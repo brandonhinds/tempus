@@ -1,0 +1,80 @@
+<section class="ts-card" id="page-time" style="margin-bottom:16px;">
+  <div class="ts-tabs">
+    <div class="ts-tab active" data-tab="timer">⏱️ Timer</div>
+    <div class="ts-tab" data-tab="manual">✏️ Manual Entry</div>
+  </div>
+
+  <div id="tab-timer">
+    <div class="ts-row">
+      <div class="ts-col">
+        <div style="font-size:64px; font-family:monospace;" id="timer-display">0:00</div>
+        <div class="ts-row">
+          <button id="btn-start">Start</button>
+          <button id="btn-pause" class="secondary">Pause</button>
+          <button id="btn-stop" class="danger">Stop & Save</button>
+          <button id="btn-reset" class="secondary">Reset</button>
+        </div>
+        <div class="ts-note" style="margin-top:8px;">Timer must run >= 1 minute to save.</div>
+      </div>
+      <div class="ts-col">
+        <label>Description</label>
+        <textarea id="timer-desc" rows="3" placeholder="What are you working on?"></textarea>
+        <label style="margin-top:8px; display:block;">Project</label>
+        <input id="timer-project" placeholder="Optional project name" />
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-manual" style="display:none;">
+    <div class="ts-row">
+      <div class="ts-col"><label>Date</label><input type="date" id="manual-date" /></div>
+      <div class="ts-col"><label>Start Time</label><input type="time" id="manual-start" required /></div>
+      <div class="ts-col"><label>End Time</label><input type="time" id="manual-end" required /></div>
+    </div>
+    <div class="ts-row" style="margin-top:8px;">
+      <div class="ts-col"><label>Description</label><textarea id="manual-desc" rows="2"></textarea></div>
+      <div class="ts-col"><label>Project</label><input id="manual-project" /></div>
+    </div>
+    <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
+      <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
+      <button id="btn-add-manual">Add Entry</button>
+    </div>
+  </div>
+
+  <div class="ts-calendar" id="calendar-section">
+    <div class="ts-calendar-header">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <h3 style="margin:0;">Calendar</h3>
+        <div class="ts-badge" id="calendar-month-total">Total hours: 0</div>
+      </div>
+      <div class="ts-calendar-nav">
+        <button class="ghost" id="calendar-prev" title="Previous Month">◀</button>
+        <div id="calendar-label" style="min-width:140px; text-align:center;"></div>
+        <button class="ghost" id="calendar-next" title="Next Month">▶</button>
+      </div>
+    </div>
+    <div class="ts-calendar-grid" id="calendar-weekdays">
+      <div class="ts-calendar-weekday">Mon</div>
+      <div class="ts-calendar-weekday">Tue</div>
+      <div class="ts-calendar-weekday">Wed</div>
+      <div class="ts-calendar-weekday">Thu</div>
+      <div class="ts-calendar-weekday">Fri</div>
+      <div class="ts-calendar-weekday">Sat</div>
+      <div class="ts-calendar-weekday">Sun</div>
+    </div>
+    <div class="ts-calendar-grid" id="calendar-grid"></div>
+    <div class="ts-note" style="margin-top:6px;">Click a day to review or edit entries.</div>
+    <div class="ts-calendar-detail" id="calendar-detail">
+      <div class="ts-calendar-detail-header">
+        <div>
+          <strong id="calendar-detail-date">Select a day</strong>
+          <div class="ts-note" id="calendar-detail-total"></div>
+        </div>
+        <div>
+          <button class="ghost" id="calendar-add-entry">New Entry</button>
+        </div>
+      </div>
+      <div class="ts-calendar-detail-list" id="calendar-detail-list"></div>
+    </div>
+  </div>
+</section>

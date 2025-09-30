@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Timesheet App</title>
+    <style>
+      body { margin:0; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','Roboto',sans-serif; background:#f8fafc; color:#0f172a; }
+      .container { max-width: 960px; margin: 0 auto; padding: 16px; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+      .row { display:flex; gap:12px; flex-wrap: wrap; }
+      .col { flex:1 1 280px; min-width: 280px; }
+      input, select, textarea, button { font: inherit; }
+      input, select, textarea { border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; width:100%; }
+      button { border:0; background:#2563eb; color:#fff; border-radius:6px; padding:8px 12px; cursor:pointer; }
+      button.secondary { background:#64748b; }
+      button.danger { background:#dc2626; }
+      .muted { color:#475569; font-size: 12px; }
+      .toolbar { display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; }
+      .tabs { display:flex; gap:8px; margin-bottom:12px; }
+      .tab { padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; cursor:pointer; }
+      .tab.active { background:#dbeafe; border-color:#93c5fd; color:#1d4ed8; }
+      .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; }
+      .badge.green { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+      .badge.yellow { background:#fef9c3; color:#854d0e; border:1px solid #fde68a; }
+      .badge.red { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; }
+      .list { display:flex; flex-direction: column; gap:8px; }
+      .list-item { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="toolbar">
+        <h1>Timesheet</h1>
+        <div id="sync-status" class="muted">Idle</div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div class="tabs">
+          <div class="tab active" data-tab="timer">⏱️ Timer</div>
+          <div class="tab" data-tab="manual">✏️ Manual Entry</div>
+        </div>
+        <div id="tab-timer">
+          <div class="row">
+            <div class="col">
+              <div style="font-size:48px; font-family:monospace;" id="timer-display">0:00</div>
+              <div class="row">
+                <button id="btn-start">Start</button>
+                <button id="btn-pause" class="secondary">Pause</button>
+                <button id="btn-stop" class="danger">Stop & Save</button>
+                <button id="btn-reset" class="secondary">Reset</button>
+              </div>
+            </div>
+            <div class="col">
+              <label>Description</label>
+              <textarea id="timer-desc" rows="3" placeholder="What are you working on?"></textarea>
+              <label style="margin-top:8px; display:block;">Project</label>
+              <input id="timer-project" placeholder="Optional project name" />
+            </div>
+          </div>
+        </div>
+        <div id="tab-manual" style="display:none;">
+          <div class="row">
+            <div class="col">
+              <label>Date</label>
+              <input type="date" id="manual-date" />
+            </div>
+            <div class="col">
+              <label>Start Time</label>
+              <input type="time" id="manual-start" required />
+            </div>
+            <div class="col">
+              <label>End Time</label>
+              <input type="time" id="manual-end" required />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <div class="col">
+              <label>Description</label>
+              <textarea id="manual-desc" rows="2"></textarea>
+            </div>
+            <div class="col">
+              <label>Project</label>
+              <input id="manual-project" />
+            </div>
+          </div>
+          <div style="margin-top:8px; text-align:right;">
+            <button id="btn-add-manual">Add Entry</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <h3>Settings</h3>
+            <div class="row">
+              <div class="col">
+                <label>Default Project</label>
+                <input id="set-default-project" />
+              </div>
+              <div class="col">
+                <label>Round to Nearest (minutes)</label>
+                <input type="number" id="set-round" min="0" step="1" />
+              </div>
+            </div>
+            <div style="margin-top:8px; text-align:right;">
+              <button id="btn-save-settings">Save Settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---- Simple state & helpers ----
+      const state = {
+        isRunning: false,
+        startTs: null,
+        timerInterval: null,
+        cacheKey: 'ts_cache',
+        entries: [],
+        settings: {},
+      };
+
+      const $ = sel => document.querySelector(sel);
+      const fmt = m => {
+        const h = Math.floor(m/60); const mm = m%60; return (h>0? h+':':'') + String(mm).padStart(2,'0');
+      };
+      const fmtTimer = ms => {
+        const total = Math.floor(ms/1000); const mm = Math.floor(total/60); const ss = total%60;
+        return (mm>=60? Math.floor(mm/60)+':'+String(mm%60).padStart(2,'0') : mm) + ':' + String(ss).padStart(2,'0');
+      };
+      const setStatus = (txt, kind='') => {
+        const el = $('#sync-status');
+        el.textContent = txt;
+        el.className = 'muted ' + (kind||'');
+      };
+
+      // ---- Local cache ----
+      function loadCache() {
+        try {
+          const raw = localStorage.getItem(state.cacheKey);
+          if (!raw) return;
+          const obj = JSON.parse(raw);
+          state.entries = obj.entries||[];
+          state.settings = obj.settings||{};
+        } catch(e) {}
+      }
+      function saveCache() {
+        try { localStorage.setItem(state.cacheKey, JSON.stringify({ entries: state.entries, settings: state.settings })); } catch(e) {}
+      }
+
+      // ---- Tabs ----
+      document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        const id = t.getAttribute('data-tab');
+        ['timer','manual'].forEach(k => $('#tab-'+k).style.display = (k===id? 'block':'none'));
+      }));
+
+      // ---- Timer ----
+      function startTimer() {
+        if (state.isRunning) return;
+        state.isRunning = true;
+        state.startTs = Date.now();
+        state.timerInterval = setInterval(() => {
+          $('#timer-display').textContent = fmtTimer(Date.now()-state.startTs);
+        }, 1000);
+      }
+      function pauseTimer() {
+        if (!state.isRunning) return;
+        state.isRunning = false; clearInterval(state.timerInterval);
+      }
+      function resetTimer() {
+        state.isRunning = false; clearInterval(state.timerInterval); state.startTs = null; $('#timer-display').textContent = '0:00';
+      }
+      async function stopAndSave() {
+        if (!state.startTs) return;
+        const end = Date.now();
+        const durMin = Math.max(1, Math.floor((end - state.startTs)/60000));
+        const dateStr = new Date().toISOString().slice(0,10);
+        const startStr = new Date(state.startTs).toTimeString().slice(0,5);
+        const endStr = new Date(end).toTimeString().slice(0,5);
+        const entry = {
+          id: 'temp_'+Date.now(),
+          date: dateStr,
+          start_time: startStr,
+          end_time: endStr,
+          duration_minutes: durMin,
+          description: $('#timer-desc').value || 'Timer session',
+          project: $('#timer-project').value || (state.settings.default_project||''),
+          created_at: new Date().toISOString()
+        };
+        // optimistic add
+        state.entries.unshift(entry); saveCache(); renderEntries();
+        resetTimer();
+        setStatus('Saving...', 'yellow');
+        google.script.run.withSuccessHandler(res => {
+          if (res && res.success) {
+            // replace temp with real
+            const idx = state.entries.findIndex(e => e.id === entry.id);
+            if (idx > -1) state.entries[idx] = res.entry;
+            saveCache(); renderEntries(); setStatus('Saved', 'green');
+          } else { setStatus('Save failed', 'red'); }
+        }).withFailureHandler(err => {
+          console.log(err); setStatus('Save failed (offline?)', 'red');
+        }).api_addEntry(entry);
+      }
+
+      $('#btn-start').onclick = startTimer;
+      $('#btn-pause').onclick = pauseTimer;
+      $('#btn-reset').onclick = resetTimer;
+      $('#btn-stop').onclick = stopAndSave;
+
+      // ---- Manual entry ----
+      $('#manual-date').value = new Date().toISOString().slice(0,10);
+      $('#btn-add-manual').onclick = function() {
+        const start = $('#manual-start').value; const end = $('#manual-end').value;
+        if (!start || !end) return;
+        const s = new Date('2000-01-01T'+start+':00');
+        const e = new Date('2000-01-01T'+end+':00');
+        const dur = Math.floor((e-s)/60000);
+        if (dur <= 0) return alert('End time must be after start time');
+        const entry = {
+          id: 'temp_'+Date.now(),
+          date: $('#manual-date').value,
+          start_time: start,
+          end_time: end,
+          duration_minutes: dur,
+          description: $('#manual-desc').value || 'Manual entry',
+          project: $('#manual-project').value || (state.settings.default_project||''),
+          created_at: new Date().toISOString()
+        };
+        state.entries.unshift(entry); saveCache(); renderEntries();
+        setStatus('Saving...', 'yellow');
+        google.script.run.withSuccessHandler(res => {
+          if (res && res.success) {
+            const idx = state.entries.findIndex(e => e.id === entry.id);
+            if (idx > -1) state.entries[idx] = res.entry;
+            saveCache(); renderEntries(); setStatus('Saved', 'green');
+          } else { setStatus('Save failed', 'red'); }
+        }).withFailureHandler(err => { console.log(err); setStatus('Save failed (offline?)', 'red'); }).api_addEntry(entry);
+      };
+
+      // ---- Entries list ----
+      function renderEntries() {
+        // Legacy prototype no longer renders a per-day list.
+      }
+
+      function deleteEntry(id) {
+        const idx = state.entries.findIndex(e => e.id === id);
+        if (idx === -1) return;
+        const backup = state.entries[idx];
+        state.entries.splice(idx,1); saveCache(); renderEntries();
+        setStatus('Deleting...', 'yellow');
+        google.script.run.withSuccessHandler(()=>{ setStatus('Deleted', 'green'); })
+          .withFailureHandler(err => { console.log(err); state.entries.splice(idx,0,backup); saveCache(); renderEntries(); setStatus('Delete failed', 'red'); })
+          .api_deleteEntry(id);
+      }
+
+      function editEntry(id) {
+        const e = state.entries.find(x => x.id === id); if (!e) return;
+        const start = prompt('Start time (HH:MM)', e.start_time||''); if (start===null) return;
+        const end = prompt('End time (HH:MM)', e.end_time||''); if (end===null) return;
+        const desc = prompt('Description', e.description||''); if (desc===null) return;
+        const proj = prompt('Project', e.project||''); if (proj===null) return;
+        const s = new Date('2000-01-01T'+start+':00'); const ee = new Date('2000-01-01T'+end+':00');
+        const dur = Math.max(1, Math.floor((ee-s)/60000));
+        const update = { id, date: e.date, start_time: start, end_time: end, duration_minutes: dur, description: desc, project: proj };
+        const idx = state.entries.findIndex(x => x.id === id); const backup = {...e};
+        state.entries[idx] = { ...e, ...update }; saveCache(); renderEntries();
+        setStatus('Saving...', 'yellow');
+        google.script.run.withSuccessHandler(res => { setStatus('Saved', 'green'); })
+          .withFailureHandler(err => { console.log(err); state.entries[idx] = backup; saveCache(); renderEntries(); setStatus('Save failed', 'red'); })
+          .api_updateEntry(update);
+      }
+
+      // ---- Settings ----
+      $('#btn-save-settings').onclick = function() {
+        const next = {
+          default_project: $('#set-default-project').value || '',
+          round_to_nearest: parseInt($('#set-round').value||'0',10) || 0,
+        };
+        state.settings = { ...state.settings, ...next }; saveCache();
+        setStatus('Saving settings...', 'yellow');
+        google.script.run.withSuccessHandler(()=> setStatus('Settings saved', 'green'))
+          .withFailureHandler(()=> setStatus('Settings failed', 'red'))
+          .api_updateSettings(next);
+      };
+
+      // ---- Initial load ----
+      function init() {
+        loadCache();
+        // hydrate UI from cache
+        renderEntries();
+        $('#set-default-project').value = state.settings.default_project||'';
+        $('#set-round').value = state.settings.round_to_nearest||0;
+        setStatus('Syncing...', 'yellow');
+        // parallel fetches
+        google.script.run.withSuccessHandler(e => { state.entries = e||[]; saveCache(); renderEntries(); setStatus('Synced', 'green'); })
+          .withFailureHandler(()=> setStatus('Entries sync failed (offline?)', 'red'))
+          .api_getEntries({});
+        google.script.run.withSuccessHandler(s => { state.settings = s||{}; saveCache(); $('#set-default-project').value = state.settings.default_project||''; $('#set-round').value = state.settings.round_to_nearest||0; })
+          .withFailureHandler(()=>{})
+          .api_getSettings();
+      }
+
+      init();
+    </script>
+  </body>
+</html>

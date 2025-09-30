@@ -1,0 +1,539 @@
+<script>
+  // Layout navigation
+  const pageTime = document.getElementById('page-time');
+  const pageSettings = document.getElementById('page-settings');
+  function showPage(target) {
+    const showTime = target === 'time';
+    pageTime.style.display = showTime ? 'block' : 'none';
+    pageSettings.style.display = showTime ? 'none' : 'block';
+  }
+  document.getElementById('nav-time').onclick = () => showPage('time');
+  document.getElementById('nav-settings').onclick = () => showPage('settings');
+  showPage('time');
+
+  // State & helpers
+  const state = {
+    isRunning: false,
+    startTs: null,
+    timerInterval: null,
+    cacheKey: 'ts_cache',
+    entries: [],
+    settings: {},
+    editingEntryId: null,
+    calendar: null,
+    selectedCalendarDate: null
+  };
+
+  const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+  const fmt = (minutes) => {
+    const total = Number(minutes) || 0;
+    const h = Math.floor(total / 60);
+    const mm = total % 60;
+    return (h > 0 ? h + ':' : '') + String(mm).padStart(2, '0');
+  };
+  const fmtTimer = (ms) => {
+    const total = Math.floor(ms / 1000);
+    const mm = Math.floor(total / 60);
+    const ss = total % 60;
+    const minutesPortion = mm >= 60 ? Math.floor(mm / 60) + ':' + String(mm % 60).padStart(2, '0') : mm;
+    return minutesPortion + ':' + String(ss).padStart(2, '0');
+  };
+  const setStatus = (text, cls) => {
+    const el = document.getElementById('status');
+    el.textContent = text;
+    el.className = 'ts-badge ' + (cls || '');
+  };
+  const isoDate = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const isoDateTime = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const parseIsoDate = (value) => {
+    const [y, m, d] = value.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const todayIso = () => isoDate(new Date());
+  const formatHours = (minutes) => {
+    const hrs = (Number(minutes) || 0) / 60;
+    let out = (Math.round(hrs * 100) / 100).toFixed(2);
+    out = out.replace(/\.00$/, '');
+    out = out.replace(/(\.\d)0$/, '$1');
+    return out === '' ? '0' : out;
+  };
+
+  const getRoundInterval = () => {
+    const value = Number(state.settings.round_to_nearest);
+    return Number.isFinite(value) && value > 1 ? value : 0;
+  };
+  const roundDuration = (minutes) => {
+    const base = Math.max(0, Math.round(Number(minutes) || 0));
+    const interval = getRoundInterval();
+    if (!interval) return Math.max(1, base);
+    const rounded = Math.round(base / interval) * interval;
+    return Math.max(interval, rounded);
+  };
+
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(state.cacheKey);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      state.entries = obj.entries || [];
+      state.settings = obj.settings || {};
+    } catch (e) {}
+  }
+  function saveCache() {
+    try {
+      localStorage.setItem(state.cacheKey, JSON.stringify({ entries: state.entries, settings: state.settings }));
+    } catch (e) {}
+  }
+
+  // Tabs
+  function activateTab(id) {
+    $$('.ts-tab').forEach((tab) => {
+      const target = tab.getAttribute('data-tab');
+      tab.classList.toggle('active', target === id);
+    });
+    ['timer', 'manual'].forEach((pane) => {
+      const el = document.getElementById('tab-' + pane);
+      if (el) el.style.display = pane === id ? 'block' : 'none';
+    });
+  }
+  $$('.ts-tab').forEach((tab) => {
+    tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
+  });
+  activateTab('timer');
+
+  // Timer controls
+  function startTimer() {
+    if (state.isRunning) return;
+    state.isRunning = true;
+    state.startTs = Date.now();
+    state.timerInterval = setInterval(() => {
+      document.getElementById('timer-display').textContent = fmtTimer(Date.now() - state.startTs);
+    }, 1000);
+  }
+  function pauseTimer() {
+    if (!state.isRunning) return;
+    state.isRunning = false;
+    clearInterval(state.timerInterval);
+  }
+  function resetTimer() {
+    state.isRunning = false;
+    clearInterval(state.timerInterval);
+    state.startTs = null;
+    document.getElementById('timer-display').textContent = '0:00';
+  }
+  function stopAndSave() {
+    if (!state.startTs) return;
+    const end = Date.now();
+    const rawDuration = Math.max(1, Math.floor((end - state.startTs) / 60000));
+    const durMin = roundDuration(rawDuration);
+    const now = new Date();
+    const entry = {
+      id: 'temp_' + Date.now(),
+      date: isoDate(now),
+      start_time: new Date(state.startTs).toTimeString().slice(0, 5),
+      end_time: new Date(end).toTimeString().slice(0, 5),
+      duration_minutes: durMin,
+      description: document.getElementById('timer-desc').value || 'Timer session',
+      project: document.getElementById('timer-project').value || (state.settings.default_project || ''),
+      created_at: isoDateTime(now)
+    };
+    state.entries.unshift(entry);
+    saveCache();
+    renderEntries();
+    resetTimer();
+    setStatus('Saving...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success) {
+          const idx = state.entries.findIndex((e) => e.id === entry.id);
+          if (idx > -1) state.entries[idx] = res.entry;
+          saveCache();
+          renderEntries();
+          setStatus('Saved', 'success');
+        } else {
+          setStatus('Save failed', 'error');
+        }
+      })
+      .withFailureHandler(() => setStatus('Save failed (offline?)', 'error'))
+      .api_addEntry(entry);
+  }
+  document.getElementById('btn-start').onclick = startTimer;
+  document.getElementById('btn-pause').onclick = pauseTimer;
+  document.getElementById('btn-reset').onclick = resetTimer;
+  document.getElementById('btn-stop').onclick = stopAndSave;
+
+  // Manual form helpers
+  const manualDate = document.getElementById('manual-date');
+  const manualStart = document.getElementById('manual-start');
+  const manualEnd = document.getElementById('manual-end');
+  const manualDesc = document.getElementById('manual-desc');
+  const manualProject = document.getElementById('manual-project');
+  const manualSaveBtn = document.getElementById('btn-add-manual');
+  const manualCancelBtn = document.getElementById('btn-cancel-edit');
+
+  function setManualDate(dateIso) {
+    if (!manualDate) return;
+    manualDate.value = dateIso || todayIso();
+  }
+
+  setManualDate(todayIso());
+
+  function setManualMode(isEdit) {
+    manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
+    manualCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+  }
+  function populateManualForm(entry, isEdit) {
+    showPage('time');
+    activateTab('manual');
+    setManualDate(entry.date || todayIso());
+    manualStart.value = entry.start_time || '';
+    manualEnd.value = entry.end_time || '';
+    manualDesc.value = entry.description || '';
+    manualProject.value = entry.project != null ? entry.project : (state.settings.default_project || '');
+    state.editingEntryId = isEdit ? entry.id : null;
+    setManualMode(!!isEdit);
+    if (isEdit) manualStart.focus();
+  }
+  function clearManualEditing() {
+    state.editingEntryId = null;
+    setManualMode(false);
+    manualStart.value = '';
+    manualEnd.value = '';
+    manualDesc.value = '';
+    manualProject.value = state.settings.default_project || '';
+  }
+  function getManualPayload() {
+    const date = manualDate.value || todayIso();
+    const start = manualStart.value;
+    const end = manualEnd.value;
+    if (!date || !start || !end) {
+      alert('Date, start time, and end time are required.');
+      return null;
+    }
+    const startTs = new Date(`${date}T${start}:00`);
+    const endTs = new Date(`${date}T${end}:00`);
+    const duration = Math.floor((endTs - startTs) / 60000);
+    if (duration <= 0) {
+      alert('End time must be after start time.');
+      return null;
+    }
+    const rounded = roundDuration(duration);
+    const trimmedProject = manualProject.value.trim();
+    return {
+      date,
+      start_time: start,
+      end_time: end,
+      duration_minutes: rounded,
+      description: manualDesc.value.trim() || 'Manual entry',
+      project: trimmedProject !== '' ? trimmedProject : (state.editingEntryId ? '' : (state.settings.default_project || ''))
+    };
+  }
+
+  manualSaveBtn.onclick = function () {
+    const payload = getManualPayload();
+    if (!payload) return;
+    if (state.editingEntryId) {
+      const idx = state.entries.findIndex((e) => e.id === state.editingEntryId);
+      if (idx === -1) return;
+      const backup = { ...state.entries[idx] };
+      const update = { id: state.editingEntryId, ...payload };
+      state.entries[idx] = { ...backup, ...update };
+      saveCache();
+      renderEntries();
+      setStatus('Saving...', 'warn');
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (res && res.success) {
+            state.entries[idx] = res.entry;
+            clearManualEditing();
+            saveCache();
+            renderEntries();
+            setStatus('Saved', 'success');
+          } else {
+            state.entries[idx] = backup;
+            saveCache();
+            renderEntries();
+            setStatus('Save failed', 'error');
+          }
+        })
+        .withFailureHandler(() => {
+          state.entries[idx] = backup;
+          saveCache();
+          renderEntries();
+          setStatus('Save failed', 'error');
+        })
+        .api_updateEntry(update);
+    } else {
+      const now = new Date();
+      const entry = {
+        id: 'temp_' + Date.now(),
+        ...payload,
+        created_at: isoDateTime(now)
+      };
+      state.entries.unshift(entry);
+      saveCache();
+      renderEntries();
+      clearManualEditing();
+      setStatus('Saving...', 'warn');
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (res && res.success) {
+            const idx = state.entries.findIndex((e) => e.id === entry.id);
+            if (idx > -1) state.entries[idx] = res.entry;
+            saveCache();
+            renderEntries();
+            setStatus('Saved', 'success');
+          } else {
+            setStatus('Save failed', 'error');
+          }
+        })
+        .withFailureHandler(() => setStatus('Save failed (offline?)', 'error'))
+        .api_addEntry(entry);
+    }
+    state.selectedCalendarDate = payload.date;
+    setManualDate(state.selectedCalendarDate);
+    renderCalendar();
+    renderCalendarDetail();
+  };
+  manualCancelBtn.onclick = function () {
+    clearManualEditing();
+    activateTab('manual');
+  };
+
+  // Entries & KPIs
+  function minutesForDate(date) {
+    return state.entries
+      .filter((e) => e.date === date)
+      .reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
+  }
+  function renderEntries() {
+    renderCalendar();
+    renderCalendarDetail();
+  }
+  function deleteEntry(id) {
+    const idx = state.entries.findIndex((e) => e.id === id);
+    if (idx === -1) return;
+    const backup = state.entries[idx];
+    state.entries.splice(idx, 1);
+    saveCache();
+    renderEntries();
+    setStatus('Deleting...', 'warn');
+    google.script.run
+      .withSuccessHandler(() => setStatus('Deleted', 'success'))
+      .withFailureHandler(() => {
+        state.entries.splice(idx, 0, backup);
+        saveCache();
+        renderEntries();
+        setStatus('Delete failed', 'error');
+      })
+      .api_deleteEntry(id);
+  }
+  function editEntry(id) {
+    const entry = state.entries.find((e) => e.id === id);
+    if (!entry) return;
+    state.selectedCalendarDate = entry.date;
+    populateManualForm(entry, true);
+    renderCalendar();
+    renderCalendarDetail();
+  }
+
+  // Calendar rendering
+  function ensureCalendarState() {
+    if (!state.calendar) {
+      const today = new Date();
+      state.calendar = { year: today.getFullYear(), month: today.getMonth() };
+    }
+    if (!state.selectedCalendarDate) {
+      state.selectedCalendarDate = todayIso();
+      if (!state.editingEntryId) setManualDate(state.selectedCalendarDate);
+    }
+  }
+  function calendarStartDate(year, month) {
+    const first = new Date(year, month, 1);
+    const offset = (first.getDay() + 6) % 7; // shift so Monday=0
+    return new Date(year, month, 1 - offset);
+  }
+  function minutesByDate() {
+    return state.entries.reduce((map, entry) => {
+      if (!entry.date) return map;
+      const key = entry.date;
+      map[key] = (map[key] || 0) + (Number(entry.duration_minutes) || 0);
+      return map;
+    }, {});
+  }
+  function renderCalendar() {
+    ensureCalendarState();
+    const totals = minutesByDate();
+    const grid = document.getElementById('calendar-grid');
+    const label = document.getElementById('calendar-label');
+    const monthTotalEl = document.getElementById('calendar-month-total');
+    const activeMonth = new Date(state.calendar.year, state.calendar.month, 1);
+    label.textContent = activeMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const monthKey = `${activeMonth.getFullYear()}-${String(activeMonth.getMonth() + 1).padStart(2, '0')}`;
+    const monthTotalMinutes = Object.keys(totals).reduce((acc, key) => {
+      if (key.startsWith(monthKey)) {
+        acc += totals[key];
+      }
+      return acc;
+    }, 0);
+    monthTotalEl.textContent = `Total hours: ${formatHours(monthTotalMinutes)}`;
+    grid.innerHTML = '';
+    const start = calendarStartDate(state.calendar.year, state.calendar.month);
+    for (let i = 0; i < 42; i++) {
+      const current = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      const iso = isoDate(current);
+      const cell = document.createElement('div');
+      cell.className = 'ts-calendar-cell';
+      if (current.getMonth() !== state.calendar.month) cell.classList.add('inactive');
+      if (iso === todayIso()) cell.classList.add('today');
+      const totalMinutes = totals[iso] || 0;
+      if (totalMinutes > 0) cell.classList.add('has-entries');
+      if (iso === state.selectedCalendarDate) cell.classList.add('selected');
+      const dayEl = document.createElement('div');
+      dayEl.className = 'ts-calendar-day';
+      dayEl.textContent = current.getDate();
+      const totalEl = document.createElement('div');
+      totalEl.className = 'ts-calendar-total';
+      if (totalMinutes === 0) totalEl.classList.add('empty');
+      totalEl.textContent = totalMinutes === 0 ? '0' : formatHours(totalMinutes);
+      cell.append(dayEl, totalEl);
+      cell.onclick = () => handleCalendarClick(iso);
+      grid.appendChild(cell);
+    }
+  }
+  function renderCalendarDetail() {
+    ensureCalendarState();
+    const detail = document.getElementById('calendar-detail');
+    const title = document.getElementById('calendar-detail-date');
+    const totalEl = document.getElementById('calendar-detail-total');
+    const list = document.getElementById('calendar-detail-list');
+    const dateIso = state.selectedCalendarDate;
+    if (!dateIso) {
+      detail.classList.remove('active');
+      title.textContent = 'Select a day';
+      totalEl.textContent = '';
+      list.innerHTML = '';
+      return;
+    }
+    detail.classList.add('active');
+    const dateObj = parseIsoDate(dateIso);
+    title.textContent = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    const entries = state.entries
+      .filter((entry) => entry.date === dateIso)
+      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+    const totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
+    totalEl.textContent = `${formatHours(totalMinutes)} hours`;
+    list.innerHTML = '';
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ts-calendar-detail-empty';
+      empty.textContent = 'No entries for this day yet.';
+      list.appendChild(empty);
+      return;
+    }
+    entries.forEach((entry) => {
+      const el = document.createElement('div');
+      el.className = 'ts-item';
+      el.innerHTML = `
+        <div style="flex:1;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <strong>${entry.start_time || '--:--'} - ${entry.end_time || '--:--'}</strong>
+            <span class="ts-badge success">${fmt(entry.duration_minutes || 0)}</span>
+            ${entry.project ? `<span class="ts-badge">${entry.project}</span>` : ''}
+          </div>
+          ${entry.description ? `<div class="ts-note" style="margin-top:4px;">${entry.description}</div>` : ''}
+        </div>
+        <div>
+          <button class="ghost" data-edit="${entry.id}">Edit</button>
+          <button class="danger" data-del="${entry.id}" style="margin-left:6px;">Delete</button>
+        </div>
+      `;
+      list.appendChild(el);
+    });
+    list.querySelectorAll('button[data-edit]').forEach((btn) => (btn.onclick = () => editEntry(btn.getAttribute('data-edit'))));
+    list.querySelectorAll('button[data-del]').forEach((btn) => (btn.onclick = () => deleteEntry(btn.getAttribute('data-del'))));
+  }
+  function handleCalendarClick(dateIso) {
+    state.selectedCalendarDate = dateIso;
+    setManualDate(dateIso);
+    renderCalendar();
+    renderCalendarDetail();
+  }
+  function changeCalendarMonth(delta) {
+    ensureCalendarState();
+    const next = new Date(state.calendar.year, state.calendar.month + delta, 1);
+    state.calendar.year = next.getFullYear();
+    state.calendar.month = next.getMonth();
+    if (state.selectedCalendarDate) {
+      const selected = parseIsoDate(state.selectedCalendarDate);
+      if (selected.getFullYear() !== state.calendar.year || selected.getMonth() !== state.calendar.month) {
+        state.selectedCalendarDate = null;
+      }
+    }
+    renderCalendar();
+    renderCalendarDetail();
+  }
+  document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
+  document.getElementById('calendar-next').onclick = () => changeCalendarMonth(1);
+  document.getElementById('calendar-add-entry').onclick = () => {
+    ensureCalendarState();
+    const date = state.selectedCalendarDate || todayIso();
+    populateManualForm({ date, start_time: '', end_time: '', description: '', project: state.settings.default_project || '' }, false);
+  };
+
+  // Settings persistence
+  document.getElementById('btn-save-settings').onclick = function () {
+    const next = {
+      default_project: document.getElementById('set-default-project').value || '',
+      round_to_nearest: parseInt(document.getElementById('set-round').value || '0', 10) || 0
+    };
+    state.settings = { ...state.settings, ...next };
+    saveCache();
+    setStatus('Saving settings...', 'warn');
+    google.script.run
+      .withSuccessHandler(() => setStatus('Settings saved', 'success'))
+      .withFailureHandler(() => setStatus('Settings failed', 'error'))
+      .api_updateSettings(next);
+  };
+
+  // Initial load
+  function init() {
+    loadCache();
+    renderEntries();
+    document.getElementById('set-default-project').value = state.settings.default_project || '';
+    document.getElementById('set-round').value = state.settings.round_to_nearest || 0;
+    if (!state.editingEntryId) {
+      manualProject.value = state.settings.default_project || '';
+    }
+    setStatus('Syncing...', 'warn');
+    google.script.run
+      .withSuccessHandler((entries) => {
+        state.entries = entries || [];
+        saveCache();
+        renderEntries();
+        setStatus('Synced', 'success');
+      })
+      .withFailureHandler(() => setStatus('Entries sync failed', 'error'))
+      .api_getEntries({});
+    google.script.run
+      .withSuccessHandler((settings) => {
+        state.settings = settings || {};
+        saveCache();
+        document.getElementById('set-default-project').value = state.settings.default_project || '';
+        document.getElementById('set-round').value = state.settings.round_to_nearest || 0;
+        if (!state.editingEntryId) {
+          manualProject.value = state.settings.default_project || '';
+        }
+      })
+      .withFailureHandler(() => {})
+      .api_getSettings();
+  }
+  init();
+</script>
