@@ -9,7 +9,40 @@
   const navContractsBtn = document.getElementById('nav-contracts');
   const navSettingsBtn = document.getElementById('nav-settings');
 
-  function showPage(target) {
+  const state = {
+    isRunning: false,
+    startTs: null,
+    timerInterval: null,
+    cacheKey: 'ts_cache',
+    entries: [],
+    settings: {},
+    contracts: [],
+    contractMap: {},
+    featureFlags: {},
+    editingEntryId: null,
+    editingContractId: null,
+    calendar: null,
+    selectedCalendarDate: null,
+    currentPage: 'time'
+  };
+
+  const PAGE_KEYS = ['time', 'contracts', 'settings'];
+  const LAST_PAGE_KEY = 'ts_last_page';
+
+  function persistLastPage(page) {
+    if (!PAGE_KEYS.includes(page)) return;
+    try {
+      if (state.featureFlags.remember_last_page) {
+        localStorage.setItem(LAST_PAGE_KEY, page);
+      } else {
+        localStorage.removeItem(LAST_PAGE_KEY);
+      }
+    } catch (e) {}
+  }
+
+  function showPage(target, options) {
+    const opts = options || {};
+    const normalized = PAGE_KEYS.includes(target) ? target : 'time';
     const pages = {
       time: pageTime,
       contracts: pageContracts,
@@ -17,8 +50,12 @@
     };
     Object.keys(pages).forEach((key) => {
       const page = pages[key];
-      if (page) page.style.display = key === target ? 'block' : 'none';
+      if (page) page.style.display = key === normalized ? 'block' : 'none';
     });
+    state.currentPage = normalized;
+    if (!opts.skipRemember) {
+      persistLastPage(normalized);
+    }
   }
 
   function closeNavMenu() {
@@ -73,23 +110,9 @@
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
-  showPage('time');
+  showPage('time', { skipRemember: true });
 
-  // State & helpers
-  const state = {
-    isRunning: false,
-    startTs: null,
-    timerInterval: null,
-    cacheKey: 'ts_cache',
-    entries: [],
-    settings: {},
-    contracts: [],
-    contractMap: {},
-    editingEntryId: null,
-    editingContractId: null,
-    calendar: null,
-    selectedCalendarDate: null
-  };
+  // Helpers
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -176,6 +199,43 @@
     return clone;
   };
 
+  const DEFAULT_FEATURE_FLAGS = {
+    remember_last_page: {
+      name: 'Remember last page on refresh',
+      description: 'When enabled, the app reopens on the most recently viewed page.'
+    }
+  };
+
+  const normalizeFeatureFlags = (raw) => {
+    const out = {};
+    if (raw && typeof raw === 'object') {
+      Object.keys(raw).forEach((key) => {
+        const value = raw[key];
+        const enabled = value && typeof value === 'object' ? !!value.enabled : !!value;
+        const name = value && typeof value === 'object' && value.name ? String(value.name) : '';
+        const description = value && typeof value === 'object' && value.description ? String(value.description) : '';
+        out[key] = {
+          enabled,
+          name,
+          description
+        };
+      });
+    }
+    Object.keys(DEFAULT_FEATURE_FLAGS).forEach((key) => {
+      if (!out[key]) {
+        out[key] = {
+          enabled: false,
+          name: DEFAULT_FEATURE_FLAGS[key].name,
+          description: DEFAULT_FEATURE_FLAGS[key].description
+        };
+      } else {
+        out[key].name = out[key].name || DEFAULT_FEATURE_FLAGS[key].name;
+        out[key].description = out[key].description || DEFAULT_FEATURE_FLAGS[key].description;
+      }
+    });
+    return out;
+  };
+
   function updateContractMap() {
     state.contractMap = state.contracts.reduce((map, contract) => {
       map[contract.id] = contract;
@@ -217,6 +277,7 @@
       state.entries = Array.isArray(obj.entries) ? obj.entries.map(sanitizeEntry) : [];
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
+      state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
       updateContractMap();
     } catch (e) {}
   }
@@ -225,7 +286,8 @@
       const payload = {
         entries: state.entries.map(sanitizeEntry),
         settings: state.settings,
-        contracts: state.contracts.map(sanitizeContract)
+        contracts: state.contracts.map(sanitizeContract),
+        featureFlags: normalizeFeatureFlags(state.featureFlags)
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -637,6 +699,7 @@
   setManualDate(todayIso());
 
   const contractsListEl = document.getElementById('contracts-list');
+  const featureFlagsListEl = document.getElementById('feature-flags-list');
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -698,7 +761,9 @@
       btn.onclick = () => handleContractEdit(btn.getAttribute('data-contract-edit'));
     });
     contractsListEl.querySelectorAll('[data-contract-delete]').forEach((btn) => {
-      if (btn.disabled) {
+      const locked = btn.hasAttribute('disabled');
+      btn.disabled = locked;
+      if (locked) {
         btn.onclick = null;
       } else {
         btn.onclick = () => handleContractDelete(btn.getAttribute('data-contract-delete'));
@@ -823,6 +888,108 @@
       .api_deleteContract(id);
   }
 
+  function renderFeatureFlags() {
+    if (!featureFlagsListEl) return;
+    featureFlagsListEl.innerHTML = '';
+    const entries = Object.keys(state.featureFlags).map((key) => ({
+      key,
+      enabled: !!state.featureFlags[key].enabled,
+      name: state.featureFlags[key].name || key,
+      description: state.featureFlags[key].description || ''
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ts-note';
+      empty.textContent = 'No feature flags configured.';
+      featureFlagsListEl.appendChild(empty);
+      return;
+    }
+    entries.forEach((flag) => {
+      const row = document.createElement('div');
+      row.className = 'ts-flag-row';
+
+      const meta = document.createElement('div');
+      meta.className = 'ts-flag-meta';
+      meta.innerHTML = `<div class="ts-flag-title">${flag.name}</div>` + (flag.description ? `<div class="ts-flag-desc">${flag.description}</div>` : '');
+
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'ts-toggle';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = flag.enabled;
+      input.dataset.flag = flag.key;
+      input.setAttribute('aria-label', flag.name);
+      const track = document.createElement('span');
+      track.className = 'ts-toggle-track';
+      const thumb = document.createElement('span');
+      thumb.className = 'ts-toggle-thumb';
+      track.appendChild(thumb);
+      toggleLabel.appendChild(input);
+      toggleLabel.appendChild(track);
+
+      input.addEventListener('change', () => {
+        if (!!state.featureFlags[flag.key]?.enabled === input.checked) return;
+        updateFeatureFlag(flag.key, input.checked);
+      });
+
+      row.append(meta, toggleLabel);
+      featureFlagsListEl.appendChild(row);
+    });
+  }
+
+  function updateFeatureFlag(featureKey, enabled) {
+    const toggleInput = featureFlagsListEl ? featureFlagsListEl.querySelector(`input[data-flag="${featureKey}"]`) : null;
+    if (toggleInput) toggleInput.disabled = true;
+    const currentMeta = state.featureFlags[featureKey] || DEFAULT_FEATURE_FLAGS[featureKey] || { name: featureKey, description: '' };
+    setStatus('Updating feature flags...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (toggleInput) toggleInput.disabled = false;
+        if (res && res.success && res.flags) {
+          state.featureFlags = normalizeFeatureFlags(res.flags);
+          saveCache();
+          renderFeatureFlags();
+          applyFeatureFlags();
+          setStatus('Feature flags updated', 'success');
+        } else {
+          if (toggleInput) toggleInput.checked = !!currentMeta.enabled;
+          setStatus('Feature flag update failed', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        if (toggleInput) {
+          toggleInput.disabled = false;
+          toggleInput.checked = !!currentMeta.enabled;
+        }
+        setStatus('Feature flag update failed', 'error');
+      })
+      .api_setFeatureFlag({
+        feature: featureKey,
+        enabled: enabled,
+        name: currentMeta.name || featureKey,
+        description: currentMeta.description || ''
+      });
+  }
+
+  function applyFeatureFlags() {
+    const rememberFlag = state.featureFlags.remember_last_page || DEFAULT_FEATURE_FLAGS.remember_last_page || { enabled: false };
+    if (rememberFlag.enabled) {
+      let stored = null;
+      try {
+        stored = localStorage.getItem(LAST_PAGE_KEY);
+      } catch (e) {}
+      if (!stored) {
+        persistLastPage(state.currentPage);
+      } else if (stored && PAGE_KEYS.includes(stored) && stored !== state.currentPage) {
+        showPage(stored);
+      }
+    } else {
+      try {
+        localStorage.removeItem(LAST_PAGE_KEY);
+      } catch (e) {}
+    }
+  }
+
   if (contractSaveBtn) {
     contractSaveBtn.onclick = handleContractSave;
   }
@@ -842,6 +1009,7 @@
   function renderEntries() {
     renderCalendar();
     renderCalendarDetail();
+    renderContractsList();
   }
   function deleteEntry(id) {
     const idx = state.entries.findIndex((e) => e.id === id);
@@ -1039,6 +1207,9 @@
     clearContractForm();
     refreshContractBindings();
     refreshTimerButtons();
+    state.featureFlags = normalizeFeatureFlags(state.featureFlags);
+    renderFeatureFlags();
+    applyFeatureFlags();
     setStatus('Syncing...', 'warn');
     google.script.run
       .withSuccessHandler((entries) => {
@@ -1066,6 +1237,15 @@
       })
       .withFailureHandler(() => setStatus('Contracts sync failed', 'error'))
       .api_getContracts();
+    google.script.run
+      .withSuccessHandler((flags) => {
+        state.featureFlags = normalizeFeatureFlags(flags);
+        saveCache();
+        renderFeatureFlags();
+        applyFeatureFlags();
+      })
+      .withFailureHandler(() => {})
+      .api_getFeatureFlags();
   }
   init();
 </script>

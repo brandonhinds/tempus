@@ -49,15 +49,17 @@ Contracts describe a billable agreement and govern whether time can be logged fo
 - Track additional metadata such as client codes or billing notes when needed.
 - Continue blocking deletions when contracts have associated time entries so historical data remains intact.
 
-## feature_flags (future use)
-The sheet exists but is currently empty and unsupported by the deployed code. If reintroduced, the expected columns are:
+## feature_flags
+Feature flags gate optional behaviours. Each row records a single flag and its current state. The backend normalises booleans to `TRUE` / `FALSE` strings for Apps Script compatibility while the client treats them as JavaScript booleans.
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `feature` | string | Unique flag identifier. |
-| `enabled` | boolean/string | `TRUE`/`FALSE` or textual equivalent. |
-| `description` | string | Human-readable explanation of the flag. |
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `feature` | string | Unique flag identifier. | `remember_last_page` |
+| `enabled` | boolean/string | `TRUE`/`FALSE` indicating whether the flag is active. | `TRUE` |
+| `name` | string | Human-friendly title displayed in the UI. | `Remember last page on refresh` |
+| `description` | string | Additional context rendered under the title. | `When enabled, the app reopens on the most recently viewed page.` |
 
 ### Suggested improvements
-- Keep this sheet disabled until feature flags are required again to avoid stale state.
-- When reactivated, normalise booleans to `TRUE`/`FALSE` and add client-side toggles that persist through the `api_updateSettings` flow.
+- Add created/updated timestamps if we need historical auditing of flag changes.
+- Keep feature identifiers kebab- or snake-cased so the client can map them safely to object keys.
+- Expand the sheet with owner and rollout metadata once multiple flags are in play.

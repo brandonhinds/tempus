@@ -26,6 +26,19 @@
   button.ghost { background: transparent; border:1px solid var(--border); }
   button.danger { background: var(--danger); }
   button:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+  .ts-flag-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid var(--border); }
+  .ts-flag-row:last-child { border-bottom:0; }
+  .ts-flag-meta { flex:1; }
+  .ts-flag-title { font-weight:600; font-size:14px; }
+  .ts-flag-desc { margin-top:4px; color: var(--muted); font-size:12px; }
+  .ts-toggle { position:relative; display:inline-flex; align-items:center; cursor:pointer; }
+  .ts-toggle input { position:absolute; opacity:0; width:0; height:0; }
+  .ts-toggle-track { width:44px; height:24px; background:#334155; border-radius:999px; transition: background .2s ease; display:inline-block; position:relative; }
+  .ts-toggle-thumb { position:absolute; top:3px; left:4px; width:18px; height:18px; border-radius:50%; background:#fff; transition: transform .2s ease; }
+  .ts-toggle input:checked + .ts-toggle-track { background: var(--primary); }
+  .ts-toggle input:checked + .ts-toggle-track .ts-toggle-thumb { transform: translateX(18px); }
+  .ts-toggle input:disabled + .ts-toggle-track { opacity:0.5; cursor:not-allowed; }
+  .ts-toggle input:focus-visible + .ts-toggle-track { outline:2px solid var(--primary); outline-offset:2px; }
   .ts-muted { color: var(--muted); font-size: 12px; }
   .ts-toolbar { display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; }
   .ts-tabs { display:flex; gap:8px; margin-bottom:12px; }

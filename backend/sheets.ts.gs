@@ -10,6 +10,8 @@ function getOrCreateSheet(name) {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
       sh.getRange(1,1,1,6).setValues([['id','name','start_date','end_date','hourly_rate','created_at']]);
+    } else if (name === 'feature_flags') {
+      sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
     }
   }
   if (name === 'timesheet_entries') {
@@ -62,6 +64,31 @@ function getOrCreateSheet(name) {
     sh.getRange('C:D').setNumberFormat('@');
     sh.getRange('E:E').setNumberFormat('0.00');
     sh.getRange('F:F').setNumberFormat('@');
+  }
+  if (name === 'feature_flags') {
+    const expectedFlagHeaders = ['feature','enabled','name','description'];
+    const headerRange = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedFlagHeaders.length));
+    const headers = headerRange.getValues()[0];
+    const hasName = headers.indexOf('name') !== -1;
+    if (!hasName) {
+      const descIndex = headers.indexOf('description');
+      if (descIndex !== -1) {
+        sh.insertColumnBefore(descIndex + 1);
+        sh.getRange(1, descIndex + 1).setValue('name');
+      } else {
+        const lastCol = sh.getLastColumn();
+        if (lastCol < expectedFlagHeaders.length) {
+          sh.insertColumnAfter(lastCol);
+        }
+        sh.getRange(1, 3).setValue('name');
+      }
+    }
+    const sanitized = sh.getRange(1, 1, 1, expectedFlagHeaders.length).getValues()[0];
+    if (expectedFlagHeaders.some((header, idx) => sanitized[idx] !== header)) {
+      sh.getRange(1, 1, 1, expectedFlagHeaders.length).setValues([expectedFlagHeaders]);
+    }
+    sh.getRange('B:B').setNumberFormat('@');
+    sh.getRange('C:D').setNumberFormat('@');
   }
   return sh;
 }
