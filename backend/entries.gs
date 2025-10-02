@@ -80,7 +80,7 @@ function normalizeEntryObject(entry) {
     end_time: toIsoTime(entry.end_time),
     duration_minutes: normalizeDurationMinutes(entry.duration_minutes),
     break_minutes: normalizeDurationMinutes(entry.break_minutes || entry.break || 0),
-    project: entry.project || '',
+    contract_id: entry.contract_id || entry.contractId || entry.project || '',
     created_at: toIsoDateTime(entry.created_at)
   };
 }
@@ -94,7 +94,7 @@ function buildEntryRow(entry, createdAt) {
     normalized.end_time,
     normalized.duration_minutes,
     normalized.break_minutes,
-    normalized.project,
+    normalized.contract_id,
     createdAt || normalized.created_at || toIsoDateTime(new Date())
   ];
 }
@@ -137,7 +137,7 @@ function api_addEntry(entry) {
     end_time: record.end_time,
     duration_minutes: record.duration_minutes,
     break_minutes: record.break_minutes,
-    project: record.project,
+    contract_id: record.contract_id,
     created_at: toIsoDateTime(now)
   }, toIsoDateTime(now));
   sh.appendRow(row);
@@ -149,7 +149,7 @@ function api_addEntry(entry) {
     end_time: row[3],
     duration_minutes: row[4],
     break_minutes: row[5],
-    project: row[6],
+    contract_id: row[6],
     created_at: row[7]
   }) };
 }

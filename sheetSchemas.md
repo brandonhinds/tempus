@@ -10,7 +10,7 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 | `type` | string | Primitive type recorded when the value was saved (`string`, `number`, `boolean`). | `number` |
 
 ### Suggested improvements
-- Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings (e.g., `default_project`).
+- Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings.
 - When writing numeric settings, coerce to integers client-side and reject negative values before persisting.
 
 ## timesheet_entries
@@ -24,13 +24,30 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `end_time` | string (HH:mm) | Local end time. | `17:10` |
 | `duration_minutes` | number | Whole minutes of work after subtracting breaks, rounded by the client before submission. | `525` |
 | `break_minutes` | number | Minutes withheld from the shift (e.g., lunch). Defaults to `0`. | `15` |
-| `project` | string | Project tag or code. | `DFAT` |
+| `contract_id` | string (UUID) | References the contract active on the entry date. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
 
 ### Suggested improvements
 - Enforce non-empty `date`, `start_time`, and `end_time` client-side with validation messages before submission.
 - Derive `duration_minutes` server-side from `start_time`/`end_time` and the stored `break_minutes` to prevent tampering, while still letting the client show the optimistic value.
-- Introduce a lookup sheet for `project` codes to ensure consistent naming and prevent typos.
+- Validate that `contract_id` exists in the contracts sheet before persisting new rows.
+
+## contracts
+Contracts describe a billable agreement and govern whether time can be logged for a given date. Dates are inclusive and stored in ISO `yyyy-MM-dd` format.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
+| `name` | string | Human-readable contract name. | `Acme Support Retainer` |
+| `start_date` | string (ISO) | First day the contract is valid. | `2025-01-01` |
+| `end_date` | string (ISO) | Last day the contract is valid. Blank indicates open-ended. | `2025-12-31` |
+| `hourly_rate` | number | Billing rate in the sheet's currency units. | `125.00` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the contract row was created server-side. | `2024-05-06T10:15:00Z` |
+
+### Suggested improvements
+- Add validation to ensure contracts do not overlap unintentionally.
+- Track additional metadata such as client codes or billing notes when needed.
+- Continue blocking deletions when contracts have associated time entries so historical data remains intact.
 
 ## feature_flags (future use)
 The sheet exists but is currently empty and unsupported by the deployed code. If reintroduced, the expected columns are:

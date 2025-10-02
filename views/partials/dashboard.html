@@ -7,7 +7,11 @@
   <div id="tab-manual">
     <div class="ts-row">
       <div class="ts-col"><label>Date</label><input type="date" id="manual-date" /></div>
-      <div class="ts-col"><label>Project</label><input id="manual-project" /></div>
+      <div class="ts-col">
+        <label>Contract</label>
+        <select id="manual-contract"></select>
+        <div class="ts-warning" id="manual-contract-warning" style="display:none;">No valid contract for this date. Add one on the Contracts page before logging time.</div>
+      </div>
     </div>
     <div class="ts-row" style="margin-top:8px;">
       <div class="ts-col"><label>Start Time</label><input type="time" id="manual-start" required /></div>
@@ -35,8 +39,9 @@
       <div class="ts-col">
         <label>Break (minutes)</label>
         <input type="number" id="timer-break" min="0" step="1" value="0" />
-        <label style="margin-top:8px; display:block;">Project</label>
-        <input id="timer-project" placeholder="Optional project name" />
+        <label style="margin-top:8px; display:block;">Contract</label>
+        <select id="timer-contract"></select>
+        <div class="ts-warning" id="timer-contract-warning" style="display:none;">Add a valid contract for today on the Contracts page before using the timer.</div>
       </div>
     </div>
   </div>

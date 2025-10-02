@@ -1,16 +1,24 @@
 <script>
   // Layout navigation
   const pageTime = document.getElementById('page-time');
+  const pageContracts = document.getElementById('page-contracts');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');
   const navTimeBtn = document.getElementById('nav-time');
+  const navContractsBtn = document.getElementById('nav-contracts');
   const navSettingsBtn = document.getElementById('nav-settings');
 
   function showPage(target) {
-    const showTime = target === 'time';
-    pageTime.style.display = showTime ? 'block' : 'none';
-    pageSettings.style.display = showTime ? 'none' : 'block';
+    const pages = {
+      time: pageTime,
+      contracts: pageContracts,
+      settings: pageSettings
+    };
+    Object.keys(pages).forEach((key) => {
+      const page = pages[key];
+      if (page) page.style.display = key === target ? 'block' : 'none';
+    });
   }
 
   function closeNavMenu() {
@@ -62,6 +70,7 @@
   });
 
   if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
+  if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
   showPage('time');
@@ -74,7 +83,10 @@
     cacheKey: 'ts_cache',
     entries: [],
     settings: {},
+    contracts: [],
+    contractMap: {},
     editingEntryId: null,
+    editingContractId: null,
     calendar: null,
     selectedCalendarDate: null
   };
@@ -142,7 +154,59 @@
     if (clone.break_minutes > clone.duration_minutes) {
       clone.break_minutes = clone.duration_minutes;
     }
+    const contractId = clone.contract_id || clone.contractId || clone.project || '';
+    clone.contract_id = contractId ? String(contractId).trim() : '';
+    delete clone.project;
+    delete clone.contractId;
     return clone;
+  };
+
+  const sanitizeContract = (contract) => {
+    if (!contract) return contract;
+    const clone = { ...contract };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.name = clone.name ? String(clone.name).trim() : '';
+    clone.start_date = clone.start_date || clone.startDate || '';
+    clone.end_date = clone.end_date || clone.endDate || '';
+    clone.hourly_rate = Number(clone.hourly_rate != null ? clone.hourly_rate : 0);
+    if (Number.isNaN(clone.hourly_rate)) clone.hourly_rate = 0;
+    delete clone.startDate;
+    delete clone.endDate;
+    delete clone.hourlyRate;
+    return clone;
+  };
+
+  function updateContractMap() {
+    state.contractMap = state.contracts.reduce((map, contract) => {
+      map[contract.id] = contract;
+      return map;
+    }, {});
+  }
+
+  const contractIsValid = (contract, dateIso) => {
+    if (!contract || !dateIso) return false;
+    if (contract.start_date && contract.start_date > dateIso) return false;
+    if (contract.end_date && contract.end_date !== '' && contract.end_date < dateIso) return false;
+    return true;
+  };
+
+  function validContractsForDate(dateIso) {
+    if (!dateIso) return [];
+    return state.contracts.filter((contract) => contractIsValid(contract, dateIso));
+  }
+
+  function getContractName(id) {
+    if (!id) return '';
+    const match = state.contractMap[id];
+    if (match) return match.name;
+    return '';
+  }
+
+  const contractBadge = (entry) => {
+    const name = getContractName(entry.contract_id);
+    if (name) return `<span class="ts-badge">${name}</span>`;
+    if (entry.contract_id) return `<span class="ts-badge warn">Unknown contract</span>`;
+    return `<span class="ts-badge warn">No contract</span>`;
   };
 
   function loadCache() {
@@ -152,12 +216,18 @@
       const obj = JSON.parse(raw);
       state.entries = Array.isArray(obj.entries) ? obj.entries.map(sanitizeEntry) : [];
       state.settings = obj.settings || {};
+      state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
+      updateContractMap();
     } catch (e) {}
   }
   function saveCache() {
     try {
-      state.entries = state.entries.map(sanitizeEntry);
-      localStorage.setItem(state.cacheKey, JSON.stringify({ entries: state.entries, settings: state.settings }));
+      const payload = {
+        entries: state.entries.map(sanitizeEntry),
+        settings: state.settings,
+        contracts: state.contracts.map(sanitizeContract)
+      };
+      localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
   }
 
@@ -180,16 +250,22 @@
   // Timer controls
   function startTimer() {
     if (state.isRunning) return;
+    if (!timerContract || !timerContract.value) {
+      alert('Select a contract before starting the timer.');
+      return;
+    }
     state.isRunning = true;
     state.startTs = Date.now();
     state.timerInterval = setInterval(() => {
       document.getElementById('timer-display').textContent = fmtTimer(Date.now() - state.startTs);
     }, 1000);
+    refreshTimerButtons();
   }
   function pauseTimer() {
     if (!state.isRunning) return;
     state.isRunning = false;
     clearInterval(state.timerInterval);
+    refreshTimerButtons();
   }
   function resetTimer() {
     state.isRunning = false;
@@ -197,9 +273,14 @@
     state.startTs = null;
     document.getElementById('timer-display').textContent = '0:00';
     if (timerBreak) timerBreak.value = '0';
+    refreshTimerButtons();
   }
   function stopAndSave() {
     if (!state.startTs) return;
+    if (!timerContract || !timerContract.value) {
+      alert('Select a contract before saving the timer entry.');
+      return;
+    }
     const end = Date.now();
     const rawDuration = Math.max(1, Math.floor((end - state.startTs) / 60000));
     const breakMinutes = Math.max(0, Math.round(Number(timerBreak.value || 0)));
@@ -209,14 +290,20 @@
     }
     const durMin = roundDuration(rawDuration - breakMinutes);
     const now = new Date();
+    const contract = state.contractMap[timerContract.value];
+    const todayIsoString = isoDate(now);
+    if (!contract || !contractIsValid(contract, todayIsoString)) {
+      alert('Selected contract is not valid for today.');
+      return;
+    }
     const entry = sanitizeEntry({
       id: 'temp_' + Date.now(),
-      date: isoDate(now),
+      date: todayIsoString,
       start_time: new Date(state.startTs).toTimeString().slice(0, 5),
       end_time: new Date(end).toTimeString().slice(0, 5),
       duration_minutes: durMin,
       break_minutes: breakMinutes,
-      project: document.getElementById('timer-project').value || (state.settings.default_project || ''),
+      contract_id: timerContract.value,
       created_at: isoDateTime(now)
     });
     state.entries.unshift(entry);
@@ -249,19 +336,139 @@
   const manualStart = document.getElementById('manual-start');
   const manualEnd = document.getElementById('manual-end');
   const manualBreak = document.getElementById('manual-break');
-  const manualProject = document.getElementById('manual-project');
+  const manualContract = document.getElementById('manual-contract');
+  const manualContractWarning = document.getElementById('manual-contract-warning');
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
   const timerBreak = document.getElementById('timer-break');
+  const timerContract = document.getElementById('timer-contract');
+  const timerContractWarning = document.getElementById('timer-contract-warning');
+  const btnStart = document.getElementById('btn-start');
+  const btnPause = document.getElementById('btn-pause');
+  const btnStop = document.getElementById('btn-stop');
 
-  function setManualDate(dateIso) {
-    if (!manualDate) return;
-    manualDate.value = dateIso || todayIso();
+  function refreshTimerButtons() {
+    if (!btnStart || !btnStop || !btnPause) return;
+    const hasContract = !!(timerContract && timerContract.value);
+    btnStart.disabled = !hasContract || state.isRunning;
+    btnStop.disabled = !state.isRunning;
+    btnPause.disabled = !state.isRunning;
   }
 
-  setManualDate(todayIso());
-  if (manualBreak) manualBreak.value = '0';
-  if (timerBreak) timerBreak.value = '0';
+  function updateManualContractOptions(preferredContractId) {
+    if (!manualContract) return '';
+    const dateIso = manualDate && manualDate.value ? manualDate.value : todayIso();
+    const valid = validContractsForDate(dateIso);
+    const currentValue = preferredContractId != null ? preferredContractId : manualContract.value;
+    const options = [...valid];
+    if (currentValue && !options.some((contract) => contract.id === currentValue)) {
+      const fallback = state.contractMap[currentValue];
+      if (fallback) options.push(fallback);
+    }
+    options.sort((a, b) => a.name.localeCompare(b.name));
+    manualContract.innerHTML = '';
+    if (!options.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'No contracts';
+      manualContract.appendChild(placeholder);
+      manualContract.value = '';
+      manualContract.disabled = true;
+      if (manualContractWarning) manualContractWarning.style.display = 'block';
+      if (manualSaveBtn) manualSaveBtn.disabled = true;
+      return '';
+    }
+    if (options.length > 1) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select contract';
+      manualContract.appendChild(placeholder);
+    }
+    options.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      manualContract.appendChild(opt);
+    });
+    let selected = currentValue && options.some((contract) => contract.id === currentValue) ? currentValue : '';
+    if (!selected && valid.length === 1) {
+      selected = valid[0].id;
+    }
+    manualContract.value = selected;
+    manualContract.disabled = valid.length === 1 && options.length === valid.length;
+    if (manualContractWarning) manualContractWarning.style.display = 'none';
+    if (manualSaveBtn) manualSaveBtn.disabled = !manualContract.value;
+    return manualContract.value;
+  }
+
+  function updateTimerContractOptions(preferredContractId) {
+    if (!timerContract) {
+      refreshTimerButtons();
+      return '';
+    }
+    const dateIso = todayIso();
+    const valid = validContractsForDate(dateIso);
+    const currentValue = preferredContractId != null ? preferredContractId : timerContract.value;
+    const options = [...valid];
+    if (currentValue && !options.some((contract) => contract.id === currentValue)) {
+      const fallback = state.contractMap[currentValue];
+      if (fallback) options.push(fallback);
+    }
+    options.sort((a, b) => a.name.localeCompare(b.name));
+    timerContract.innerHTML = '';
+    if (!options.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'No contracts';
+      timerContract.appendChild(placeholder);
+      timerContract.value = '';
+      timerContract.disabled = true;
+      if (timerContractWarning) timerContractWarning.style.display = 'block';
+      refreshTimerButtons();
+      return '';
+    }
+    if (options.length > 1) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select contract';
+      timerContract.appendChild(placeholder);
+    }
+    options.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      timerContract.appendChild(opt);
+    });
+    let selected = currentValue && options.some((contract) => contract.id === currentValue) ? currentValue : '';
+    if (!selected && valid.length === 1) {
+      selected = valid[0].id;
+    }
+    timerContract.value = selected;
+    timerContract.disabled = valid.length === 1 && options.length === valid.length;
+    if (timerContractWarning) timerContractWarning.style.display = 'none';
+    refreshTimerButtons();
+    return timerContract.value;
+  }
+
+  function refreshContractBindings(preferredManualContractId, preferredTimerContractId) {
+    updateContractMap();
+    const manualDateIso = manualDate && manualDate.value ? manualDate.value : todayIso();
+    const manualPreferred = preferredManualContractId && contractIsValid(state.contractMap[preferredManualContractId], manualDateIso)
+      ? preferredManualContractId
+      : undefined;
+    const timerDateIso = todayIso();
+    const timerPreferred = preferredTimerContractId && contractIsValid(state.contractMap[preferredTimerContractId], timerDateIso)
+      ? preferredTimerContractId
+      : undefined;
+    updateManualContractOptions(manualPreferred);
+    updateTimerContractOptions(timerPreferred);
+  }
+
+  function setManualDate(dateIso, preferredContractId) {
+    if (!manualDate) return;
+    manualDate.value = dateIso || todayIso();
+    updateManualContractOptions(preferredContractId != null ? preferredContractId : (manualContract ? manualContract.value : ''));
+  }
 
   function setManualMode(isEdit) {
     manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
@@ -270,11 +477,12 @@
   function populateManualForm(entry, isEdit) {
     showPage('time');
     activateTab('manual');
-    setManualDate(entry.date || todayIso());
+    const preferredDate = entry.date || todayIso();
+    const preferredContractId = entry.contract_id || '';
+    setManualDate(preferredDate, preferredContractId);
     manualStart.value = entry.start_time || '';
     manualEnd.value = entry.end_time || '';
     manualBreak.value = String(entry.break_minutes != null ? entry.break_minutes : 0);
-    manualProject.value = entry.project != null ? entry.project : (state.settings.default_project || '');
     state.editingEntryId = isEdit ? entry.id : null;
     setManualMode(!!isEdit);
     if (isEdit) manualStart.focus();
@@ -285,7 +493,7 @@
     manualStart.value = '';
     manualEnd.value = '';
     manualBreak.value = '0';
-    manualProject.value = state.settings.default_project || '';
+    updateManualContractOptions();
   }
   function getManualPayload() {
     const date = manualDate.value || todayIso();
@@ -308,14 +516,27 @@
       return null;
     }
     const rounded = roundDuration(duration - breakMin);
-    const trimmedProject = manualProject.value.trim();
+    const contractId = manualContract ? manualContract.value : '';
+    if (!contractId) {
+      alert('Select a contract for this date.');
+      return null;
+    }
+    const contract = state.contractMap[contractId];
+    if (!contract) {
+      alert('Selected contract is no longer available.');
+      return null;
+    }
+    if (!contractIsValid(contract, date) && !state.editingEntryId) {
+      alert('Selected contract is not valid for this date.');
+      return null;
+    }
     return {
       date,
       start_time: start,
       end_time: end,
       duration_minutes: rounded,
       break_minutes: breakMin,
-      project: trimmedProject !== '' ? trimmedProject : (state.editingEntryId ? '' : (state.settings.default_project || ''))
+      contract_id: contractId
     };
   }
 
@@ -381,7 +602,7 @@
         .api_addEntry(entry);
     }
     state.selectedCalendarDate = payload.date;
-    setManualDate(state.selectedCalendarDate);
+    setManualDate(state.selectedCalendarDate, payload.contract_id);
     renderCalendar();
     renderCalendarDetail();
   };
@@ -389,6 +610,228 @@
     clearManualEditing();
     activateTab('manual');
   };
+
+  if (manualDate) {
+    manualDate.addEventListener('change', () => {
+      state.selectedCalendarDate = manualDate.value;
+      updateManualContractOptions();
+      renderCalendar();
+      renderCalendarDetail();
+    });
+  }
+
+  if (manualContract) {
+    manualContract.addEventListener('change', () => {
+      if (manualSaveBtn) manualSaveBtn.disabled = !manualContract.value;
+    });
+  }
+
+  if (timerContract) {
+    timerContract.addEventListener('change', () => {
+      refreshTimerButtons();
+    });
+  }
+
+  if (manualBreak) manualBreak.value = '0';
+  if (timerBreak) timerBreak.value = '0';
+  setManualDate(todayIso());
+
+  const contractsListEl = document.getElementById('contracts-list');
+  const contractNameInput = document.getElementById('contract-name');
+  const contractStartInput = document.getElementById('contract-start');
+  const contractEndInput = document.getElementById('contract-end');
+  const contractRateInput = document.getElementById('contract-rate');
+  const contractSaveBtn = document.getElementById('contract-save');
+  const contractCancelBtn = document.getElementById('contract-cancel');
+
+  function setContractFormMode(isEdit) {
+    if (contractSaveBtn) contractSaveBtn.textContent = isEdit ? 'Update Contract' : 'Add Contract';
+    if (contractCancelBtn) contractCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+  }
+
+  function contractEndSortValue(contract) {
+    return contract.end_date && contract.end_date !== '' ? contract.end_date : '9999-12-31';
+  }
+
+  function renderContractsList() {
+    if (!contractsListEl) return;
+    contractsListEl.innerHTML = '';
+    if (!state.contracts.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ts-note';
+      empty.textContent = 'No contracts yet. Add one to start tracking time.';
+      contractsListEl.appendChild(empty);
+      return;
+    }
+    const sorted = [...state.contracts].sort((a, b) => {
+      const endA = contractEndSortValue(a);
+      const endB = contractEndSortValue(b);
+      if (endA !== endB) return endB.localeCompare(endA);
+      const startA = a.start_date || '';
+      const startB = b.start_date || '';
+      if (startA !== startB) return (startB || '').localeCompare(startA || '');
+      return a.name.localeCompare(b.name);
+    });
+    sorted.forEach((contract) => {
+      const hasEntries = state.entries.some((entry) => entry.contract_id === contract.id);
+      const deleteDisabledAttr = hasEntries
+        ? 'disabled aria-disabled="true" title="Cannot delete a contract with time entries"'
+        : '';
+      const item = document.createElement('div');
+      item.className = 'ts-item';
+      const rangeLabel = contract.end_date ? `${contract.start_date || '—'} → ${contract.end_date}` : `${contract.start_date || '—'} → Present`;
+      const rate = Number(contract.hourly_rate || 0);
+      item.innerHTML = `
+        <div style="flex:1;">
+          <div style="font-weight:600;">${contract.name || 'Unnamed contract'}</div>
+          <div class="ts-note">Dates: ${rangeLabel}</div>
+          <div class="ts-note">Rate: ${rate.toFixed(2)} / hr</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="ghost" data-contract-edit="${contract.id}">Edit</button>
+          <button class="danger" data-contract-delete="${contract.id}" ${deleteDisabledAttr}>Delete</button>
+        </div>
+      `;
+      contractsListEl.appendChild(item);
+    });
+    contractsListEl.querySelectorAll('[data-contract-edit]').forEach((btn) => {
+      btn.onclick = () => handleContractEdit(btn.getAttribute('data-contract-edit'));
+    });
+    contractsListEl.querySelectorAll('[data-contract-delete]').forEach((btn) => {
+      if (btn.disabled) {
+        btn.onclick = null;
+      } else {
+        btn.onclick = () => handleContractDelete(btn.getAttribute('data-contract-delete'));
+      }
+    });
+  }
+
+  function clearContractForm() {
+    state.editingContractId = null;
+    if (contractNameInput) contractNameInput.value = '';
+    if (contractStartInput) contractStartInput.value = '';
+    if (contractEndInput) contractEndInput.value = '';
+    if (contractRateInput) contractRateInput.value = '';
+    setContractFormMode(false);
+  }
+
+  function populateContractForm(contract) {
+    state.editingContractId = contract.id;
+    if (contractNameInput) contractNameInput.value = contract.name || '';
+    if (contractStartInput) contractStartInput.value = contract.start_date || '';
+    if (contractEndInput) contractEndInput.value = contract.end_date || '';
+    if (contractRateInput) contractRateInput.value = contract.hourly_rate != null ? Number(contract.hourly_rate).toFixed(2) : '';
+    setContractFormMode(true);
+  }
+
+  function getContractFormPayload() {
+    const name = contractNameInput ? contractNameInput.value.trim() : '';
+    const startDate = contractStartInput ? contractStartInput.value : '';
+    const endDate = contractEndInput ? contractEndInput.value : '';
+    const hourlyRateRaw = contractRateInput ? contractRateInput.value : '';
+    const hourlyRate = Number(hourlyRateRaw || 0);
+    if (!name) {
+      alert('Contract name is required.');
+      return null;
+    }
+    if (!startDate) {
+      alert('Contract start date is required.');
+      return null;
+    }
+    if (endDate && endDate < startDate) {
+      alert('End date must be on or after the start date.');
+      return null;
+    }
+    if (hourlyRate < 0) {
+      alert('Hourly rate must be zero or greater.');
+      return null;
+    }
+    return {
+      name,
+      start_date: startDate,
+      end_date: endDate,
+      hourly_rate: Math.round(hourlyRate * 100) / 100
+    };
+  }
+
+  function handleContractSave() {
+    if (!contractSaveBtn) return;
+    const payload = getContractFormPayload();
+    if (!payload) return;
+    contractSaveBtn.disabled = true;
+    const isEdit = !!state.editingContractId;
+    setStatus(isEdit ? 'Updating contract...' : 'Saving contract...', 'warn');
+    const handler = (res) => {
+      contractSaveBtn.disabled = false;
+      if (res && res.success && res.contract) {
+        const normalized = sanitizeContract(res.contract);
+        state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
+        refreshContractBindings(normalized.id, normalized.id);
+        renderContractsList();
+        saveCache();
+        clearContractForm();
+        setStatus(isEdit ? 'Contract updated' : 'Contract saved', 'success');
+      } else {
+        setStatus('Contract save failed', 'error');
+      }
+    };
+    const failure = () => {
+      contractSaveBtn.disabled = false;
+      setStatus('Contract save failed', 'error');
+    };
+    if (isEdit) {
+      google.script.run
+        .withSuccessHandler(handler)
+        .withFailureHandler(failure)
+        .api_updateContract({ id: state.editingContractId, ...payload });
+    } else {
+      google.script.run
+        .withSuccessHandler(handler)
+        .withFailureHandler(failure)
+        .api_addContract(payload);
+    }
+  }
+
+  function handleContractEdit(id) {
+    const contract = state.contracts.find((c) => c.id === id);
+    if (!contract) return;
+    populateContractForm(contract);
+    showPage('contracts');
+  }
+
+  function handleContractDelete(id) {
+    if (!id) return;
+    const hasEntries = state.entries.some((entry) => entry.contract_id === id);
+    if (hasEntries) {
+      alert('This contract already has time entries and cannot be deleted.');
+      return;
+    }
+    if (!confirm('Delete this contract?')) return;
+    setStatus('Deleting contract...', 'warn');
+    google.script.run
+      .withSuccessHandler(() => {
+        state.contracts = state.contracts.filter((contract) => contract.id !== id);
+        if (state.editingContractId === id) {
+          clearContractForm();
+        }
+        refreshContractBindings();
+        renderContractsList();
+        saveCache();
+        setStatus('Contract deleted', 'success');
+      })
+      .withFailureHandler(() => setStatus('Contract delete failed', 'error'))
+      .api_deleteContract(id);
+  }
+
+  if (contractSaveBtn) {
+    contractSaveBtn.onclick = handleContractSave;
+  }
+  if (contractCancelBtn) {
+    contractCancelBtn.onclick = () => {
+      clearContractForm();
+    };
+  }
+  setContractFormMode(false);
 
   // Entries & KPIs
   function minutesForDate(date) {
@@ -529,7 +972,7 @@
           <div style="display:flex; gap:8px; align-items:center;">
             <strong>${entry.start_time || '--:--'} - ${entry.end_time || '--:--'}</strong>
             <span class="ts-badge success">${fmt(entry.duration_minutes || 0)}</span>
-            ${entry.project ? `<span class="ts-badge">${entry.project}</span>` : ''}
+            ${contractBadge(entry)}
             ${entry.break_minutes ? `<span class="ts-badge">Break ${entry.break_minutes}m</span>` : ''}
           </div>
         </div>
@@ -568,14 +1011,15 @@
   document.getElementById('calendar-add-entry').onclick = () => {
     ensureCalendarState();
     const date = state.selectedCalendarDate || todayIso();
-    populateManualForm({ date, start_time: '', end_time: '', break_minutes: 0, project: state.settings.default_project || '' }, false);
+    const preferredContract = manualContract ? manualContract.value : '';
+    populateManualForm({ date, start_time: '', end_time: '', break_minutes: 0, contract_id: preferredContract }, false);
   };
 
   // Settings persistence
+  const roundInput = document.getElementById('set-round');
   document.getElementById('btn-save-settings').onclick = function () {
     const next = {
-      default_project: document.getElementById('set-default-project').value || '',
-      round_to_nearest: parseInt(document.getElementById('set-round').value || '0', 10) || 0
+      round_to_nearest: parseInt(roundInput.value || '0', 10) || 0
     };
     state.settings = { ...state.settings, ...next };
     saveCache();
@@ -590,11 +1034,11 @@
   function init() {
     loadCache();
     renderEntries();
-    document.getElementById('set-default-project').value = state.settings.default_project || '';
-    document.getElementById('set-round').value = state.settings.round_to_nearest || 0;
-    if (!state.editingEntryId) {
-      manualProject.value = state.settings.default_project || '';
-    }
+    if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
+    renderContractsList();
+    clearContractForm();
+    refreshContractBindings();
+    refreshTimerButtons();
     setStatus('Syncing...', 'warn');
     google.script.run
       .withSuccessHandler((entries) => {
@@ -609,14 +1053,19 @@
       .withSuccessHandler((settings) => {
         state.settings = settings || {};
         saveCache();
-        document.getElementById('set-default-project').value = state.settings.default_project || '';
-        document.getElementById('set-round').value = state.settings.round_to_nearest || 0;
-        if (!state.editingEntryId) {
-          manualProject.value = state.settings.default_project || '';
-        }
+        if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
       })
       .withFailureHandler(() => {})
       .api_getSettings();
+    google.script.run
+      .withSuccessHandler((contracts) => {
+        state.contracts = (contracts || []).map(sanitizeContract);
+        refreshContractBindings();
+        renderContractsList();
+        saveCache();
+      })
+      .withFailureHandler(() => setStatus('Contracts sync failed', 'error'))
+      .api_getContracts();
   }
   init();
 </script>

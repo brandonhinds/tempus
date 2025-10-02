@@ -25,6 +25,7 @@
   button.secondary { background:#334155; }
   button.ghost { background: transparent; border:1px solid var(--border); }
   button.danger { background: var(--danger); }
+  button:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
   .ts-muted { color: var(--muted); font-size: 12px; }
   .ts-toolbar { display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; }
   .ts-tabs { display:flex; gap:8px; margin-bottom:12px; }
@@ -65,5 +66,6 @@
   .ts-nav-menu { position:absolute; right:0; top:calc(100% + 8px); background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:8px; min-width:160px; box-shadow:0 12px 30px rgba(0,0,0,.35); z-index:10; }
   .ts-nav-menu[hidden] { display:none; }
   .ts-nav-menu button { width:100%; justify-content:flex-start; }
+  .ts-warning { color: #f87171; font-size:12px; margin-top:6px; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } }
 </style>

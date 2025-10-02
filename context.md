@@ -22,7 +22,7 @@ I want it to look like a professional, enterprise ready application.
 **Feature Scope & Customization**
 
 5. Core time tracking features: What are the essential features? (start/stop timer, manual entry, project/task selection, etc.)
-    Start stop timers and manual entry are essential. Entries capture start and stop times plus an optional break duration that gets subtracted from total work time.
+    Start stop timers and manual entry are essential. Entries capture start and stop times plus an optional break duration that gets subtracted from total work time, and every entry must be tied to a contract that is valid for the selected date. Contract management lives on its own page so agreements can be added, edited, or retired independently of the main time-entry flow.
 6. Customization depth: How granular should the customization be? (UI themes, field visibility, workflow steps, etc.)
     All those things should be customisable.
 7. User roles: Will there be different user types (employees, managers, admins) with different permissions?
@@ -33,7 +33,7 @@ I want it to look like a professional, enterprise ready application.
 **Google Sheets Specific**
 
 9. Sheet structure: Do you have a preferred sheet structure, or should we design one? (separate sheets for users, projects, entries, etc.)
-    You can design the sheet structure however you want. It should be maintainable / extendable. Assume anything you create will be scaled further by someone else.
+    You can design the sheet structure however you want. It should be maintainable / extendable. Assume anything you create will be scaled further by someone else. Contracts now live in their own sheet and entries reference them by id.
 10. Data validation: What level of data validation do you need in the sheets?
     The sheets don't need data validation. The validation shoudl instead be in the front end before it sends it.
 11. Backup/recovery: How important is data backup and version history?
