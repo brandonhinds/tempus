@@ -203,6 +203,10 @@
     remember_last_page: {
       name: 'Remember last page on refresh',
       description: 'When enabled, the app reopens on the most recently viewed page.'
+    },
+    show_clear_cache: {
+      name: 'Show cache clear button',
+      description: 'Displays a button that lets you clear cached entries and settings from this browser.'
     }
   };
 
@@ -706,6 +710,8 @@
   const contractRateInput = document.getElementById('contract-rate');
   const contractSaveBtn = document.getElementById('contract-save');
   const contractCancelBtn = document.getElementById('contract-cancel');
+  const clearCacheWrapper = document.getElementById('clear-cache-wrapper');
+  const clearCacheBtn = document.getElementById('btn-clear-cache');
 
   function setContractFormMode(isEdit) {
     if (contractSaveBtn) contractSaveBtn.textContent = isEdit ? 'Update Contract' : 'Add Contract';
@@ -988,6 +994,7 @@
         localStorage.removeItem(LAST_PAGE_KEY);
       } catch (e) {}
     }
+    updateClearCacheVisibility();
   }
 
   if (contractSaveBtn) {
@@ -999,6 +1006,23 @@
     };
   }
   setContractFormMode(false);
+
+  function updateClearCacheVisibility() {
+    if (!clearCacheWrapper) return;
+    const enabled = !!(state.featureFlags.show_clear_cache && state.featureFlags.show_clear_cache.enabled);
+    clearCacheWrapper.style.display = enabled ? 'block' : 'none';
+  }
+
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', () => {
+      if (!confirm('Clear cached entries and settings from this browser?')) return;
+      try {
+        localStorage.removeItem(state.cacheKey);
+        localStorage.removeItem(LAST_PAGE_KEY);
+      } catch (e) {}
+      setStatus('Local cache cleared. Data will be reloaded from the server on next sync.', 'success');
+    });
+  }
 
   // Entries & KPIs
   function minutesForDate(date) {
