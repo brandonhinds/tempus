@@ -15,8 +15,6 @@ The next things we want to include:
 
 - Assuming the contracts page gets expanded views, move the new contract settings to a button instead of always being at the bottom of the screen
 
-- Change the 0's for hours on a day to be blank
-
 - Add the invoice requirements (all behind feature flags)
 
 - Add a thinkStack employee feature flag, which will do things like include the lost super in the expected pay

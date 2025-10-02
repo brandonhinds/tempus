@@ -23,6 +23,7 @@
     editingContractId: null,
     calendar: null,
     selectedCalendarDate: null,
+    showZeroHours: false,
     currentPage: 'time'
   };
 
@@ -207,6 +208,10 @@
     show_clear_cache: {
       name: 'Show cache clear button',
       description: 'Displays a button that lets you clear cached entries and settings from this browser.'
+    },
+    show_zero_hours: {
+      name: 'Show zero hours on empty days',
+      description: 'When enabled, days without logged time display a 0 instead of being blank.'
     }
   };
 
@@ -994,6 +999,10 @@
         localStorage.removeItem(LAST_PAGE_KEY);
       } catch (e) {}
     }
+    const zeroFlag = state.featureFlags.show_zero_hours || DEFAULT_FEATURE_FLAGS.show_zero_hours || { enabled: false };
+    state.showZeroHours = !!zeroFlag.enabled;
+    renderCalendar();
+    renderCalendarDetail();
     updateClearCacheVisibility();
   }
 
@@ -1120,7 +1129,11 @@
       const totalEl = document.createElement('div');
       totalEl.className = 'ts-calendar-total';
       if (totalMinutes === 0) totalEl.classList.add('empty');
-      totalEl.textContent = totalMinutes === 0 ? '0' : formatHours(totalMinutes);
+      if (totalMinutes === 0) {
+        totalEl.textContent = state.showZeroHours ? '0' : '';
+      } else {
+        totalEl.textContent = formatHours(totalMinutes);
+      }
       cell.append(dayEl, totalEl);
       cell.onclick = () => handleCalendarClick(iso);
       grid.appendChild(cell);

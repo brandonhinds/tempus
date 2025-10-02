@@ -24,5 +24,5 @@
 ## Commit & Pull Request Guidelines
 - Use imperative, scope-focused commit subjects (e.g., `Normalize entry timestamps`); avoid bundling unrelated changes.
 - Pull requests should outline the user-visible impact, list touched sheets or scripts, and include manual test evidence. Attach screenshots or GIFs for UI updates.
-- When behaviour or architecture shifts, update all affected docs (`context.md`, `sheetSchemas.md`, `AGENTS.md`, etc.) within the same PR so future contributors stay in sync.
+- When behaviour or architecture shifts, update all affected docs (`context.md`, `sheetSchemas.md`, `AGENTS.md`, `featureFlags.md`, etc.) within the same PR so future contributors stay in sync.
 - Reference relevant context or planning docs when applicable so reviewers can trace decisions quickly.
