@@ -60,5 +60,10 @@
   .ts-calendar-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .ts-calendar-detail-list { display:flex; flex-direction:column; gap:10px; }
   .ts-calendar-detail-empty { font-size:12px; color: var(--muted); }
+  .ts-nav { position:relative; }
+  .ts-nav-toggle { width:42px; height:42px; display:flex; align-items:center; justify-content:center; font-size:20px; }
+  .ts-nav-menu { position:absolute; right:0; top:calc(100% + 8px); background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:8px; min-width:160px; box-shadow:0 12px 30px rgba(0,0,0,.35); z-index:10; }
+  .ts-nav-menu[hidden] { display:none; }
+  .ts-nav-menu button { width:100%; justify-content:flex-start; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } }
 </style>

@@ -22,14 +22,14 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `date` | string (ISO) | Work date in `yyyy-MM-dd`. | `2025-09-30` |
 | `start_time` | string (HH:mm) | Local start time captured by the client. | `08:10` |
 | `end_time` | string (HH:mm) | Local end time. | `17:10` |
-| `duration_minutes` | number | Whole minutes rounded by the client before submission. | `540` |
-| `description` | string | Free-form notes from the user. | `Manual entry` |
+| `duration_minutes` | number | Whole minutes of work after subtracting breaks, rounded by the client before submission. | `525` |
+| `break_minutes` | number | Minutes withheld from the shift (e.g., lunch). Defaults to `0`. | `15` |
 | `project` | string | Project tag or code. | `DFAT` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
 
 ### Suggested improvements
 - Enforce non-empty `date`, `start_time`, and `end_time` client-side with validation messages before submission.
-- Derive `duration_minutes` server-side from `start_time`/`end_time` to prevent tampering, while still letting the client show the optimistic value.
+- Derive `duration_minutes` server-side from `start_time`/`end_time` and the stored `break_minutes` to prevent tampering, while still letting the client show the optimistic value.
 - Introduce a lookup sheet for `project` codes to ensure consistent naming and prevent typos.
 
 ## feature_flags (future use)

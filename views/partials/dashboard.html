@@ -1,10 +1,26 @@
 <section class="ts-card" id="page-time" style="margin-bottom:16px;">
   <div class="ts-tabs">
-    <div class="ts-tab active" data-tab="timer">⏱️ Timer</div>
-    <div class="ts-tab" data-tab="manual">✏️ Manual Entry</div>
+    <div class="ts-tab active" data-tab="manual">✏️ Manual Entry</div>
+    <div class="ts-tab" data-tab="timer">⏱️ Timer</div>
   </div>
 
-  <div id="tab-timer">
+  <div id="tab-manual">
+    <div class="ts-row">
+      <div class="ts-col"><label>Date</label><input type="date" id="manual-date" /></div>
+      <div class="ts-col"><label>Project</label><input id="manual-project" /></div>
+    </div>
+    <div class="ts-row" style="margin-top:8px;">
+      <div class="ts-col"><label>Start Time</label><input type="time" id="manual-start" required /></div>
+      <div class="ts-col"><label>End Time</label><input type="time" id="manual-end" required /></div>
+      <div class="ts-col"><label>Break (minutes)</label><input type="number" id="manual-break" min="0" step="1" value="0" /></div>
+    </div>
+    <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
+      <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
+      <button id="btn-add-manual">Add Entry</button>
+    </div>
+  </div>
+
+  <div id="tab-timer" style="display:none;">
     <div class="ts-row">
       <div class="ts-col">
         <div style="font-size:64px; font-family:monospace;" id="timer-display">0:00</div>
@@ -14,30 +30,14 @@
           <button id="btn-stop" class="danger">Stop & Save</button>
           <button id="btn-reset" class="secondary">Reset</button>
         </div>
-        <div class="ts-note" style="margin-top:8px;">Timer must run >= 1 minute to save.</div>
+        <div class="ts-note" style="margin-top:8px;">Timer must run &ge; 1 minute to save.</div>
       </div>
       <div class="ts-col">
-        <label>Description</label>
-        <textarea id="timer-desc" rows="3" placeholder="What are you working on?"></textarea>
+        <label>Break (minutes)</label>
+        <input type="number" id="timer-break" min="0" step="1" value="0" />
         <label style="margin-top:8px; display:block;">Project</label>
         <input id="timer-project" placeholder="Optional project name" />
       </div>
-    </div>
-  </div>
-
-  <div id="tab-manual" style="display:none;">
-    <div class="ts-row">
-      <div class="ts-col"><label>Date</label><input type="date" id="manual-date" /></div>
-      <div class="ts-col"><label>Start Time</label><input type="time" id="manual-start" required /></div>
-      <div class="ts-col"><label>End Time</label><input type="time" id="manual-end" required /></div>
-    </div>
-    <div class="ts-row" style="margin-top:8px;">
-      <div class="ts-col"><label>Description</label><textarea id="manual-desc" rows="2"></textarea></div>
-      <div class="ts-col"><label>Project</label><input id="manual-project" /></div>
-    </div>
-    <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
-      <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
-      <button id="btn-add-manual">Add Entry</button>
     </div>
   </div>
 

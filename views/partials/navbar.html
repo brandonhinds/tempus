@@ -5,9 +5,12 @@
       <div style="font-size:20px; font-weight:700;">Timesheet</div>
       <div id="status" class="ts-badge" style="margin-left:10px;">Idle</div>
     </div>
-    <div style="margin-left:auto; display:flex; gap:8px;">
-      <button class="ghost" id="nav-time">Time Entry</button>
-      <button class="ghost" id="nav-settings">Settings</button>
+    <div class="ts-nav" style="margin-left:auto;">
+      <button class="ghost ts-nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Open navigation">☰</button>
+      <div class="ts-nav-menu" id="nav-menu" hidden>
+        <button class="ghost" id="nav-time">Time Entry</button>
+        <button class="ghost" id="nav-settings">Settings</button>
+      </div>
     </div>
   </div>
 </header>

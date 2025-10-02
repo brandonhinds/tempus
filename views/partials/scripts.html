@@ -2,13 +2,68 @@
   // Layout navigation
   const pageTime = document.getElementById('page-time');
   const pageSettings = document.getElementById('page-settings');
+  const navToggle = document.getElementById('nav-toggle');
+  const navMenu = document.getElementById('nav-menu');
+  const navTimeBtn = document.getElementById('nav-time');
+  const navSettingsBtn = document.getElementById('nav-settings');
+
   function showPage(target) {
     const showTime = target === 'time';
     pageTime.style.display = showTime ? 'block' : 'none';
     pageSettings.style.display = showTime ? 'none' : 'block';
   }
-  document.getElementById('nav-time').onclick = () => showPage('time');
-  document.getElementById('nav-settings').onclick = () => showPage('settings');
+
+  function closeNavMenu() {
+    if (!navMenu) return;
+    navMenu.hidden = true;
+    if (navToggle) navToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function openNavMenu() {
+    if (!navMenu) return;
+    navMenu.hidden = false;
+    if (navToggle) navToggle.setAttribute('aria-expanded', 'true');
+  }
+
+  function toggleNavMenu() {
+    if (!navMenu) return;
+    const expanded = navToggle && navToggle.getAttribute('aria-expanded') === 'true';
+    if (expanded) {
+      closeNavMenu();
+    } else {
+      openNavMenu();
+    }
+  }
+
+  if (navToggle && navMenu) {
+    navToggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleNavMenu();
+    });
+  }
+
+  if (navMenu) {
+    navMenu.addEventListener('click', (event) => {
+      if ((event.target instanceof HTMLElement) && event.target.tagName === 'BUTTON') {
+        closeNavMenu();
+      }
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    if (!navMenu || navMenu.hidden) return;
+    if (navToggle && (event.target === navToggle || navToggle.contains(event.target))) return;
+    if (navMenu.contains(event.target)) return;
+    closeNavMenu();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeNavMenu();
+  });
+
+  if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
+  if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
+  closeNavMenu();
   showPage('time');
 
   // State & helpers
@@ -77,17 +132,31 @@
     return Math.max(interval, rounded);
   };
 
+  const sanitizeEntry = (entry) => {
+    if (!entry) return entry;
+    const clone = { ...entry };
+    clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes) || 0));
+    const rawBreak = clone.break_minutes != null ? clone.break_minutes : clone.break;
+    clone.break_minutes = Math.max(0, Math.round(Number(rawBreak) || 0));
+    delete clone.description;
+    if (clone.break_minutes > clone.duration_minutes) {
+      clone.break_minutes = clone.duration_minutes;
+    }
+    return clone;
+  };
+
   function loadCache() {
     try {
       const raw = localStorage.getItem(state.cacheKey);
       if (!raw) return;
       const obj = JSON.parse(raw);
-      state.entries = obj.entries || [];
+      state.entries = Array.isArray(obj.entries) ? obj.entries.map(sanitizeEntry) : [];
       state.settings = obj.settings || {};
     } catch (e) {}
   }
   function saveCache() {
     try {
+      state.entries = state.entries.map(sanitizeEntry);
       localStorage.setItem(state.cacheKey, JSON.stringify({ entries: state.entries, settings: state.settings }));
     } catch (e) {}
   }
@@ -98,7 +167,7 @@
       const target = tab.getAttribute('data-tab');
       tab.classList.toggle('active', target === id);
     });
-    ['timer', 'manual'].forEach((pane) => {
+    ['manual', 'timer'].forEach((pane) => {
       const el = document.getElementById('tab-' + pane);
       if (el) el.style.display = pane === id ? 'block' : 'none';
     });
@@ -106,7 +175,7 @@
   $$('.ts-tab').forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
   });
-  activateTab('timer');
+  activateTab('manual');
 
   // Timer controls
   function startTimer() {
@@ -127,23 +196,29 @@
     clearInterval(state.timerInterval);
     state.startTs = null;
     document.getElementById('timer-display').textContent = '0:00';
+    if (timerBreak) timerBreak.value = '0';
   }
   function stopAndSave() {
     if (!state.startTs) return;
     const end = Date.now();
     const rawDuration = Math.max(1, Math.floor((end - state.startTs) / 60000));
-    const durMin = roundDuration(rawDuration);
+    const breakMinutes = Math.max(0, Math.round(Number(timerBreak.value || 0)));
+    if (breakMinutes >= rawDuration) {
+      alert('Break must be shorter than the recorded time.');
+      return;
+    }
+    const durMin = roundDuration(rawDuration - breakMinutes);
     const now = new Date();
-    const entry = {
+    const entry = sanitizeEntry({
       id: 'temp_' + Date.now(),
       date: isoDate(now),
       start_time: new Date(state.startTs).toTimeString().slice(0, 5),
       end_time: new Date(end).toTimeString().slice(0, 5),
       duration_minutes: durMin,
-      description: document.getElementById('timer-desc').value || 'Timer session',
+      break_minutes: breakMinutes,
       project: document.getElementById('timer-project').value || (state.settings.default_project || ''),
       created_at: isoDateTime(now)
-    };
+    });
     state.entries.unshift(entry);
     saveCache();
     renderEntries();
@@ -153,7 +228,7 @@
       .withSuccessHandler((res) => {
         if (res && res.success) {
           const idx = state.entries.findIndex((e) => e.id === entry.id);
-          if (idx > -1) state.entries[idx] = res.entry;
+          if (idx > -1) state.entries[idx] = sanitizeEntry(res.entry);
           saveCache();
           renderEntries();
           setStatus('Saved', 'success');
@@ -173,10 +248,11 @@
   const manualDate = document.getElementById('manual-date');
   const manualStart = document.getElementById('manual-start');
   const manualEnd = document.getElementById('manual-end');
-  const manualDesc = document.getElementById('manual-desc');
+  const manualBreak = document.getElementById('manual-break');
   const manualProject = document.getElementById('manual-project');
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
+  const timerBreak = document.getElementById('timer-break');
 
   function setManualDate(dateIso) {
     if (!manualDate) return;
@@ -184,6 +260,8 @@
   }
 
   setManualDate(todayIso());
+  if (manualBreak) manualBreak.value = '0';
+  if (timerBreak) timerBreak.value = '0';
 
   function setManualMode(isEdit) {
     manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
@@ -195,7 +273,7 @@
     setManualDate(entry.date || todayIso());
     manualStart.value = entry.start_time || '';
     manualEnd.value = entry.end_time || '';
-    manualDesc.value = entry.description || '';
+    manualBreak.value = String(entry.break_minutes != null ? entry.break_minutes : 0);
     manualProject.value = entry.project != null ? entry.project : (state.settings.default_project || '');
     state.editingEntryId = isEdit ? entry.id : null;
     setManualMode(!!isEdit);
@@ -206,7 +284,7 @@
     setManualMode(false);
     manualStart.value = '';
     manualEnd.value = '';
-    manualDesc.value = '';
+    manualBreak.value = '0';
     manualProject.value = state.settings.default_project || '';
   }
   function getManualPayload() {
@@ -224,14 +302,19 @@
       alert('End time must be after start time.');
       return null;
     }
-    const rounded = roundDuration(duration);
+    const breakMin = Math.max(0, Math.round(Number(manualBreak.value || 0)));
+    if (breakMin >= duration) {
+      alert('Break must be shorter than the total time.');
+      return null;
+    }
+    const rounded = roundDuration(duration - breakMin);
     const trimmedProject = manualProject.value.trim();
     return {
       date,
       start_time: start,
       end_time: end,
       duration_minutes: rounded,
-      description: manualDesc.value.trim() || 'Manual entry',
+      break_minutes: breakMin,
       project: trimmedProject !== '' ? trimmedProject : (state.editingEntryId ? '' : (state.settings.default_project || ''))
     };
   }
@@ -244,14 +327,14 @@
       if (idx === -1) return;
       const backup = { ...state.entries[idx] };
       const update = { id: state.editingEntryId, ...payload };
-      state.entries[idx] = { ...backup, ...update };
+      state.entries[idx] = sanitizeEntry({ ...backup, ...update });
       saveCache();
       renderEntries();
       setStatus('Saving...', 'warn');
       google.script.run
         .withSuccessHandler((res) => {
           if (res && res.success) {
-            state.entries[idx] = res.entry;
+            state.entries[idx] = sanitizeEntry(res.entry);
             clearManualEditing();
             saveCache();
             renderEntries();
@@ -277,7 +360,7 @@
         ...payload,
         created_at: isoDateTime(now)
       };
-      state.entries.unshift(entry);
+      state.entries.unshift(sanitizeEntry(entry));
       saveCache();
       renderEntries();
       clearManualEditing();
@@ -286,7 +369,7 @@
         .withSuccessHandler((res) => {
           if (res && res.success) {
             const idx = state.entries.findIndex((e) => e.id === entry.id);
-            if (idx > -1) state.entries[idx] = res.entry;
+            if (idx > -1) state.entries[idx] = sanitizeEntry(res.entry);
             saveCache();
             renderEntries();
             setStatus('Saved', 'success');
@@ -447,8 +530,8 @@
             <strong>${entry.start_time || '--:--'} - ${entry.end_time || '--:--'}</strong>
             <span class="ts-badge success">${fmt(entry.duration_minutes || 0)}</span>
             ${entry.project ? `<span class="ts-badge">${entry.project}</span>` : ''}
+            ${entry.break_minutes ? `<span class="ts-badge">Break ${entry.break_minutes}m</span>` : ''}
           </div>
-          ${entry.description ? `<div class="ts-note" style="margin-top:4px;">${entry.description}</div>` : ''}
         </div>
         <div>
           <button class="ghost" data-edit="${entry.id}">Edit</button>
@@ -485,7 +568,7 @@
   document.getElementById('calendar-add-entry').onclick = () => {
     ensureCalendarState();
     const date = state.selectedCalendarDate || todayIso();
-    populateManualForm({ date, start_time: '', end_time: '', description: '', project: state.settings.default_project || '' }, false);
+    populateManualForm({ date, start_time: '', end_time: '', break_minutes: 0, project: state.settings.default_project || '' }, false);
   };
 
   // Settings persistence
@@ -515,7 +598,7 @@
     setStatus('Syncing...', 'warn');
     google.script.run
       .withSuccessHandler((entries) => {
-        state.entries = entries || [];
+        state.entries = (entries || []).map(sanitizeEntry);
         saveCache();
         renderEntries();
         setStatus('Synced', 'success');

@@ -22,7 +22,7 @@ I want it to look like a professional, enterprise ready application.
 **Feature Scope & Customization**
 
 5. Core time tracking features: What are the essential features? (start/stop timer, manual entry, project/task selection, etc.)
-    Start stop timers and manual entry are essential. I also want people to put in their start and stop times (manual versions of clocking in and out).
+    Start stop timers and manual entry are essential. Entries capture start and stop times plus an optional break duration that gets subtracted from total work time.
 6. Customization depth: How granular should the customization be? (UI themes, field visibility, workflow steps, etc.)
     All those things should be customisable.
 7. User roles: Will there be different user types (employees, managers, admins) with different permissions?
@@ -56,4 +56,3 @@ I want it to look like a professional, enterprise ready application.
     Browser storage is fine as long as it improves performance and will be synced seamlessly with the backend.
 17. Error handling: How should the app behave when Google Sheets API is slow or unavailable?
     When the Google Sheets API is unavailable it should report it clearly so the user knows their data is not being saved.
-

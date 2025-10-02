@@ -79,7 +79,7 @@ function normalizeEntryObject(entry) {
     start_time: toIsoTime(entry.start_time),
     end_time: toIsoTime(entry.end_time),
     duration_minutes: normalizeDurationMinutes(entry.duration_minutes),
-    description: entry.description || '',
+    break_minutes: normalizeDurationMinutes(entry.break_minutes || entry.break || 0),
     project: entry.project || '',
     created_at: toIsoDateTime(entry.created_at)
   };
@@ -93,7 +93,7 @@ function buildEntryRow(entry, createdAt) {
     normalized.start_time,
     normalized.end_time,
     normalized.duration_minutes,
-    normalized.description,
+    normalized.break_minutes,
     normalized.project,
     createdAt || normalized.created_at || toIsoDateTime(new Date())
   ];
@@ -136,7 +136,7 @@ function api_addEntry(entry) {
     start_time: record.start_time,
     end_time: record.end_time,
     duration_minutes: record.duration_minutes,
-    description: record.description,
+    break_minutes: record.break_minutes,
     project: record.project,
     created_at: toIsoDateTime(now)
   }, toIsoDateTime(now));
@@ -148,7 +148,7 @@ function api_addEntry(entry) {
     start_time: row[2],
     end_time: row[3],
     duration_minutes: row[4],
-    description: row[5],
+    break_minutes: row[5],
     project: row[6],
     created_at: row[7]
   }) };
