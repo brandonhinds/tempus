@@ -24,7 +24,9 @@
     calendar: null,
     selectedCalendarDate: null,
     showZeroHours: false,
-    currentPage: 'time'
+    currentPage: 'time',
+    incomeSummary: null,
+    pendingTaxRequest: null
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'settings'];
@@ -155,6 +157,34 @@
     out = out.replace(/(\.\d)0$/, '$1');
     return out === '' ? '0' : out;
   };
+  const DEFAULT_SUPER_RATE = 0.12;
+  const currencyFormatter = new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'AUD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const formatCurrency = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return currencyFormatter.format(num);
+  };
+  const getSuperRateSetting = () => {
+    const raw = state.settings ? state.settings.superannuation_rate : undefined;
+    const num = Number(raw);
+    if (Number.isFinite(num) && num >= 0) {
+      return num > 1 ? num / 100 : num;
+    }
+    return DEFAULT_SUPER_RATE;
+  };
+  const getSuperRatePercentage = () => Math.round(getSuperRateSetting() * 1000) / 10;
+  const sanitizeSuperRateInputValue = (value) => {
+    const num = Number(value);
+    if (Number.isFinite(num) && num >= 0) return Math.round(num * 10) / 10;
+    return Math.round(DEFAULT_SUPER_RATE * 1000) / 10;
+  };
+  const getSalarySacrificePlaceholder = () => 0; // Stub for salary sacrifice configuration.
+  const getExtraSuperPlaceholder = () => 0; // Stub for future extra super contributions.
 
   const getRoundInterval = () => {
     const value = Number(state.settings.round_to_nearest);
@@ -719,10 +749,31 @@
   if (timerBreak) timerBreak.value = '0';
   setManualDate(todayIso());
 
+  const incomeNetBadge = document.getElementById('calendar-net-income');
+  const incomeToggleBtn = incomeNetBadge;
+  const incomeBreakdownEl = document.getElementById('income-breakdown');
+  const incomeTotalPackageEl = document.getElementById('income-total-package');
+  const incomeGrossEl = document.getElementById('income-gross');
+  const incomeSuperGuaranteeEl = document.getElementById('income-super-guarantee');
+  const incomeExtraSuperEl = document.getElementById('income-extra-super');
+  const incomeOtherDeductionsEl = document.getElementById('income-other-deductions');
+  const incomeTaxableEl = document.getElementById('income-taxable');
+  const incomeTaxEl = document.getElementById('income-tax');
+  const incomeNetDetailEl = document.getElementById('income-net');
+  let incomeBreakdownExpanded = false;
+  if (incomeToggleBtn) {
+    incomeToggleBtn.addEventListener('click', () => {
+      incomeBreakdownExpanded = !incomeBreakdownExpanded;
+      applyIncomeBreakdownVisibility();
+    });
+  }
+  applyIncomeBreakdownVisibility();
+
   const contractsListEl = document.getElementById('contracts-list');
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
+  const superRateInput = document.getElementById('set-super-rate');
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -1053,6 +1104,211 @@
       .filter((e) => e.date === date)
       .reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
   }
+  const monthKeyFor = (year, month) => `${year}-${String(month + 1).padStart(2, '0')}`;
+  function entriesForMonth(year, month) {
+    const prefix = monthKeyFor(year, month);
+    return state.entries.filter((entry) => entry.date && entry.date.startsWith(prefix));
+  }
+  function buildIncomeSummary(year, month) {
+    const entries = entriesForMonth(year, month);
+    const periodStart = new Date(year, month, 1);
+    const salarySacrifice = getSalarySacrificePlaceholder();
+    const extraSuper = getExtraSuperPlaceholder();
+    const superRate = getSuperRateSetting();
+    if (!entries.length) {
+      return {
+        monthKey: monthKeyFor(year, month),
+        periodStart,
+        hasEntries: false,
+        totalMinutes: 0,
+        totalHours: 0,
+        totalPackage: 0,
+        grossIncome: 0,
+        superRate,
+        superGuarantee: 0,
+        extraSuper,
+        otherDeductions: salarySacrifice,
+        taxableIncome: 0,
+        taxStatus: 'resolved',
+        tax: 0,
+        netIncome: 0,
+        requestKey: `${monthKeyFor(year, month)}:0`
+      };
+    }
+    const totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
+    const totalHours = totalMinutes / 60;
+    const validContractsUsed = entries.reduce((set, entry) => {
+      const contract = state.contractMap[entry.contract_id];
+      if (contract && contractIsValid(contract, entry.date)) set.add(contract.id);
+      return set;
+    }, new Set());
+    const validContractsAcrossDates = entries.reduce((set, entry) => {
+      const valids = validContractsForDate(entry.date);
+      valids.forEach((contract) => set.add(contract.id));
+      return set;
+    }, new Set());
+    let totalPackage = 0;
+    if (validContractsUsed.size === 1) {
+      const onlyId = Array.from(validContractsUsed)[0];
+      const contract = state.contractMap[onlyId];
+      const rate = contract ? Number(contract.hourly_rate || 0) : 0;
+      totalPackage = totalHours * rate;
+    } else if (!validContractsUsed.size && validContractsAcrossDates.size === 1) {
+      const fallbackId = Array.from(validContractsAcrossDates)[0];
+      const contract = state.contractMap[fallbackId];
+      const rate = contract ? Number(contract.hourly_rate || 0) : 0;
+      totalPackage = totalHours * rate;
+    } else {
+      totalPackage = entries.reduce((acc, entry) => {
+        const minutes = Number(entry.duration_minutes) || 0;
+        let rate = 0;
+        const contract = state.contractMap[entry.contract_id];
+        if (contract && contractIsValid(contract, entry.date)) {
+          rate = Number(contract.hourly_rate || 0);
+        } else {
+          const valids = validContractsForDate(entry.date);
+          if (valids.length === 1) rate = Number(valids[0].hourly_rate || 0);
+        }
+        return acc + (minutes / 60) * rate;
+      }, 0);
+    }
+    const denominator = 1 + superRate;
+    const grossIncome = denominator !== 0 ? totalPackage / denominator : totalPackage;
+    const superGuarantee = Math.max(0, (grossIncome - salarySacrifice) * superRate);
+    const taxableIncome = grossIncome - extraSuper - salarySacrifice;
+    const requestKey = `${monthKeyFor(year, month)}:${Math.round(taxableIncome * 100)}`;
+    return {
+      monthKey: monthKeyFor(year, month),
+      periodStart,
+      hasEntries: entries.length > 0,
+      totalMinutes,
+      totalHours,
+      totalPackage,
+      grossIncome,
+      superRate,
+      superGuarantee,
+      extraSuper,
+      otherDeductions: salarySacrifice,
+      taxableIncome,
+      taxStatus: taxableIncome > 0 ? 'pending' : 'resolved',
+      tax: taxableIncome > 0 ? null : 0,
+      netIncome: taxableIncome > 0 ? null : taxableIncome,
+      requestKey
+    };
+  }
+  function applyIncomeBreakdownVisibility() {
+    if (!incomeBreakdownEl) return;
+    incomeBreakdownEl.hidden = !incomeBreakdownExpanded;
+    if (incomeToggleBtn) {
+      incomeToggleBtn.dataset.expanded = incomeBreakdownExpanded ? 'true' : 'false';
+      incomeToggleBtn.setAttribute('aria-expanded', incomeBreakdownExpanded ? 'true' : 'false');
+    }
+  }
+  function updateIncomeSummaryUI(summary) {
+    if (!incomeNetBadge && !incomeBreakdownEl) return;
+    if (!summary) {
+      if (incomeNetBadge) incomeNetBadge.textContent = 'Net income: --';
+      if (incomeNetDetailEl) incomeNetDetailEl.textContent = '--';
+      if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = '--';
+      if (incomeGrossEl) incomeGrossEl.textContent = '--';
+      if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = '--';
+      if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = '--';
+      if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = '--';
+      if (incomeTaxableEl) incomeTaxableEl.textContent = '--';
+      if (incomeTaxEl) incomeTaxEl.textContent = '--';
+      return;
+    }
+    const netValue = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
+    const netDisplay = (() => {
+      if (summary.taxStatus === 'pending') return 'Calculating...';
+      if (summary.taxStatus === 'error') return 'Tax unavailable';
+      return formatCurrency(netValue);
+    })();
+    const taxText = (() => {
+      if (summary.taxStatus === 'pending') return 'Calculating...';
+      if (summary.taxStatus === 'error') return 'Tax unavailable';
+      return formatCurrency(summary.tax || 0);
+    })();
+    if (incomeNetBadge) incomeNetBadge.textContent = `Net income: ${netDisplay}`;
+    if (incomeNetDetailEl) incomeNetDetailEl.textContent = netDisplay;
+    if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = formatCurrency(summary.totalPackage);
+    if (incomeGrossEl) incomeGrossEl.textContent = formatCurrency(summary.grossIncome);
+    if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
+    if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = formatCurrency(summary.extraSuper);
+    if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = formatCurrency(summary.otherDeductions);
+    if (incomeTaxableEl) incomeTaxableEl.textContent = formatCurrency(summary.taxableIncome);
+    if (incomeTaxEl) incomeTaxEl.textContent = taxText;
+  }
+  function handleTaxSuccess(requestId, taxValue) {
+    if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
+    const summary = state.incomeSummary;
+    if (!summary || summary.monthKey !== state.pendingTaxRequest.monthKey) {
+      state.pendingTaxRequest = null;
+      return;
+    }
+    const computedTax = Math.max(0, Number(taxValue) || 0);
+    summary.tax = computedTax;
+    summary.taxStatus = 'resolved';
+    summary.netIncome = summary.taxableIncome - computedTax;
+    state.pendingTaxRequest = null;
+    updateIncomeSummaryUI(summary);
+  }
+  function handleTaxFailure(requestId) {
+    if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
+    const summary = state.incomeSummary;
+    if (!summary || summary.monthKey !== state.pendingTaxRequest.monthKey) {
+      state.pendingTaxRequest = null;
+      return;
+    }
+    summary.tax = 0;
+    summary.taxStatus = 'error';
+    summary.netIncome = summary.taxableIncome;
+    state.pendingTaxRequest = null;
+    updateIncomeSummaryUI(summary);
+  }
+  function requestTaxEstimate(summary) {
+    if (!summary || summary.taxStatus !== 'pending') return;
+    if (!summary.taxableIncome || summary.taxableIncome <= 0) {
+      summary.taxStatus = 'resolved';
+      summary.tax = 0;
+      summary.netIncome = summary.taxableIncome;
+      updateIncomeSummaryUI(summary);
+      return;
+    }
+    if (state.pendingTaxRequest && state.pendingTaxRequest.key === summary.requestKey) return;
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      summary.taxStatus = 'error';
+      summary.tax = 0;
+      summary.netIncome = summary.taxableIncome;
+      updateIncomeSummaryUI(summary);
+      state.pendingTaxRequest = null;
+      return;
+    }
+    const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    state.pendingTaxRequest = {
+      id: requestId,
+      key: summary.requestKey,
+      monthKey: summary.monthKey
+    };
+    google.script.run
+      .withSuccessHandler((value) => handleTaxSuccess(requestId, value))
+      .withFailureHandler(() => handleTaxFailure(requestId))
+      .estimateTax(Number(summary.taxableIncome) || 0, summary.periodStart.toISOString());
+  }
+  function renderIncomeSummary() {
+    if (!incomeNetBadge && !incomeBreakdownEl) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const summary = buildIncomeSummary(year, month);
+    state.incomeSummary = summary;
+    updateIncomeSummaryUI(summary);
+    applyIncomeBreakdownVisibility();
+    if (summary.taxStatus === 'pending') {
+      requestTaxEstimate(summary);
+    } else {
+      state.pendingTaxRequest = null;
+    }
+  }
   function renderEntries() {
     renderCalendar();
     renderCalendarDetail();
@@ -1152,6 +1408,7 @@
       cell.onclick = () => handleCalendarClick(iso);
       grid.appendChild(cell);
     }
+    renderIncomeSummary();
   }
   function renderCalendarDetail() {
     ensureCalendarState();
@@ -1237,13 +1494,17 @@
   // Settings persistence
   document.getElementById('btn-save-settings').onclick = function () {
     const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
+    const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
     const next = {
       round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
-      theme: nextTheme
+      theme: nextTheme,
+      superannuation_rate: superRatePercent
     };
     applyTheme(nextTheme);
+    if (superRateInput) superRateInput.value = String(next.superannuation_rate);
     state.settings = { ...state.settings, ...next };
     saveCache();
+    renderCalendar();
     setStatus('Saving settings...', 'warn');
     google.script.run
       .withSuccessHandler(() => setStatus('Settings saved', 'success'))
@@ -1261,6 +1522,7 @@
   // Initial load
   function init() {
     loadCache();
+    if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
     applyTheme(state.settings.theme || 'dark');
@@ -1286,7 +1548,9 @@
         state.settings = settings || {};
         saveCache();
         if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
+        if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
         applyTheme(state.settings.theme || 'dark');
+        renderCalendar();
       })
       .withFailureHandler(() => {})
       .api_getSettings();
@@ -1296,6 +1560,7 @@
         refreshContractBindings();
         renderContractsList();
         saveCache();
+        renderCalendar();
       })
       .withFailureHandler(() => setStatus('Contracts sync failed', 'error'))
       .api_getContracts();

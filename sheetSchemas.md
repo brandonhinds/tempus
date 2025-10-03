@@ -9,9 +9,14 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 | `value` | string/number | Stored value. Numbers (e.g., rounding increments) remain unquoted. | `5` |
 | `type` | string | Primitive type recorded when the value was saved (`string`, `number`, `boolean`). | `number` |
 
+### Known keys
+- `round_to_nearest` (number) - Minute increment used when rounding manual or timer entries client-side.
+- `theme` (string) - UI theme identifier (`dark`, `light`, `rose`, `og`).
+- `superannuation_rate` (number) - Percentage used when deriving income + payroll summaries. Stored as a whole-number percent (e.g., `12` => 12%).
+
 ### Suggested improvements
 - Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings (e.g., `round_to_nearest`, `theme`).
-- When writing numeric settings, coerce to integers client-side and reject negative values before persisting.
+- When writing numeric settings, coerce to integers client-side and reject negative values before persisting. Clamp `superannuation_rate` to a sensible range (e.g., 0-30%) before saving.
 
 ## timesheet_entries
 Every row represents a single time entry. Server APIs normalise dates to ISO-8601 strings (`yyyy-MM-dd`) and times to `HH:mm`. `created_at` is stored in UTC.

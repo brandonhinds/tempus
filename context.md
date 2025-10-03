@@ -56,3 +56,11 @@ I want it to look like a professional, enterprise ready application.
     Browser storage is fine as long as it improves performance and will be synced seamlessly with the backend.
 17. Error handling: How should the app behave when Google Sheets API is slow or unavailable?
     When the Google Sheets API is unavailable it should report it clearly so the user knows their data is not being saved.
+
+**Income Summary & Payroll Settings**
+
+- The calendar header now includes a `Net income` badge beside `Total hours`; clicking the badge toggles the detailed breakdown showing Total package, Gross income, Superannuation guarantee, Extra super contributions, Other deductions, Taxable income, and Tax.
+- Monthly totals are derived from timesheet entry durations multiplied by the hourly rate of active contracts; when only one valid contract exists for the month we shortcut by applying that rate to the aggregated hours.
+- Superannuation defaults to 12% and is configurable via Settings -> Superannuation rate (%). The value is stored per user in `user_settings.superannuation_rate` and is applied across the monthly breakdown.
+- Salary sacrifice, extra super, and other deductions are stubbed at 0 for now. The structure is in place so future settings or per-entry data can slot straight into the breakdown calculations.
+- Tax estimation uses the shared `estimateTax(grossIncome, currentDate)` helper (see `backend/tax.gs`) and runs asynchronously so the UI remains responsive; failures fall back to showing taxable income without a deduction and flag Tax as unavailable.

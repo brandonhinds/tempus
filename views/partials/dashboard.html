@@ -51,12 +51,23 @@
       <div style="display:flex; align-items:center; gap:16px;">
         <h3 style="margin:0;">Calendar</h3>
         <div class="ts-badge" id="calendar-month-total">Total hours: 0</div>
+        <button class="ts-badge ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">Net income: --</button>
       </div>
       <div class="ts-calendar-nav">
         <button class="ghost" id="calendar-prev" title="Previous Month">◀</button>
         <div id="calendar-label" style="min-width:140px; text-align:center;"></div>
         <button class="ghost" id="calendar-next" title="Next Month">▶</button>
       </div>
+    </div>
+    <div class="ts-income-breakdown" id="income-breakdown" hidden>
+      <div class="ts-income-row"><span class="ts-income-row-label">Total package</span><span class="ts-income-row-value" id="income-total-package">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Gross income</span><span class="ts-income-row-value" id="income-gross">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Superannuation guarantee</span><span class="ts-income-row-value" id="income-super-guarantee">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Extra super contributions</span><span class="ts-income-row-value" id="income-extra-super">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Other deductions</span><span class="ts-income-row-value" id="income-other-deductions">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Taxable income</span><span class="ts-income-row-value" id="income-taxable">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Tax</span><span class="ts-income-row-value" id="income-tax">--</span></div>
+      <div class="ts-income-row"><span class="ts-income-row-label">Net income</span><span class="ts-income-row-value" id="income-net">--</span></div>
     </div>
     <div class="ts-calendar-grid" id="calendar-weekdays">
       <div class="ts-calendar-weekday">Mon</div>

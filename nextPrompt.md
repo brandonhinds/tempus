@@ -1,7 +1,5 @@
 The next things we want to include:
 
-- Add in calculations for the income breakdown for the month. Default to only showing the net income, but have the option for an expanded view that shows all the fields.
-
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
 - Add the ability to add salary sacrifice options, as well as a novated lease.
@@ -23,3 +21,15 @@ The next things we want to include:
 - Add ability to switch months using a date picker (with just months and years)
 
 - Add ability to add actual pay for comparison
+
+- Remove the Reset button on the timer.
+
+- Rework the timer to instead be a punch in/punch out system, or at the very least store the start of the timer in local storage so a browser refresh doesn't blow it away.
+
+- Add the concept of "default inputs", which can allow a user to configure quick select hours options. This would be helpful for both James Bustard, who does consistent hours each day, and Lil, who has different types of assessments that her income is based off.
+
+- Update some settings to force a cache flush when enabled or updated (e.g the superannuation percentage)
+
+- Remove the New Entry button from the entries list at the bottom of the sheet.
+
+- Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
