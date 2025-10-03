@@ -4,7 +4,7 @@ This document lists the feature flags supported by the Timesheet app. Each flag 
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `remember_last_page` | Enabled (`FALSE` until toggled) | When enabled, the app reopens on the last viewed page after refresh. |
+| `remember_last_page` | Disabled | When enabled, the app reopens on the last viewed page after refresh. |
 | `show_clear_cache` | Disabled | Shows a "Clear Local Cache" button on the Settings page. |
 | `show_zero_hours` | Disabled | Displays `0` for days without logged time in the calendar instead of leaving them blank. |
 

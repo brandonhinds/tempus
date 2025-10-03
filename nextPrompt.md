@@ -1,6 +1,6 @@
 The next things we want to include:
 
-- Create a setting for the theme, and have the option for different themes.
+- Update theme to cover other colours (e.g. settings saved / sync)
 
 - Add in calculations for the income breakdown for the month. Default to only showing the net income, but have the option for an expanded view that shows all the fields.
 

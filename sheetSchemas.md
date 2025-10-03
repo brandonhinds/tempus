@@ -10,7 +10,7 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 | `type` | string | Primitive type recorded when the value was saved (`string`, `number`, `boolean`). | `number` |
 
 ### Suggested improvements
-- Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings.
+- Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings (e.g., `round_to_nearest`, `theme`).
 - When writing numeric settings, coerce to integers client-side and reject negative values before persisting.
 
 ## timesheet_entries

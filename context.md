@@ -24,7 +24,7 @@ I want it to look like a professional, enterprise ready application.
 5. Core time tracking features: What are the essential features? (start/stop timer, manual entry, project/task selection, etc.)
     Start stop timers and manual entry are essential. Entries capture start and stop times plus an optional break duration that gets subtracted from total work time, and every entry must be tied to a contract that is valid for the selected date. Contract management lives on its own page so agreements can be added, edited, or retired independently of the main time-entry flow.
 6. Customization depth: How granular should the customization be? (UI themes, field visibility, workflow steps, etc.)
-    All those things should be customisable. Feature flags (e.g., `remember_last_page`) give us a safe way to roll out optional UX tweaks without disturbing the core flow.
+    All those things should be customisable. Theme options (dark, light, rose gold, etc.) should be controllable from Settings, and feature flags (e.g., `remember_last_page`) give us a safe way to roll out optional UX tweaks without disturbing the core flow.
 7. User roles: Will there be different user types (employees, managers, admins) with different permissions?
     The one user should be considered a full admin of the system.
 8. Integration needs: Any specific integrations needed? (payroll systems, project management tools, etc.)

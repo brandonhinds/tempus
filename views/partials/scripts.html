@@ -215,6 +215,17 @@
     }
   };
 
+  const THEME_KEYS = ['dark', 'light', 'rose'];
+
+  function applyTheme(theme) {
+    const normalized = THEME_KEYS.includes(theme) ? theme : 'dark';
+    const body = document.body;
+    THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
+    body.classList.add('ts-theme-' + normalized);
+    state.settings = { ...state.settings, theme: normalized };
+    if (themeSelect) themeSelect.value = normalized;
+  }
+
   const normalizeFeatureFlags = (raw) => {
     const out = {};
     if (raw && typeof raw === 'object') {
@@ -288,6 +299,7 @@
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
       updateContractMap();
+      applyTheme((state.settings && state.settings.theme) || 'dark');
     } catch (e) {}
   }
   function saveCache() {
@@ -709,6 +721,8 @@
 
   const contractsListEl = document.getElementById('contracts-list');
   const featureFlagsListEl = document.getElementById('feature-flags-list');
+  const roundInput = document.getElementById('set-round');
+  const themeSelect = document.getElementById('set-theme');
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -1221,11 +1235,13 @@
   };
 
   // Settings persistence
-  const roundInput = document.getElementById('set-round');
   document.getElementById('btn-save-settings').onclick = function () {
+    const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
     const next = {
-      round_to_nearest: parseInt(roundInput.value || '0', 10) || 0
+      round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
+      theme: nextTheme
     };
+    applyTheme(nextTheme);
     state.settings = { ...state.settings, ...next };
     saveCache();
     setStatus('Saving settings...', 'warn');
@@ -1235,11 +1251,19 @@
       .api_updateSettings(next);
   };
 
+  if (themeSelect) {
+    themeSelect.addEventListener('change', () => {
+      applyTheme(themeSelect.value);
+      saveCache();
+    });
+  }
+
   // Initial load
   function init() {
     loadCache();
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
+    applyTheme(state.settings.theme || 'dark');
     renderContractsList();
     clearContractForm();
     refreshContractBindings();
@@ -1262,6 +1286,7 @@
         state.settings = settings || {};
         saveCache();
         if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
+        applyTheme(state.settings.theme || 'dark');
       })
       .withFailureHandler(() => {})
       .api_getSettings();
