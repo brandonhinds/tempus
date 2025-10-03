@@ -224,9 +224,12 @@
     clone.end_date = clone.end_date || clone.endDate || '';
     clone.hourly_rate = Number(clone.hourly_rate != null ? clone.hourly_rate : 0);
     if (Number.isNaN(clone.hourly_rate)) clone.hourly_rate = 0;
+    clone.total_hours = Number(clone.total_hours != null ? clone.total_hours : (clone.totalHours != null ? clone.totalHours : 0));
+    if (Number.isNaN(clone.total_hours) || clone.total_hours < 0) clone.total_hours = 0;
     delete clone.startDate;
     delete clone.endDate;
     delete clone.hourlyRate;
+    delete clone.totalHours;
     return clone;
   };
 
@@ -778,6 +781,7 @@
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
   const contractRateInput = document.getElementById('contract-rate');
+  const contractTotalHoursInput = document.getElementById('contract-total-hours');
   const contractSaveBtn = document.getElementById('contract-save');
   const contractCancelBtn = document.getElementById('contract-cancel');
   const clearCacheWrapper = document.getElementById('clear-cache-wrapper');
@@ -820,11 +824,17 @@
       item.className = 'ts-item';
       const rangeLabel = contract.end_date ? `${contract.start_date || '—'} → ${contract.end_date}` : `${contract.start_date || '—'} → Present`;
       const rate = Number(contract.hourly_rate || 0);
+      const totalHours = Number(contract.total_hours || 0);
+      const formattedTotalHours = totalHours > 0
+        ? `${totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })} hrs`
+        : 'Unlimited';
+      const totalHoursNote = `<div class="ts-note">Total hours: ${formattedTotalHours}</div>`;
       item.innerHTML = `
         <div style="flex:1;">
           <div style="font-weight:600;">${contract.name || 'Unnamed contract'}</div>
           <div class="ts-note">Dates: ${rangeLabel}</div>
           <div class="ts-note">Rate: ${rate.toFixed(2)} / hr</div>
+          ${totalHoursNote}
         </div>
         <div style="display:flex; gap:8px;">
           <button class="ghost" data-contract-edit="${contract.id}">Edit</button>
@@ -853,6 +863,7 @@
     if (contractStartInput) contractStartInput.value = '';
     if (contractEndInput) contractEndInput.value = '';
     if (contractRateInput) contractRateInput.value = '';
+    if (contractTotalHoursInput) contractTotalHoursInput.value = '';
     setContractFormMode(false);
   }
 
@@ -862,6 +873,10 @@
     if (contractStartInput) contractStartInput.value = contract.start_date || '';
     if (contractEndInput) contractEndInput.value = contract.end_date || '';
     if (contractRateInput) contractRateInput.value = contract.hourly_rate != null ? Number(contract.hourly_rate).toFixed(2) : '';
+    if (contractTotalHoursInput) {
+      const totalHours = Number(contract.total_hours || 0);
+      contractTotalHoursInput.value = totalHours > 0 ? String(totalHours) : '';
+    }
     setContractFormMode(true);
   }
 
@@ -871,6 +886,8 @@
     const endDate = contractEndInput ? contractEndInput.value : '';
     const hourlyRateRaw = contractRateInput ? contractRateInput.value : '';
     const hourlyRate = Number(hourlyRateRaw || 0);
+    const totalHoursRaw = contractTotalHoursInput ? contractTotalHoursInput.value : '';
+    const totalHoursValue = totalHoursRaw === '' ? 0 : Number(totalHoursRaw);
     if (!name) {
       alert('Contract name is required.');
       return null;
@@ -887,11 +904,17 @@
       alert('Hourly rate must be zero or greater.');
       return null;
     }
+    if (Number.isNaN(totalHoursValue) || totalHoursValue < 0) {
+      alert('Total hours must be zero or greater.');
+      return null;
+    }
+    const totalHours = Math.round(Number(totalHoursValue || 0) * 100) / 100;
     return {
       name,
       start_date: startDate,
       end_date: endDate,
-      hourly_rate: Math.round(hourlyRate * 100) / 100
+      hourly_rate: Math.round(hourlyRate * 100) / 100,
+      total_hours: totalHours
     };
   }
 

@@ -1,9 +1,16 @@
-var CONTRACT_CACHE_PREFIX = 'contracts_v1_';
+var CONTRACT_CACHE_PREFIX = 'contracts_v2_';
 
 function normalizeHourlyRate(value) {
   if (value === null || value === undefined || value === '') return 0;
   var num = Number(value);
   if (isNaN(num)) return 0;
+  return Math.round(num * 100) / 100;
+}
+
+function normalizeContractTotalHours(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  var num = Number(value);
+  if (isNaN(num) || num < 0) return 0;
   return Math.round(num * 100) / 100;
 }
 
@@ -15,6 +22,7 @@ function normalizeContractObject(contract) {
     start_date: toIsoDate(contract.start_date || contract.startDate),
     end_date: toIsoDate(contract.end_date || contract.endDate),
     hourly_rate: normalizeHourlyRate(contract.hourly_rate || contract.hourlyRate),
+    total_hours: normalizeContractTotalHours(contract.total_hours || contract.totalHours),
     created_at: toIsoDateTime(contract.created_at)
   };
   if (!normalized.end_date || normalized.end_date === 'Invalid Date') normalized.end_date = '';
@@ -38,12 +46,48 @@ function buildContractRow(contract, createdAt) {
     normalized.start_date,
     normalized.end_date,
     normalized.hourly_rate,
+    normalized.total_hours,
     createdAt || normalized.created_at || toIsoDateTime(new Date())
   ];
 }
 
+function ensureContractsSchema(sh) {
+  if (!sh) return;
+  var lastRow = sh.getLastRow();
+  var lastColumn = sh.getLastColumn();
+  if (lastRow === 0 || lastColumn === 0) {
+    sh.getRange(1, 1, 1, 7).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'created_at']]);
+    return;
+  }
+  var headerRange = sh.getRange(1, 1, 1, lastColumn);
+  var headers = headerRange.getValues()[0];
+  var hasHeaderContent = headers.some(function(value) { return String(value || '').trim() !== ''; });
+  if (!hasHeaderContent) {
+    sh.getRange(1, 1, 1, 7).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'created_at']]);
+    return;
+  }
+  if (headers.indexOf('total_hours') === -1) {
+    var createdIdx = headers.indexOf('created_at');
+    var newColIndex;
+    if (createdIdx !== -1) {
+      newColIndex = createdIdx + 1;
+      sh.insertColumnBefore(newColIndex);
+    } else {
+      sh.insertColumnAfter(lastColumn);
+      newColIndex = sh.getLastColumn();
+    }
+    sh.getRange(1, newColIndex).setValue('total_hours');
+    var rows = sh.getLastRow();
+    if (rows > 1) {
+      sh.getRange(2, newColIndex, rows - 1, 1).setValue(0);
+    }
+  }
+}
+
 function getContractsSheet() {
-  return getOrCreateSheet('contracts');
+  var sh = getOrCreateSheet('contracts');
+  ensureContractsSchema(sh);
+  return sh;
 }
 
 function contractHasEntries(contractId) {
@@ -105,7 +149,7 @@ function api_updateContract(contract) {
   var values = sh.getDataRange().getValues();
   for (var i = 1; i < values.length; i++) {
     if (values[i][0] === contract.id) {
-      var originalCreated = values[i][5];
+      var originalCreated = values[i][6];
       var normalized = normalizeContractObject(contract);
       normalized.id = contract.id;
       validateContractDates(normalized);
