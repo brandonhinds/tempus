@@ -1,7 +1,5 @@
 The next things we want to include:
 
-- Update theme to cover other colours (e.g. settings saved / sync)
-
 - Add in calculations for the income breakdown for the month. Default to only showing the net income, but have the option for an expanded view that shows all the fields.
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
@@ -21,3 +19,7 @@ The next things we want to include:
 
 - Add BAS tracking
     * Enable both monthly and quarterly payments
+
+- Add ability to switch months using a date picker (with just months and years)
+
+- Add ability to add actual pay for comparison
