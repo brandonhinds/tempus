@@ -61,6 +61,7 @@ I want it to look like a professional, enterprise ready application.
 
 - The calendar header now includes a `Net income` badge beside `Total hours`; clicking the badge toggles the detailed breakdown showing Total package, Gross income, Superannuation guarantee, Extra super contributions, Other deductions, Taxable income, and Tax.
 - Contracts now support an optional `total_hours` field that caps the engagement's allowance. Leaving it blank (or saving `0`) keeps the contract unlimited and is stored server-side as `0` for future burndown reporting.
+- The Contracts page now surfaces a selector-driven detail panel with a monthly burndown chart for capped agreements (expected vs. actual remaining hours, plus an actual-average projection with overrun warnings) and an unlimited-hours summary that highlights total time logged to date.
 - Monthly totals are derived from timesheet entry durations multiplied by the hourly rate of active contracts; when only one valid contract exists for the month we shortcut by applying that rate to the aggregated hours.
 - Superannuation defaults to 12% and is configurable via Settings -> Superannuation rate (%). The value is stored per user in `user_settings.superannuation_rate` and is applied across the monthly breakdown.
 - Salary sacrifice, extra super, and other deductions are stubbed at 0 for now. The structure is in place so future settings or per-entry data can slot straight into the breakdown calculations.

@@ -26,7 +26,8 @@
     showZeroHours: false,
     currentPage: 'time',
     incomeSummary: null,
-    pendingTaxRequest: null
+    pendingTaxRequest: null,
+    selectedContractId: ''
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'settings'];
@@ -578,6 +579,7 @@
       : undefined;
     updateManualContractOptions(manualPreferred);
     updateTimerContractOptions(timerPreferred);
+    renderContractsUI();
   }
 
   function setManualDate(dateIso, preferredContractId) {
@@ -772,7 +774,6 @@
   }
   applyIncomeBreakdownVisibility();
 
-  const contractsListEl = document.getElementById('contracts-list');
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
@@ -784,100 +785,81 @@
   const contractTotalHoursInput = document.getElementById('contract-total-hours');
   const contractSaveBtn = document.getElementById('contract-save');
   const contractCancelBtn = document.getElementById('contract-cancel');
+  const contractAddToggle = document.getElementById('contract-toggle-add');
+  const contractFormContainer = document.getElementById('contract-form-container');
+  const contractSelector = document.getElementById('contract-selector');
+  const contractDetailEl = document.getElementById('contract-detail');
+  const contractBurndownEl = document.getElementById('contract-burndown');
+  const contractUnlimitedNote = document.getElementById('contract-unlimited-note');
+  const contractFormDefaultParent = contractFormContainer ? contractFormContainer.parentElement : null;
+  const contractFormPlaceholder = contractFormContainer && contractFormDefaultParent
+    ? (function () {
+        const placeholder = document.createComment('contract-form-home');
+        contractFormDefaultParent.insertBefore(placeholder, contractFormContainer.nextSibling);
+        return placeholder;
+      })()
+    : null;
   const clearCacheWrapper = document.getElementById('clear-cache-wrapper');
   const clearCacheBtn = document.getElementById('btn-clear-cache');
 
-  function setContractFormMode(isEdit) {
-    if (contractSaveBtn) contractSaveBtn.textContent = isEdit ? 'Update Contract' : 'Add Contract';
-    if (contractCancelBtn) contractCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+  const DECIMAL_HOURS_FORMATTER = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+
+  function formatDecimalHours(value) {
+    return DECIMAL_HOURS_FORMATTER.format(Math.max(0, Math.round((Number(value) || 0) * 100) / 100));
   }
 
-  function contractEndSortValue(contract) {
-    return contract.end_date && contract.end_date !== '' ? contract.end_date : '9999-12-31';
-  }
-
-  function renderContractsList() {
-    if (!contractsListEl) return;
-    contractsListEl.innerHTML = '';
-    if (!state.contracts.length) {
-      const empty = document.createElement('div');
-      empty.className = 'ts-note';
-      empty.textContent = 'No contracts yet. Add one to start tracking time.';
-      contractsListEl.appendChild(empty);
-      return;
-    }
-    const sorted = [...state.contracts].sort((a, b) => {
-      const endA = contractEndSortValue(a);
-      const endB = contractEndSortValue(b);
-      if (endA !== endB) return endB.localeCompare(endA);
-      const startA = a.start_date || '';
-      const startB = b.start_date || '';
-      if (startA !== startB) return (startB || '').localeCompare(startA || '');
-      return a.name.localeCompare(b.name);
-    });
-    sorted.forEach((contract) => {
-      const hasEntries = state.entries.some((entry) => entry.contract_id === contract.id);
-      const deleteDisabledAttr = hasEntries
-        ? 'disabled aria-disabled="true" title="Cannot delete a contract with time entries"'
-        : '';
-      const item = document.createElement('div');
-      item.className = 'ts-item';
-      const rangeLabel = contract.end_date ? `${contract.start_date || '—'} → ${contract.end_date}` : `${contract.start_date || '—'} → Present`;
-      const rate = Number(contract.hourly_rate || 0);
-      const totalHours = Number(contract.total_hours || 0);
-      const formattedTotalHours = totalHours > 0
-        ? `${totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })} hrs`
-        : 'Unlimited';
-      const totalHoursNote = `<div class="ts-note">Total hours: ${formattedTotalHours}</div>`;
-      item.innerHTML = `
-        <div style="flex:1;">
-          <div style="font-weight:600;">${contract.name || 'Unnamed contract'}</div>
-          <div class="ts-note">Dates: ${rangeLabel}</div>
-          <div class="ts-note">Rate: ${rate.toFixed(2)} / hr</div>
-          ${totalHoursNote}
-        </div>
-        <div style="display:flex; gap:8px;">
-          <button class="ghost" data-contract-edit="${contract.id}">Edit</button>
-          <button class="danger" data-contract-delete="${contract.id}" ${deleteDisabledAttr}>Delete</button>
-        </div>
-      `;
-      contractsListEl.appendChild(item);
-    });
-    contractsListEl.querySelectorAll('[data-contract-edit]').forEach((btn) => {
-      btn.onclick = () => handleContractEdit(btn.getAttribute('data-contract-edit'));
-    });
-    contractsListEl.querySelectorAll('[data-contract-delete]').forEach((btn) => {
-      const locked = btn.hasAttribute('disabled');
-      btn.disabled = locked;
-      if (locked) {
-        btn.onclick = null;
-      } else {
-        btn.onclick = () => handleContractDelete(btn.getAttribute('data-contract-delete'));
-      }
-    });
-  }
-
-  function clearContractForm() {
-    state.editingContractId = null;
+  function resetContractFormFields() {
     if (contractNameInput) contractNameInput.value = '';
     if (contractStartInput) contractStartInput.value = '';
     if (contractEndInput) contractEndInput.value = '';
     if (contractRateInput) contractRateInput.value = '';
     if (contractTotalHoursInput) contractTotalHoursInput.value = '';
-    setContractFormMode(false);
   }
 
-  function populateContractForm(contract) {
-    state.editingContractId = contract.id;
-    if (contractNameInput) contractNameInput.value = contract.name || '';
-    if (contractStartInput) contractStartInput.value = contract.start_date || '';
-    if (contractEndInput) contractEndInput.value = contract.end_date || '';
-    if (contractRateInput) contractRateInput.value = contract.hourly_rate != null ? Number(contract.hourly_rate).toFixed(2) : '';
-    if (contractTotalHoursInput) {
-      const totalHours = Number(contract.total_hours || 0);
-      contractTotalHoursInput.value = totalHours > 0 ? String(totalHours) : '';
+  function placeContractFormAtDefault() {
+    if (!contractFormContainer || !contractFormPlaceholder || !contractFormPlaceholder.parentNode) return;
+    if (contractFormContainer.parentElement !== contractFormPlaceholder.parentNode) {
+      contractFormPlaceholder.parentNode.insertBefore(contractFormContainer, contractFormPlaceholder);
     }
-    setContractFormMode(true);
+  }
+
+  function placeContractFormInDetail() {
+    if (!contractFormContainer || !contractDetailEl) return;
+    if (contractFormContainer.parentElement !== contractDetailEl) {
+      contractDetailEl.appendChild(contractFormContainer);
+    }
+  }
+
+  function setContractFormMode(mode) {
+    const visible = mode === 'create' || mode === 'edit';
+    if (contractFormContainer) contractFormContainer.style.display = visible ? 'block' : 'none';
+    if (contractSaveBtn) contractSaveBtn.textContent = mode === 'edit' ? 'Save Changes' : 'Save';
+    if (contractCancelBtn) contractCancelBtn.style.display = visible ? 'inline-flex' : 'none';
+  }
+
+  function showContractForm(mode) {
+    if (mode === 'create') {
+      placeContractFormAtDefault();
+      if (contractAddToggle) contractAddToggle.textContent = 'Close';
+    }
+    setContractFormMode(mode);
+    if (mode === 'create') {
+      state.editingContractId = null;
+      resetContractFormFields();
+    }
+    if (mode === 'create' && contractNameInput) contractNameInput.focus();
+    renderContractDetail();
+  }
+
+  function hideContractForm() {
+    resetContractFormFields();
+    state.editingContractId = null;
+    setContractFormMode('hidden');
+    placeContractFormAtDefault();
+    if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
   }
 
   function getContractFormPayload() {
@@ -918,6 +900,439 @@
     };
   }
 
+  function populateContractForm(contract) {
+    state.editingContractId = contract.id;
+    if (contractNameInput) contractNameInput.value = contract.name || '';
+    if (contractStartInput) contractStartInput.value = contract.start_date || '';
+    if (contractEndInput) contractEndInput.value = contract.end_date || '';
+    if (contractRateInput) contractRateInput.value = contract.hourly_rate != null ? Number(contract.hourly_rate).toFixed(2) : '';
+    if (contractTotalHoursInput) {
+      const totalHours = Number(contract.total_hours || 0);
+      contractTotalHoursInput.value = totalHours > 0 ? String(totalHours) : '';
+    }
+    placeContractFormInDetail();
+    setContractFormMode('edit');
+    if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
+    if (contractNameInput) contractNameInput.focus();
+    renderContractDetail();
+  }
+
+  function getContractById(id) {
+    return id ? state.contractMap[id] : undefined;
+  }
+
+  function contractEndSortValue(contract) {
+    return contract.end_date && contract.end_date !== '' ? contract.end_date : '9999-12-31';
+  }
+
+  function renderContractSelectorOptions() {
+    if (!contractSelector) return;
+    const previousSelection = state.selectedContractId;
+    contractSelector.innerHTML = '';
+    if (!state.contracts.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'No contracts yet';
+      contractSelector.appendChild(placeholder);
+      contractSelector.disabled = true;
+      state.selectedContractId = '';
+      return;
+    }
+    contractSelector.disabled = false;
+    const sorted = [...state.contracts].sort((a, b) => {
+      const endA = contractEndSortValue(a);
+      const endB = contractEndSortValue(b);
+      if (endA !== endB) return endA.localeCompare(endB);
+      const startA = a.start_date || '';
+      const startB = b.start_date || '';
+      if (startA !== startB) return startA.localeCompare(startB);
+      return a.name.localeCompare(b.name);
+    });
+    if (!state.selectedContractId || !getContractById(state.selectedContractId)) {
+      state.selectedContractId = previousSelection && getContractById(previousSelection)
+        ? previousSelection
+        : (sorted.length ? sorted[0].id : '');
+    }
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a contract...';
+    contractSelector.appendChild(placeholder);
+    sorted.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name || 'Untitled contract';
+      contractSelector.appendChild(opt);
+    });
+    contractSelector.value = state.selectedContractId || '';
+  }
+
+  function computeContractUsage(contract) {
+    const monthlyHours = {};
+    let total = 0;
+    if (contract) {
+      state.entries.forEach((entry) => {
+        if (entry.contract_id !== contract.id || !entry.date) return;
+        const monthKey = entry.date.slice(0, 7);
+        const hours = (Number(entry.duration_minutes) || 0) / 60;
+        total += hours;
+        monthlyHours[monthKey] = (monthlyHours[monthKey] || 0) + hours;
+      });
+    }
+    return { totalHours: total, monthlyHours };
+  }
+
+  function contractMonthRange(contract) {
+    if (!contract) return [];
+    const startDate = contract.start_date ? parseIsoDate(contract.start_date) : parseIsoDate(todayIso());
+    if (!startDate || Number.isNaN(startDate.getTime())) return [];
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const today = new Date();
+    const endSource = contract.end_date ? parseIsoDate(contract.end_date) : today;
+    const effectiveEndDate = (!endSource || Number.isNaN(endSource.getTime())) ? today : endSource;
+    const end = new Date(effectiveEndDate.getFullYear(), effectiveEndDate.getMonth(), 1);
+    const months = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    if (cursor > end) {
+      months.push(new Date(cursor));
+      return months;
+    }
+    while (cursor <= end) {
+      months.push(new Date(cursor));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    if (!months.length) months.push(new Date(start));
+    return months;
+  }
+
+  function renderContractDetail() {
+    if (!contractDetailEl) return;
+    contractDetailEl.innerHTML = '';
+    if (contractSelector) contractSelector.value = state.selectedContractId || '';
+    if (!state.selectedContractId) {
+      const note = document.createElement('div');
+      note.className = 'ts-note';
+      note.textContent = state.contracts.length ? 'Select a contract to see its detail and burndown.' : 'Add a contract to get started.';
+      contractDetailEl.appendChild(note);
+      if (contractBurndownEl) contractBurndownEl.innerHTML = '';
+      if (contractUnlimitedNote) contractUnlimitedNote.style.display = 'none';
+      if (!state.editingContractId) placeContractFormAtDefault();
+      return;
+    }
+    const contract = getContractById(state.selectedContractId);
+    if (!contract) {
+      state.selectedContractId = '';
+      if (contractSelector) contractSelector.value = '';
+      renderContractDetail();
+      return;
+    }
+    const isEditing = state.editingContractId === contract.id;
+    if (!isEditing) {
+      placeContractFormAtDefault();
+      if (contractFormContainer && contractFormContainer.style.display === 'block' && !state.editingContractId) {
+        // create mode already visible in default location
+      }
+    }
+    const usage = computeContractUsage(contract);
+    if (isEditing) {
+      if (contractUnlimitedNote) contractUnlimitedNote.style.display = 'none';
+      if (contractBurndownEl) contractBurndownEl.innerHTML = '';
+      placeContractFormInDetail();
+      setContractFormMode('edit');
+      const heading = document.createElement('div');
+      heading.className = 'ts-note';
+      heading.textContent = 'Editing contract';
+      contractDetailEl.appendChild(heading);
+      contractDetailEl.appendChild(contractFormContainer);
+      renderContractBurndown(contract, usage);
+      return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'contract-detail-grid';
+
+    const addDetail = (label, value) => {
+      const item = document.createElement('div');
+      item.className = 'contract-detail-item';
+      const labelEl = document.createElement('div');
+      labelEl.className = 'contract-detail-label';
+      labelEl.textContent = label;
+      const valueEl = document.createElement('div');
+      valueEl.className = 'contract-detail-value';
+      valueEl.textContent = value || '—';
+      item.append(labelEl, valueEl);
+      grid.appendChild(item);
+    };
+
+    const rangeLabel = contract.end_date
+      ? `${contract.start_date || '—'} → ${contract.end_date}`
+      : `${contract.start_date || '—'} → Present`;
+    const totalHoursValue = Number(contract.total_hours || 0);
+    addDetail('Contract name', contract.name || 'Untitled contract');
+    addDetail('Date range', rangeLabel);
+    addDetail('Hourly rate', `${Number(contract.hourly_rate || 0).toFixed(2)} / hr`);
+    addDetail('Total hours', totalHoursValue > 0 ? `${formatDecimalHours(totalHoursValue)} hrs` : 'Unlimited');
+    addDetail('Hours logged', `${formatDecimalHours(usage.totalHours)} hrs`);
+
+    contractDetailEl.appendChild(grid);
+
+    const actions = document.createElement('div');
+    actions.className = 'contract-detail-actions';
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Edit';
+    editBtn.className = 'ghost';
+    editBtn.onclick = () => handleContractEdit(contract.id);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.className = 'danger';
+    deleteBtn.onclick = () => handleContractDelete(contract.id);
+    actions.append(editBtn, deleteBtn);
+    contractDetailEl.appendChild(actions);
+
+    renderContractBurndown(contract, usage);
+  }
+
+  function renderContractBurndown(contract, usage) {
+    if (!contractBurndownEl) return;
+    contractBurndownEl.innerHTML = '';
+    const totalHours = Number(contract.total_hours || 0);
+    if (!usage) usage = computeContractUsage(contract);
+    if (totalHours <= 0) {
+      if (contractUnlimitedNote) {
+        contractUnlimitedNote.style.display = 'block';
+        contractUnlimitedNote.textContent = `This contract is unlimited. Hours logged so far: ${formatDecimalHours(usage.totalHours)} hrs. Burndown charts require a total hour cap.`;
+      }
+      const monthsEntries = Object.keys(usage.monthlyHours).sort();
+      if (usage.totalHours > 0 && monthsEntries.length) {
+        const heading = document.createElement('div');
+        heading.className = 'ts-note';
+        heading.textContent = 'Monthly hours logged';
+        contractBurndownEl.appendChild(heading);
+        const table = document.createElement('table');
+        table.className = 'contract-burndown-table';
+        table.innerHTML = '<thead><tr><th>Month</th><th>Hours logged</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        monthsEntries.forEach((monthKey) => {
+          const tr = document.createElement('tr');
+          const monthCell = document.createElement('td');
+          const parts = monthKey.split('-');
+          const dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+          monthCell.textContent = dateObj.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+          const valueCell = document.createElement('td');
+          valueCell.textContent = `${formatDecimalHours(usage.monthlyHours[monthKey])} hrs`;
+          tr.append(monthCell, valueCell);
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        contractBurndownEl.appendChild(table);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'contract-burndown-empty';
+        empty.textContent = 'No time has been logged for this contract yet.';
+        contractBurndownEl.appendChild(empty);
+      }
+      return;
+    }
+    if (contractUnlimitedNote) contractUnlimitedNote.style.display = 'none';
+
+    const months = contractMonthRange(contract);
+    if (!months.length) {
+      const empty = document.createElement('div');
+      empty.className = 'contract-burndown-empty';
+      empty.textContent = 'Not enough data to build a burndown chart.';
+      contractBurndownEl.appendChild(empty);
+      return;
+    }
+
+    const avgBurn = totalHours / months.length;
+    const expectedPoints = [{ label: 'Start', value: totalHours }];
+    const actualPathPoints = [{ label: 'Start', value: totalHours }];
+    const tableRows = [];
+    const today = new Date();
+    const todayIsoString = todayIso();
+    const contractStarted = !contract.start_date || contract.start_date <= todayIsoString;
+    const contractActive = contractStarted && (!contract.end_date || contract.end_date >= todayIsoString);
+    const currentMonthKey = monthKeyFor(today.getFullYear(), today.getMonth());
+    const currentIdx = months.findIndex((monthDate) => monthKeyFor(monthDate.getFullYear(), monthDate.getMonth()) === currentMonthKey);
+    let latestDataIdx = -1;
+    months.forEach((monthDate, idx) => {
+      const key = monthKeyFor(monthDate.getFullYear(), monthDate.getMonth());
+      if ((usage.monthlyHours[key] || 0) > 0) latestDataIdx = idx;
+    });
+    let actualEndIndex = months.length - 1;
+    if (contractActive && currentIdx !== -1) {
+      actualEndIndex = Math.max(latestDataIdx, currentIdx);
+      if (actualEndIndex < 0) actualEndIndex = currentIdx;
+      actualEndIndex = Math.min(actualEndIndex, months.length - 1);
+    }
+    if (actualEndIndex < 0) actualEndIndex = months.length - 1;
+
+    const monthContributions = months.map((monthDate, idx) => {
+      if (idx === currentIdx && contractActive && latestDataIdx <= currentIdx) {
+        const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+        const daysElapsed = Math.min(daysInMonth, Math.max(1, today.getDate()));
+        return Math.min(1, daysElapsed / daysInMonth);
+      }
+      return 1;
+    });
+
+    let actualConsumedForAverage = 0;
+    let monthsContributionUsed = 0;
+    let cumulativeConsumed = 0;
+    months.forEach((monthDate, idx) => {
+      const key = monthKeyFor(monthDate.getFullYear(), monthDate.getMonth());
+      const expectedRemaining = Math.max(0, totalHours - avgBurn * (idx + 1));
+      const hoursThisMonth = usage.monthlyHours[key] || 0;
+      cumulativeConsumed += hoursThisMonth;
+      const actualRemaining = Math.max(0, totalHours - cumulativeConsumed);
+      expectedPoints.push({ label: monthDate, value: expectedRemaining });
+      if (idx <= actualEndIndex) {
+        actualPathPoints.push({ label: monthDate, value: actualRemaining });
+        actualConsumedForAverage += hoursThisMonth;
+        monthsContributionUsed += monthContributions[idx];
+      }
+      tableRows.push({
+        monthLabel: monthDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
+        hoursLogged: hoursThisMonth,
+        expectedRemaining,
+        actualRemaining
+      });
+    });
+
+    const avgActualMonthlyBurn = monthsContributionUsed > 0 ? actualConsumedForAverage / monthsContributionUsed : 0;
+    const totalContribution = monthContributions.reduce((sum, value) => sum + value, 0);
+    const actualAveragePoints = [{ label: 'Start', value: totalHours }];
+    if (avgActualMonthlyBurn > 0) {
+      let cumulativeContribution = 0;
+      months.forEach((monthDate, idx) => {
+        cumulativeContribution += monthContributions[idx];
+        const projectedRemaining = Math.max(0, totalHours - avgActualMonthlyBurn * cumulativeContribution);
+        actualAveragePoints.push({ label: monthDate, value: projectedRemaining });
+      });
+    }
+
+    const pointGroups = [expectedPoints, actualPathPoints];
+    if (actualAveragePoints.length > 1) pointGroups.push(actualAveragePoints);
+    const maxValue = Math.max(totalHours, ...pointGroups.flat().map((p) => p.value));
+    const width = 720;
+    const height = 320;
+    const margin = { top: 20, right: 28, bottom: 44, left: 56 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const stepX = expectedPoints.length > 1 ? plotWidth / (expectedPoints.length - 1) : 0;
+    const scaleX = (index) => margin.left + stepX * index;
+    const scaleY = (value) => {
+      if (maxValue === 0) return margin.top + plotHeight;
+      return margin.top + plotHeight - (value / maxValue) * plotHeight;
+    };
+    const buildPath = (points) => points.map((point, idx) => {
+      const x = scaleX(idx).toFixed(2);
+      const y = scaleY(point.value).toFixed(2);
+      return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+    }).join(' ');
+
+    const styles = getComputedStyle(document.body);
+    const borderColor = (styles.getPropertyValue('--border') || '#1e293b').trim();
+    const mutedColor = (styles.getPropertyValue('--muted') || '#94a3b8').trim();
+    const primaryColor = (styles.getPropertyValue('--primary') || '#3b82f6').trim();
+    const successColor = (styles.getPropertyValue('--success') || '#10b981').trim();
+    const textColor = mutedColor || '#94a3b8';
+
+    const expectedPath = buildPath(expectedPoints);
+    const actualPath = buildPath(actualPathPoints);
+    const actualAveragePath = actualAveragePoints.length > 1 ? buildPath(actualAveragePoints) : '';
+    const xAxisY = margin.top + plotHeight;
+    const svgParts = [];
+    svgParts.push(`<path d="M${margin.left},${xAxisY} L${margin.left + plotWidth},${xAxisY}" stroke="${borderColor}" stroke-width="1" fill="none" />`);
+    svgParts.push(`<path d="M${margin.left},${margin.top} L${margin.left},${xAxisY}" stroke="${borderColor}" stroke-width="1" fill="none" />`);
+    svgParts.push(`<path d="${expectedPath}" stroke="${mutedColor}" stroke-width="2" fill="none" />`);
+    svgParts.push(`<path d="${actualPath}" stroke="${primaryColor}" stroke-width="2" fill="none" />`);
+    if (actualAveragePath) svgParts.push(`<path d="${actualAveragePath}" stroke="${successColor}" stroke-width="2" fill="none" stroke-dasharray="6 4" />`);
+
+    expectedPoints.forEach((point, idx) => {
+      const x = scaleX(idx);
+      const y = scaleY(point.value);
+      svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${mutedColor}" />`);
+    });
+    actualPathPoints.forEach((point, idx) => {
+      const x = scaleX(idx);
+      const y = scaleY(point.value);
+      svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${primaryColor}" />`);
+    });
+    if (actualAveragePath) {
+      actualAveragePoints.forEach((point, idx) => {
+        const x = scaleX(idx);
+        const y = scaleY(point.value);
+        svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${successColor}" />`);
+      });
+    }
+
+    const labelGroup = months.map((monthDate, idx) => {
+      const x = scaleX(idx + 1);
+      const label = monthDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+      return `<text x="${x}" y="${xAxisY + 18}" text-anchor="middle" font-size="11" fill="${textColor}">${label}</text>`;
+    }).join('');
+
+    const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Contract burndown chart"><g>${svgParts.join('')} ${labelGroup}</g></svg>`;
+
+    const legend = document.createElement('div');
+    legend.className = 'contract-burndown-legend';
+    legend.innerHTML = `<span><span class="line" style="background:${mutedColor};"></span>Expected remaining</span><span><span class="line" style="background:${primaryColor};"></span>Actual remaining</span>${actualAveragePath ? `<span><span class="line" style="background:transparent; border-bottom:2px dashed ${successColor}; height:0;"></span>Actual average (projection)</span>` : ''}`;
+    contractBurndownEl.appendChild(legend);
+
+    const avgSummary = document.createElement('div');
+    avgSummary.className = 'ts-note';
+    avgSummary.textContent = `Average burn required: ${formatDecimalHours(avgBurn)} hrs/month`;
+    contractBurndownEl.appendChild(avgSummary);
+
+    if (contractActive && avgActualMonthlyBurn > avgBurn + 0.01 && monthsContributionUsed > 0) {
+      const projectedTotalUsage = avgActualMonthlyBurn * totalContribution;
+      const overageHours = projectedTotalUsage - totalHours;
+      if (overageHours > 0.5) {
+        const warning = document.createElement('div');
+        warning.className = 'ts-warning';
+        warning.textContent = `At the current pace you're on track to exceed this contract by approximately ${formatDecimalHours(overageHours)} hrs.`;
+        contractBurndownEl.appendChild(warning);
+      }
+    }
+
+    const plotWrapper = document.createElement('div');
+    plotWrapper.className = 'contract-burndown-plot';
+    plotWrapper.innerHTML = svg;
+    contractBurndownEl.appendChild(plotWrapper);
+
+    if (avgActualMonthlyBurn > 0) {
+      const actualAvgNote = document.createElement('div');
+      actualAvgNote.className = 'ts-note';
+      actualAvgNote.textContent = `Actual average to date: ${formatDecimalHours(avgActualMonthlyBurn)} hrs/month (${monthsContributionUsed.toFixed(2)} months measured)`;
+      contractBurndownEl.appendChild(actualAvgNote);
+    }
+
+    const table = document.createElement('table');
+    table.className = 'contract-burndown-table';
+    table.innerHTML = '<thead><tr><th>Month</th><th>Hours logged</th><th>Expected remaining</th><th>Actual remaining</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    tableRows.forEach((row) => {
+      const tr = document.createElement('tr');
+      const monthCell = document.createElement('td');
+      monthCell.textContent = row.monthLabel;
+      const loggedCell = document.createElement('td');
+      loggedCell.textContent = `${formatDecimalHours(row.hoursLogged)} hrs`;
+      const expectedCell = document.createElement('td');
+      expectedCell.textContent = `${formatDecimalHours(row.expectedRemaining)} hrs`;
+      const actualCell = document.createElement('td');
+      actualCell.textContent = `${formatDecimalHours(row.actualRemaining)} hrs`;
+      tr.append(monthCell, loggedCell, expectedCell, actualCell);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    contractBurndownEl.appendChild(table);
+  }
+
+  function renderContractsUI() {
+    renderContractSelectorOptions();
+    renderContractDetail();
+  }
+
   function handleContractSave() {
     if (!contractSaveBtn) return;
     const payload = getContractFormPayload();
@@ -930,10 +1345,11 @@
       if (res && res.success && res.contract) {
         const normalized = sanitizeContract(res.contract);
         state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
+        state.selectedContractId = normalized.id;
         refreshContractBindings(normalized.id, normalized.id);
-        renderContractsList();
         saveCache();
-        clearContractForm();
+        hideContractForm();
+        renderContractDetail();
         setStatus(isEdit ? 'Contract updated' : 'Contract saved', 'success');
       } else {
         setStatus('Contract save failed', 'error');
@@ -976,10 +1392,12 @@
       .withSuccessHandler(() => {
         state.contracts = state.contracts.filter((contract) => contract.id !== id);
         if (state.editingContractId === id) {
-          clearContractForm();
+          hideContractForm();
+        }
+        if (state.selectedContractId === id) {
+          state.selectedContractId = '';
         }
         refreshContractBindings();
-        renderContractsList();
         saveCache();
         setStatus('Contract deleted', 'success');
       })
@@ -1099,10 +1517,31 @@
   }
   if (contractCancelBtn) {
     contractCancelBtn.onclick = () => {
-      clearContractForm();
+      hideContractForm();
+      renderContractDetail();
     };
   }
-  setContractFormMode(false);
+  if (contractAddToggle) {
+    contractAddToggle.addEventListener('click', () => {
+      showPage('contracts');
+      const isEditing = !!state.editingContractId;
+      const isCreateVisible = !isEditing && contractFormContainer && contractFormContainer.style.display === 'block' && contractFormContainer.parentElement !== contractDetailEl;
+      if (isCreateVisible) {
+        hideContractForm();
+        renderContractDetail();
+      } else {
+        showContractForm('create');
+      }
+    });
+  }
+  if (contractSelector) {
+    contractSelector.addEventListener('change', () => {
+      const nextId = contractSelector.value || '';
+      state.selectedContractId = nextId;
+      renderContractDetail();
+    });
+  }
+  setContractFormMode('hidden');
 
   function updateClearCacheVisibility() {
     if (!clearCacheWrapper) return;
@@ -1335,7 +1774,7 @@
   function renderEntries() {
     renderCalendar();
     renderCalendarDetail();
-    renderContractsList();
+    renderContractsUI();
   }
   function deleteEntry(id) {
     const idx = state.entries.findIndex((e) => e.id === id);
@@ -1549,8 +1988,8 @@
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
     applyTheme(state.settings.theme || 'dark');
-    renderContractsList();
-    clearContractForm();
+    renderContractsUI();
+    hideContractForm();
     refreshContractBindings();
     refreshTimerButtons();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
@@ -1581,7 +2020,6 @@
       .withSuccessHandler((contracts) => {
         state.contracts = (contracts || []).map(sanitizeContract);
         refreshContractBindings();
-        renderContractsList();
         saveCache();
         renderCalendar();
       })
