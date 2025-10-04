@@ -25,17 +25,25 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | --- | --- | --- | --- |
 | `id` | string (UUID) | Unique identifier generated server-side (`Utilities.getUuid`). | `19f40595-b8a0-489f-8ad8-ea3348593068` |
 | `date` | string (ISO) | Work date in `yyyy-MM-dd`. | `2025-09-30` |
-| `start_time` | string (HH:mm) | Local start time captured by the client. | `08:10` |
-| `end_time` | string (HH:mm) | Local end time. | `17:10` |
-| `duration_minutes` | number | Whole minutes of work after subtracting breaks, rounded by the client before submission. | `525` |
-| `break_minutes` | number | Minutes withheld from the shift (e.g., lunch). Defaults to `0`. | `15` |
+| `start_time` | string (HH:mm) | Earliest punch-in time for the entry (basic total-hours rows intentionally leave this blank). | `08:10` |
+| `end_time` | string (HH:mm) | Latest punch-out time for the entry (basic total-hours rows intentionally leave this blank). | `17:10` |
+| `duration_minutes` | number | Sum of all closed punch ranges in whole minutes. Derived server-side to prevent tampering. | `525` |
+| `break_minutes` | number | Legacy break tracking retained for backward compatibility. New punch-based entries persist `0`. | `0` |
 | `contract_id` | string (UUID) | References the contract active on the entry date. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
+| `punches_json` | string (JSON) | JSON-encoded array of punch objects: `[{"in":"HH:mm","out":"HH:mm"}]`. `out` may be blank for an open punch. | `[{"in":"08:10","out":"12:05"},{"in":"12:40","out":"17:10"}]` |
 
 ### Suggested improvements
-- Enforce non-empty `date`, `start_time`, and `end_time` client-side with validation messages before submission.
-- Derive `duration_minutes` server-side from `start_time`/`end_time` and the stored `break_minutes` to prevent tampering, while still letting the client show the optimistic value.
+- Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
+- Derive `duration_minutes` server-side from `punches_json` so edits through the UI remain authoritative even if cached data drifts.
 - Validate that `contract_id` exists in the contracts sheet before persisting new rows.
+- Consider adding a separate audit sheet for punch adjustments if regulatory requirements demand a full punch history.
+
+### Manual entry compatibility
+- Manual edits should serialise punches exactly as the punch workflow: one row per day/contract with `punches_json` holding an ordered array of `{ "in": "HH:mm", "out": "HH:mm" }` pairs.
+- For single-block days the array contains one object (e.g., `[{"in":"08:30","out":"17:00"}]`). Multiple breaks become separate objects to avoid relying on `break_minutes`.
+- Leave `out` empty (`""`) while a punch is in progress; the backend will exclude it from `duration_minutes` but surface a warning in the UI so the user can close the range.
+- For basic (total-hours) entries, store a single punch from `00:00` to the total elapsed time and set `break_minutes` to the user-specified break so reports can continue to deduct it.
 
 ## contracts
 Contracts describe a billable agreement and govern whether time can be logged for a given date. Dates are inclusive and stored in ISO `yyyy-MM-dd` format.

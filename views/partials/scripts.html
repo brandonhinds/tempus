@@ -10,9 +10,6 @@
   const navSettingsBtn = document.getElementById('nav-settings');
 
   const state = {
-    isRunning: false,
-    startTs: null,
-    timerInterval: null,
     cacheKey: 'ts_cache',
     entries: [],
     settings: {},
@@ -28,7 +25,9 @@
     currentPage: 'time',
     incomeSummary: null,
     pendingTaxRequest: null,
-    selectedContractId: ''
+    selectedContractId: '',
+    punchDraft: null,
+    punchDraftSaving: false
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'settings'];
@@ -127,13 +126,6 @@
     const mm = total % 60;
     return (h > 0 ? h + ':' : '') + String(mm).padStart(2, '0');
   };
-  const fmtTimer = (ms) => {
-    const total = Math.floor(ms / 1000);
-    const mm = Math.floor(total / 60);
-    const ss = total % 60;
-    const minutesPortion = mm >= 60 ? Math.floor(mm / 60) + ':' + String(mm % 60).padStart(2, '0') : mm;
-    return minutesPortion + ':' + String(ss).padStart(2, '0');
-  };
   const setStatus = (text, cls) => {
     const el = document.getElementById('status');
     el.textContent = text;
@@ -165,6 +157,13 @@
     out = out.replace(/\.00$/, '');
     out = out.replace(/(\.\d)0$/, '$1');
     return out === '' ? '0' : out;
+  };
+  const minutesToTime = (minutes) => {
+    const mins = Math.max(0, Math.round(Number(minutes) || 0));
+    if (mins >= 24 * 60) return '23:59';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
   const DEFAULT_SUPER_RATE = 0.12;
   const currencyFormatter = new Intl.NumberFormat(undefined, {
@@ -207,16 +206,181 @@
     return Math.max(interval, rounded);
   };
 
+  const TIME_PATTERN = /^\d{2}:\d{2}$/;
+  const normalizeTimeValue = (value) => {
+    if (!value && value !== 0) return '';
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (TIME_PATTERN.test(trimmed)) return trimmed;
+      const parsed = new Date(`1970-01-01T${trimmed}:00`);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toTimeString().slice(0, 5);
+    } else if (value instanceof Date) {
+      return value.toTimeString().slice(0, 5);
+    }
+    const coerced = new Date(value);
+    if (!Number.isNaN(coerced.getTime())) return coerced.toTimeString().slice(0, 5);
+    return '';
+  };
+  const timeToMinutes = (time) => {
+    if (!time || !TIME_PATTERN.test(time)) return null;
+    const parts = time.split(':');
+    return Number(parts[0]) * 60 + Number(parts[1]);
+  };
+  const clonePunches = (punches) => (Array.isArray(punches) ? punches.map((p) => ({ in: p.in || '', out: p.out || '' })) : []);
+  const normalizePunchList = (value) => {
+    if (!value) return [];
+    let source = value;
+    if (typeof source === 'string') {
+      try {
+        source = JSON.parse(source);
+      } catch (e) {
+        source = [];
+      }
+    }
+    if (!Array.isArray(source)) source = source ? [source] : [];
+    const punches = source.reduce((acc, raw) => {
+      if (!raw) return acc;
+      const start = normalizeTimeValue(raw.in || raw.start || raw.start_time || raw.startTime);
+      if (!start) return acc;
+      let end = normalizeTimeValue(raw.out || raw.stop || raw.end || raw.end_time || raw.endTime);
+      if (end && timeToMinutes(end) !== null && timeToMinutes(start) !== null && timeToMinutes(end) < timeToMinutes(start)) {
+        end = '';
+      }
+      acc.push({ in: start, out: end || '' });
+      return acc;
+    }, []);
+    punches.sort((a, b) => {
+      if (a.in === b.in) return (a.out || '').localeCompare(b.out || '');
+      return a.in.localeCompare(b.in);
+    });
+    return punches;
+  };
+  const summarizePunches = (punches) => {
+    if (!Array.isArray(punches) || !punches.length) {
+      return { totalMinutes: 0, earliest: '', latest: '', openCount: 0 };
+    }
+    let earliest = '';
+    let latest = '';
+    let total = 0;
+    let openCount = 0;
+    punches.forEach((punch) => {
+      if (!punch || !punch.in) return;
+      if (!earliest || punch.in < earliest) earliest = punch.in;
+      if (punch.out) {
+        if (!latest || punch.out > latest) latest = punch.out;
+        const startMinutes = timeToMinutes(punch.in);
+        const endMinutes = timeToMinutes(punch.out);
+        if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+          total += endMinutes - startMinutes;
+        }
+      } else {
+        openCount += 1;
+      }
+    });
+    return { totalMinutes: total, earliest, latest, openCount };
+  };
+  const validatePunches = (punches, options = {}) => {
+    const { allowOpen = true, requireClosed = false } = options;
+    const sorted = normalizePunchList(punches);
+    let lastEnd = null;
+    let openCount = 0;
+    for (let idx = 0; idx < sorted.length; idx += 1) {
+      const punch = sorted[idx];
+      const startMinutes = timeToMinutes(punch.in);
+      if (startMinutes === null) {
+        return 'Each punch needs a valid start time.';
+      }
+      if (!punch.out) {
+        openCount += 1;
+        if (requireClosed) {
+          return 'Please enter an end time for each punch.';
+        }
+        if (!allowOpen && openCount > 0) {
+          return 'Close any open punches before saving.';
+        }
+        if (lastEnd !== null && startMinutes < lastEnd) {
+          return 'Punch ranges cannot overlap.';
+        }
+        lastEnd = startMinutes;
+        continue;
+      }
+      const endMinutes = timeToMinutes(punch.out);
+      if (endMinutes === null || endMinutes <= startMinutes) {
+        return 'Punch out must be later than punch in.';
+      }
+      if (lastEnd !== null && startMinutes < lastEnd) {
+        return 'Punch ranges cannot overlap.';
+      }
+      lastEnd = endMinutes;
+    }
+    return null;
+  };
+
+  const entryPunches = (entry) => {
+    if (entry && Array.isArray(entry.punches) && entry.punches.length) {
+      return entry.punches.map((punch) => ({ in: punch.in || '', out: punch.out || '' }));
+    }
+    if (entry && entry.start_time && entry.end_time) {
+      return [{ in: entry.start_time, out: entry.end_time }];
+    }
+    return [];
+  };
+  const entryFirstPunchMinutes = (entry) => {
+    const punches = entryPunches(entry);
+    if (punches.length) {
+      const mins = timeToMinutes(punches[0].in);
+      if (mins !== null) return mins;
+    }
+    const fallback = timeToMinutes(entry && entry.start_time ? entry.start_time : '');
+    return fallback !== null ? fallback : 24 * 60;
+  };
+  const getEntryPunchSummary = (entry) => {
+    const punches = entryPunches(entry);
+    if (!punches.length) {
+      const start = entry && entry.start_time ? entry.start_time : '--:--';
+      const end = entry && entry.end_time ? entry.end_time : '--:--';
+      return `${start} - ${end}`;
+    }
+    const summary = summarizePunches(punches);
+    const start = summary.earliest || '--:--';
+    const end = summary.openCount > 0 ? 'Open' : (summary.latest || '--:--');
+    return `${start} - ${end}`;
+  };
+  const getEntryPunchDetail = (entry) => {
+    const punches = entryPunches(entry);
+    if (!punches.length) return '';
+    return punches.map((punch) => `${punch.in || '--:--'} - ${punch.out || 'Open'}`).join(', ');
+  };
+
   const sanitizeEntry = (entry) => {
     if (!entry) return entry;
     const clone = { ...entry };
-    clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes) || 0));
+    const punches = normalizePunchList(clone.punches != null ? clone.punches : clone.punches_json);
+    clone.punches = clonePunches(punches);
+    clone.punches_json = JSON.stringify(clone.punches);
     const rawBreak = clone.break_minutes != null ? clone.break_minutes : clone.break;
-    clone.break_minutes = Math.max(0, Math.round(Number(rawBreak) || 0));
-    delete clone.description;
-    if (clone.break_minutes > clone.duration_minutes) {
-      clone.break_minutes = clone.duration_minutes;
+    const breakMinutes = Math.max(0, Math.round(Number(rawBreak) || 0));
+    clone.break_minutes = breakMinutes;
+    const summary = summarizePunches(clone.punches);
+    if (clone.punches.length) {
+      let worked = summary.totalMinutes;
+      if (breakMinutes > 0) worked = Math.max(0, worked - breakMinutes);
+      if (clone.duration_minutes != null && Number.isFinite(Number(clone.duration_minutes))) {
+        clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes)));
+      } else {
+        clone.duration_minutes = Math.max(0, Math.round(worked));
+      }
+      clone.start_time = normalizeTimeValue(clone.start_time);
+      clone.end_time = normalizeTimeValue(clone.end_time);
+    } else {
+      clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes) || 0));
+      clone.start_time = normalizeTimeValue(clone.start_time);
+      clone.end_time = normalizeTimeValue(clone.end_time);
+      if (clone.break_minutes > clone.duration_minutes) clone.break_minutes = clone.duration_minutes;
     }
+    clone.open_punch_count = summary.openCount || 0;
+    delete clone.break;
+    delete clone.description;
     const contractId = clone.contract_id || clone.contractId || clone.project || '';
     clone.contract_id = contractId ? String(contractId).trim() : '';
     delete clone.project;
@@ -362,7 +526,7 @@
       const target = tab.getAttribute('data-tab');
       tab.classList.toggle('active', target === id);
     });
-    ['manual', 'timer'].forEach((pane) => {
+    ['manual', 'punch'].forEach((pane) => {
       const el = document.getElementById('tab-' + pane);
       if (el) el.style.display = pane === id ? 'block' : 'none';
     });
@@ -372,112 +536,319 @@
   });
   activateTab('manual');
 
-  // Timer controls
-  function startTimer() {
-    if (state.isRunning) return;
-    if (!timerContract || !timerContract.value) {
-      alert('Select a contract before starting the timer.');
-      return;
-    }
-    state.isRunning = true;
-    state.startTs = Date.now();
-    state.timerInterval = setInterval(() => {
-      document.getElementById('timer-display').textContent = fmtTimer(Date.now() - state.startTs);
-    }, 1000);
-    refreshTimerButtons();
+  // Punch controls
+  const punchContract = document.getElementById('punch-contract');
+  const punchContractWarning = document.getElementById('punch-contract-warning');
+  const punchToggleBtn = document.getElementById('btn-punch-toggle');
+  const punchAddRangeBtn = document.getElementById('btn-punch-add-range');
+  const punchSaveBtn = document.getElementById('btn-punch-save');
+  const punchDiscardBtn = document.getElementById('btn-punch-discard');
+  const punchList = document.getElementById('punch-range-list');
+  const punchOpenWarning = document.getElementById('punch-open-warning');
+  const punchSummary = document.getElementById('punch-summary');
+  const punchDateLabel = document.getElementById('punch-date-label');
+
+  function currentPunchDate() {
+    return todayIso();
   }
-  function pauseTimer() {
-    if (!state.isRunning) return;
-    state.isRunning = false;
-    clearInterval(state.timerInterval);
-    refreshTimerButtons();
-  }
-  function resetTimer() {
-    state.isRunning = false;
-    clearInterval(state.timerInterval);
-    state.startTs = null;
-    document.getElementById('timer-display').textContent = '0:00';
-    if (timerBreak) timerBreak.value = '0';
-    refreshTimerButtons();
-  }
-  function stopAndSave() {
-    if (!state.startTs) return;
-    if (!timerContract || !timerContract.value) {
-      alert('Select a contract before saving the timer entry.');
-      return;
+
+  function updatePunchContractOptions(preferredContractId) {
+    if (!punchContract) return '';
+    const dateIso = currentPunchDate();
+    const valid = validContractsForDate(dateIso);
+    const currentValue = preferredContractId != null ? preferredContractId : punchContract.value;
+    const options = [...valid];
+    if (currentValue && !options.some((contract) => contract.id === currentValue)) {
+      const fallback = state.contractMap[currentValue];
+      if (fallback) options.push(fallback);
     }
-    const end = Date.now();
-    const rawDuration = Math.max(1, Math.floor((end - state.startTs) / 60000));
-    const breakMinutes = Math.max(0, Math.round(Number(timerBreak.value || 0)));
-    if (breakMinutes >= rawDuration) {
-      alert('Break must be shorter than the recorded time.');
-      return;
+    options.sort((a, b) => a.name.localeCompare(b.name));
+    punchContract.innerHTML = '';
+    if (!options.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'No contracts';
+      punchContract.appendChild(placeholder);
+      punchContract.value = '';
+      punchContract.disabled = true;
+      if (punchContractWarning) punchContractWarning.style.display = 'block';
+      return '';
     }
-    const durMin = roundDuration(rawDuration - breakMinutes);
-    const now = new Date();
-    const contract = state.contractMap[timerContract.value];
-    const todayIsoString = isoDate(now);
-    if (!contract || !contractIsValid(contract, todayIsoString)) {
-      alert('Selected contract is not valid for today.');
-      return;
+    if (options.length > 1) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select contract';
+      punchContract.appendChild(placeholder);
     }
-    const entry = sanitizeEntry({
-      id: 'temp_' + Date.now(),
-      date: todayIsoString,
-      start_time: new Date(state.startTs).toTimeString().slice(0, 5),
-      end_time: new Date(end).toTimeString().slice(0, 5),
-      duration_minutes: durMin,
-      break_minutes: breakMinutes,
-      contract_id: timerContract.value,
-      created_at: isoDateTime(now)
+    options.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      punchContract.appendChild(opt);
     });
-    state.entries.unshift(entry);
-    saveCache();
-    renderEntries();
-    resetTimer();
-    setStatus('Saving...', 'warn');
-    google.script.run
-      .withSuccessHandler((res) => {
-        if (res && res.success) {
-          const idx = state.entries.findIndex((e) => e.id === entry.id);
-          if (idx > -1) state.entries[idx] = sanitizeEntry(res.entry);
-          saveCache();
-          renderEntries();
-          setStatus('Saved', 'success');
-        } else {
-          setStatus('Save failed', 'error');
-        }
-      })
-      .withFailureHandler(() => setStatus('Save failed (offline?)', 'error'))
-      .api_addEntry(entry);
+    let selected = currentValue && options.some((contract) => contract.id === currentValue) ? currentValue : '';
+    if (!selected && valid.length === 1) {
+      selected = valid[0].id;
+    }
+    punchContract.value = selected;
+    punchContract.disabled = valid.length === 1 && options.length === valid.length;
+    if (punchContractWarning) punchContractWarning.style.display = selected ? 'none' : 'block';
+    return punchContract.value;
   }
-  document.getElementById('btn-start').onclick = startTimer;
-  document.getElementById('btn-pause').onclick = pauseTimer;
-  document.getElementById('btn-reset').onclick = resetTimer;
-  document.getElementById('btn-stop').onclick = stopAndSave;
+
+  function ensurePunchDraft(preferredContractId) {
+    const selected = updatePunchContractOptions(preferredContractId);
+    const contractId = selected || '';
+    if (!contractId) {
+      state.punchDraft = {
+        entryId: null,
+        contractId: '',
+        date: currentPunchDate(),
+        punches: [],
+        dirty: false
+      };
+      renderPunchDraft();
+      return;
+    }
+    const dateIso = currentPunchDate();
+    const entry = state.entries.find((e) => e.date === dateIso && e.contract_id === contractId) || null;
+    state.punchDraft = {
+      entryId: entry ? entry.id : null,
+      contractId,
+      date: dateIso,
+      punches: entry ? clonePunches(entry.punches || []) : [],
+      dirty: false
+    };
+    renderPunchDraft();
+  }
+
+  function setPunchDraftDirty() {
+    if (!state.punchDraft) return;
+    state.punchDraft.dirty = true;
+  }
+
+  function renderPunchDraft() {
+    if (!punchList) return;
+    punchList.innerHTML = '';
+    const draft = state.punchDraft || { punches: [], contractId: '' };
+    const punches = draft.punches || [];
+    if (punchDateLabel) {
+      const dateObj = parseIsoDate(draft.date || currentPunchDate());
+      punchDateLabel.textContent = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    if (!draft.contractId) {
+      const note = document.createElement('div');
+      note.className = 'ts-note';
+      note.textContent = 'Select a contract to view today\'s punches.';
+      punchList.appendChild(note);
+    } else if (!punches.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ts-note';
+      empty.textContent = 'No punches yet. Punch in or add a manual range.';
+      punchList.appendChild(empty);
+    } else {
+      punches.forEach((punch, index) => {
+        const row = document.createElement('div');
+        row.className = 'ts-punch-row';
+        const startInput = document.createElement('input');
+        startInput.type = 'time';
+        startInput.value = punch.in || '';
+        startInput.className = 'ts-punch-input';
+        startInput.onchange = () => {
+          draft.punches[index].in = startInput.value;
+          setPunchDraftDirty();
+          updatePunchSummary();
+        };
+        const endInput = document.createElement('input');
+        endInput.type = 'time';
+        endInput.value = punch.out || '';
+        endInput.className = 'ts-punch-input';
+        endInput.onchange = () => {
+          draft.punches[index].out = endInput.value;
+          setPunchDraftDirty();
+          updatePunchSummary();
+        };
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'ghost';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => {
+          draft.punches.splice(index, 1);
+          setPunchDraftDirty();
+          renderPunchDraft();
+        };
+        row.appendChild(startInput);
+        row.appendChild(document.createTextNode(' to '));
+        row.appendChild(endInput);
+        row.appendChild(removeBtn);
+        punchList.appendChild(row);
+      });
+    }
+    updatePunchSummary();
+    const hasContract = !!draft.contractId;
+    const hasPunches = punches.length > 0;
+    const openCount = summarizePunches(punches).openCount;
+    if (punchToggleBtn) {
+      punchToggleBtn.textContent = openCount > 0 ? 'Punch Out Now' : 'Punch In Now';
+      punchToggleBtn.disabled = !hasContract || state.punchDraftSaving;
+    }
+    if (punchAddRangeBtn) punchAddRangeBtn.disabled = !hasContract || state.punchDraftSaving;
+    if (punchSaveBtn) punchSaveBtn.disabled = !hasContract || state.punchDraftSaving || !hasPunches;
+    if (punchDiscardBtn) punchDiscardBtn.disabled = !hasContract || state.punchDraftSaving || !draft.dirty;
+  }
+
+  function updatePunchSummary() {
+    if (!punchSummary || !punchOpenWarning) return;
+    const draft = state.punchDraft || { punches: [] };
+    const punches = normalizePunchList(draft.punches || []);
+    const summary = summarizePunches(punches);
+    if (punches.length) {
+      const rounded = summary.totalMinutes > 0 ? roundDuration(summary.totalMinutes) : 0;
+      punchSummary.textContent = `Recorded: ${formatHours(rounded)} hours`;
+    } else {
+      punchSummary.textContent = '';
+    }
+    if (summary.openCount > 0) {
+      const lastOpen = punches.find((p) => !p.out);
+      punchOpenWarning.textContent = lastOpen && lastOpen.in ? `Open punch since ${lastOpen.in}. Remember to punch out.` : 'Open punch detected. Please punch out when you finish.';
+      punchOpenWarning.style.display = 'block';
+    } else {
+      punchOpenWarning.style.display = 'none';
+    }
+  }
+
+  function addPunchRow() {
+    if (!state.punchDraft) return;
+    state.punchDraft.punches.push({ in: '', out: '' });
+    setPunchDraftDirty();
+    renderPunchDraft();
+  }
+
+  function persistPunchDraft(options = {}) {
+    const { requireClosed = false } = options;
+    const draft = state.punchDraft;
+    if (!draft || !draft.contractId) {
+      alert('Select a contract before saving punches.');
+      return;
+    }
+    const punches = normalizePunchList(draft.punches || []);
+    const validationError = validatePunches(punches, { allowOpen: !requireClosed, requireClosed });
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+    const summary = summarizePunches(punches);
+    const roundedMinutes = summary.totalMinutes > 0 ? roundDuration(summary.totalMinutes) : 0;
+    const payload = {
+      date: draft.date,
+      contract_id: draft.contractId,
+      punches,
+      start_time: summary.earliest,
+      end_time: summary.openCount > 0 ? '' : summary.latest,
+      duration_minutes: roundedMinutes,
+      break_minutes: 0,
+      round_interval: getRoundInterval()
+    };
+    if (draft.entryId) payload.id = draft.entryId;
+    state.punchDraftSaving = true;
+    setStatus('Saving punches...', 'warn');
+    renderPunchDraft();
+    const onSuccess = (res) => {
+      state.punchDraftSaving = false;
+      if (res && res.success && res.entry) {
+        const sanitized = sanitizeEntry(res.entry);
+        const idx = state.entries.findIndex((e) => e.id === sanitized.id);
+        if (idx > -1) {
+          state.entries[idx] = sanitized;
+        } else {
+          state.entries.push(sanitized);
+        }
+        state.punchDraft = {
+          entryId: sanitized.id,
+          contractId: sanitized.contract_id,
+          date: sanitized.date,
+          punches: clonePunches(sanitized.punches || []),
+          dirty: false
+        };
+        saveCache();
+        renderEntries();
+        setStatus('Punches saved', 'success');
+      } else {
+        setStatus('Punch save failed', 'error');
+      }
+      renderPunchDraft();
+    };
+    const onFailure = () => {
+      state.punchDraftSaving = false;
+      setStatus('Punch save failed', 'error');
+      renderPunchDraft();
+    };
+    if (draft.entryId) {
+      google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(onFailure)
+        .api_updateEntry(payload);
+    } else {
+      google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(onFailure)
+        .api_addEntry(payload);
+    }
+  }
+
+  function handlePunchToggle() {
+    const draft = state.punchDraft;
+    if (!draft || !draft.contractId) {
+      alert('Select a contract before punching in.');
+      return;
+    }
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5);
+    const punches = draft.punches || [];
+    const openIndex = punches.findIndex((punch) => punch && !punch.out);
+    if (openIndex !== -1) {
+      draft.punches[openIndex].out = currentTime;
+    } else {
+      draft.punches.push({ in: currentTime, out: '' });
+    }
+    setPunchDraftDirty();
+    renderPunchDraft();
+    persistPunchDraft({ requireClosed: false });
+  }
+
+  function handlePunchSave() {
+    persistPunchDraft({ requireClosed: false });
+  }
+
+  function handlePunchDiscard() {
+    if (!state.punchDraft) return;
+    ensurePunchDraft(state.punchDraft.contractId);
+  }
+
+  if (punchToggleBtn) punchToggleBtn.onclick = handlePunchToggle;
+  if (punchAddRangeBtn) punchAddRangeBtn.onclick = addPunchRow;
+  if (punchSaveBtn) punchSaveBtn.onclick = handlePunchSave;
+  if (punchDiscardBtn) punchDiscardBtn.onclick = handlePunchDiscard;
+  if (punchContract) {
+    punchContract.addEventListener('change', () => {
+      ensurePunchDraft(punchContract.value);
+    });
+  }
 
   // Manual form helpers
   const manualDate = document.getElementById('manual-date');
-  const manualStart = document.getElementById('manual-start');
-  const manualEnd = document.getElementById('manual-end');
-  const manualBreak = document.getElementById('manual-break');
   const manualContract = document.getElementById('manual-contract');
   const manualContractWarning = document.getElementById('manual-contract-warning');
+  const manualHoursInput = document.getElementById('manual-hours');
+  const manualBreakInput = document.getElementById('manual-break');
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
-  const timerBreak = document.getElementById('timer-break');
-  const timerContract = document.getElementById('timer-contract');
-  const timerContractWarning = document.getElementById('timer-contract-warning');
-  const btnStart = document.getElementById('btn-start');
-  const btnPause = document.getElementById('btn-pause');
-  const btnStop = document.getElementById('btn-stop');
 
-  function refreshTimerButtons() {
-    if (!btnStart || !btnStop || !btnPause) return;
-    const hasContract = !!(timerContract && timerContract.value);
-    btnStart.disabled = !hasContract || state.isRunning;
-    btnStop.disabled = !state.isRunning;
-    btnPause.disabled = !state.isRunning;
+  function updateBasicSaveEnabled() {
+    if (!manualSaveBtn) return;
+    const hasContract = !!(manualContract && manualContract.value);
+    const hours = Number(manualHoursInput ? manualHoursInput.value : '');
+    manualSaveBtn.disabled = !(hasContract && Number.isFinite(hours) && hours > 0);
   }
 
   function updateManualContractOptions(preferredContractId) {
@@ -500,7 +871,7 @@
       manualContract.value = '';
       manualContract.disabled = true;
       if (manualContractWarning) manualContractWarning.style.display = 'block';
-      if (manualSaveBtn) manualSaveBtn.disabled = true;
+      updateBasicSaveEnabled();
       return '';
     }
     if (options.length > 1) {
@@ -521,72 +892,22 @@
     }
     manualContract.value = selected;
     manualContract.disabled = valid.length === 1 && options.length === valid.length;
-    if (manualContractWarning) manualContractWarning.style.display = 'none';
-    if (manualSaveBtn) manualSaveBtn.disabled = !manualContract.value;
+    if (manualContractWarning) manualContractWarning.style.display = manualContract.value ? 'none' : 'block';
+    updateBasicSaveEnabled();
     return manualContract.value;
   }
 
-  function updateTimerContractOptions(preferredContractId) {
-    if (!timerContract) {
-      refreshTimerButtons();
-      return '';
-    }
-    const dateIso = todayIso();
-    const valid = validContractsForDate(dateIso);
-    const currentValue = preferredContractId != null ? preferredContractId : timerContract.value;
-    const options = [...valid];
-    if (currentValue && !options.some((contract) => contract.id === currentValue)) {
-      const fallback = state.contractMap[currentValue];
-      if (fallback) options.push(fallback);
-    }
-    options.sort((a, b) => a.name.localeCompare(b.name));
-    timerContract.innerHTML = '';
-    if (!options.length) {
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = 'No contracts';
-      timerContract.appendChild(placeholder);
-      timerContract.value = '';
-      timerContract.disabled = true;
-      if (timerContractWarning) timerContractWarning.style.display = 'block';
-      refreshTimerButtons();
-      return '';
-    }
-    if (options.length > 1) {
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = 'Select contract';
-      timerContract.appendChild(placeholder);
-    }
-    options.forEach((contract) => {
-      const opt = document.createElement('option');
-      opt.value = contract.id;
-      opt.textContent = contract.name;
-      timerContract.appendChild(opt);
-    });
-    let selected = currentValue && options.some((contract) => contract.id === currentValue) ? currentValue : '';
-    if (!selected && valid.length === 1) {
-      selected = valid[0].id;
-    }
-    timerContract.value = selected;
-    timerContract.disabled = valid.length === 1 && options.length === valid.length;
-    if (timerContractWarning) timerContractWarning.style.display = 'none';
-    refreshTimerButtons();
-    return timerContract.value;
-  }
-
-  function refreshContractBindings(preferredManualContractId, preferredTimerContractId) {
+  function refreshContractBindings(preferredManualContractId, preferredPunchContractId) {
     updateContractMap();
     const manualDateIso = manualDate && manualDate.value ? manualDate.value : todayIso();
     const manualPreferred = preferredManualContractId && contractIsValid(state.contractMap[preferredManualContractId], manualDateIso)
       ? preferredManualContractId
       : undefined;
-    const timerDateIso = todayIso();
-    const timerPreferred = preferredTimerContractId && contractIsValid(state.contractMap[preferredTimerContractId], timerDateIso)
-      ? preferredTimerContractId
+    const punchPreferred = preferredPunchContractId && contractIsValid(state.contractMap[preferredPunchContractId], currentPunchDate())
+      ? preferredPunchContractId
       : undefined;
     updateManualContractOptions(manualPreferred);
-    updateTimerContractOptions(timerPreferred);
+    ensurePunchDraft(punchPreferred);
     renderContractsUI();
   }
 
@@ -597,51 +918,72 @@
   }
 
   function setManualMode(isEdit) {
-    manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
-    manualCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+    if (manualSaveBtn) manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
+    if (manualCancelBtn) manualCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
   }
+
   function populateManualForm(entry, isEdit) {
     showPage('time');
     activateTab('manual');
     const preferredDate = entry.date || todayIso();
     const preferredContractId = entry.contract_id || '';
     setManualDate(preferredDate, preferredContractId);
-    manualStart.value = entry.start_time || '';
-    manualEnd.value = entry.end_time || '';
-    manualBreak.value = String(entry.break_minutes != null ? entry.break_minutes : 0);
+    const punches = entryPunches(entry);
+    let totalMinutes = punches.reduce((acc, punch) => {
+      const start = timeToMinutes(punch.in);
+      const end = timeToMinutes(punch.out);
+      if (start === null || end === null || end <= start) return acc;
+      return acc + (end - start);
+    }, 0);
+    if (!totalMinutes && entry.duration_minutes != null) {
+      totalMinutes = Number(entry.duration_minutes) + Number(entry.break_minutes || 0);
+    }
+    if (manualHoursInput) {
+      const hoursValue = totalMinutes > 0 ? formatDecimalHours(totalMinutes / 60) : '';
+      manualHoursInput.value = hoursValue ? hoursValue : '';
+    }
+    if (manualBreakInput) manualBreakInput.value = Number(entry.break_minutes || 0);
     state.editingEntryId = isEdit ? entry.id : null;
     setManualMode(!!isEdit);
-    if (isEdit) manualStart.focus();
+    if (isEdit && manualHoursInput) manualHoursInput.focus();
+    updateBasicSaveEnabled();
   }
+
   function clearManualEditing() {
     state.editingEntryId = null;
     setManualMode(false);
-    manualStart.value = '';
-    manualEnd.value = '';
-    manualBreak.value = '0';
+    if (manualHoursInput) manualHoursInput.value = '';
+    if (manualBreakInput) manualBreakInput.value = '0';
     updateManualContractOptions();
+    updateBasicSaveEnabled();
   }
+
   function getManualPayload() {
     const date = manualDate.value || todayIso();
-    const start = manualStart.value;
-    const end = manualEnd.value;
-    if (!date || !start || !end) {
-      alert('Date, start time, and end time are required.');
+    if (!date) {
+      alert('Date is required.');
       return null;
     }
-    const startTs = new Date(`${date}T${start}:00`);
-    const endTs = new Date(`${date}T${end}:00`);
-    const duration = Math.floor((endTs - startTs) / 60000);
-    if (duration <= 0) {
-      alert('End time must be after start time.');
+    const hoursRaw = manualHoursInput ? manualHoursInput.value.trim() : '';
+    const totalHours = Number(hoursRaw);
+    if (!Number.isFinite(totalHours) || totalHours <= 0) {
+      alert('Enter the total number of hours worked.');
       return null;
     }
-    const breakMin = Math.max(0, Math.round(Number(manualBreak.value || 0)));
-    if (breakMin >= duration) {
+    const totalMinutes = Math.round(totalHours * 60);
+    if (totalMinutes > 24 * 60) {
+      alert('Total hours must be within a single day (24 hours or less).');
+      return null;
+    }
+    if (totalMinutes <= 0) {
+      alert('Total hours must be greater than zero.');
+      return null;
+    }
+    const breakMinutes = manualBreakInput ? Math.max(0, Math.round(Number(manualBreakInput.value || 0))) : 0;
+    if (breakMinutes >= totalMinutes) {
       alert('Break must be shorter than the total time.');
       return null;
     }
-    const rounded = roundDuration(duration - breakMin);
     const contractId = manualContract ? manualContract.value : '';
     if (!contractId) {
       alert('Select a contract for this date.');
@@ -656,13 +998,18 @@
       alert('Selected contract is not valid for this date.');
       return null;
     }
+    const punches = [{ in: '00:00', out: minutesToTime(totalMinutes) }];
+    const workedMinutes = Math.max(0, totalMinutes - breakMinutes);
+    const roundedMinutes = roundDuration(workedMinutes);
     return {
       date,
-      start_time: start,
-      end_time: end,
-      duration_minutes: rounded,
-      break_minutes: breakMin,
-      contract_id: contractId
+      punches,
+      start_time: '',
+      end_time: '',
+      duration_minutes: roundedMinutes,
+      break_minutes: breakMinutes,
+      contract_id: contractId,
+      round_interval: getRoundInterval()
     };
   }
 
@@ -685,6 +1032,7 @@
             clearManualEditing();
             saveCache();
             renderEntries();
+            ensurePunchDraft(payload.contract_id);
             setStatus('Saved', 'success');
           } else {
             state.entries[idx] = backup;
@@ -719,6 +1067,7 @@
             if (idx > -1) state.entries[idx] = sanitizeEntry(res.entry);
             saveCache();
             renderEntries();
+            ensurePunchDraft(payload.contract_id);
             setStatus('Saved', 'success');
           } else {
             setStatus('Save failed', 'error');
@@ -747,19 +1096,20 @@
   }
 
   if (manualContract) {
-    manualContract.addEventListener('change', () => {
-      if (manualSaveBtn) manualSaveBtn.disabled = !manualContract.value;
+    manualContract.addEventListener('change', updateBasicSaveEnabled);
+  }
+
+  if (manualHoursInput) manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
+  if (manualBreakInput) {
+    manualBreakInput.addEventListener('input', () => {
+      if (Number(manualBreakInput.value || 0) < 0) manualBreakInput.value = '0';
+      updateBasicSaveEnabled();
     });
   }
 
-  if (timerContract) {
-    timerContract.addEventListener('change', () => {
-      refreshTimerButtons();
-    });
-  }
-
-  if (manualBreak) manualBreak.value = '0';
-  if (timerBreak) timerBreak.value = '0';
+  if (manualHoursInput) manualHoursInput.value = '';
+  if (manualBreakInput) manualBreakInput.value = '0';
+  updateBasicSaveEnabled();
   setManualDate(todayIso());
 
   const incomeNetBadge = document.getElementById('calendar-net-income');
@@ -1919,9 +2269,10 @@
     title.textContent = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
     const entries = state.entries
       .filter((entry) => entry.date === dateIso)
-      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+      .sort((a, b) => entryFirstPunchMinutes(a) - entryFirstPunchMinutes(b));
     const totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
-    totalEl.textContent = `${formatHours(totalMinutes)} hours`;
+    const hasOpenPunch = entries.some((entry) => entry.open_punch_count > 0);
+    totalEl.textContent = `${formatHours(totalMinutes)} hours${hasOpenPunch ? ' (open punches ignored)' : ''}`;
     list.innerHTML = '';
     if (!entries.length) {
       const empty = document.createElement('div');
@@ -1930,17 +2281,30 @@
       list.appendChild(empty);
       return;
     }
+    if (hasOpenPunch) {
+      const warn = document.createElement('div');
+      warn.className = 'ts-warning';
+      warn.style.marginBottom = '8px';
+      warn.textContent = 'Open punches are ignored in totals until you punch out.';
+      list.appendChild(warn);
+    }
     entries.forEach((entry) => {
       const el = document.createElement('div');
       el.className = 'ts-item';
+      const summaryLabel = getEntryPunchSummary(entry);
+      const detailLabel = getEntryPunchDetail(entry);
+      const openBadge = entry.open_punch_count ? '<span class="ts-badge warn">Open punch</span>' : '';
+      const breakBadge = entry.break_minutes ? `<span class="ts-badge">Break ${entry.break_minutes}m</span>` : '';
       el.innerHTML = `
         <div style="flex:1;">
           <div style="display:flex; gap:8px; align-items:center;">
-            <strong>${entry.start_time || '--:--'} - ${entry.end_time || '--:--'}</strong>
+            <strong>${summaryLabel}</strong>
             <span class="ts-badge success">${fmt(entry.duration_minutes || 0)}</span>
             ${contractBadge(entry)}
-            ${entry.break_minutes ? `<span class="ts-badge">Break ${entry.break_minutes}m</span>` : ''}
+            ${breakBadge}
+            ${openBadge}
           </div>
+          ${detailLabel ? `<div class="ts-note">Punches: ${detailLabel}</div>` : ''}
         </div>
         <div>
           <button class="ghost" data-edit="${entry.id}">Edit</button>
@@ -1978,7 +2342,7 @@
     ensureCalendarState();
     const date = state.selectedCalendarDate || todayIso();
     const preferredContract = manualContract ? manualContract.value : '';
-    populateManualForm({ date, start_time: '', end_time: '', break_minutes: 0, contract_id: preferredContract }, false);
+    populateManualForm({ date, punches: [], contract_id: preferredContract }, false);
   };
 
   // Settings persistence
@@ -2019,7 +2383,6 @@
     renderContractsUI();
     hideContractForm();
     refreshContractBindings();
-    refreshTimerButtons();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
     renderFeatureFlags();
     applyFeatureFlags();
@@ -2029,6 +2392,7 @@
         state.entries = (entries || []).map(sanitizeEntry);
         saveCache();
         renderEntries();
+        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
         setStatus('Synced', 'success');
       })
       .withFailureHandler(() => setStatus('Entries sync failed', 'error'))

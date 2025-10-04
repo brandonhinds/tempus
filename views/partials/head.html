@@ -126,6 +126,10 @@
   .ts-col { flex:1 1 320px; min-width:320px; }
   input, select, textarea, button { font: inherit; }
   input, select, textarea { background: var(--panel); color: var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; width:100%; max-width:100%; display:block; }
+  .ts-punch-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .ts-punch-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .ts-punch-row .ts-punch-input { width:120px; }
+  .ts-punch-row button { flex:0 0 auto; }
   button { border:0; background:var(--primary); color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer; transition: transform .05s ease; }
   button:hover { transform: translateY(-1px); }
   button.secondary { background: var(--border); color: var(--text); }

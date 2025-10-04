@@ -1,7 +1,7 @@
 <section class="ts-card" id="page-time" style="margin-bottom:16px;">
   <div class="ts-tabs">
-    <div class="ts-tab active" data-tab="manual">✏️ Manual Entry</div>
-    <div class="ts-tab" data-tab="timer">⏱️ Timer</div>
+    <div class="ts-tab active" data-tab="manual">📝 Basic</div>
+    <div class="ts-tab" data-tab="punch">🕒 Punches</div>
   </div>
 
   <div id="tab-manual">
@@ -14,9 +14,17 @@
       </div>
     </div>
     <div class="ts-row" style="margin-top:8px;">
-      <div class="ts-col"><label>Start Time</label><input type="time" id="manual-start" required /></div>
-      <div class="ts-col"><label>End Time</label><input type="time" id="manual-end" required /></div>
-      <div class="ts-col"><label>Break (minutes)</label><input type="number" id="manual-break" min="0" step="1" value="0" /></div>
+      <div class="ts-col">
+        <label>Total hours (decimal)</label>
+        <input type="number" id="manual-hours" min="0" step="0.01" placeholder="e.g. 8.5" />
+      </div>
+      <div class="ts-col">
+        <label>Break (minutes)</label>
+        <input type="number" id="manual-break" min="0" step="1" value="0" />
+      </div>
+      <div class="ts-col" style="display:flex; align-items:flex-end;">
+        <div class="ts-note">Totals are rounded using your settings.</div>
+      </div>
     </div>
     <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
       <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
@@ -24,26 +32,26 @@
     </div>
   </div>
 
-  <div id="tab-timer" style="display:none;">
+  <div id="tab-punch" style="display:none;">
     <div class="ts-row">
       <div class="ts-col">
-        <div style="font-size:64px; font-family:monospace;" id="timer-display">0:00</div>
-        <div class="ts-row">
-          <button id="btn-start">Start</button>
-          <button id="btn-pause" class="secondary">Pause</button>
-          <button id="btn-stop" class="danger">Stop & Save</button>
-          <button id="btn-reset" class="secondary">Reset</button>
-        </div>
-        <div class="ts-note" style="margin-top:8px;">Timer must run &ge; 1 minute to save.</div>
+        <label>Contract</label>
+        <select id="punch-contract"></select>
+        <div class="ts-warning" id="punch-contract-warning" style="display:none;">Add a valid contract for today before punching in.</div>
       </div>
-      <div class="ts-col">
-        <label>Break (minutes)</label>
-        <input type="number" id="timer-break" min="0" step="1" value="0" />
-        <label style="margin-top:8px; display:block;">Contract</label>
-        <select id="timer-contract"></select>
-        <div class="ts-warning" id="timer-contract-warning" style="display:none;">Add a valid contract for today on the Contracts page before using the timer.</div>
+      <div class="ts-col" style="display:flex; flex-direction:column; justify-content:flex-end;">
+        <span class="ts-note">Punches are recorded for today (<span id="punch-date-label"></span>).</span>
       </div>
     </div>
+    <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
+      <button id="btn-punch-toggle">Punch In Now</button>
+      <button class="ghost" type="button" id="btn-punch-add-range">Add Manual Range</button>
+      <button type="button" id="btn-punch-save">Save Punches</button>
+      <button class="ghost" type="button" id="btn-punch-discard">Discard</button>
+    </div>
+    <div class="ts-note" id="punch-summary" style="margin-top:8px;"></div>
+    <div class="ts-warning" id="punch-open-warning" style="display:none; margin-top:4px;"></div>
+    <div id="punch-range-list" class="ts-punch-list"></div>
   </div>
 
   <div class="ts-calendar" id="calendar-section">

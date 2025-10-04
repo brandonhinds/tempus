@@ -5,7 +5,7 @@ function getOrCreateSheet(name) {
   if (!sh) {
     sh = ss.insertSheet(name);
     if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,8).setValues([['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at']]);
+      sh.getRange(1,1,1,9).setValues([['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at','punches_json']]);
     } else if (name === 'user_settings') {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
@@ -15,7 +15,7 @@ function getOrCreateSheet(name) {
     }
   }
   if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at'];
+    const expectedHeaders = ['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at','punches_json'];
     const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
     const headerRange = sh.getRange(1, 1, 1, lastColumn);
     const headers = headerRange.getValues()[0];
@@ -51,7 +51,17 @@ function getOrCreateSheet(name) {
         sh.getRange(1, insertBefore).setValue('contract_id');
       }
     }
-    const sanitizedHeaders = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedHeaders.length)).getValues()[0];
+    const punchesIndex = headers.indexOf('punches_json');
+    if (punchesIndex === -1) {
+      const lastCol = sh.getLastColumn();
+      sh.insertColumnAfter(lastCol);
+      sh.getRange(1, lastCol + 1).setValue('punches_json');
+      const rowCount = sh.getLastRow();
+      if (rowCount > 1) {
+        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('[]');
+      }
+    }
+    const sanitizedHeaders = sh.getRange(1, 1, 1, expectedHeaders.length).getValues()[0];
     if (expectedHeaders.some((header, idx) => sanitizedHeaders[idx] !== header)) {
       sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
     }
@@ -59,6 +69,7 @@ function getOrCreateSheet(name) {
     sh.getRange('C:D').setNumberFormat('@');
     sh.getRange('F:F').setNumberFormat('0');
     sh.getRange('H:H').setNumberFormat('@');
+    sh.getRange('I:I').setNumberFormat('@');
   }
   if (name === 'contracts') {
     sh.getRange('C:D').setNumberFormat('@');

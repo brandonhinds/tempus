@@ -71,17 +71,123 @@ function normalizeDurationMinutes(value) {
   return Math.max(0, Math.round(num));
 }
 
+function normalizePunchTime(value) {
+  var iso = toIsoTime(value);
+  if (!iso) return '';
+  return /^\d{2}:\d{2}$/.test(iso) ? iso : '';
+}
+
+function timeToMinutes(time) {
+  if (!time || !/^\d{2}:\d{2}$/.test(time)) return null;
+  var parts = time.split(':');
+  return Number(parts[0]) * 60 + Number(parts[1]);
+}
+
+function normalizePunches(value) {
+  if (!value) return [];
+  var source = value;
+  if (typeof source === 'string') {
+    try {
+      source = JSON.parse(source);
+    } catch (e) {
+      source = [];
+    }
+  }
+  if (!Array.isArray(source)) source = [source];
+  var punches = source.reduce(function(acc, punch) {
+    if (!punch) return acc;
+    var punchIn = normalizePunchTime(punch['in'] || punch.start || punch.start_time || punch.startTime);
+    if (!punchIn) return acc;
+    var punchOut = normalizePunchTime(punch.out || punch.stop || punch.end || punch.end_time || punch.endTime);
+    if (punchOut && timeToMinutes(punchOut) < timeToMinutes(punchIn)) {
+      punchOut = '';
+    }
+    acc.push({ 'in': punchIn, out: punchOut || '' });
+    return acc;
+  }, []);
+  punches.sort(function(a, b) {
+    if (a['in'] === b['in']) {
+      return (a.out || '').localeCompare(b.out || '');
+    }
+    return a['in'].localeCompare(b['in']);
+  });
+  return punches;
+}
+
+function punchesTotalMinutes(punches) {
+  return punches.reduce(function(total, punch) {
+    if (!punch || !punch['in'] || !punch.out) return total;
+    var start = timeToMinutes(punch['in']);
+    var end = timeToMinutes(punch.out);
+    if (start === null || end === null || end <= start) return total;
+    return total + (end - start);
+  }, 0);
+}
+
+function punchesEarliest(punches) {
+  var earliest = '';
+  punches.forEach(function(punch) {
+    if (!punch || !punch['in']) return;
+    if (!earliest || punch['in'] < earliest) {
+      earliest = punch['in'];
+    }
+  });
+  return earliest;
+}
+
+function punchesLatest(punches) {
+  var latest = '';
+  punches.forEach(function(punch) {
+    if (!punch) return;
+    if (punch.out && (!latest || punch.out > latest)) {
+      latest = punch.out;
+    }
+  });
+  return latest;
+}
+
 function normalizeEntryObject(entry) {
   if (!entry) return entry;
+  var punches = normalizePunches(entry.punches != null ? entry.punches : (entry.punches_json || entry.punchesJson));
+  var roundInterval = normalizeDurationMinutes(entry.round_interval);
+  var breakMinutes = normalizeDurationMinutes(entry.break_minutes || entry.break || 0);
+  var hasProvidedStart = Object.prototype.hasOwnProperty.call(entry, 'start_time') || Object.prototype.hasOwnProperty.call(entry, 'startTime');
+  var startProvidedValue = Object.prototype.hasOwnProperty.call(entry, 'start_time') ? entry.start_time : entry.startTime;
+  var startTime = hasProvidedStart ? toIsoTime(startProvidedValue) : '';
+  if (!startTime && !hasProvidedStart && punches.length) {
+    startTime = punchesEarliest(punches);
+  }
+  var hasProvidedEnd = Object.prototype.hasOwnProperty.call(entry, 'end_time') || Object.prototype.hasOwnProperty.call(entry, 'endTime');
+  var endProvidedValue = Object.prototype.hasOwnProperty.call(entry, 'end_time') ? entry.end_time : entry.endTime;
+  var endTime = hasProvidedEnd ? toIsoTime(endProvidedValue) : '';
+  if (!endTime && !hasProvidedEnd && punches.length) {
+    endTime = punchesLatest(punches);
+  }
+  var durationFromPunches = punches.length ? punchesTotalMinutes(punches) : 0;
+  if (punches.length && breakMinutes > 0) {
+    durationFromPunches = Math.max(0, durationFromPunches - breakMinutes);
+  }
+  if (punches.length && roundInterval > 1 && durationFromPunches > 0) {
+    durationFromPunches = Math.max(roundInterval, Math.round(durationFromPunches / roundInterval) * roundInterval);
+  }
+  if (!punches.length && roundInterval > 1) {
+    var rawDuration = normalizeDurationMinutes(entry.duration_minutes);
+    if (rawDuration > 0) {
+      rawDuration = Math.max(roundInterval, Math.round(rawDuration / roundInterval) * roundInterval);
+      entry.duration_minutes = rawDuration;
+    }
+  }
   return {
     id: entry.id || '',
     date: toIsoDate(entry.date),
-    start_time: toIsoTime(entry.start_time),
-    end_time: toIsoTime(entry.end_time),
-    duration_minutes: normalizeDurationMinutes(entry.duration_minutes),
-    break_minutes: normalizeDurationMinutes(entry.break_minutes || entry.break || 0),
+    start_time: startTime,
+    end_time: endTime,
+    duration_minutes: punches.length ? normalizeDurationMinutes(durationFromPunches) : normalizeDurationMinutes(entry.duration_minutes),
+    break_minutes: breakMinutes,
     contract_id: entry.contract_id || entry.contractId || entry.project || '',
-    created_at: toIsoDateTime(entry.created_at)
+    created_at: toIsoDateTime(entry.created_at),
+    punches: punches,
+    punches_json: JSON.stringify(punches)
   };
 }
 
@@ -95,7 +201,8 @@ function buildEntryRow(entry, createdAt) {
     normalized.duration_minutes,
     normalized.break_minutes,
     normalized.contract_id,
-    createdAt || normalized.created_at || toIsoDateTime(new Date())
+    createdAt || normalized.created_at || toIsoDateTime(new Date()),
+    normalized.punches_json || '[]'
   ];
 }
 
@@ -129,17 +236,23 @@ function api_addEntry(entry) {
   var sh = getOrCreateSheet('timesheet_entries');
   var id = Utilities.getUuid();
   var now = new Date();
-  var record = normalizeEntryObject(entry || {});
-  var row = buildEntryRow({
+  var normalized = normalizeEntryObject({
     id: id,
-    date: record.date || toIsoDate(now),
-    start_time: record.start_time,
-    end_time: record.end_time,
-    duration_minutes: record.duration_minutes,
-    break_minutes: record.break_minutes,
-    contract_id: record.contract_id,
-    created_at: toIsoDateTime(now)
-  }, toIsoDateTime(now));
+    date: entry && entry.date ? entry.date : toIsoDate(now),
+    start_time: entry && entry.start_time,
+    end_time: entry && entry.end_time,
+    duration_minutes: entry && entry.duration_minutes,
+    break_minutes: entry && entry.break_minutes,
+    contract_id: entry && entry.contract_id,
+    created_at: toIsoDateTime(now),
+    punches: entry && entry.punches,
+    punches_json: entry && entry.punches_json
+  });
+  normalized.id = normalized.id || id;
+  normalized.date = normalized.date || toIsoDate(now);
+  normalized.contract_id = normalized.contract_id || '';
+  normalized.created_at = normalized.created_at || toIsoDateTime(now);
+  var row = buildEntryRow(normalized, normalized.created_at);
   sh.appendRow(row);
   cacheClearPrefix(ENTRY_CACHE_PREFIX);
   return { success: true, entry: normalizeEntryObject({
@@ -150,7 +263,8 @@ function api_addEntry(entry) {
     duration_minutes: row[4],
     break_minutes: row[5],
     contract_id: row[6],
-    created_at: row[7]
+    created_at: row[7],
+    punches_json: row[8]
   }) };
 }
 
@@ -160,7 +274,14 @@ function api_updateEntry(update) {
   for (var i=1; i<values.length; i++) {
     if (values[i][0] === update.id) {
       var originalCreated = values[i][7];
-      var normalized = normalizeEntryObject(update || {});
+      var payload = update || {};
+      if (payload.punches == null && payload.punches_json == null) {
+        payload = Object.assign({}, payload, { punches_json: values[i][8] || '[]' });
+      }
+      if ((payload.break_minutes == null || payload.break_minutes === '') && values[i][5] != null) {
+        payload = Object.assign({}, payload, { break_minutes: values[i][5] });
+      }
+      var normalized = normalizeEntryObject(payload);
       normalized.id = update.id;
       normalized.created_at = toIsoDateTime(originalCreated);
       var newRow = buildEntryRow(normalized, normalized.created_at);
