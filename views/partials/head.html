@@ -174,13 +174,15 @@
   .contract-detail-label { font-size:12px; color: var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
   .contract-detail-value { font-size:16px; font-weight:600; }
   .contract-detail-actions { margin-top:12px; display:flex; gap:8px; justify-content:flex-end; }
-  .contract-burndown { margin-top:16px; display:flex; flex-direction:column; align-items:center; gap:12px; width:100%; overflow-x:auto; }
-  .contract-burndown-plot { width:100%; max-width:720px; }
-  .contract-burndown svg { width:100%; max-width:720px; height:auto; }
-  .contract-burndown-legend { display:flex; gap:12px; margin-bottom:4px; font-size:12px; color: var(--muted); justify-content:center; }
+  .contract-burndown { margin-top:16px; display:flex; flex-direction:column; align-items:stretch; gap:12px; width:100%; overflow-x:auto; }
+  .contract-burndown-plot { width:100%; }
+  .contract-burndown svg { width:100%; height:auto; }
+  .contract-burndown-legend { display:flex; gap:12px; margin-bottom:4px; font-size:12px; color: var(--muted); justify-content:center; align-self:center; }
   .contract-burndown-legend span { display:flex; align-items:center; gap:6px; }
   .contract-burndown-legend .line { width:18px; height:2px; }
-  .contract-burndown-table { margin:12px auto; border-collapse:collapse; width:100%; max-width:720px; }
+  .contract-burndown-table { margin:12px 0; border-collapse:collapse; width:100%; }
+  .contract-burndown-summary { text-align:center; }
+  .contract-burndown-warning { text-align:center; }
   .contract-burndown-table th, .contract-burndown-table td { padding:6px 8px; border:1px solid var(--border); text-align:right; }
   .contract-burndown-table th:first-child, .contract-burndown-table td:first-child { text-align:left; }
   .contract-burndown-empty { font-size:12px; color: var(--muted); margin-top:8px; }

@@ -1,18 +1,11 @@
 The next things we want to include:
 
-- Add a contract burndown view that can be loaded for a selected contract
-    * SORT THE CONTRACTS BY CURRENT, AND THEN DATE ORDER. AUTO SELECT THE CURRENT CONTRACT IF THERE IS ONLY ONE.
-    * Have the Add Contract button use the same set of fields as editing an existing contract.
-    * Make the dates a little cleaner to avoid overlaps. Having year as YY would help.
-
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
 - Add the ability to add salary sacrifice options, as well as a novated lease.
 
 - Have a configurable number of hours that can be tracked, with the default one being work. Have the ability to have multiple "work" hours. If there is more than one type of hours then have a dropdown that displays all the choices, defaulting to work.
     * Have this behind a feature flag
-
-- Assuming the contracts page gets expanded views, move the new contract settings to a button instead of always being at the bottom of the screen
 
 - Add the invoice requirements (all behind feature flags)
 
@@ -36,3 +29,5 @@ The next things we want to include:
 - Remove the New Entry button from the entries list at the bottom of the sheet.
 
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
+
+- Add Xero reporting mode

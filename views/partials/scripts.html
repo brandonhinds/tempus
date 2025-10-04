@@ -21,6 +21,7 @@
     featureFlags: {},
     editingEntryId: null,
     editingContractId: null,
+    contractFormMode: 'hidden',
     calendar: null,
     selectedCalendarDate: null,
     showZeroHours: false,
@@ -151,6 +152,13 @@
     return new Date(y, m - 1, d);
   };
   const todayIso = () => isoDate(new Date());
+  const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const formatMonthShortYear = (dateObj) => {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
+    const month = MONTH_ABBREVIATIONS[dateObj.getMonth()] || '';
+    const year = dateObj.getFullYear();
+    return `${month} ${String(year).slice(-2)}`;
+  };
   const formatHours = (minutes) => {
     const hrs = (Number(minutes) || 0) / 60;
     let out = (Math.round(hrs * 100) / 100).toFixed(2);
@@ -834,6 +842,7 @@
   }
 
   function setContractFormMode(mode) {
+    state.contractFormMode = mode;
     const visible = mode === 'create' || mode === 'edit';
     if (contractFormContainer) contractFormContainer.style.display = visible ? 'block' : 'none';
     if (contractSaveBtn) contractSaveBtn.textContent = mode === 'edit' ? 'Save Changes' : 'Save';
@@ -842,14 +851,12 @@
 
   function showContractForm(mode) {
     if (mode === 'create') {
-      placeContractFormAtDefault();
+      state.editingContractId = null;
+      resetContractFormFields();
+      placeContractFormInDetail();
       if (contractAddToggle) contractAddToggle.textContent = 'Close';
     }
     setContractFormMode(mode);
-    if (mode === 'create') {
-      state.editingContractId = null;
-      resetContractFormFields();
-    }
     if (mode === 'create' && contractNameInput) contractNameInput.focus();
     renderContractDetail();
   }
@@ -942,16 +949,20 @@
     const sorted = [...state.contracts].sort((a, b) => {
       const endA = contractEndSortValue(a);
       const endB = contractEndSortValue(b);
-      if (endA !== endB) return endA.localeCompare(endB);
+      if (endA !== endB) return endB.localeCompare(endA);
       const startA = a.start_date || '';
       const startB = b.start_date || '';
-      if (startA !== startB) return startA.localeCompare(startB);
+      if (startA !== startB) return startB.localeCompare(startA);
       return a.name.localeCompare(b.name);
     });
+    const todayContracts = validContractsForDate(todayIso());
+    const soleCurrentContractId = (!state.editingContractId && todayContracts.length === 1)
+      ? todayContracts[0].id
+      : '';
     if (!state.selectedContractId || !getContractById(state.selectedContractId)) {
-      state.selectedContractId = previousSelection && getContractById(previousSelection)
-        ? previousSelection
-        : (sorted.length ? sorted[0].id : '');
+      state.selectedContractId = soleCurrentContractId
+        || (previousSelection && getContractById(previousSelection) ? previousSelection : '')
+        || (sorted.length ? sorted[0].id : '');
     }
     const placeholder = document.createElement('option');
     placeholder.value = '';
@@ -1007,6 +1018,19 @@
   function renderContractDetail() {
     if (!contractDetailEl) return;
     contractDetailEl.innerHTML = '';
+    if (state.contractFormMode === 'create') {
+      if (contractSelector) contractSelector.value = '';
+      if (contractBurndownEl) contractBurndownEl.innerHTML = '';
+      if (contractUnlimitedNote) contractUnlimitedNote.style.display = 'none';
+      if (contractAddToggle) contractAddToggle.textContent = 'Close';
+      const heading = document.createElement('div');
+      heading.className = 'ts-note';
+      heading.textContent = 'Creating new contract';
+      contractDetailEl.appendChild(heading);
+      placeContractFormInDetail();
+      return;
+    }
+    if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
     if (contractSelector) contractSelector.value = state.selectedContractId || '';
     if (!state.selectedContractId) {
       const note = document.createElement('div');
@@ -1116,7 +1140,7 @@
           const monthCell = document.createElement('td');
           const parts = monthKey.split('-');
           const dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
-          monthCell.textContent = dateObj.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+          monthCell.textContent = formatMonthShortYear(dateObj);
           const valueCell = document.createElement('td');
           valueCell.textContent = `${formatDecimalHours(usage.monthlyHours[monthKey])} hrs`;
           tr.append(monthCell, valueCell);
@@ -1191,7 +1215,7 @@
         monthsContributionUsed += monthContributions[idx];
       }
       tableRows.push({
-        monthLabel: monthDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
+        monthLabel: formatMonthShortYear(monthDate),
         hoursLogged: hoursThisMonth,
         expectedRemaining,
         actualRemaining
@@ -1213,7 +1237,10 @@
     const pointGroups = [expectedPoints, actualPathPoints];
     if (actualAveragePoints.length > 1) pointGroups.push(actualAveragePoints);
     const maxValue = Math.max(totalHours, ...pointGroups.flat().map((p) => p.value));
-    const width = 720;
+    const containerRect = contractBurndownEl.getBoundingClientRect();
+    const detailRect = contractDetailEl ? contractDetailEl.getBoundingClientRect() : null;
+    const measuredWidth = containerRect.width || (detailRect && detailRect.width) || 720;
+    const width = Math.max(480, Math.floor(measuredWidth));
     const height = 320;
     const margin = { top: 20, right: 28, bottom: 44, left: 56 };
     const plotWidth = width - margin.left - margin.right;
@@ -1268,20 +1295,19 @@
 
     const labelGroup = months.map((monthDate, idx) => {
       const x = scaleX(idx + 1);
-      const label = monthDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+      const label = formatMonthShortYear(monthDate);
       return `<text x="${x}" y="${xAxisY + 18}" text-anchor="middle" font-size="11" fill="${textColor}">${label}</text>`;
     }).join('');
 
     const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Contract burndown chart"><g>${svgParts.join('')} ${labelGroup}</g></svg>`;
 
-    const legend = document.createElement('div');
-    legend.className = 'contract-burndown-legend';
-    legend.innerHTML = `<span><span class="line" style="background:${mutedColor};"></span>Expected remaining</span><span><span class="line" style="background:${primaryColor};"></span>Actual remaining</span>${actualAveragePath ? `<span><span class="line" style="background:transparent; border-bottom:2px dashed ${successColor}; height:0;"></span>Actual average (projection)</span>` : ''}`;
-    contractBurndownEl.appendChild(legend);
-
     const avgSummary = document.createElement('div');
-    avgSummary.className = 'ts-note';
-    avgSummary.textContent = `Average burn required: ${formatDecimalHours(avgBurn)} hrs/month`;
+    avgSummary.className = 'ts-note contract-burndown-summary';
+    const summaryParts = [`Average burn required: ${formatDecimalHours(avgBurn)} hrs/month.`];
+    if (avgActualMonthlyBurn > 0) {
+      summaryParts.push(`Actual average to date: ${formatDecimalHours(avgActualMonthlyBurn)} hrs/month (${monthsContributionUsed.toFixed(2)} months measured).`);
+    }
+    avgSummary.textContent = summaryParts.join(' ');
     contractBurndownEl.appendChild(avgSummary);
 
     if (contractActive && avgActualMonthlyBurn > avgBurn + 0.01 && monthsContributionUsed > 0) {
@@ -1289,7 +1315,7 @@
       const overageHours = projectedTotalUsage - totalHours;
       if (overageHours > 0.5) {
         const warning = document.createElement('div');
-        warning.className = 'ts-warning';
+        warning.className = 'ts-warning contract-burndown-warning';
         warning.textContent = `At the current pace you're on track to exceed this contract by approximately ${formatDecimalHours(overageHours)} hrs.`;
         contractBurndownEl.appendChild(warning);
       }
@@ -1300,12 +1326,10 @@
     plotWrapper.innerHTML = svg;
     contractBurndownEl.appendChild(plotWrapper);
 
-    if (avgActualMonthlyBurn > 0) {
-      const actualAvgNote = document.createElement('div');
-      actualAvgNote.className = 'ts-note';
-      actualAvgNote.textContent = `Actual average to date: ${formatDecimalHours(avgActualMonthlyBurn)} hrs/month (${monthsContributionUsed.toFixed(2)} months measured)`;
-      contractBurndownEl.appendChild(actualAvgNote);
-    }
+    const legend = document.createElement('div');
+    legend.className = 'contract-burndown-legend';
+    legend.innerHTML = `<span><span class="line" style="background:${mutedColor};"></span>Expected remaining</span><span><span class="line" style="background:${primaryColor};"></span>Actual remaining</span>${actualAveragePath ? `<span><span class="line" style="background:transparent; border-bottom:2px dashed ${successColor}; height:0;"></span>Actual average (projection)</span>` : ''}`;
+    contractBurndownEl.appendChild(legend);
 
     const table = document.createElement('table');
     table.className = 'contract-burndown-table';
@@ -1524,19 +1548,23 @@
   if (contractAddToggle) {
     contractAddToggle.addEventListener('click', () => {
       showPage('contracts');
-      const isEditing = !!state.editingContractId;
-      const isCreateVisible = !isEditing && contractFormContainer && contractFormContainer.style.display === 'block' && contractFormContainer.parentElement !== contractDetailEl;
-      if (isCreateVisible) {
+      if (state.contractFormMode === 'create') {
         hideContractForm();
         renderContractDetail();
-      } else {
-        showContractForm('create');
+        return;
       }
+      if (state.contractFormMode === 'edit') {
+        hideContractForm();
+      }
+      showContractForm('create');
     });
   }
   if (contractSelector) {
     contractSelector.addEventListener('change', () => {
       const nextId = contractSelector.value || '';
+      if (state.contractFormMode === 'create' || (state.contractFormMode === 'edit' && state.editingContractId && state.editingContractId !== nextId)) {
+        hideContractForm();
+      }
       state.selectedContractId = nextId;
       renderContractDetail();
     });
