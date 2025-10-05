@@ -1,5 +1,7 @@
 The next things we want to include:
 
+- Fix being able to switch back and forth between basic and advanced views for existing dates.
+
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
 - Add the ability to add salary sacrifice options, as well as a novated lease.
@@ -31,3 +33,5 @@ The next things we want to include:
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
 
 - Add Xero reporting mode
+
+- Make it clear that the "Save Settings" button needs to be clicked when settings are updated. The theme, for example switches immediately, even though it has not be saved.

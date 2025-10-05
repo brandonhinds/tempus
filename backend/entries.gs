@@ -187,7 +187,8 @@ function normalizeEntryObject(entry) {
     contract_id: entry.contract_id || entry.contractId || entry.project || '',
     created_at: toIsoDateTime(entry.created_at),
     punches: punches,
-    punches_json: JSON.stringify(punches)
+    punches_json: JSON.stringify(punches),
+    entry_type: entry.entry_type || 'basic'
   };
 }
 
@@ -202,7 +203,8 @@ function buildEntryRow(entry, createdAt) {
     normalized.break_minutes,
     normalized.contract_id,
     createdAt || normalized.created_at || toIsoDateTime(new Date()),
-    normalized.punches_json || '[]'
+    normalized.punches_json || '[]',
+    normalized.entry_type || 'basic'
   ];
 }
 
@@ -246,7 +248,8 @@ function api_addEntry(entry) {
     contract_id: entry && entry.contract_id,
     created_at: toIsoDateTime(now),
     punches: entry && entry.punches,
-    punches_json: entry && entry.punches_json
+    punches_json: entry && entry.punches_json,
+    entry_type: entry && entry.entry_type
   });
   normalized.id = normalized.id || id;
   normalized.date = normalized.date || toIsoDate(now);
@@ -264,7 +267,8 @@ function api_addEntry(entry) {
     break_minutes: row[5],
     contract_id: row[6],
     created_at: row[7],
-    punches_json: row[8]
+    punches_json: row[8],
+    entry_type: row[9]
   }) };
 }
 
@@ -280,6 +284,9 @@ function api_updateEntry(update) {
       }
       if ((payload.break_minutes == null || payload.break_minutes === '') && values[i][5] != null) {
         payload = Object.assign({}, payload, { break_minutes: values[i][5] });
+      }
+      if (!payload.entry_type && values[i][9] != null) {
+        payload = Object.assign({}, payload, { entry_type: values[i][9] });
       }
       var normalized = normalizeEntryObject(payload);
       normalized.id = update.id;

@@ -17,6 +17,7 @@
     contractMap: {},
     featureFlags: {},
     editingEntryId: null,
+    editingEntryType: null,
     editingContractId: null,
     contractFormMode: 'hidden',
     calendar: null,
@@ -27,7 +28,8 @@
     pendingTaxRequest: null,
     selectedContractId: '',
     punchDraft: null,
-    punchDraftSaving: false
+    punchDraftSaving: false,
+    currentTab: 'manual'
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'settings'];
@@ -385,6 +387,10 @@
     clone.contract_id = contractId ? String(contractId).trim() : '';
     delete clone.project;
     delete clone.contractId;
+    // Preserve entry_type if it exists
+    if (clone.entry_type) {
+      clone.entry_type = String(clone.entry_type).trim();
+    }
     return clone;
   };
 
@@ -522,6 +528,20 @@
 
   // Tabs
   function activateTab(id) {
+    // Prevent switching tabs when editing an existing entry or when punch draft has changes
+    const isEditingEntry = state.editingEntryId && state.currentTab !== id;
+    const isEditingPunch = state.punchDraft && state.punchDraft.dirty && state.currentTab !== id;
+    
+    // Also prevent switching if we're editing a basic entry and trying to switch to advanced, or vice versa
+    const isWrongEntryType = state.editingEntryId && (
+      (state.editingEntryType === 'basic' && id === 'punch') ||
+      (state.editingEntryType === 'advanced' && id === 'manual')
+    );
+    
+    if (isEditingEntry || isEditingPunch || isWrongEntryType) {
+      return;
+    }
+    
     $$('.ts-tab').forEach((tab) => {
       const target = tab.getAttribute('data-tab');
       tab.classList.toggle('active', target === id);
@@ -530,6 +550,7 @@
       const el = document.getElementById('tab-' + pane);
       if (el) el.style.display = pane === id ? 'block' : 'none';
     });
+    state.currentTab = id;
   }
   $$('.ts-tab').forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
@@ -537,19 +558,18 @@
   activateTab('manual');
 
   // Punch controls
+  const punchDate = document.getElementById('punch-date');
   const punchContract = document.getElementById('punch-contract');
   const punchContractWarning = document.getElementById('punch-contract-warning');
   const punchToggleBtn = document.getElementById('btn-punch-toggle');
-  const punchAddRangeBtn = document.getElementById('btn-punch-add-range');
   const punchSaveBtn = document.getElementById('btn-punch-save');
-  const punchDiscardBtn = document.getElementById('btn-punch-discard');
+  const punchCancelBtn = document.getElementById('btn-punch-cancel');
   const punchList = document.getElementById('punch-range-list');
   const punchOpenWarning = document.getElementById('punch-open-warning');
   const punchSummary = document.getElementById('punch-summary');
-  const punchDateLabel = document.getElementById('punch-date-label');
 
   function currentPunchDate() {
-    return todayIso();
+    return punchDate && punchDate.value ? punchDate.value : todayIso();
   }
 
   function updatePunchContractOptions(preferredContractId) {
@@ -596,27 +616,37 @@
     return punchContract.value;
   }
 
+  function setPunchDate(dateIso, preferredContractId) {
+    if (!punchDate) return;
+    punchDate.value = dateIso || todayIso();
+    updatePunchContractOptions(preferredContractId != null ? preferredContractId : (punchContract ? punchContract.value : ''));
+  }
+
   function ensurePunchDraft(preferredContractId) {
     const selected = updatePunchContractOptions(preferredContractId);
     const contractId = selected || '';
+    const dateIso = currentPunchDate();
+    
+    // If we're switching dates and there's no contract selected, start fresh
     if (!contractId) {
       state.punchDraft = {
         entryId: null,
         contractId: '',
-        date: currentPunchDate(),
-        punches: [],
+        date: dateIso,
+        punches: [{ in: '', out: '' }],
         dirty: false
       };
       renderPunchDraft();
       return;
     }
-    const dateIso = currentPunchDate();
+    
+    // Look for existing entry for this specific date and contract
     const entry = state.entries.find((e) => e.date === dateIso && e.contract_id === contractId) || null;
     state.punchDraft = {
       entryId: entry ? entry.id : null,
       contractId,
       date: dateIso,
-      punches: entry ? clonePunches(entry.punches || []) : [],
+      punches: entry ? clonePunches(entry.punches || []) : [{ in: '', out: '' }],
       dirty: false
     };
     renderPunchDraft();
@@ -632,20 +662,66 @@
     punchList.innerHTML = '';
     const draft = state.punchDraft || { punches: [], contractId: '' };
     const punches = draft.punches || [];
-    if (punchDateLabel) {
-      const dateObj = parseIsoDate(draft.date || currentPunchDate());
-      punchDateLabel.textContent = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    }
     if (!draft.contractId) {
       const note = document.createElement('div');
       note.className = 'ts-note';
       note.textContent = 'Select a contract to view today\'s punches.';
       punchList.appendChild(note);
-    } else if (!punches.length) {
-      const empty = document.createElement('div');
-      empty.className = 'ts-note';
-      empty.textContent = 'No punches yet. Punch in or add a manual range.';
-      punchList.appendChild(empty);
+    } else if (!punches.length || (punches.length === 1 && !punches[0].in)) {
+      // Show an empty range for new entries
+      const emptyRange = document.createElement('div');
+      emptyRange.className = 'ts-punch-row';
+      const startInput = document.createElement('input');
+      startInput.type = 'time';
+      startInput.value = punches.length > 0 ? (punches[0].in || '') : '';
+      startInput.className = 'ts-punch-input';
+      startInput.onchange = () => {
+        if (!draft.punches.length) draft.punches.push({ in: '', out: '' });
+        draft.punches[0].in = startInput.value;
+        setPunchDraftDirty();
+        updatePunchSummary();
+      };
+      const endInput = document.createElement('input');
+      endInput.type = 'time';
+      endInput.value = punches.length > 0 ? (punches[0].out || '') : '';
+      endInput.className = 'ts-punch-input';
+      endInput.onchange = () => {
+        if (!draft.punches.length) draft.punches.push({ in: '', out: '' });
+        draft.punches[0].out = endInput.value;
+        setPunchDraftDirty();
+        updatePunchSummary();
+      };
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'ghost';
+      addBtn.textContent = 'Add';
+      addBtn.onclick = () => {
+        if (!draft.punches.length) draft.punches.push({ in: '', out: '' });
+        draft.punches.push({ in: '', out: '' });
+        setPunchDraftDirty();
+        renderPunchDraft();
+        // Focus on the new row's start input
+        setTimeout(() => {
+          const newRow = punchList.children[punchList.children.length - 1];
+          const newStartInput = newRow.querySelector('input[type="time"]');
+          if (newStartInput) newStartInput.focus();
+        }, 0);
+      };
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'ghost';
+      removeBtn.textContent = 'Remove';
+      removeBtn.onclick = () => {
+        if (draft.punches.length) draft.punches.splice(0, 1);
+        setPunchDraftDirty();
+        renderPunchDraft();
+      };
+      emptyRange.appendChild(startInput);
+      emptyRange.appendChild(document.createTextNode(' to '));
+      emptyRange.appendChild(endInput);
+      emptyRange.appendChild(addBtn);
+      emptyRange.appendChild(removeBtn);
+      punchList.appendChild(emptyRange);
     } else {
       punches.forEach((punch, index) => {
         const row = document.createElement('div');
@@ -668,6 +744,25 @@
           setPunchDraftDirty();
           updatePunchSummary();
         };
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'ghost';
+        addBtn.textContent = 'Add';
+        addBtn.onclick = () => {
+          // Insert new punch after current index
+          draft.punches.splice(index + 1, 0, { in: '', out: '' });
+          setPunchDraftDirty();
+          renderPunchDraft();
+          // Focus on the new row's start input
+          setTimeout(() => {
+            const allRows = punchList.children;
+            const newRowIndex = index + 1;
+            if (allRows[newRowIndex]) {
+              const newStartInput = allRows[newRowIndex].querySelector('input[type="time"]');
+              if (newStartInput) newStartInput.focus();
+            }
+          }, 0);
+        };
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'ghost';
@@ -680,6 +775,7 @@
         row.appendChild(startInput);
         row.appendChild(document.createTextNode(' to '));
         row.appendChild(endInput);
+        row.appendChild(addBtn);
         row.appendChild(removeBtn);
         punchList.appendChild(row);
       });
@@ -689,12 +785,17 @@
     const hasPunches = punches.length > 0;
     const openCount = summarizePunches(punches).openCount;
     if (punchToggleBtn) {
-      punchToggleBtn.textContent = openCount > 0 ? 'Punch Out Now' : 'Punch In Now';
+      punchToggleBtn.textContent = openCount > 0 ? 'Punch Out' : 'Punch In';
       punchToggleBtn.disabled = !hasContract || state.punchDraftSaving;
     }
-    if (punchAddRangeBtn) punchAddRangeBtn.disabled = !hasContract || state.punchDraftSaving;
-    if (punchSaveBtn) punchSaveBtn.disabled = !hasContract || state.punchDraftSaving || !hasPunches;
-    if (punchDiscardBtn) punchDiscardBtn.disabled = !hasContract || state.punchDraftSaving || !draft.dirty;
+    if (punchSaveBtn) {
+      punchSaveBtn.disabled = !hasContract || state.punchDraftSaving || !hasPunches;
+      punchSaveBtn.textContent = draft.entryId ? 'Update Entry' : 'Add Entry';
+    }
+    if (punchCancelBtn) {
+      punchCancelBtn.disabled = !hasContract || state.punchDraftSaving || !draft.dirty;
+      punchCancelBtn.style.display = draft.dirty ? 'inline-flex' : 'none';
+    }
   }
 
   function updatePunchSummary() {
@@ -747,7 +848,8 @@
       end_time: summary.openCount > 0 ? '' : summary.latest,
       duration_minutes: roundedMinutes,
       break_minutes: 0,
-      round_interval: getRoundInterval()
+      round_interval: getRoundInterval(),
+      entry_type: 'advanced'
     };
     if (draft.entryId) payload.id = draft.entryId;
     state.punchDraftSaving = true;
@@ -805,11 +907,25 @@
     const now = new Date();
     const currentTime = now.toTimeString().slice(0, 5);
     const punches = draft.punches || [];
-    const openIndex = punches.findIndex((punch) => punch && !punch.out);
+    
+    // Look for an open punch (has in but no out)
+    const openIndex = punches.findIndex((punch) => punch && punch.in && !punch.out);
     if (openIndex !== -1) {
+      // Punch out - close the open punch
       draft.punches[openIndex].out = currentTime;
     } else {
-      draft.punches.push({ in: currentTime, out: '' });
+      // Punch in - add a new punch or populate the first empty range
+      if (punches.length === 0) {
+        draft.punches.push({ in: currentTime, out: '' });
+      } else {
+        // Find the first empty range (no in time) and populate it
+        const firstEmpty = punches.findIndex(punch => !punch.in);
+        if (firstEmpty !== -1) {
+          draft.punches[firstEmpty].in = currentTime;
+        } else {
+          draft.punches.push({ in: currentTime, out: '' });
+        }
+      }
     }
     setPunchDraftDirty();
     renderPunchDraft();
@@ -826,9 +942,17 @@
   }
 
   if (punchToggleBtn) punchToggleBtn.onclick = handlePunchToggle;
-  if (punchAddRangeBtn) punchAddRangeBtn.onclick = addPunchRow;
   if (punchSaveBtn) punchSaveBtn.onclick = handlePunchSave;
-  if (punchDiscardBtn) punchDiscardBtn.onclick = handlePunchDiscard;
+  if (punchCancelBtn) punchCancelBtn.onclick = handlePunchDiscard;
+  if (punchDate) {
+    punchDate.addEventListener('change', () => {
+      state.selectedCalendarDate = punchDate.value;
+      // Clear any existing draft when date changes
+      state.punchDraft = null;
+      updatePunchContractOptions();
+      ensurePunchDraft();
+    });
+  }
   if (punchContract) {
     punchContract.addEventListener('change', () => {
       ensurePunchDraft(punchContract.value);
@@ -924,6 +1048,7 @@
 
   function populateManualForm(entry, isEdit) {
     showPage('time');
+    state.currentTab = 'manual';
     activateTab('manual');
     const preferredDate = entry.date || todayIso();
     const preferredContractId = entry.contract_id || '';
@@ -944,6 +1069,7 @@
     }
     if (manualBreakInput) manualBreakInput.value = Number(entry.break_minutes || 0);
     state.editingEntryId = isEdit ? entry.id : null;
+    state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     setManualMode(!!isEdit);
     if (isEdit && manualHoursInput) manualHoursInput.focus();
     updateBasicSaveEnabled();
@@ -951,6 +1077,8 @@
 
   function clearManualEditing() {
     state.editingEntryId = null;
+    state.editingEntryType = null;
+    state.currentTab = 'manual';
     setManualMode(false);
     if (manualHoursInput) manualHoursInput.value = '';
     if (manualBreakInput) manualBreakInput.value = '0';
@@ -1009,7 +1137,8 @@
       duration_minutes: roundedMinutes,
       break_minutes: breakMinutes,
       contract_id: contractId,
-      round_interval: getRoundInterval()
+      round_interval: getRoundInterval(),
+      entry_type: 'basic'
     };
   }
 
@@ -1079,7 +1208,6 @@
     state.selectedCalendarDate = payload.date;
     setManualDate(state.selectedCalendarDate, payload.contract_id);
     renderCalendar();
-    renderCalendarDetail();
   };
   manualCancelBtn.onclick = function () {
     clearManualEditing();
@@ -1088,10 +1216,22 @@
 
   if (manualDate) {
     manualDate.addEventListener('change', () => {
-      state.selectedCalendarDate = manualDate.value;
+      const newDate = manualDate.value;
+      const oldDate = state.selectedCalendarDate;
+      
+      // If we're editing an entry and the date changed, assume changes were discarded
+      if (state.editingEntryId && newDate !== oldDate) {
+        clearManualEditing();
+        state.selectedCalendarDate = newDate;
+        setManualDate(newDate);
+        updateManualContractOptions();
+        renderCalendar();
+        return;
+      }
+      
+      state.selectedCalendarDate = newDate;
       updateManualContractOptions();
       renderCalendar();
-      renderCalendarDetail();
     });
   }
 
@@ -1882,7 +2022,6 @@
     const zeroFlag = state.featureFlags.show_zero_hours || DEFAULT_FEATURE_FLAGS.show_zero_hours || { enabled: false };
     state.showZeroHours = !!zeroFlag.enabled;
     renderCalendar();
-    renderCalendarDetail();
     updateClearCacheVisibility();
   }
 
@@ -2151,7 +2290,6 @@
   }
   function renderEntries() {
     renderCalendar();
-    renderCalendarDetail();
     renderContractsUI();
   }
   function deleteEntry(id) {
@@ -2178,7 +2316,6 @@
     state.selectedCalendarDate = entry.date;
     populateManualForm(entry, true);
     renderCalendar();
-    renderCalendarDetail();
   }
 
   // Calendar rendering
@@ -2220,7 +2357,8 @@
       }
       return acc;
     }, 0);
-    monthTotalEl.textContent = `Total hours: ${formatHours(monthTotalMinutes)}`;
+    const roundedMonthTotal = roundDuration(monthTotalMinutes);
+    monthTotalEl.textContent = `Total hours: ${formatHours(roundedMonthTotal)}`;
     grid.innerHTML = '';
     const start = calendarStartDate(state.calendar.year, state.calendar.month);
     for (let i = 0; i < 42; i++) {
@@ -2242,7 +2380,8 @@
       if (totalMinutes === 0) {
         totalEl.textContent = state.showZeroHours ? '0' : '';
       } else {
-        totalEl.textContent = formatHours(totalMinutes);
+        const roundedMinutes = roundDuration(totalMinutes);
+        totalEl.textContent = formatHours(roundedMinutes);
       }
       cell.append(dayEl, totalEl);
       cell.onclick = () => handleCalendarClick(iso);
@@ -2250,77 +2389,60 @@
     }
     renderIncomeSummary();
   }
-  function renderCalendarDetail() {
-    ensureCalendarState();
-    const detail = document.getElementById('calendar-detail');
-    const title = document.getElementById('calendar-detail-date');
-    const totalEl = document.getElementById('calendar-detail-total');
-    const list = document.getElementById('calendar-detail-list');
-    const dateIso = state.selectedCalendarDate;
-    if (!dateIso) {
-      detail.classList.remove('active');
-      title.textContent = 'Select a day';
-      totalEl.textContent = '';
-      list.innerHTML = '';
-      return;
-    }
-    detail.classList.add('active');
-    const dateObj = parseIsoDate(dateIso);
-    title.textContent = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-    const entries = state.entries
-      .filter((entry) => entry.date === dateIso)
-      .sort((a, b) => entryFirstPunchMinutes(a) - entryFirstPunchMinutes(b));
-    const totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
-    const hasOpenPunch = entries.some((entry) => entry.open_punch_count > 0);
-    totalEl.textContent = `${formatHours(totalMinutes)} hours${hasOpenPunch ? ' (open punches ignored)' : ''}`;
-    list.innerHTML = '';
-    if (!entries.length) {
-      const empty = document.createElement('div');
-      empty.className = 'ts-calendar-detail-empty';
-      empty.textContent = 'No entries for this day yet.';
-      list.appendChild(empty);
-      return;
-    }
-    if (hasOpenPunch) {
-      const warn = document.createElement('div');
-      warn.className = 'ts-warning';
-      warn.style.marginBottom = '8px';
-      warn.textContent = 'Open punches are ignored in totals until you punch out.';
-      list.appendChild(warn);
-    }
-    entries.forEach((entry) => {
-      const el = document.createElement('div');
-      el.className = 'ts-item';
-      const summaryLabel = getEntryPunchSummary(entry);
-      const detailLabel = getEntryPunchDetail(entry);
-      const openBadge = entry.open_punch_count ? '<span class="ts-badge warn">Open punch</span>' : '';
-      const breakBadge = entry.break_minutes ? `<span class="ts-badge">Break ${entry.break_minutes}m</span>` : '';
-      el.innerHTML = `
-        <div style="flex:1;">
-          <div style="display:flex; gap:8px; align-items:center;">
-            <strong>${summaryLabel}</strong>
-            <span class="ts-badge success">${fmt(entry.duration_minutes || 0)}</span>
-            ${contractBadge(entry)}
-            ${breakBadge}
-            ${openBadge}
-          </div>
-          ${detailLabel ? `<div class="ts-note">Punches: ${detailLabel}</div>` : ''}
-        </div>
-        <div>
-          <button class="ghost" data-edit="${entry.id}">Edit</button>
-          <button class="danger" data-del="${entry.id}" style="margin-left:6px;">Delete</button>
-        </div>
-      `;
-      list.appendChild(el);
-    });
-    list.querySelectorAll('button[data-edit]').forEach((btn) => (btn.onclick = () => editEntry(btn.getAttribute('data-edit'))));
-    list.querySelectorAll('button[data-del]').forEach((btn) => (btn.onclick = () => deleteEntry(btn.getAttribute('data-del'))));
-  }
   function handleCalendarClick(dateIso) {
     state.selectedCalendarDate = dateIso;
     setManualDate(dateIso);
     renderCalendar();
-    renderCalendarDetail();
+    
+    // Check if there's an existing entry for this date
+    const existingEntry = state.entries.find(entry => entry.date === dateIso);
+    if (existingEntry) {
+      console.log('Found existing entry:', existingEntry.entry_type, existingEntry);
+      
+      // Determine entry type - if not set, try to detect from data structure
+      let entryType = existingEntry.entry_type;
+      if (!entryType) {
+        // Basic entries typically have a single punch from 00:00 to total time
+        const punches = existingEntry.punches || [];
+        if (punches.length === 1 && punches[0].in === '00:00') {
+          entryType = 'basic';
+        } else {
+          entryType = 'advanced';
+        }
+        console.log('Detected entry type:', entryType);
+      }
+      
+      // Prepopulate the form with the existing entry
+      if (entryType === 'basic') {
+        populateManualForm(existingEntry, true);
+      } else {
+        // For advanced entries, switch to advanced tab and populate
+        state.currentTab = 'punch';
+        state.editingEntryType = entryType;
+        activateTab('punch');
+        if (punchDate) punchDate.value = existingEntry.date;
+        ensurePunchDraft(existingEntry.contract_id);
+        if (state.punchDraft) {
+          state.punchDraft.entryId = existingEntry.id;
+          state.punchDraft.contractId = existingEntry.contract_id;
+          state.punchDraft.date = existingEntry.date;
+          state.punchDraft.punches = clonePunches(existingEntry.punches || []);
+          state.punchDraft.dirty = false;
+          renderPunchDraft();
+        }
+      }
+    } else {
+      // No existing entry, keep current tab but clear editing state
+      if (state.currentTab === 'manual') {
+        clearManualEditing();
+      } else {
+        // For advanced mode, just clear the editing state without changing tabs
+        state.editingEntryId = null;
+        state.editingEntryType = null;
+        setPunchDate(dateIso);
+        ensurePunchDraft();
+      }
+    }
   }
   function changeCalendarMonth(delta) {
     ensureCalendarState();
@@ -2334,16 +2456,9 @@
       }
     }
     renderCalendar();
-    renderCalendarDetail();
   }
   document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
   document.getElementById('calendar-next').onclick = () => changeCalendarMonth(1);
-  document.getElementById('calendar-add-entry').onclick = () => {
-    ensureCalendarState();
-    const date = state.selectedCalendarDate || todayIso();
-    const preferredContract = manualContract ? manualContract.value : '';
-    populateManualForm({ date, punches: [], contract_id: preferredContract }, false);
-  };
 
   // Settings persistence
   document.getElementById('btn-save-settings').onclick = function () {

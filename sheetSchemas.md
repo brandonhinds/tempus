@@ -32,6 +32,7 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `contract_id` | string (UUID) | References the contract active on the entry date. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
 | `punches_json` | string (JSON) | JSON-encoded array of punch objects: `[{"in":"HH:mm","out":"HH:mm"}]`. `out` may be blank for an open punch. | `[{"in":"08:10","out":"12:05"},{"in":"12:40","out":"17:10"}]` |
+| `entry_type` | string | Entry mode used: `basic` for total-hours entries, `advanced` for punch-based entries. | `basic` |
 
 ### Suggested improvements
 - Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
