@@ -2542,5 +2542,674 @@
       .withFailureHandler(() => {})
       .api_getFeatureFlags();
   }
+
+  // Default Entries Functionality
+  const state_defaults = {
+    entryDefaults: { basic: [], advanced: [] },
+    currentDefaultType: null,
+    editingDefaultName: null
+  };
+
+  // Default entry UI elements
+  const createManualDefaultBtn = document.getElementById('btn-create-manual-default');
+  const enterManualDefaultBtn = document.getElementById('btn-enter-manual-default');
+  const editManualDefaultsBtn = document.getElementById('btn-edit-manual-defaults');
+  const createPunchDefaultBtn = document.getElementById('btn-create-punch-default');
+  const enterPunchDefaultBtn = document.getElementById('btn-enter-punch-default');
+  const editPunchDefaultsBtn = document.getElementById('btn-edit-punch-defaults');
+
+
+  // Modal elements
+  const createDefaultModal = document.getElementById('modal-create-default');
+  const selectDefaultModal = document.getElementById('modal-select-default');
+  const editDefaultsModal = document.getElementById('modal-edit-defaults');
+  const editDefaultDetailsModal = document.getElementById('modal-edit-default-details');
+
+  function updateDefaultButtonsVisibility() {
+    const featureEnabled = state.featureFlags.default_inputs && state.featureFlags.default_inputs.enabled;
+
+    if (!featureEnabled) {
+      // Hide all default buttons if feature is disabled
+      [createManualDefaultBtn, enterManualDefaultBtn, editManualDefaultsBtn,
+       createPunchDefaultBtn, enterPunchDefaultBtn, editPunchDefaultsBtn].forEach(btn => {
+        if (btn) btn.style.display = 'none';
+      });
+      return;
+    }
+
+    const defaults = state_defaults.entryDefaults;
+    const hasBasicDefaults = defaults.basic.length > 0;
+    const hasAdvancedDefaults = defaults.advanced.length > 0;
+
+    // Basic/Manual tab buttons
+    if (createManualDefaultBtn) createManualDefaultBtn.style.display = 'inline-flex';
+    if (enterManualDefaultBtn) enterManualDefaultBtn.style.display = hasBasicDefaults ? 'inline-flex' : 'none';
+    if (editManualDefaultsBtn) editManualDefaultsBtn.style.display = hasBasicDefaults ? 'inline-flex' : 'none';
+
+    // Advanced/Punch tab buttons
+    if (createPunchDefaultBtn) createPunchDefaultBtn.style.display = 'inline-flex';
+    if (enterPunchDefaultBtn) enterPunchDefaultBtn.style.display = hasAdvancedDefaults ? 'inline-flex' : 'none';
+    if (editPunchDefaultsBtn) editPunchDefaultsBtn.style.display = hasAdvancedDefaults ? 'inline-flex' : 'none';
+  }
+
+  function loadEntryDefaults() {
+    google.script.run
+      .withSuccessHandler((result) => {
+        state_defaults.entryDefaults = result || { basic: [], advanced: [] };
+        updateDefaultButtonsVisibility();
+      })
+      .withFailureHandler(() => {
+        console.log('Failed to load entry defaults');
+      })
+      .api_getEntryDefaults();
+  }
+
+  function showModal(modal) {
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function hideModal(modal) {
+    if (modal) modal.style.display = 'none';
+  }
+
+  function getCurrentFormData(type) {
+    if (type === 'basic') {
+      const hours = Number(manualHoursInput ? manualHoursInput.value : '');
+      const breakMinutes = Number(manualBreakInput ? manualBreakInput.value : '');
+      return {
+        duration_minutes: Math.round(hours * 60),
+        break_minutes: breakMinutes || 0
+      };
+    } else if (type === 'advanced') {
+      const draft = state.punchDraft;
+      if (!draft || !draft.punches) return { punches: [] };
+      return {
+        punches: draft.punches.filter(p => p.in && p.out) // Only include closed punches
+      };
+    }
+    return null;
+  }
+
+  function applyDefaultToForm(defaultData, type) {
+    if (type === 'basic') {
+      const hours = (defaultData.duration_minutes || 0) / 60;
+      if (manualHoursInput) manualHoursInput.value = hours > 0 ? hours.toString() : '';
+      if (manualBreakInput) manualBreakInput.value = (defaultData.break_minutes || 0).toString();
+      updateBasicSaveEnabled();
+    } else if (type === 'advanced') {
+      // Apply punches to advanced form
+      ensurePunchDraft();
+      if (state.punchDraft) {
+        state.punchDraft.punches = [...(defaultData.punches || [])];
+        setPunchDraftDirty();
+        renderPunchDraft();
+        updatePunchSummary();
+      }
+    }
+  }
+
+  function handleCreateDefault(type) {
+    const formData = getCurrentFormData(type);
+    if (!formData) {
+      setStatus('Please enter some time data first', 'warn');
+      return;
+    }
+
+    if (type === 'basic' && (!formData.duration_minutes || formData.duration_minutes <= 0)) {
+      setStatus('Please enter a valid number of hours', 'warn');
+      return;
+    }
+
+    if (type === 'advanced' && (!formData.punches || formData.punches.length === 0)) {
+      setStatus('Please add some punch times first', 'warn');
+      return;
+    }
+
+    state_defaults.currentDefaultType = type;
+    state_defaults.currentFormData = formData;
+
+    const nameInput = document.getElementById('default-name');
+    if (nameInput) nameInput.value = '';
+    showModal(createDefaultModal);
+    if (nameInput) nameInput.focus();
+  }
+
+  function handleEnterDefault(type) {
+    const defaults = state_defaults.entryDefaults[type] || [];
+
+    if (defaults.length === 0) {
+      setStatus('No defaults available', 'warn');
+      return;
+    }
+
+    if (defaults.length === 1) {
+      // Single default - apply directly and submit
+      applyDefaultToForm(defaults[0], type);
+
+      // Trigger the appropriate save handler
+      setTimeout(() => {
+        if (type === 'basic' && manualSaveBtn) {
+          manualSaveBtn.click();
+        } else if (type === 'advanced' && punchSaveBtn) {
+          punchSaveBtn.click();
+        }
+      }, 100);
+    } else {
+      // Multiple defaults - show selection modal
+      state_defaults.currentDefaultType = type;
+      renderDefaultSelection(defaults);
+      showModal(selectDefaultModal);
+    }
+  }
+
+  function renderDefaultSelection(defaults) {
+    const listEl = document.getElementById('default-selection-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '';
+    defaults.forEach((defaultData, index) => {
+      const item = document.createElement('div');
+      item.className = 'ts-default-item';
+      item.style.cssText = 'padding: 12px; margin: 8px 0; border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; transition: background-color 0.2s;';
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.textContent = defaultData.name;
+
+      const details = document.createElement('div');
+      details.style.fontSize = '0.9em';
+      details.style.color = 'var(--text-secondary)';
+      details.style.marginTop = '4px';
+
+      if (state_defaults.currentDefaultType === 'basic') {
+        const hours = (defaultData.duration_minutes || 0) / 60;
+        details.textContent = `${hours} hours, ${defaultData.break_minutes || 0} min break`;
+      } else {
+        const punchCount = (defaultData.punches || []).length;
+        details.textContent = `${punchCount} punch ${punchCount === 1 ? 'range' : 'ranges'}`;
+      }
+
+      item.appendChild(title);
+      item.appendChild(details);
+
+      item.addEventListener('click', () => {
+        applyDefaultToForm(defaultData, state_defaults.currentDefaultType);
+        hideModal(selectDefaultModal);
+
+        // Trigger the appropriate save handler
+        setTimeout(() => {
+          if (state_defaults.currentDefaultType === 'basic' && manualSaveBtn) {
+            manualSaveBtn.click();
+          } else if (state_defaults.currentDefaultType === 'advanced' && punchSaveBtn) {
+            punchSaveBtn.click();
+          }
+        }, 100);
+      });
+
+      item.addEventListener('mouseenter', () => {
+        item.style.backgroundColor = 'var(--hover-bg)';
+      });
+
+      item.addEventListener('mouseleave', () => {
+        item.style.backgroundColor = '';
+      });
+
+      listEl.appendChild(item);
+    });
+  }
+
+  function handleEditDefaults(type) {
+    state_defaults.currentDefaultType = type;
+    renderEditDefaultsList();
+    showModal(editDefaultsModal);
+  }
+
+  function renderEditDefaultsList() {
+    const listEl = document.getElementById('edit-defaults-list');
+    if (!listEl) return;
+
+    const defaults = state_defaults.entryDefaults[state_defaults.currentDefaultType] || [];
+
+    listEl.innerHTML = '';
+
+    if (defaults.length === 0) {
+      listEl.innerHTML = '<div class="ts-note">No defaults created yet.</div>';
+      return;
+    }
+
+    defaults.forEach((defaultData, index) => {
+      const item = document.createElement('div');
+      item.className = 'ts-edit-default-item';
+      item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; margin: 8px 0; border: 1px solid var(--border-color); border-radius: 4px;';
+
+      const content = document.createElement('div');
+      content.style.flex = '1';
+      content.style.cursor = 'pointer';
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.textContent = defaultData.name;
+
+      const details = document.createElement('div');
+      details.style.fontSize = '0.9em';
+      details.style.color = 'var(--text-secondary)';
+      details.style.marginTop = '4px';
+
+      if (state_defaults.currentDefaultType === 'basic') {
+        const hours = (defaultData.duration_minutes || 0) / 60;
+        details.textContent = `${hours} hours, ${defaultData.break_minutes || 0} min break`;
+      } else {
+        const punchCount = (defaultData.punches || []).length;
+        details.textContent = `${punchCount} punch ${punchCount === 1 ? 'range' : 'ranges'}`;
+      }
+
+      content.appendChild(title);
+      content.appendChild(details);
+
+      content.addEventListener('click', () => {
+        openEditDefaultDetails(defaultData);
+      });
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'ghost';
+      deleteBtn.style.marginLeft = '12px';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`Delete the "${defaultData.name}" default?`)) {
+          deleteEntryDefault(defaultData.name, deleteBtn);
+        }
+      });
+
+      item.appendChild(content);
+      item.appendChild(deleteBtn);
+      listEl.appendChild(item);
+    });
+  }
+
+  function openEditDefaultDetails(defaultData) {
+    state_defaults.editingDefaultName = defaultData.name;
+
+    const nameInput = document.getElementById('edit-default-name');
+    if (nameInput) nameInput.value = defaultData.name;
+
+    const formEl = document.getElementById('edit-default-form');
+    if (!formEl) return;
+
+    formEl.innerHTML = '';
+
+    if (state_defaults.currentDefaultType === 'basic') {
+      const hours = (defaultData.duration_minutes || 0) / 60;
+
+      formEl.innerHTML = `
+        <div class="ts-row">
+          <div class="ts-col">
+            <label>Total hours</label>
+            <input type="number" id="edit-default-hours" min="0" step="0.01" value="${hours}" />
+          </div>
+          <div class="ts-col">
+            <label>Break (minutes)</label>
+            <input type="number" id="edit-default-break" min="0" step="1" value="${defaultData.break_minutes || 0}" />
+          </div>
+        </div>
+      `;
+    } else {
+      const punchesHtml = (defaultData.punches || []).map((punch, i) => `
+        <div class="ts-row" style="margin-top: 8px;">
+          <div class="ts-col">
+            <label>Punch ${i + 1} In</label>
+            <input type="time" id="edit-punch-${i}-in" value="${punch.in || ''}" />
+          </div>
+          <div class="ts-col">
+            <label>Punch ${i + 1} Out</label>
+            <input type="time" id="edit-punch-${i}-out" value="${punch.out || ''}" />
+          </div>
+          <div class="ts-col" style="display:flex; align-items:flex-end;">
+            <button type="button" class="ghost" onclick="removePunchRow(${i})">Remove</button>
+          </div>
+        </div>
+      `).join('');
+
+      formEl.innerHTML = `
+        <div id="edit-punch-rows">
+          ${punchesHtml}
+        </div>
+        <div style="margin-top: 12px;">
+          <button type="button" class="ghost" onclick="addEditPunchRow()">Add Punch Range</button>
+        </div>
+      `;
+    }
+
+    hideModal(editDefaultsModal);
+    showModal(editDefaultDetailsModal);
+  }
+
+  // Global functions for punch editing (needed for onclick handlers)
+  window.addEditPunchRow = function() {
+    const container = document.getElementById('edit-punch-rows');
+    if (!container) return;
+
+    const existingRows = container.children.length;
+    const newRow = document.createElement('div');
+    newRow.className = 'ts-row';
+    newRow.style.marginTop = '8px';
+    newRow.innerHTML = `
+      <div class="ts-col">
+        <label>Punch ${existingRows + 1} In</label>
+        <input type="time" id="edit-punch-${existingRows}-in" />
+      </div>
+      <div class="ts-col">
+        <label>Punch ${existingRows + 1} Out</label>
+        <input type="time" id="edit-punch-${existingRows}-out" />
+      </div>
+      <div class="ts-col" style="display:flex; align-items:flex-end;">
+        <button type="button" class="ghost" onclick="removePunchRow(${existingRows})">Remove</button>
+      </div>
+    `;
+    container.appendChild(newRow);
+  };
+
+  window.removePunchRow = function(index) {
+    const container = document.getElementById('edit-punch-rows');
+    if (!container || container.children.length <= 1) return;
+
+    if (container.children[index]) {
+      container.removeChild(container.children[index]);
+
+      // Update labels and IDs
+      Array.from(container.children).forEach((row, i) => {
+        const labels = row.querySelectorAll('label');
+        const inputs = row.querySelectorAll('input');
+        const button = row.querySelector('button');
+
+        if (labels[0]) labels[0].textContent = `Punch ${i + 1} In`;
+        if (labels[1]) labels[1].textContent = `Punch ${i + 1} Out`;
+        if (inputs[0]) inputs[0].id = `edit-punch-${i}-in`;
+        if (inputs[1]) inputs[1].id = `edit-punch-${i}-out`;
+        if (button) button.setAttribute('onclick', `removePunchRow(${i})`);
+      });
+    }
+  };
+
+  function saveDefaultFromModal() {
+    const nameInput = document.getElementById('default-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const saveBtn = document.getElementById('btn-save-default');
+
+    if (!name) {
+      setStatus('Please enter a name for the default', 'warn');
+      return;
+    }
+
+    const type = state_defaults.currentDefaultType;
+    const formData = state_defaults.currentFormData;
+
+    if (!type || !formData) {
+      setStatus('Invalid default data', 'error');
+      return;
+    }
+
+    // Disable save button and show saving state
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+    setStatus('Saving default...', 'warn');
+
+    google.script.run
+      .withSuccessHandler((result) => {
+        // Re-enable save button
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Default';
+        }
+
+        if (result && result.success) {
+          state_defaults.entryDefaults = result.defaults;
+          updateDefaultButtonsVisibility();
+          hideModal(createDefaultModal);
+          setStatus(`Default "${name}" created`, 'success');
+        } else {
+          setStatus('Failed to create default', 'error');
+        }
+      })
+      .withFailureHandler((error) => {
+        // Re-enable save button
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Default';
+        }
+        setStatus('Failed to create default: ' + error.message, 'error');
+      })
+      .api_saveEntryDefault(type, name, formData);
+  }
+
+  function saveDefaultDetails() {
+    const nameInput = document.getElementById('edit-default-name');
+    const newName = nameInput ? nameInput.value.trim() : '';
+
+    if (!newName) {
+      setStatus('Please enter a name for the default', 'warn');
+      return;
+    }
+
+    const type = state_defaults.currentDefaultType;
+    const oldName = state_defaults.editingDefaultName;
+
+    let formData;
+    if (type === 'basic') {
+      const hoursInput = document.getElementById('edit-default-hours');
+      const breakInput = document.getElementById('edit-default-break');
+      const hours = Number(hoursInput ? hoursInput.value : '');
+      const breakMinutes = Number(breakInput ? breakInput.value : '');
+
+      if (!Number.isFinite(hours) || hours <= 0) {
+        setStatus('Please enter valid hours', 'warn');
+        return;
+      }
+
+      formData = {
+        duration_minutes: Math.round(hours * 60),
+        break_minutes: breakMinutes || 0
+      };
+    } else {
+      const container = document.getElementById('edit-punch-rows');
+      if (!container) return;
+
+      const punches = [];
+      Array.from(container.children).forEach((row, i) => {
+        const inInput = document.getElementById(`edit-punch-${i}-in`);
+        const outInput = document.getElementById(`edit-punch-${i}-out`);
+        const inTime = inInput ? inInput.value : '';
+        const outTime = outInput ? outInput.value : '';
+
+        if (inTime && outTime) {
+          punches.push({ in: inTime, out: outTime });
+        }
+      });
+
+      if (punches.length === 0) {
+        setStatus('Please add at least one complete punch range', 'warn');
+        return;
+      }
+
+      formData = { punches };
+    }
+
+    // Disable save button and show saving state
+    const saveBtn = document.getElementById('btn-save-default-details');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+    setStatus('Updating default...', 'warn');
+
+    google.script.run
+      .withSuccessHandler((result) => {
+        // Re-enable save button
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Changes';
+        }
+
+        if (result && result.success) {
+          state_defaults.entryDefaults = result.defaults;
+          updateDefaultButtonsVisibility();
+          hideModal(editDefaultDetailsModal);
+          setStatus(`Default "${newName}" updated`, 'success');
+          // Refresh the edit list if still open
+          if (editDefaultsModal && editDefaultsModal.style.display !== 'none') {
+            renderEditDefaultsList();
+            showModal(editDefaultsModal);
+          }
+        } else {
+          setStatus('Failed to update default', 'error');
+        }
+      })
+      .withFailureHandler((error) => {
+        // Re-enable save button
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Changes';
+        }
+        setStatus('Failed to update default: ' + error.message, 'error');
+      })
+      .api_updateEntryDefault(type, oldName, newName, formData);
+  }
+
+  function deleteEntryDefault(name, deleteBtn) {
+    const type = state_defaults.currentDefaultType;
+
+    // Disable delete button and show deleting state
+    if (deleteBtn) {
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = 'Deleting...';
+    }
+    setStatus('Deleting default...', 'warn');
+
+    google.script.run
+      .withSuccessHandler((result) => {
+        // Re-enable delete button
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete';
+        }
+
+        if (result && result.success) {
+          state_defaults.entryDefaults = result.defaults;
+          updateDefaultButtonsVisibility();
+          renderEditDefaultsList();
+          setStatus(`Default "${name}" deleted`, 'success');
+        } else {
+          setStatus('Failed to delete default', 'error');
+        }
+      })
+      .withFailureHandler((error) => {
+        // Re-enable delete button
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete';
+        }
+        setStatus('Failed to delete default: ' + error.message, 'error');
+      })
+      .api_deleteEntryDefault(type, name);
+  }
+
+  // Event handlers for default entry buttons
+  if (createManualDefaultBtn) {
+    createManualDefaultBtn.addEventListener('click', () => handleCreateDefault('basic'));
+  }
+
+  if (enterManualDefaultBtn) {
+    enterManualDefaultBtn.addEventListener('click', () => handleEnterDefault('basic'));
+  }
+
+  if (editManualDefaultsBtn) {
+    editManualDefaultsBtn.addEventListener('click', () => handleEditDefaults('basic'));
+  }
+
+  if (createPunchDefaultBtn) {
+    createPunchDefaultBtn.addEventListener('click', () => handleCreateDefault('advanced'));
+  }
+
+  if (enterPunchDefaultBtn) {
+    enterPunchDefaultBtn.addEventListener('click', () => handleEnterDefault('advanced'));
+  }
+
+  if (editPunchDefaultsBtn) {
+    editPunchDefaultsBtn.addEventListener('click', () => handleEditDefaults('advanced'));
+  }
+
+  // Modal event handlers
+  function setupModalHandlers() {
+    // Close buttons
+    document.querySelectorAll('.ts-modal-close').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const modal = e.target.closest('.ts-modal');
+        hideModal(modal);
+      });
+    });
+
+    // Click outside to close
+    document.querySelectorAll('.ts-modal').forEach(modal => {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          hideModal(modal);
+        }
+      });
+    });
+
+    // Specific button handlers
+    const cancelCreateBtn = document.getElementById('btn-cancel-create-default');
+    if (cancelCreateBtn) {
+      cancelCreateBtn.addEventListener('click', () => hideModal(createDefaultModal));
+    }
+
+    const saveDefaultBtn = document.getElementById('btn-save-default');
+    if (saveDefaultBtn) {
+      saveDefaultBtn.addEventListener('click', saveDefaultFromModal);
+    }
+
+    const cancelSelectBtn = document.getElementById('btn-cancel-select-default');
+    if (cancelSelectBtn) {
+      cancelSelectBtn.addEventListener('click', () => hideModal(selectDefaultModal));
+    }
+
+    const closeEditBtn = document.getElementById('btn-close-edit-defaults');
+    if (closeEditBtn) {
+      closeEditBtn.addEventListener('click', () => hideModal(editDefaultsModal));
+    }
+
+    const cancelEditDetailsBtn = document.getElementById('btn-cancel-edit-default-details');
+    if (cancelEditDetailsBtn) {
+      cancelEditDetailsBtn.addEventListener('click', () => {
+        hideModal(editDefaultDetailsModal);
+        if (editDefaultsModal) showModal(editDefaultsModal);
+      });
+    }
+
+    const saveDetailsBtn = document.getElementById('btn-save-default-details');
+    if (saveDetailsBtn) {
+      saveDetailsBtn.addEventListener('click', saveDefaultDetails);
+    }
+
+    // Enter key handlers
+    const defaultNameInput = document.getElementById('default-name');
+    if (defaultNameInput) {
+      defaultNameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          saveDefaultFromModal();
+        }
+      });
+    }
+  }
+
+  setupModalHandlers();
+
+  // Initialize default entries after all functions are defined
+  updateDefaultButtonsVisibility();
+  loadEntryDefaults();
+
+  // Call the main init function
   init();
 </script>

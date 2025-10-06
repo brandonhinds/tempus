@@ -26,9 +26,16 @@
         <div class="ts-note">Totals are rounded using your settings.</div>
       </div>
     </div>
-    <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
-      <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
-      <button id="btn-add-manual">Add Entry</button>
+    <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="btn-create-manual-default" style="display:none;">Create Default</button>
+        <button class="ghost" id="btn-enter-manual-default" style="display:none;">Enter Default</button>
+        <button class="ghost" id="btn-edit-manual-defaults" style="display:none;">Edit Defaults</button>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
+        <button id="btn-add-manual">Add Entry</button>
+      </div>
     </div>
   </div>
 
@@ -47,9 +54,16 @@
     <div class="ts-note" id="punch-summary" style="margin-top:8px;"></div>
     <div class="ts-warning" id="punch-open-warning" style="display:none; margin-top:4px;"></div>
     <div id="punch-range-list" class="ts-punch-list"></div>
-    <div style="margin-top:8px; display:flex; justify-content:flex-end; gap:8px;">
-      <button class="ghost" id="btn-punch-cancel" style="display:none;">Discard Changes</button>
-      <button id="btn-punch-save">Add Entry</button>
+    <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="btn-create-punch-default" style="display:none;">Create Default</button>
+        <button class="ghost" id="btn-enter-punch-default" style="display:none;">Enter Default</button>
+        <button class="ghost" id="btn-edit-punch-defaults" style="display:none;">Edit Defaults</button>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="btn-punch-cancel" style="display:none;">Discard Changes</button>
+        <button id="btn-punch-save">Add Entry</button>
+      </div>
     </div>
   </div>
 
@@ -89,3 +103,80 @@
     <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries.</div>
   </div>
 </section>
+
+<!-- Default Entry Modals -->
+<div class="ts-modal" id="modal-create-default" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Create Default Entry</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-row">
+        <div class="ts-col">
+          <label>Default Name</label>
+          <input type="text" id="default-name" placeholder="e.g., Regular Day, Split Day" />
+        </div>
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-create-default">Cancel</button>
+      <button id="btn-save-default">Save Default</button>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-select-default" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Select Default Entry</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div id="default-selection-list" class="ts-default-list"></div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-select-default">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-edit-defaults" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 600px;">
+    <div class="ts-modal-header">
+      <h3>Edit Defaults</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div id="edit-defaults-list" class="ts-edit-defaults-list"></div>
+      <div class="ts-note" style="margin-top:16px;">Click on a default to edit its details, or use the delete button to remove it.</div>
+    </div>
+    <div class="ts-modal-footer">
+      <button id="btn-close-edit-defaults">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-edit-default-details" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Edit Default Details</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-row">
+        <div class="ts-col">
+          <label>Default Name</label>
+          <input type="text" id="edit-default-name" />
+        </div>
+      </div>
+      <div id="edit-default-form" style="margin-top:16px;">
+        <!-- Dynamic content based on default type -->
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-edit-default-details">Cancel</button>
+      <button id="btn-save-default-details">Save Changes</button>
+    </div>
+  </div>
+</div>

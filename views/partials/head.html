@@ -31,6 +31,9 @@
     --primary-glow: rgba(59, 130, 246, 0.35);
     --primary-hint-bg: rgba(59, 130, 246, 0.12);
     --primary-hint-border: rgba(59, 130, 246, 0.55);
+    --hover-bg: rgba(59, 130, 246, 0.08);
+    --border-color: var(--border);
+    --text-secondary: var(--muted);
   }
   .ts-theme-light {
     --bg: #f4f5f9;
@@ -60,6 +63,9 @@
     --primary-glow: rgba(37, 99, 235, 0.2);
     --primary-hint-bg: rgba(59, 130, 246, 0.1);
     --primary-hint-border: rgba(37, 99, 235, 0.45);
+    --hover-bg: rgba(37, 99, 235, 0.08);
+    --border-color: var(--border);
+    --text-secondary: var(--muted);
   }
   .ts-theme-rose {
     --bg: #fff5f8;
@@ -89,6 +95,9 @@
     --primary-glow: rgba(209, 107, 134, 0.28);
     --primary-hint-bg: rgba(209, 107, 134, 0.14);
     --primary-hint-border: rgba(209, 107, 134, 0.5);
+    --hover-bg: rgba(209, 107, 134, 0.08);
+    --border-color: var(--border);
+    --text-secondary: var(--muted);
   }
   .ts-theme-og {
     --bg: #061424;
@@ -118,6 +127,9 @@
     --primary-glow: rgba(249, 115, 22, 0.35);
     --primary-hint-bg: rgba(56, 189, 248, 0.16);
     --primary-hint-border: rgba(56, 189, 248, 0.45);
+    --hover-bg: rgba(249, 115, 22, 0.08);
+    --border-color: var(--border);
+    --text-secondary: var(--muted);
   }
   .ts-body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text); }
   .ts-container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
@@ -216,5 +228,18 @@
   .ts-nav-menu[hidden] { display:none; }
   .ts-nav-menu button { width:100%; justify-content:flex-start; }
   .ts-warning { color: #f87171; font-size:12px; margin-top:6px; }
-  @media (max-width: 720px){ .ts-col { min-width:100%; } }
+  .ts-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:none; align-items:center; justify-content:center; z-index:1000; }
+  .ts-modal-content { background:var(--panel); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 50px rgba(0,0,0,0.5); }
+  .ts-modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); }
+  .ts-modal-header h3 { margin:0; font-size:18px; }
+  .ts-modal-close { background:none; border:none; font-size:24px; cursor:pointer; color:var(--muted); padding:0; width:auto; height:auto; }
+  .ts-modal-close:hover { color:var(--text); }
+  .ts-modal-body { padding:20px; }
+  .ts-modal-footer { display:flex; justify-content:flex-end; gap:12px; padding:16px 20px; border-top:1px solid var(--border); }
+  .ts-default-list { display:flex; flex-direction:column; gap:8px; }
+  .ts-edit-defaults-list { display:flex; flex-direction:column; gap:8px; }
+  .ts-default-item:hover { background:var(--primary-hint-bg) !important; }
+  .ts-edit-default-item { transition:background-color 0.2s; }
+  .ts-edit-default-item:hover { background:var(--primary-hint-bg); }
+  @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
 </style>

@@ -114,3 +114,152 @@ function api_setFeatureFlag(payload) {
   cacheClearPrefix(FEATURE_FLAG_CACHE_KEY);
   return { success: true, flags: api_getFeatureFlags() };
 }
+
+function api_getEntryDefaults() {
+  var settings = api_getSettings();
+  var defaultsJson = settings.entry_defaults || '{}';
+  try {
+    var defaults = JSON.parse(defaultsJson);
+    return {
+      basic: defaults.basic || [],
+      advanced: defaults.advanced || []
+    };
+  } catch (e) {
+    return { basic: [], advanced: [] };
+  }
+}
+
+function api_saveEntryDefault(type, name, data) {
+  if (!type || (type !== 'basic' && type !== 'advanced')) {
+    throw new Error('Type must be "basic" or "advanced".');
+  }
+  if (!name || String(name).trim() === '') {
+    throw new Error('Default name is required.');
+  }
+  if (!data) {
+    throw new Error('Default data is required.');
+  }
+
+  var defaults = api_getEntryDefaults();
+  var trimmedName = String(name).trim();
+
+  // Check if name already exists
+  var existingIndex = defaults[type].findIndex(function(d) {
+    return d.name === trimmedName;
+  });
+
+  if (existingIndex !== -1) {
+    throw new Error('A default with this name already exists.');
+  }
+
+  // Create new default object
+  var newDefault = {
+    name: trimmedName
+  };
+
+  if (type === 'basic') {
+    newDefault.duration_minutes = data.duration_minutes || 0;
+    newDefault.break_minutes = data.break_minutes || 0;
+  } else {
+    newDefault.punches = data.punches || [];
+  }
+
+  // Add to defaults
+  defaults[type].push(newDefault);
+
+  // Save back to settings
+  var settingsUpdate = {};
+  settingsUpdate.entry_defaults = JSON.stringify(defaults);
+  api_updateSettings(settingsUpdate);
+
+  return { success: true, defaults: defaults };
+}
+
+function api_updateEntryDefault(type, oldName, newName, data) {
+  if (!type || (type !== 'basic' && type !== 'advanced')) {
+    throw new Error('Type must be "basic" or "advanced".');
+  }
+  if (!oldName || String(oldName).trim() === '') {
+    throw new Error('Original default name is required.');
+  }
+  if (!newName || String(newName).trim() === '') {
+    throw new Error('New default name is required.');
+  }
+  if (!data) {
+    throw new Error('Default data is required.');
+  }
+
+  var defaults = api_getEntryDefaults();
+  var trimmedOldName = String(oldName).trim();
+  var trimmedNewName = String(newName).trim();
+
+  // Find existing default
+  var existingIndex = defaults[type].findIndex(function(d) {
+    return d.name === trimmedOldName;
+  });
+
+  if (existingIndex === -1) {
+    throw new Error('Default not found.');
+  }
+
+  // Check if new name conflicts with another default (unless it's the same name)
+  if (trimmedOldName !== trimmedNewName) {
+    var nameConflict = defaults[type].findIndex(function(d) {
+      return d.name === trimmedNewName;
+    });
+
+    if (nameConflict !== -1) {
+      throw new Error('A default with this name already exists.');
+    }
+  }
+
+  // Update the default
+  var updatedDefault = {
+    name: trimmedNewName
+  };
+
+  if (type === 'basic') {
+    updatedDefault.duration_minutes = data.duration_minutes || 0;
+    updatedDefault.break_minutes = data.break_minutes || 0;
+  } else {
+    updatedDefault.punches = data.punches || [];
+  }
+
+  defaults[type][existingIndex] = updatedDefault;
+
+  // Save back to settings
+  var settingsUpdate = {};
+  settingsUpdate.entry_defaults = JSON.stringify(defaults);
+  api_updateSettings(settingsUpdate);
+
+  return { success: true, defaults: defaults };
+}
+
+function api_deleteEntryDefault(type, name) {
+  if (!type || (type !== 'basic' && type !== 'advanced')) {
+    throw new Error('Type must be "basic" or "advanced".');
+  }
+  if (!name || String(name).trim() === '') {
+    throw new Error('Default name is required.');
+  }
+
+  var defaults = api_getEntryDefaults();
+  var trimmedName = String(name).trim();
+
+  // Find and remove the default
+  var originalLength = defaults[type].length;
+  defaults[type] = defaults[type].filter(function(d) {
+    return d.name !== trimmedName;
+  });
+
+  if (defaults[type].length === originalLength) {
+    throw new Error('Default not found.');
+  }
+
+  // Save back to settings
+  var settingsUpdate = {};
+  settingsUpdate.entry_defaults = JSON.stringify(defaults);
+  api_updateSettings(settingsUpdate);
+
+  return { success: true, defaults: defaults };
+}
