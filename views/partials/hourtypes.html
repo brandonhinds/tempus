@@ -1,0 +1,90 @@
+<section class="ts-card" id="page-hour-types" style="display:none;">
+  <div class="ts-page-header">
+    <h2>Hour Types</h2>
+    <p class="ts-page-description">Manage different types of hours you can track. Configure which types contribute to income calculations and require contracts.</p>
+  </div>
+
+  <div class="ts-hour-types-list" id="hour-types-list">
+    <!-- Hour types will be loaded here -->
+  </div>
+
+  <div style="margin-top:24px;">
+    <button id="btn-add-hour-type">Add Hour Type</button>
+  </div>
+</section>
+
+<!-- Hour Type Creation/Edit Modal -->
+<div class="ts-modal" id="modal-hour-type" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3 id="hour-type-modal-title">Add Hour Type</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-row">
+        <div class="ts-col">
+          <label>Name</label>
+          <input type="text" id="hour-type-name" placeholder="e.g., Annual Leave, Training" />
+        </div>
+        <div class="ts-col">
+          <label>Slug</label>
+          <input type="text" id="hour-type-slug" placeholder="e.g., annual, training" />
+          <div class="ts-note">Used internally for identification. Should be lowercase and unique.</div>
+        </div>
+      </div>
+      <div class="ts-row" style="margin-top:16px;">
+        <div class="ts-col">
+          <label>Color</label>
+          <input type="color" id="hour-type-color" value="#6b7280" />
+          <div class="ts-note">Used for calendar visualization.</div>
+        </div>
+      </div>
+      <div class="ts-flag-row" style="margin-top:16px;">
+        <div class="ts-flag-meta">
+          <div class="ts-flag-title">Contributes to income</div>
+          <div class="ts-flag-desc">When enabled, this hour type will be included in income calculations and require a contract.</div>
+        </div>
+        <label class="ts-toggle">
+          <input type="checkbox" id="hour-type-contributes-income" />
+          <span class="ts-toggle-track">
+            <span class="ts-toggle-thumb"></span>
+          </span>
+        </label>
+      </div>
+      <div class="ts-flag-row" style="margin-top:16px;">
+        <div class="ts-flag-meta">
+          <div class="ts-flag-title">Set as default</div>
+          <div class="ts-flag-desc">The default hour type is automatically selected for new entries and shown prominently in the calendar.</div>
+        </div>
+        <label class="ts-toggle">
+          <input type="checkbox" id="hour-type-is-default" />
+          <span class="ts-toggle-track">
+            <span class="ts-toggle-thumb"></span>
+          </span>
+        </label>
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-hour-type">Cancel</button>
+      <button id="btn-save-hour-type">Save Hour Type</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hour Type Deletion Confirmation Modal -->
+<div class="ts-modal" id="modal-delete-hour-type" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Delete Hour Type</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <p>Are you sure you want to delete "<span id="delete-hour-type-name"></span>"?</p>
+      <p class="ts-note">This action cannot be undone. If this hour type is used by existing entries, deletion will be prevented.</p>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-delete-hour-type">Cancel</button>
+      <button class="danger" id="btn-confirm-delete-hour-type">Delete Hour Type</button>
+    </div>
+  </div>
+</div>

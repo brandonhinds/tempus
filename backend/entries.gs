@@ -161,6 +161,13 @@ function normalizeEntryObject(entry) {
       entry.duration_minutes = rawDuration;
     }
   }
+
+  // Handle hour_type_id - default to work hour type if not provided or empty
+  var hourTypeId = entry.hour_type_id || entry.hourTypeId || '';
+  if (!hourTypeId) {
+    hourTypeId = getDefaultHourTypeId();
+  }
+
   return {
     id: entry.id || '',
     date: toIsoDate(entry.date),
@@ -169,7 +176,8 @@ function normalizeEntryObject(entry) {
     created_at: toIsoDateTime(entry.created_at),
     punches: punches,
     punches_json: JSON.stringify(punches),
-    entry_type: entry.entry_type || 'basic'
+    entry_type: entry.entry_type || 'basic',
+    hour_type_id: hourTypeId
   };
 }
 
@@ -182,7 +190,8 @@ function buildEntryRow(entry, createdAt) {
     normalized.contract_id,
     createdAt || normalized.created_at || toIsoDateTime(new Date()),
     normalized.punches_json || '[]',
-    normalized.entry_type || 'basic'
+    normalized.entry_type || 'basic',
+    normalized.hour_type_id
   ];
 }
 
@@ -224,7 +233,8 @@ function api_addEntry(entry) {
     created_at: toIsoDateTime(now),
     punches: entry && entry.punches,
     punches_json: entry && entry.punches_json,
-    entry_type: entry && entry.entry_type
+    entry_type: entry && entry.entry_type,
+    hour_type_id: entry && entry.hour_type_id
   });
   normalized.id = normalized.id || id;
   normalized.date = normalized.date || toIsoDate(now);
@@ -240,7 +250,8 @@ function api_addEntry(entry) {
     contract_id: row[3],
     created_at: row[4],
     punches_json: row[5],
-    entry_type: row[6]
+    entry_type: row[6],
+    hour_type_id: row[7]
   }) };
 }
 
@@ -256,6 +267,9 @@ function api_updateEntry(update) {
       }
       if (!payload.entry_type && values[i][6] != null) {
         payload = Object.assign({}, payload, { entry_type: values[i][6] });
+      }
+      if (!payload.hour_type_id && values[i][7] != null) {
+        payload = Object.assign({}, payload, { hour_type_id: values[i][7] });
       }
       var normalized = normalizeEntryObject(payload);
       normalized.id = update.id;

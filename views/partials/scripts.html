@@ -2,11 +2,13 @@
   // Layout navigation
   const pageTime = document.getElementById('page-time');
   const pageContracts = document.getElementById('page-contracts');
+  const pageHourTypes = document.getElementById('page-hour-types');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');
   const navTimeBtn = document.getElementById('nav-time');
   const navContractsBtn = document.getElementById('nav-contracts');
+  const navHourTypesBtn = document.getElementById('nav-hour-types');
   const navSettingsBtn = document.getElementById('nav-settings');
 
   const state = {
@@ -15,10 +17,13 @@
     settings: {},
     contracts: [],
     contractMap: {},
+    hourTypes: [],
+    hourTypeMap: {},
     featureFlags: {},
     editingEntryId: null,
     editingEntryType: null,
     editingContractId: null,
+    editingHourTypeId: null,
     contractFormMode: 'hidden',
     calendar: null,
     selectedCalendarDate: null,
@@ -31,7 +36,7 @@
     currentTab: 'manual'
   };
 
-  const PAGE_KEYS = ['time', 'contracts', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -51,6 +56,7 @@
     const pages = {
       time: pageTime,
       contracts: pageContracts,
+      'hour-types': pageHourTypes,
       settings: pageSettings
     };
     Object.keys(pages).forEach((key) => {
@@ -113,6 +119,7 @@
 
   if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
+  if (navHourTypesBtn) navHourTypesBtn.onclick = () => { closeNavMenu(); showPage('hour-types'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
   showPage('time', { skipRemember: true });
@@ -402,6 +409,20 @@
     return clone;
   };
 
+  const sanitizeHourType = (hourType) => {
+    if (!hourType) return hourType;
+    const clone = { ...hourType };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.name = clone.name ? String(clone.name).trim() : '';
+    clone.slug = clone.slug ? String(clone.slug).trim() : '';
+    clone.color = clone.color ? String(clone.color).trim() : '#6b7280';
+    clone.contributes_to_income = Boolean(clone.contributes_to_income === 'TRUE' || clone.contributes_to_income === true);
+    clone.requires_contract = Boolean(clone.requires_contract === 'TRUE' || clone.requires_contract === true);
+    clone.is_default = Boolean(clone.is_default === 'TRUE' || clone.is_default === true);
+    clone.created_at = clone.created_at || '';
+    return clone;
+  };
+
   const DEFAULT_FEATURE_FLAGS = {
     remember_last_page: {
       name: 'Remember last page on refresh',
@@ -414,6 +435,10 @@
     show_zero_hours: {
       name: 'Show zero hours on empty days',
       description: 'When enabled, days without logged time display a 0 instead of being blank.'
+    },
+    hour_types: {
+      name: 'Hour Types',
+      description: 'Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization.'
     }
   };
 
@@ -465,6 +490,13 @@
     }, {});
   }
 
+  function updateHourTypeMap() {
+    state.hourTypeMap = state.hourTypes.reduce((map, hourType) => {
+      map[hourType.id] = hourType;
+      return map;
+    }, {});
+  }
+
   const contractIsValid = (contract, dateIso) => {
     if (!contract || !dateIso) return false;
     if (contract.start_date && contract.start_date > dateIso) return false;
@@ -499,6 +531,7 @@
       state.entries = Array.isArray(obj.entries) ? obj.entries.map(sanitizeEntry) : [];
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
+      state.hourTypes = Array.isArray(obj.hourTypes) ? obj.hourTypes.map(sanitizeHourType) : [];
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
 
       // Set initial tab based on today's entry type
@@ -511,6 +544,7 @@
       }
       updateTabStates();
       updateContractMap();
+      updateHourTypeMap();
       applyTheme((state.settings && state.settings.theme) || 'dark');
     } catch (e) {}
   }
@@ -520,6 +554,7 @@
         entries: state.entries.map(sanitizeEntry),
         settings: state.settings,
         contracts: state.contracts.map(sanitizeContract),
+        hourTypes: state.hourTypes.map(sanitizeHourType),
         featureFlags: normalizeFeatureFlags(state.featureFlags)
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
@@ -2179,6 +2214,15 @@
     state.showZeroHours = !!zeroFlag.enabled;
     renderCalendar();
     updateClearCacheVisibility();
+
+    // Show/hide hour types navigation
+    const hourTypesFlag = state.featureFlags.hour_types || DEFAULT_FEATURE_FLAGS.hour_types || { enabled: false };
+    if (navHourTypesBtn) {
+      navHourTypesBtn.style.display = hourTypesFlag.enabled ? 'block' : 'none';
+    }
+    if (hourTypesFlag.enabled) {
+      loadHourTypes();
+    }
   }
 
   if (contractSaveBtn) {
@@ -3357,6 +3401,311 @@
   // Initialize default entries after all functions are defined
   updateDefaultButtonsVisibility();
   loadEntryDefaults();
+
+  // Hour Types Management
+  function generateRandomColor() {
+    const colors = [
+      '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
+      '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+      '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
+    ];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+
+  function loadHourTypes() {
+    if (!state.featureFlags.hour_types) return;
+
+    setStatus('Loading hour types...', 'warn');
+    google.script.run
+      .withSuccessHandler((hourTypes) => {
+        state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
+        updateHourTypeMap();
+        renderHourTypes();
+        saveCache();
+        setStatus('Idle');
+      })
+      .withFailureHandler((error) => {
+        console.error('Failed to load hour types:', error);
+        setStatus('Error loading hour types', 'error');
+      })
+      .api_getHourTypes();
+  }
+
+  function renderHourTypes() {
+    const container = document.getElementById('hour-types-list');
+    if (!container) return;
+
+    if (state.hourTypes.length === 0) {
+      container.innerHTML = '<div class="ts-note">No hour types configured. Click "Add Hour Type" to create your first one.</div>';
+      return;
+    }
+
+    const html = state.hourTypes.map(hourType => {
+      const badges = [];
+      if (hourType.is_default) badges.push('<span class="ts-hour-type-badge default">Default</span>');
+      if (hourType.contributes_to_income) badges.push('<span class="ts-hour-type-badge income">Income</span>');
+
+      const isWork = hourType.slug === 'work';
+      const editText = isWork ? 'Settings' : 'Edit';
+
+      return `
+        <div class="ts-hour-type-item ${isWork ? 'work' : ''}" data-id="${hourType.id}">
+          <div class="ts-hour-type-color" style="background-color: ${hourType.color}"></div>
+          <div class="ts-hour-type-info">
+            <h4 class="ts-hour-type-name">${hourType.name}${isWork ? ' (Built-in)' : ''}</h4>
+            <p class="ts-hour-type-details">Slug: ${hourType.slug}</p>
+            <div class="ts-hour-type-badges">${badges.join('')}</div>
+          </div>
+          <div class="ts-hour-type-actions">
+            <button class="ghost small" onclick="editHourType('${hourType.id}')">${editText}</button>
+            <button class="ghost small danger" onclick="deleteHourType('${hourType.id}')" ${isWork ? 'style="display:none;"' : ''}>Delete</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = html;
+  }
+
+  function showHourTypeModal(hourType = null) {
+    const modal = document.getElementById('modal-hour-type');
+    const title = document.getElementById('hour-type-modal-title');
+    const nameInput = document.getElementById('hour-type-name');
+    const slugInput = document.getElementById('hour-type-slug');
+    const colorInput = document.getElementById('hour-type-color');
+    const contributesInput = document.getElementById('hour-type-contributes-income');
+    const defaultInput = document.getElementById('hour-type-is-default');
+
+    if (!modal) return;
+
+    state.editingHourTypeId = hourType ? hourType.id : null;
+    const isWork = hourType && hourType.slug === 'work';
+
+    title.textContent = isWork ? 'Work Hour Type Settings' : (hourType ? 'Edit Hour Type' : 'Add Hour Type');
+    nameInput.value = hourType ? hourType.name : '';
+    slugInput.value = hourType ? hourType.slug : '';
+    colorInput.value = hourType ? hourType.color : generateRandomColor();
+    contributesInput.checked = hourType ? hourType.contributes_to_income : false;
+    defaultInput.checked = hourType ? hourType.is_default : false;
+
+    // Disable editing core properties of work hour type
+    nameInput.disabled = isWork;
+    slugInput.disabled = isWork;
+    contributesInput.disabled = isWork;
+
+    // For work hour type, only allow changing default status and color
+    if (isWork) {
+      nameInput.style.opacity = '0.6';
+      slugInput.style.opacity = '0.6';
+      contributesInput.parentElement.style.opacity = '0.6';
+    } else {
+      nameInput.style.opacity = '1';
+      slugInput.style.opacity = '1';
+      contributesInput.parentElement.style.opacity = '1';
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  function hideHourTypeModal() {
+    const modal = document.getElementById('modal-hour-type');
+    if (modal) modal.style.display = 'none';
+    state.editingHourTypeId = null;
+  }
+
+  function saveHourType() {
+    const nameInput = document.getElementById('hour-type-name');
+    const slugInput = document.getElementById('hour-type-slug');
+    const colorInput = document.getElementById('hour-type-color');
+    const contributesInput = document.getElementById('hour-type-contributes-income');
+    const defaultInput = document.getElementById('hour-type-is-default');
+    const saveBtn = document.getElementById('btn-save-hour-type');
+
+    const name = nameInput.value.trim();
+    const slug = slugInput.value.trim().toLowerCase();
+    const color = colorInput.value;
+    const contributesToIncome = contributesInput.checked;
+    const isDefault = defaultInput.checked;
+
+    if (!name || !slug) {
+      alert('Name and slug are required');
+      return;
+    }
+
+    // Check slug uniqueness
+    const existingType = state.hourTypes.find(ht => ht.slug === slug && ht.id !== state.editingHourTypeId);
+    if (existingType) {
+      alert('A hour type with this slug already exists');
+      return;
+    }
+
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+
+    const data = {
+      name,
+      slug,
+      color,
+      contributes_to_income: contributesToIncome,
+      is_default: isDefault
+    };
+
+    if (state.editingHourTypeId) {
+      // Update existing
+      google.script.run
+        .withSuccessHandler((result) => {
+          const index = state.hourTypes.findIndex(ht => ht.id === state.editingHourTypeId);
+          if (index !== -1) {
+            state.hourTypes[index] = sanitizeHourType(result);
+          }
+          updateHourTypeMap();
+          renderHourTypes();
+          saveCache();
+          hideHourTypeModal();
+          setStatus('Hour type updated');
+          saveBtn.textContent = 'Save Hour Type';
+          saveBtn.disabled = false;
+        })
+        .withFailureHandler((error) => {
+          console.error('Failed to update hour type:', error);
+          alert('Failed to update hour type: ' + error.message);
+          saveBtn.textContent = 'Save Hour Type';
+          saveBtn.disabled = false;
+        })
+        .api_updateHourType(state.editingHourTypeId, data);
+    } else {
+      // Create new
+      google.script.run
+        .withSuccessHandler((result) => {
+          state.hourTypes.push(sanitizeHourType(result));
+          updateHourTypeMap();
+          renderHourTypes();
+          saveCache();
+          hideHourTypeModal();
+          setStatus('Hour type created');
+          saveBtn.textContent = 'Save Hour Type';
+          saveBtn.disabled = false;
+        })
+        .withFailureHandler((error) => {
+          console.error('Failed to create hour type:', error);
+          alert('Failed to create hour type: ' + error.message);
+          saveBtn.textContent = 'Save Hour Type';
+          saveBtn.disabled = false;
+        })
+        .api_createHourType(data);
+    }
+  }
+
+  function editHourType(id) {
+    const hourType = state.hourTypes.find(ht => ht.id === id);
+    if (hourType) {
+      showHourTypeModal(hourType);
+    }
+  }
+
+  function deleteHourType(id) {
+    const hourType = state.hourTypes.find(ht => ht.id === id);
+    if (!hourType) return;
+
+    const modal = document.getElementById('modal-delete-hour-type');
+    const nameSpan = document.getElementById('delete-hour-type-name');
+
+    if (!modal || !nameSpan) return;
+
+    nameSpan.textContent = hourType.name;
+    modal.style.display = 'flex';
+
+    // Store the ID for the confirm handler
+    modal.dataset.hourTypeId = id;
+  }
+
+  function confirmDeleteHourType() {
+    const modal = document.getElementById('modal-delete-hour-type');
+    const confirmBtn = document.getElementById('btn-confirm-delete-hour-type');
+    const id = modal.dataset.hourTypeId;
+
+    if (!id) return;
+
+    confirmBtn.textContent = 'Deleting...';
+    confirmBtn.disabled = true;
+
+    google.script.run
+      .withSuccessHandler(() => {
+        state.hourTypes = state.hourTypes.filter(ht => ht.id !== id);
+        updateHourTypeMap();
+        renderHourTypes();
+        saveCache();
+        modal.style.display = 'none';
+        setStatus('Hour type deleted');
+        confirmBtn.textContent = 'Delete Hour Type';
+        confirmBtn.disabled = false;
+      })
+      .withFailureHandler((error) => {
+        console.error('Failed to delete hour type:', error);
+        alert('Failed to delete hour type: ' + error.message);
+        confirmBtn.textContent = 'Delete Hour Type';
+        confirmBtn.disabled = false;
+      })
+      .api_deleteHourType(id);
+  }
+
+  // Hour Types Event Listeners
+  const btnAddHourType = document.getElementById('btn-add-hour-type');
+  const btnSaveHourType = document.getElementById('btn-save-hour-type');
+  const btnCancelHourType = document.getElementById('btn-cancel-hour-type');
+  const btnConfirmDeleteHourType = document.getElementById('btn-confirm-delete-hour-type');
+  const btnCancelDeleteHourType = document.getElementById('btn-cancel-delete-hour-type');
+
+  if (btnAddHourType) {
+    btnAddHourType.addEventListener('click', () => showHourTypeModal());
+  }
+
+  if (btnSaveHourType) {
+    btnSaveHourType.addEventListener('click', saveHourType);
+  }
+
+  if (btnCancelHourType) {
+    btnCancelHourType.addEventListener('click', hideHourTypeModal);
+  }
+
+  if (btnConfirmDeleteHourType) {
+    btnConfirmDeleteHourType.addEventListener('click', confirmDeleteHourType);
+  }
+
+  if (btnCancelDeleteHourType) {
+    btnCancelDeleteHourType.addEventListener('click', () => {
+      document.getElementById('modal-delete-hour-type').style.display = 'none';
+    });
+  }
+
+  // Auto-generate slug from name
+  const hourTypeNameInput = document.getElementById('hour-type-name');
+  const hourTypeSlugInput = document.getElementById('hour-type-slug');
+
+  if (hourTypeNameInput && hourTypeSlugInput) {
+    hourTypeNameInput.addEventListener('input', () => {
+      if (!state.editingHourTypeId) { // Only auto-generate for new hour types
+        const slug = hourTypeNameInput.value
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+        hourTypeSlugInput.value = slug;
+      }
+    });
+  }
+
+  // Close modals when clicking close button or outside
+  document.addEventListener('click', (event) => {
+    if (event.target.classList.contains('ts-modal-close')) {
+      const modal = event.target.closest('.ts-modal');
+      if (modal) modal.style.display = 'none';
+    }
+    if (event.target.classList.contains('ts-modal')) {
+      event.target.style.display = 'none';
+    }
+  });
 
   // Call the main init function
   init();

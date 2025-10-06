@@ -5,17 +5,19 @@ function getOrCreateSheet(name) {
   if (!sh) {
     sh = ss.insertSheet(name);
     if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,7).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type']]);
+      sh.getRange(1,1,1,8).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id']]);
     } else if (name === 'user_settings') {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
       sh.getRange(1,1,1,6).setValues([['id','name','start_date','end_date','hourly_rate','created_at']]);
     } else if (name === 'feature_flags') {
       sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
+    } else if (name === 'hour_types') {
+      sh.getRange(1,1,1,8).setValues([['id','name','slug','color','contributes_to_income','requires_contract','is_default','created_at']]);
     }
   }
   if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type'];
+    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id'];
     const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
     const headerRange = sh.getRange(1, 1, 1, lastColumn);
     const headers = headerRange.getValues()[0];
@@ -51,6 +53,16 @@ function getOrCreateSheet(name) {
         sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('basic');
       }
     }
+    const hourTypeIndex = headers.indexOf('hour_type_id');
+    if (hourTypeIndex === -1) {
+      const lastCol = sh.getLastColumn();
+      sh.insertColumnAfter(lastCol);
+      sh.getRange(1, lastCol + 1).setValue('hour_type_id');
+      const rowCount = sh.getLastRow();
+      if (rowCount > 1) {
+        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
+      }
+    }
     const sanitizedHeaders = sh.getRange(1, 1, 1, expectedHeaders.length).getValues()[0];
     if (expectedHeaders.some((header, idx) => sanitizedHeaders[idx] !== header)) {
       sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
@@ -59,6 +71,7 @@ function getOrCreateSheet(name) {
     sh.getRange('E:E').setNumberFormat('@');
     sh.getRange('F:F').setNumberFormat('@');
     sh.getRange('G:G').setNumberFormat('@');
+    sh.getRange('H:H').setNumberFormat('@');
   }
   if (name === 'contracts') {
     sh.getRange('C:D').setNumberFormat('@');
@@ -89,6 +102,12 @@ function getOrCreateSheet(name) {
     }
     sh.getRange('B:B').setNumberFormat('@');
     sh.getRange('C:D').setNumberFormat('@');
+  }
+  if (name === 'hour_types') {
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('B:D').setNumberFormat('@');
+    sh.getRange('E:G').setNumberFormat('@');
+    sh.getRange('H:H').setNumberFormat('@');
   }
   return sh;
 }

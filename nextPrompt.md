@@ -27,3 +27,5 @@ The next things we want to include:
 - Add Xero reporting mode
 
 - Make it clear that the "Save Settings" button needs to be clicked when settings are updated. The theme, for example switches immediately, even though it has not be saved.
+
+- It looks like defaults_hours are not being saved in the backend, so moving to a new browser or clearing your cache likely removes them.

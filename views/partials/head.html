@@ -241,5 +241,18 @@
   .ts-default-item:hover { background:var(--primary-hint-bg) !important; }
   .ts-edit-default-item { transition:background-color 0.2s; }
   .ts-edit-default-item:hover { background:var(--primary-hint-bg); }
+  .ts-hour-types-list { display:flex; flex-direction:column; gap:12px; }
+  .ts-hour-type-item { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; display:flex; align-items:center; gap:16px; transition:border-color 0.2s; }
+  .ts-hour-type-item:hover { border-color:var(--primary); }
+  .ts-hour-type-color { width:16px; height:16px; border-radius:50%; border:1px solid var(--border); }
+  .ts-hour-type-info { flex:1; }
+  .ts-hour-type-name { font-weight:600; font-size:16px; margin:0 0 4px 0; }
+  .ts-hour-type-details { font-size:12px; color:var(--muted); margin:0; }
+  .ts-hour-type-badges { display:flex; gap:6px; margin-top:6px; }
+  .ts-hour-type-badge { font-size:10px; background:var(--badge-bg); border:1px solid var(--badge-border); color:var(--badge-text); padding:2px 6px; border-radius:4px; }
+  .ts-hour-type-badge.default { background:var(--badge-success-bg); border-color:var(--badge-success-border); color:var(--badge-success-text); }
+  .ts-hour-type-badge.income { background:var(--primary-soft-bg); border-color:var(--primary-soft-border); color:var(--primary-soft-text); }
+  .ts-hour-type-actions { display:flex; gap:8px; }
+  .ts-hour-type-item.work .ts-hour-type-actions .danger { display:none; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
 </style>

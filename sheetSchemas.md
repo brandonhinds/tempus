@@ -26,10 +26,11 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `id` | string (UUID) | Unique identifier generated server-side (`Utilities.getUuid`). | `19f40595-b8a0-489f-8ad8-ea3348593068` |
 | `date` | string (ISO) | Work date in `yyyy-MM-dd`. | `2025-09-30` |
 | `duration_minutes` | number | Sum of all closed punch ranges in whole minutes. Derived server-side to prevent tampering. | `525` |
-| `contract_id` | string (UUID) | References the contract active on the entry date. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
+| `contract_id` | string (UUID) | References the contract active on the entry date. May be empty for hour types that don't require contracts. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
 | `punches_json` | string (JSON) | JSON-encoded array of punch objects: `[{"in":"HH:mm","out":"HH:mm"}]`. `out` may be blank for an open punch. | `[{"in":"08:10","out":"12:05"},{"in":"12:40","out":"17:10"}]` |
 | `entry_type` | string | Entry mode used: `basic` for total-hours entries, `advanced` for punch-based entries. | `basic` |
+| `hour_type_id` | string (UUID) | References the hour type for this entry. Defaults to "work" hour type if empty or invalid. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
 
 ### Suggested improvements
 - Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
@@ -75,3 +76,25 @@ Feature flags gate optional behaviours. Each row records a single flag and its c
 - Add created/updated timestamps if we need historical auditing of flag changes.
 - Keep feature identifiers kebab- or snake-cased so the client can map them safely to object keys.
 - Expand the sheet with owner and rollout metadata once multiple flags are in play.
+
+## hour_types
+Hour types define categories of time that can be tracked (work, annual leave, sick leave, training, etc.). Each type has configurable properties affecting contract requirements, income calculations, and visualization.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
+| `name` | string | Human-readable hour type name. | `Annual Leave` |
+| `slug` | string | URL-safe identifier for the hour type. | `annual` |
+| `color` | string | Hex color code for calendar visualization. | `#ff6b6b` |
+| `contributes_to_income` | boolean/string | `TRUE`/`FALSE` indicating if this hour type should be included in income calculations. | `FALSE` |
+| `requires_contract` | boolean/string | `TRUE`/`FALSE` indicating if entries of this type must have a contract selected. | `FALSE` |
+| `is_default` | boolean/string | `TRUE`/`FALSE` indicating if this is the default hour type for new entries. Only one can be default. | `FALSE` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the hour type was created server-side. | `2025-10-06T10:15:00Z` |
+
+### Built-in hour types
+- The "Work" hour type (`slug: "work"`) is automatically created and cannot be deleted. It contributes to income, requires a contract, and is the default when the hour_types feature is disabled.
+
+### Suggested improvements
+- Validate that only one hour type is marked as default at any time.
+- Ensure slug uniqueness within the sheet.
+- Consider adding display order for consistent UI presentation.
