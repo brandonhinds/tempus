@@ -20,10 +20,6 @@ The next things we want to include:
 
 - Add ability to add actual pay for comparison
 
-- Remove the Reset button on the timer.
-
-- Rework the timer to instead be a punch in/punch out system, or at the very least store the start of the timer in local storage so a browser refresh doesn't blow it away.
-
 - Add the concept of "default inputs", which can allow a user to configure quick select hours options. This would be helpful for both James Bustard, who does consistent hours each day, and Lil, who has different types of assessments that her income is based off.
 
 - Update some settings to force a cache flush when enabled or updated (e.g the superannuation percentage)

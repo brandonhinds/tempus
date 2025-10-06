@@ -5,6 +5,7 @@
 - `views/` contains the HTML partials used by the deployed template (`views/index.html`). Client interactivity lives in `views/partials/scripts.html` and should remain framework-free vanilla JS.
 - `index.html` is a standalone prototype kept for reference; do not wire new features there unless explicitly requested.
 - `context.md`, `sheetSchemas.md`, and related markdowns document product expectations. Update these alongside functional changes.
+- `claude.md` is Claude's version of this `AGENTS.md` file, and it should be updated whenever this file is updated.
 
 ## Build, Test, and Development Commands
 - There is no local build step; deploy by syncing the workspace with Google Apps Script (e.g., via `clasp push`) after validating changes, then publish the web app.
