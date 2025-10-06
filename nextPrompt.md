@@ -20,8 +20,6 @@ The next things we want to include:
 
 - Add ability to add actual pay for comparison
 
-- Add the concept of "default inputs", which can allow a user to configure quick select hours options. This would be helpful for both James Bustard, who does consistent hours each day, and Lil, who has different types of assessments that her income is based off.
-
 - Update some settings to force a cache flush when enabled or updated (e.g the superannuation percentage)
 
 - Remove the New Entry button from the entries list at the bottom of the sheet.

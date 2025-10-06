@@ -159,7 +159,6 @@ function api_saveEntryDefault(type, name, data) {
 
   if (type === 'basic') {
     newDefault.duration_minutes = data.duration_minutes || 0;
-    newDefault.break_minutes = data.break_minutes || 0;
   } else {
     newDefault.punches = data.punches || [];
   }
@@ -220,7 +219,6 @@ function api_updateEntryDefault(type, oldName, newName, data) {
 
   if (type === 'basic') {
     updatedDefault.duration_minutes = data.duration_minutes || 0;
-    updatedDefault.break_minutes = data.break_minutes || 0;
   } else {
     updatedDefault.punches = data.punches || [];
   }

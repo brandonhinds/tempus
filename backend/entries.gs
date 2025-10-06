@@ -150,23 +150,7 @@ function normalizeEntryObject(entry) {
   if (!entry) return entry;
   var punches = normalizePunches(entry.punches != null ? entry.punches : (entry.punches_json || entry.punchesJson));
   var roundInterval = normalizeDurationMinutes(entry.round_interval);
-  var breakMinutes = normalizeDurationMinutes(entry.break_minutes || entry.break || 0);
-  var hasProvidedStart = Object.prototype.hasOwnProperty.call(entry, 'start_time') || Object.prototype.hasOwnProperty.call(entry, 'startTime');
-  var startProvidedValue = Object.prototype.hasOwnProperty.call(entry, 'start_time') ? entry.start_time : entry.startTime;
-  var startTime = hasProvidedStart ? toIsoTime(startProvidedValue) : '';
-  if (!startTime && !hasProvidedStart && punches.length) {
-    startTime = punchesEarliest(punches);
-  }
-  var hasProvidedEnd = Object.prototype.hasOwnProperty.call(entry, 'end_time') || Object.prototype.hasOwnProperty.call(entry, 'endTime');
-  var endProvidedValue = Object.prototype.hasOwnProperty.call(entry, 'end_time') ? entry.end_time : entry.endTime;
-  var endTime = hasProvidedEnd ? toIsoTime(endProvidedValue) : '';
-  if (!endTime && !hasProvidedEnd && punches.length) {
-    endTime = punchesLatest(punches);
-  }
   var durationFromPunches = punches.length ? punchesTotalMinutes(punches) : 0;
-  if (punches.length && breakMinutes > 0) {
-    durationFromPunches = Math.max(0, durationFromPunches - breakMinutes);
-  }
   if (punches.length && roundInterval > 1 && durationFromPunches > 0) {
     durationFromPunches = Math.max(roundInterval, Math.round(durationFromPunches / roundInterval) * roundInterval);
   }
@@ -180,10 +164,7 @@ function normalizeEntryObject(entry) {
   return {
     id: entry.id || '',
     date: toIsoDate(entry.date),
-    start_time: startTime,
-    end_time: endTime,
     duration_minutes: punches.length ? normalizeDurationMinutes(durationFromPunches) : normalizeDurationMinutes(entry.duration_minutes),
-    break_minutes: breakMinutes,
     contract_id: entry.contract_id || entry.contractId || entry.project || '',
     created_at: toIsoDateTime(entry.created_at),
     punches: punches,
@@ -197,10 +178,7 @@ function buildEntryRow(entry, createdAt) {
   return [
     normalized.id,
     normalized.date,
-    normalized.start_time,
-    normalized.end_time,
     normalized.duration_minutes,
-    normalized.break_minutes,
     normalized.contract_id,
     createdAt || normalized.created_at || toIsoDateTime(new Date()),
     normalized.punches_json || '[]',
@@ -241,10 +219,7 @@ function api_addEntry(entry) {
   var normalized = normalizeEntryObject({
     id: id,
     date: entry && entry.date ? entry.date : toIsoDate(now),
-    start_time: entry && entry.start_time,
-    end_time: entry && entry.end_time,
     duration_minutes: entry && entry.duration_minutes,
-    break_minutes: entry && entry.break_minutes,
     contract_id: entry && entry.contract_id,
     created_at: toIsoDateTime(now),
     punches: entry && entry.punches,
@@ -261,14 +236,11 @@ function api_addEntry(entry) {
   return { success: true, entry: normalizeEntryObject({
     id: row[0],
     date: row[1],
-    start_time: row[2],
-    end_time: row[3],
-    duration_minutes: row[4],
-    break_minutes: row[5],
-    contract_id: row[6],
-    created_at: row[7],
-    punches_json: row[8],
-    entry_type: row[9]
+    duration_minutes: row[2],
+    contract_id: row[3],
+    created_at: row[4],
+    punches_json: row[5],
+    entry_type: row[6]
   }) };
 }
 
@@ -277,16 +249,13 @@ function api_updateEntry(update) {
   var values = sh.getDataRange().getValues();
   for (var i=1; i<values.length; i++) {
     if (values[i][0] === update.id) {
-      var originalCreated = values[i][7];
+      var originalCreated = values[i][4];
       var payload = update || {};
       if (payload.punches == null && payload.punches_json == null) {
-        payload = Object.assign({}, payload, { punches_json: values[i][8] || '[]' });
+        payload = Object.assign({}, payload, { punches_json: values[i][5] || '[]' });
       }
-      if ((payload.break_minutes == null || payload.break_minutes === '') && values[i][5] != null) {
-        payload = Object.assign({}, payload, { break_minutes: values[i][5] });
-      }
-      if (!payload.entry_type && values[i][9] != null) {
-        payload = Object.assign({}, payload, { entry_type: values[i][9] });
+      if (!payload.entry_type && values[i][6] != null) {
+        payload = Object.assign({}, payload, { entry_type: values[i][6] });
       }
       var normalized = normalizeEntryObject(payload);
       normalized.id = update.id;

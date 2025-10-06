@@ -28,7 +28,6 @@
     pendingTaxRequest: null,
     selectedContractId: '',
     punchDraft: null,
-    punchDraftSaving: false,
     currentTab: 'manual'
   };
 
@@ -360,25 +359,16 @@
     const punches = normalizePunchList(clone.punches != null ? clone.punches : clone.punches_json);
     clone.punches = clonePunches(punches);
     clone.punches_json = JSON.stringify(clone.punches);
-    const rawBreak = clone.break_minutes != null ? clone.break_minutes : clone.break;
-    const breakMinutes = Math.max(0, Math.round(Number(rawBreak) || 0));
-    clone.break_minutes = breakMinutes;
     const summary = summarizePunches(clone.punches);
     if (clone.punches.length) {
       let worked = summary.totalMinutes;
-      if (breakMinutes > 0) worked = Math.max(0, worked - breakMinutes);
       if (clone.duration_minutes != null && Number.isFinite(Number(clone.duration_minutes))) {
         clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes)));
       } else {
         clone.duration_minutes = Math.max(0, Math.round(worked));
       }
-      clone.start_time = normalizeTimeValue(clone.start_time);
-      clone.end_time = normalizeTimeValue(clone.end_time);
     } else {
       clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes) || 0));
-      clone.start_time = normalizeTimeValue(clone.start_time);
-      clone.end_time = normalizeTimeValue(clone.end_time);
-      if (clone.break_minutes > clone.duration_minutes) clone.break_minutes = clone.duration_minutes;
     }
     clone.open_punch_count = summary.openCount || 0;
     delete clone.break;
@@ -786,14 +776,14 @@
     const openCount = summarizePunches(punches).openCount;
     if (punchToggleBtn) {
       punchToggleBtn.textContent = openCount > 0 ? 'Punch Out' : 'Punch In';
-      punchToggleBtn.disabled = !hasContract || state.punchDraftSaving;
+      punchToggleBtn.disabled = !hasContract;
     }
     if (punchSaveBtn) {
-      punchSaveBtn.disabled = !hasContract || state.punchDraftSaving || !hasPunches;
+      punchSaveBtn.disabled = !hasContract || !hasPunches;
       punchSaveBtn.textContent = draft.entryId ? 'Update Entry' : 'Add Entry';
     }
     if (punchCancelBtn) {
-      punchCancelBtn.disabled = !hasContract || state.punchDraftSaving || !draft.dirty;
+      punchCancelBtn.disabled = !hasContract || !draft.dirty;
       punchCancelBtn.style.display = draft.dirty ? 'inline-flex' : 'none';
     }
   }
@@ -844,26 +834,45 @@
       date: draft.date,
       contract_id: draft.contractId,
       punches,
-      start_time: summary.earliest,
-      end_time: summary.openCount > 0 ? '' : summary.latest,
       duration_minutes: roundedMinutes,
-      break_minutes: 0,
       round_interval: getRoundInterval(),
       entry_type: 'advanced'
     };
     if (draft.entryId) payload.id = draft.entryId;
-    state.punchDraftSaving = true;
+
+    // Optimistic update: Add entry to UI immediately for new entries
+    let optimisticEntry = null;
+    if (!draft.entryId) {
+      optimisticEntry = {
+        id: 'temp_' + Date.now(),
+        ...payload,
+        created_at: isoDateTime(new Date())
+      };
+      state.entries.unshift(sanitizeEntry(optimisticEntry));
+      saveCache();
+      renderEntries();
+    }
+
     setStatus('Saving punches...', 'warn');
     renderPunchDraft();
+
     const onSuccess = (res) => {
-      state.punchDraftSaving = false;
       if (res && res.success && res.entry) {
         const sanitized = sanitizeEntry(res.entry);
-        const idx = state.entries.findIndex((e) => e.id === sanitized.id);
-        if (idx > -1) {
-          state.entries[idx] = sanitized;
+        if (optimisticEntry) {
+          // Replace optimistic entry with real one
+          const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+          if (idx > -1) {
+            state.entries[idx] = sanitized;
+          }
         } else {
-          state.entries.push(sanitized);
+          // Update existing entry
+          const idx = state.entries.findIndex((e) => e.id === sanitized.id);
+          if (idx > -1) {
+            state.entries[idx] = sanitized;
+          } else {
+            state.entries.push(sanitized);
+          }
         }
         state.punchDraft = {
           entryId: sanitized.id,
@@ -876,15 +885,34 @@
         renderEntries();
         setStatus('Punches saved', 'success');
       } else {
+        // Remove optimistic entry on failure
+        if (optimisticEntry) {
+          const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+          if (idx > -1) {
+            state.entries.splice(idx, 1);
+            saveCache();
+            renderEntries();
+          }
+        }
         setStatus('Punch save failed', 'error');
       }
       renderPunchDraft();
     };
+
     const onFailure = () => {
-      state.punchDraftSaving = false;
+      // Remove optimistic entry on failure
+      if (optimisticEntry) {
+        const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+        if (idx > -1) {
+          state.entries.splice(idx, 1);
+          saveCache();
+          renderEntries();
+        }
+      }
       setStatus('Punch save failed', 'error');
       renderPunchDraft();
     };
+
     if (draft.entryId) {
       google.script.run
         .withSuccessHandler(onSuccess)
@@ -964,7 +992,6 @@
   const manualContract = document.getElementById('manual-contract');
   const manualContractWarning = document.getElementById('manual-contract-warning');
   const manualHoursInput = document.getElementById('manual-hours');
-  const manualBreakInput = document.getElementById('manual-break');
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
 
@@ -1061,13 +1088,12 @@
       return acc + (end - start);
     }, 0);
     if (!totalMinutes && entry.duration_minutes != null) {
-      totalMinutes = Number(entry.duration_minutes) + Number(entry.break_minutes || 0);
+      totalMinutes = Number(entry.duration_minutes);
     }
     if (manualHoursInput) {
       const hoursValue = totalMinutes > 0 ? formatDecimalHours(totalMinutes / 60) : '';
       manualHoursInput.value = hoursValue ? hoursValue : '';
     }
-    if (manualBreakInput) manualBreakInput.value = Number(entry.break_minutes || 0);
     state.editingEntryId = isEdit ? entry.id : null;
     state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     setManualMode(!!isEdit);
@@ -1081,7 +1107,6 @@
     state.currentTab = 'manual';
     setManualMode(false);
     if (manualHoursInput) manualHoursInput.value = '';
-    if (manualBreakInput) manualBreakInput.value = '0';
     updateManualContractOptions();
     updateBasicSaveEnabled();
   }
@@ -1107,11 +1132,6 @@
       alert('Total hours must be greater than zero.');
       return null;
     }
-    const breakMinutes = manualBreakInput ? Math.max(0, Math.round(Number(manualBreakInput.value || 0))) : 0;
-    if (breakMinutes >= totalMinutes) {
-      alert('Break must be shorter than the total time.');
-      return null;
-    }
     const contractId = manualContract ? manualContract.value : '';
     if (!contractId) {
       alert('Select a contract for this date.');
@@ -1127,15 +1147,11 @@
       return null;
     }
     const punches = [{ in: '00:00', out: minutesToTime(totalMinutes) }];
-    const workedMinutes = Math.max(0, totalMinutes - breakMinutes);
-    const roundedMinutes = roundDuration(workedMinutes);
+    const roundedMinutes = roundDuration(totalMinutes);
     return {
       date,
       punches,
-      start_time: '',
-      end_time: '',
       duration_minutes: roundedMinutes,
-      break_minutes: breakMinutes,
       contract_id: contractId,
       round_interval: getRoundInterval(),
       entry_type: 'basic'
@@ -1240,15 +1256,8 @@
   }
 
   if (manualHoursInput) manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
-  if (manualBreakInput) {
-    manualBreakInput.addEventListener('input', () => {
-      if (Number(manualBreakInput.value || 0) < 0) manualBreakInput.value = '0';
-      updateBasicSaveEnabled();
-    });
-  }
 
   if (manualHoursInput) manualHoursInput.value = '';
-  if (manualBreakInput) manualBreakInput.value = '0';
   updateBasicSaveEnabled();
   setManualDate(todayIso());
 
@@ -2615,10 +2624,8 @@
   function getCurrentFormData(type) {
     if (type === 'basic') {
       const hours = Number(manualHoursInput ? manualHoursInput.value : '');
-      const breakMinutes = Number(manualBreakInput ? manualBreakInput.value : '');
       return {
-        duration_minutes: Math.round(hours * 60),
-        break_minutes: breakMinutes || 0
+        duration_minutes: Math.round(hours * 60)
       };
     } else if (type === 'advanced') {
       const draft = state.punchDraft;
@@ -2634,7 +2641,6 @@
     if (type === 'basic') {
       const hours = (defaultData.duration_minutes || 0) / 60;
       if (manualHoursInput) manualHoursInput.value = hours > 0 ? hours.toString() : '';
-      if (manualBreakInput) manualBreakInput.value = (defaultData.break_minutes || 0).toString();
       updateBasicSaveEnabled();
     } else if (type === 'advanced') {
       // Apply punches to advanced form
@@ -2723,7 +2729,7 @@
 
       if (state_defaults.currentDefaultType === 'basic') {
         const hours = (defaultData.duration_minutes || 0) / 60;
-        details.textContent = `${hours} hours, ${defaultData.break_minutes || 0} min break`;
+        details.textContent = `${hours} hours`;
       } else {
         const punchCount = (defaultData.punches || []).length;
         details.textContent = `${punchCount} punch ${punchCount === 1 ? 'range' : 'ranges'}`;
@@ -2797,7 +2803,7 @@
 
       if (state_defaults.currentDefaultType === 'basic') {
         const hours = (defaultData.duration_minutes || 0) / 60;
-        details.textContent = `${hours} hours, ${defaultData.break_minutes || 0} min break`;
+        details.textContent = `${hours} hours`;
       } else {
         const punchCount = (defaultData.punches || []).length;
         details.textContent = `${punchCount} punch ${punchCount === 1 ? 'range' : 'ranges'}`;
@@ -2846,10 +2852,6 @@
           <div class="ts-col">
             <label>Total hours</label>
             <input type="number" id="edit-default-hours" min="0" step="0.01" value="${hours}" />
-          </div>
-          <div class="ts-col">
-            <label>Break (minutes)</label>
-            <input type="number" id="edit-default-break" min="0" step="1" value="${defaultData.break_minutes || 0}" />
           </div>
         </div>
       `;
@@ -2999,9 +3001,7 @@
     let formData;
     if (type === 'basic') {
       const hoursInput = document.getElementById('edit-default-hours');
-      const breakInput = document.getElementById('edit-default-break');
       const hours = Number(hoursInput ? hoursInput.value : '');
-      const breakMinutes = Number(breakInput ? breakInput.value : '');
 
       if (!Number.isFinite(hours) || hours <= 0) {
         setStatus('Please enter valid hours', 'warn');
@@ -3009,8 +3009,7 @@
       }
 
       formData = {
-        duration_minutes: Math.round(hours * 60),
-        break_minutes: breakMinutes || 0
+        duration_minutes: Math.round(hours * 60)
       };
     } else {
       const container = document.getElementById('edit-punch-rows');

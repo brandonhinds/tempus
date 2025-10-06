@@ -5,7 +5,7 @@ function getOrCreateSheet(name) {
   if (!sh) {
     sh = ss.insertSheet(name);
     if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,10).setValues([['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at','punches_json','entry_type']]);
+      sh.getRange(1,1,1,7).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type']]);
     } else if (name === 'user_settings') {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
@@ -15,38 +15,18 @@ function getOrCreateSheet(name) {
     }
   }
   if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','start_time','end_time','duration_minutes','break_minutes','contract_id','created_at','punches_json','entry_type'];
+    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type'];
     const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
     const headerRange = sh.getRange(1, 1, 1, lastColumn);
     const headers = headerRange.getValues()[0];
-    const descriptionIndex = headers.indexOf('description');
-    const hasBreak = headers.indexOf('break_minutes') !== -1;
-    if (!hasBreak) {
-      if (descriptionIndex !== -1) {
-        sh.getRange(1, descriptionIndex + 1).setValue('break_minutes');
-        const lastRow = sh.getLastRow();
-        if (lastRow > 1) {
-          sh.getRange(2, descriptionIndex + 1, lastRow - 1, 1).setValue(0);
-        }
-      } else {
-        const durationIndex = headers.indexOf('duration_minutes');
-        const insertPosition = durationIndex === -1 ? expectedHeaders.length : durationIndex + 2;
-        sh.insertColumnBefore(insertPosition);
-        sh.getRange(1, insertPosition).setValue('break_minutes');
-        const rowCount = sh.getLastRow();
-        if (rowCount > 1) {
-          sh.getRange(2, insertPosition, rowCount - 1, 1).setValue(0);
-        }
-      }
-    }
     const projectIndex = headers.indexOf('project');
     const hasContract = headers.indexOf('contract_id') !== -1;
     if (!hasContract) {
       if (projectIndex !== -1) {
         sh.getRange(1, projectIndex + 1).setValue('contract_id');
       } else {
-        const insertPositionForContract = headers.indexOf('break_minutes');
-        const insertBefore = insertPositionForContract === -1 ? expectedHeaders.length : insertPositionForContract + 2;
+        const durationIndex = headers.indexOf('duration_minutes');
+        const insertBefore = durationIndex === -1 ? expectedHeaders.length : durationIndex + 2;
         sh.insertColumnBefore(insertBefore);
         sh.getRange(1, insertBefore).setValue('contract_id');
       }
@@ -76,11 +56,9 @@ function getOrCreateSheet(name) {
       sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
     }
     sh.getRange('B:B').setNumberFormat('@');
-    sh.getRange('C:D').setNumberFormat('@');
-    sh.getRange('F:F').setNumberFormat('0');
-    sh.getRange('H:H').setNumberFormat('@');
-    sh.getRange('I:I').setNumberFormat('@');
-    sh.getRange('J:J').setNumberFormat('@');
+    sh.getRange('E:E').setNumberFormat('@');
+    sh.getRange('F:F').setNumberFormat('@');
+    sh.getRange('G:G').setNumberFormat('@');
   }
   if (name === 'contracts') {
     sh.getRange('C:D').setNumberFormat('@');
