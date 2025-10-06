@@ -500,6 +500,15 @@
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
+
+      // Set initial tab based on today's entry type
+      const today = todayIso();
+      const todayEntry = state.entries.find(entry => entry.date === today);
+      if (todayEntry && todayEntry.entry_type === 'advanced') {
+        activateTab('punch');
+        if (punchDate) punchDate.value = today;
+        ensurePunchDraft(todayEntry.contract_id);
+      }
       updateContractMap();
       applyTheme((state.settings && state.settings.theme) || 'dark');
     } catch (e) {}
@@ -540,11 +549,22 @@
       const el = document.getElementById('tab-' + pane);
       if (el) el.style.display = pane === id ? 'block' : 'none';
     });
+
+    // When switching to advanced mode, sync the punch date with the selected calendar date
+    if (id === 'punch' && state.selectedCalendarDate && punchDate) {
+      punchDate.value = state.selectedCalendarDate;
+      // Clear any existing draft to prevent inheriting data from other dates
+      state.punchDraft = null;
+      ensurePunchDraft();
+    }
+
     state.currentTab = id;
   }
   $$('.ts-tab').forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
   });
+
+  // Default to manual tab initially (will be updated after cache loads)
   activateTab('manual');
 
   // Punch controls
