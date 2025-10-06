@@ -651,6 +651,8 @@
 
   // Punch controls
   const punchDate = document.getElementById('punch-date');
+  const punchHourType = document.getElementById('punch-hour-type');
+  const punchHourTypeCol = document.getElementById('punch-hour-type-col');
   const punchContract = document.getElementById('punch-contract');
   const punchContractWarning = document.getElementById('punch-contract-warning');
   const punchToggleBtn = document.getElementById('btn-punch-toggle');
@@ -742,6 +744,13 @@
       punches: entry ? clonePunches(entry.punches || []) : [{ in: '', out: '' }],
       dirty: false
     };
+
+    // Set hour type if editing existing entry
+    if (punchHourType && entry && entry.hour_type_id) {
+      punchHourType.value = entry.hour_type_id;
+      updatePunchContractVisibility();
+    }
+
     renderPunchDraft();
   }
 
@@ -924,10 +933,19 @@
   function persistPunchDraft(options = {}) {
     const { requireClosed = false } = options;
     const draft = state.punchDraft;
-    if (!draft || !draft.contractId) {
-      alert('Select a contract before saving punches.');
-      return;
+
+    // Get hour type
+    const hourTypeId = punchHourType ? punchHourType.value : getDefaultHourTypeId();
+    const selectedHourType = state.hourTypeMap[hourTypeId];
+
+    // Validate contract based on hour type
+    if (selectedHourType && selectedHourType.requires_contract) {
+      if (!draft || !draft.contractId) {
+        alert('Select a contract before saving punches.');
+        return;
+      }
     }
+
     const punches = normalizePunchList(draft.punches || []);
     const validationError = validatePunches(punches, { allowOpen: !requireClosed, requireClosed });
     if (validationError) {
@@ -938,7 +956,8 @@
     const roundedMinutes = summary.totalMinutes > 0 ? roundDuration(summary.totalMinutes) : 0;
     const payload = {
       date: draft.date,
-      contract_id: draft.contractId,
+      contract_id: draft.contractId || '',
+      hour_type_id: hourTypeId,
       punches,
       duration_minutes: roundedMinutes,
       round_interval: getRoundInterval(),
@@ -1132,6 +1151,8 @@
 
   // Manual form helpers
   const manualDate = document.getElementById('manual-date');
+  const manualHourType = document.getElementById('manual-hour-type');
+  const manualHourTypeCol = document.getElementById('manual-hour-type-col');
   const manualContract = document.getElementById('manual-contract');
   const manualContractWarning = document.getElementById('manual-contract-warning');
   const manualHoursInput = document.getElementById('manual-hours');
@@ -1141,9 +1162,23 @@
 
   function updateBasicSaveEnabled() {
     if (!manualSaveBtn) return;
-    const hasContract = !!(manualContract && manualContract.value);
+
     const hours = Number(manualHoursInput ? manualHoursInput.value : '');
-    manualSaveBtn.disabled = !(hasContract && Number.isFinite(hours) && hours > 0);
+    const validHours = Number.isFinite(hours) && hours > 0;
+
+    // Check if contract is required based on hour type
+    let contractValid = true;
+    if (manualHourType && manualHourType.value) {
+      const selectedHourType = state.hourTypeMap[manualHourType.value];
+      if (selectedHourType && selectedHourType.requires_contract) {
+        contractValid = !!(manualContract && manualContract.value);
+      }
+    } else {
+      // Default behavior when no hour type selected or feature disabled
+      contractValid = !!(manualContract && manualContract.value);
+    }
+
+    manualSaveBtn.disabled = !(contractValid && validHours);
   }
 
   function updateManualContractOptions(preferredContractId) {
@@ -1239,6 +1274,12 @@
       const hoursValue = totalMinutes > 0 ? formatDecimalHours(totalMinutes / 60) : '';
       manualHoursInput.value = hoursValue ? hoursValue : '';
     }
+    // Set hour type
+    if (manualHourType && entry.hour_type_id) {
+      manualHourType.value = entry.hour_type_id;
+      updateManualContractVisibility();
+    }
+
     state.editingEntryId = isEdit ? entry.id : null;
     state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     setManualMode(!!isEdit);
@@ -1277,20 +1318,28 @@
       alert('Total hours must be greater than zero.');
       return null;
     }
+    // Get hour type
+    const hourTypeId = manualHourType ? manualHourType.value : getDefaultHourTypeId();
+    const selectedHourType = state.hourTypeMap[hourTypeId];
+
+    // Validate contract based on hour type
     const contractId = manualContract ? manualContract.value : '';
-    if (!contractId) {
-      alert('Select a contract for this date.');
-      return null;
+    if (selectedHourType && selectedHourType.requires_contract) {
+      if (!contractId) {
+        alert('Select a contract for this date.');
+        return null;
+      }
+      const contract = state.contractMap[contractId];
+      if (!contract) {
+        alert('Selected contract is no longer available.');
+        return null;
+      }
+      if (!contractIsValid(contract, date) && !state.editingEntryId) {
+        alert('Selected contract is not valid for this date.');
+        return null;
+      }
     }
-    const contract = state.contractMap[contractId];
-    if (!contract) {
-      alert('Selected contract is no longer available.');
-      return null;
-    }
-    if (!contractIsValid(contract, date) && !state.editingEntryId) {
-      alert('Selected contract is not valid for this date.');
-      return null;
-    }
+
     const punches = [{ in: '00:00', out: minutesToTime(totalMinutes) }];
     const roundedMinutes = roundDuration(totalMinutes);
     return {
@@ -1298,6 +1347,7 @@
       punches,
       duration_minutes: roundedMinutes,
       contract_id: contractId,
+      hour_type_id: hourTypeId,
       round_interval: getRoundInterval(),
       entry_type: 'basic'
     };
@@ -1438,6 +1488,10 @@
   }
 
   if (manualHoursInput) manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
+
+  if (manualHourType) {
+    manualHourType.addEventListener('change', updateBasicSaveEnabled);
+  }
 
   if (manualHoursInput) manualHoursInput.value = '';
   updateBasicSaveEnabled();
@@ -2223,6 +2277,7 @@
     if (hourTypesFlag.enabled) {
       loadHourTypes();
     }
+    updateHourTypeFormVisibility();
   }
 
   if (contractSaveBtn) {
@@ -2289,7 +2344,13 @@
     return state.entries.filter((entry) => entry.date && entry.date.startsWith(prefix));
   }
   function buildIncomeSummary(year, month) {
-    const entries = entriesForMonth(year, month);
+    const allEntries = entriesForMonth(year, month);
+    // Filter to only include entries from hour types that contribute to income
+    const entries = allEntries.filter(entry => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      const hourType = state.hourTypeMap[hourTypeId];
+      return hourType ? hourType.contributes_to_income : true; // Default to true for backwards compatibility
+    });
     const periodStart = new Date(year, month, 1);
     const salarySacrifice = getSalarySacrificePlaceholder();
     const extraSuper = getExtraSuperPlaceholder();
@@ -2542,9 +2603,36 @@
       return map;
     }, {});
   }
+
+  function minutesByDateAndHourType() {
+    return state.entries.reduce((map, entry) => {
+      if (!entry.date) return map;
+      const date = entry.date;
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+
+      if (!map[date]) map[date] = {};
+      if (!map[date][hourTypeId]) map[date][hourTypeId] = 0;
+
+      map[date][hourTypeId] += Number(entry.duration_minutes) || 0;
+      return map;
+    }, {});
+  }
+
+  function getDefaultHourType() {
+    if (!state.hourTypes.length) return null;
+    return state.hourTypes.find(ht => ht.is_default) || state.hourTypes[0];
+  }
+
+  function getFeatureFlag(flagKey) {
+    const flag = state.featureFlags[flagKey] || DEFAULT_FEATURE_FLAGS[flagKey];
+    return flag ? flag.enabled : false;
+  }
   function renderCalendar() {
     ensureCalendarState();
     const totals = minutesByDate();
+    const hourTypeTotals = minutesByDateAndHourType();
+    const defaultHourType = getDefaultHourType();
+    const defaultHourTypeId = defaultHourType?.id || getDefaultHourTypeId();
     const grid = document.getElementById('calendar-grid');
     const label = document.getElementById('calendar-label');
     const monthTotalEl = document.getElementById('calendar-month-total');
@@ -2557,8 +2645,31 @@
       }
       return acc;
     }, 0);
+
+    // If hour types are enabled, also calculate income-contributing hours
+    let monthIncomeMinutes = 0;
+    if (getFeatureFlag('hour_types') && state.hourTypes.length > 0) {
+      const monthEntries = state.entries.filter(entry =>
+        entry.date && entry.date.startsWith(monthKey)
+      );
+      monthIncomeMinutes = monthEntries.reduce((acc, entry) => {
+        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+        const hourType = state.hourTypeMap[hourTypeId];
+        const contributesToIncome = hourType ? hourType.contributes_to_income : true;
+        if (contributesToIncome) {
+          acc += Number(entry.duration_minutes) || 0;
+        }
+        return acc;
+      }, 0);
+    }
+
     const roundedMonthTotal = roundDuration(monthTotalMinutes);
-    monthTotalEl.textContent = `Total hours: ${formatHours(roundedMonthTotal)}`;
+    if (getFeatureFlag('hour_types') && state.hourTypes.length > 0 && monthIncomeMinutes !== monthTotalMinutes) {
+      const roundedIncomeTotal = roundDuration(monthIncomeMinutes);
+      monthTotalEl.textContent = `Total hours: ${formatHours(roundedMonthTotal)} (${formatHours(roundedIncomeTotal)} billable)`;
+    } else {
+      monthTotalEl.textContent = `Total hours: ${formatHours(roundedMonthTotal)}`;
+    }
     grid.innerHTML = '';
     const start = calendarStartDate(state.calendar.year, state.calendar.month);
     for (let i = 0; i < 42; i++) {
@@ -2574,16 +2685,58 @@
       const dayEl = document.createElement('div');
       dayEl.className = 'ts-calendar-day';
       dayEl.textContent = current.getDate();
-      const totalEl = document.createElement('div');
-      totalEl.className = 'ts-calendar-total';
-      if (totalMinutes === 0) totalEl.classList.add('empty');
-      if (totalMinutes === 0) {
-        totalEl.textContent = state.showZeroHours ? '0' : '';
+
+      // Check if hour types feature is enabled and we have multiple hour types
+      const showHourTypes = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+      const dayHourTypes = hourTypeTotals[iso] || {};
+
+      if (showHourTypes && Object.keys(dayHourTypes).length > 0) {
+        // Show default hour type as main total
+        const defaultMinutes = dayHourTypes[defaultHourTypeId] || 0;
+        const totalEl = document.createElement('div');
+        totalEl.className = 'ts-calendar-total';
+        if (defaultMinutes === 0) totalEl.classList.add('empty');
+        if (defaultMinutes === 0) {
+          totalEl.textContent = state.showZeroHours ? '0' : '';
+        } else {
+          const roundedMinutes = roundDuration(defaultMinutes);
+          totalEl.textContent = formatHours(roundedMinutes);
+        }
+
+        // Show other hour types as small colored indicators
+        const otherTypesEl = document.createElement('div');
+        otherTypesEl.className = 'ts-calendar-hour-types';
+        Object.keys(dayHourTypes).forEach(hourTypeId => {
+          if (hourTypeId !== defaultHourTypeId && dayHourTypes[hourTypeId] > 0) {
+            const hourType = state.hourTypeMap[hourTypeId];
+            if (hourType) {
+              const minutes = dayHourTypes[hourTypeId];
+              const roundedMinutes = roundDuration(minutes);
+              const indicator = document.createElement('span');
+              indicator.className = 'ts-calendar-hour-type-indicator';
+              indicator.style.color = hourType.color;
+              indicator.textContent = formatHours(roundedMinutes);
+              indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
+              otherTypesEl.appendChild(indicator);
+            }
+          }
+        });
+
+        cell.append(dayEl, totalEl, otherTypesEl);
       } else {
-        const roundedMinutes = roundDuration(totalMinutes);
-        totalEl.textContent = formatHours(roundedMinutes);
+        // Original behavior - show total hours
+        const totalEl = document.createElement('div');
+        totalEl.className = 'ts-calendar-total';
+        if (totalMinutes === 0) totalEl.classList.add('empty');
+        if (totalMinutes === 0) {
+          totalEl.textContent = state.showZeroHours ? '0' : '';
+        } else {
+          const roundedMinutes = roundDuration(totalMinutes);
+          totalEl.textContent = formatHours(roundedMinutes);
+        }
+        cell.append(dayEl, totalEl);
       }
-      cell.append(dayEl, totalEl);
+
       cell.onclick = () => handleCalendarClick(iso);
       grid.appendChild(cell);
     }
@@ -3421,6 +3574,7 @@
         state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
         updateHourTypeMap();
         renderHourTypes();
+        updateHourTypeFormVisibility();
         saveCache();
         setStatus('Idle');
       })
@@ -3706,6 +3860,121 @@
       event.target.style.display = 'none';
     }
   });
+
+  // Hour Type Form Management
+  function updateHourTypeFormVisibility() {
+    const hourTypesEnabled = !!(state.featureFlags.hour_types && state.featureFlags.hour_types.enabled);
+    const hasMultipleTypes = state.hourTypes.length > 1;
+    const shouldShow = hourTypesEnabled && hasMultipleTypes;
+
+    if (manualHourTypeCol) {
+      manualHourTypeCol.style.display = shouldShow ? 'block' : 'none';
+    }
+    if (punchHourTypeCol) {
+      punchHourTypeCol.style.display = shouldShow ? 'block' : 'none';
+    }
+
+    if (shouldShow) {
+      populateHourTypeOptions();
+    }
+  }
+
+  function populateHourTypeOptions() {
+    if (!state.hourTypes.length) return;
+
+    [manualHourType, punchHourType].forEach(select => {
+      if (!select) return;
+
+      const currentValue = select.value;
+      select.innerHTML = '';
+
+      state.hourTypes.forEach(hourType => {
+        const option = document.createElement('option');
+        option.value = hourType.id;
+        option.textContent = hourType.name;
+        if (hourType.is_default && !currentValue) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+
+      // Restore previous selection if it still exists
+      if (currentValue && state.hourTypeMap[currentValue]) {
+        select.value = currentValue;
+      }
+
+      // Update contract visibility when hour type changes
+      if (select === manualHourType) {
+        updateManualContractVisibility();
+      } else if (select === punchHourType) {
+        updatePunchContractVisibility();
+      }
+    });
+  }
+
+  function updateManualContractVisibility() {
+    if (!manualHourType || !manualContract) return;
+
+    const selectedHourType = state.hourTypeMap[manualHourType.value];
+    if (selectedHourType && !selectedHourType.requires_contract) {
+      // Show "Not required" for non-contract hour types
+      manualContract.innerHTML = '<option value="">Not required (optional)</option>';
+      const validContracts = validContractsForDate(manualDate ? manualDate.value : todayIso());
+      validContracts.forEach(contract => {
+        const option = document.createElement('option');
+        option.value = contract.id;
+        option.textContent = contract.name;
+        manualContract.appendChild(option);
+      });
+      manualContract.style.fontStyle = 'italic';
+      manualContract.style.opacity = '0.8';
+    } else {
+      // Normal contract requirement
+      manualContract.style.fontStyle = 'normal';
+      manualContract.style.opacity = '1';
+      updateManualContractOptions();
+    }
+    updateBasicSaveEnabled();
+  }
+
+  function updatePunchContractVisibility() {
+    if (!punchHourType || !punchContract) return;
+
+    const selectedHourType = state.hourTypeMap[punchHourType.value];
+    if (selectedHourType && !selectedHourType.requires_contract) {
+      // Show "Not required" for non-contract hour types
+      punchContract.innerHTML = '<option value="">Not required (optional)</option>';
+      const validContracts = validContractsForDate(punchDate ? punchDate.value : todayIso());
+      validContracts.forEach(contract => {
+        const option = document.createElement('option');
+        option.value = contract.id;
+        option.textContent = contract.name;
+        punchContract.appendChild(option);
+      });
+      punchContract.style.fontStyle = 'italic';
+      punchContract.style.opacity = '0.8';
+    } else {
+      // Normal contract requirement
+      punchContract.style.fontStyle = 'normal';
+      punchContract.style.opacity = '1';
+      updatePunchContractOptions();
+    }
+  }
+
+  function getDefaultHourTypeId() {
+    if (!state.hourTypes.length) return null;
+    const defaultType = state.hourTypes.find(ht => ht.is_default);
+    return defaultType ? defaultType.id : state.hourTypes[0].id;
+  }
+
+  // Event listeners for hour type changes
+  if (manualHourType) {
+    manualHourType.addEventListener('change', updateManualContractVisibility);
+  }
+
+  if (punchHourType) {
+    punchHourType.addEventListener('change', updatePunchContractVisibility);
+  }
 
   // Call the main init function
   init();
