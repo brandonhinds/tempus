@@ -509,6 +509,7 @@
         if (punchDate) punchDate.value = today;
         ensurePunchDraft(todayEntry.contract_id);
       }
+      updateTabStates();
       updateContractMap();
       applyTheme((state.settings && state.settings.theme) || 'dark');
     } catch (e) {}
@@ -536,15 +537,31 @@
       (state.editingEntryType === 'basic' && id === 'punch') ||
       (state.editingEntryType === 'advanced' && id === 'manual')
     );
-    
-    if (isEditingEntry || isEditingPunch || isWrongEntryType) {
+
+    // Prevent switching tabs if the selected date already has data in the opposite format
+    const hasConflictingData = (() => {
+      if (!state.selectedCalendarDate) return false;
+      const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
+      if (!existingEntry) return false;
+
+      // Prevent switching to basic if date has advanced entry
+      if (id === 'manual' && existingEntry.entry_type === 'advanced') return true;
+      // Prevent switching to advanced if date has basic entry
+      if (id === 'punch' && existingEntry.entry_type === 'basic') return true;
+
+      return false;
+    })();
+
+    if (isEditingEntry || isEditingPunch || isWrongEntryType || hasConflictingData) {
       return;
     }
     
+    // Update tab visual states
     $$('.ts-tab').forEach((tab) => {
       const target = tab.getAttribute('data-tab');
       tab.classList.toggle('active', target === id);
     });
+    updateTabStates();
     ['manual', 'punch'].forEach((pane) => {
       const el = document.getElementById('tab-' + pane);
       if (el) el.style.display = pane === id ? 'block' : 'none';
@@ -564,6 +581,36 @@
     tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
   });
 
+  // Function to update tab disabled states
+  function updateTabStates() {
+    $$('.ts-tab').forEach((tab) => {
+      const target = tab.getAttribute('data-tab');
+
+      // Check if this tab should be disabled
+      let isDisabled = false;
+      let disabledReason = '';
+      if (state.selectedCalendarDate) {
+        const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
+        if (existingEntry) {
+          // Disable basic tab if date has advanced entry
+          if (target === 'manual' && existingEntry.entry_type === 'advanced') {
+            isDisabled = true;
+            disabledReason = 'This date already has an advanced entry';
+          }
+          // Disable advanced tab if date has basic entry
+          if (target === 'punch' && existingEntry.entry_type === 'basic') {
+            isDisabled = true;
+            disabledReason = 'This date already has a basic entry';
+          }
+        }
+      }
+
+      tab.style.opacity = isDisabled ? '0.4' : '1';
+      tab.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
+      tab.title = disabledReason;
+    });
+  }
+
   // Default to manual tab initially (will be updated after cache loads)
   activateTab('manual');
 
@@ -574,6 +621,7 @@
   const punchToggleBtn = document.getElementById('btn-punch-toggle');
   const punchSaveBtn = document.getElementById('btn-punch-save');
   const punchCancelBtn = document.getElementById('btn-punch-cancel');
+  const punchDeleteBtn = document.getElementById('btn-delete-punch');
   const punchList = document.getElementById('punch-range-list');
   const punchOpenWarning = document.getElementById('punch-open-warning');
   const punchSummary = document.getElementById('punch-summary');
@@ -806,6 +854,9 @@
       punchCancelBtn.disabled = !hasContract || !draft.dirty;
       punchCancelBtn.style.display = draft.dirty ? 'inline-flex' : 'none';
     }
+    if (punchDeleteBtn) {
+      punchDeleteBtn.style.display = draft.entryId ? 'inline-flex' : 'none';
+    }
   }
 
   function updatePunchSummary() {
@@ -989,9 +1040,46 @@
     ensurePunchDraft(state.punchDraft.contractId);
   }
 
+  function handlePunchDelete() {
+    if (!state.punchDraft || !state.punchDraft.entryId) return;
+
+    if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
+      return;
+    }
+
+    const entryId = state.punchDraft.entryId;
+    const currentDate = state.punchDraft.date;
+
+    setStatus('Deleting entry...', 'warn');
+
+    google.script.run
+      .withSuccessHandler(() => {
+        // Remove from local state
+        const idx = state.entries.findIndex(e => e.id === entryId);
+        if (idx > -1) {
+          state.entries.splice(idx, 1);
+        }
+
+        // Clear punch draft and start fresh
+        state.punchDraft = null;
+        if (punchDate) punchDate.value = currentDate;
+        ensurePunchDraft();
+
+        saveCache();
+        renderEntries();
+        updateTabStates();
+        setStatus('Entry deleted', 'success');
+      })
+      .withFailureHandler(() => {
+        setStatus('Delete failed', 'error');
+      })
+      .api_deleteEntry(entryId);
+  }
+
   if (punchToggleBtn) punchToggleBtn.onclick = handlePunchToggle;
   if (punchSaveBtn) punchSaveBtn.onclick = handlePunchSave;
   if (punchCancelBtn) punchCancelBtn.onclick = handlePunchDiscard;
+  if (punchDeleteBtn) punchDeleteBtn.onclick = handlePunchDelete;
   if (punchDate) {
     punchDate.addEventListener('change', () => {
       state.selectedCalendarDate = punchDate.value;
@@ -1014,6 +1102,7 @@
   const manualHoursInput = document.getElementById('manual-hours');
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
+  const manualDeleteBtn = document.getElementById('btn-delete-manual');
 
   function updateBasicSaveEnabled() {
     if (!manualSaveBtn) return;
@@ -1091,6 +1180,7 @@
   function setManualMode(isEdit) {
     if (manualSaveBtn) manualSaveBtn.textContent = isEdit ? 'Update Entry' : 'Add Entry';
     if (manualCancelBtn) manualCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+    if (manualDeleteBtn) manualDeleteBtn.style.display = isEdit ? 'inline-flex' : 'none';
   }
 
   function populateManualForm(entry, isEdit) {
@@ -1249,6 +1339,43 @@
     clearManualEditing();
     activateTab('manual');
   };
+
+  if (manualDeleteBtn) {
+    manualDeleteBtn.onclick = function () {
+      if (!state.editingEntryId) return;
+
+      if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
+        return;
+      }
+
+      const entryId = state.editingEntryId;
+      const currentDate = manualDate ? manualDate.value : todayIso();
+
+      setStatus('Deleting entry...', 'warn');
+
+      google.script.run
+        .withSuccessHandler(() => {
+          // Remove from local state
+          const idx = state.entries.findIndex(e => e.id === entryId);
+          if (idx > -1) {
+            state.entries.splice(idx, 1);
+          }
+
+          // Clear editing state and reset form
+          clearManualEditing();
+          setManualDate(currentDate);
+
+          saveCache();
+          renderEntries();
+          updateTabStates();
+          setStatus('Entry deleted', 'success');
+        })
+        .withFailureHandler(() => {
+          setStatus('Delete failed', 'error');
+        })
+        .api_deleteEntry(entryId);
+    };
+  }
 
   if (manualDate) {
     manualDate.addEventListener('change', () => {
@@ -2421,6 +2548,7 @@
   function handleCalendarClick(dateIso) {
     state.selectedCalendarDate = dateIso;
     setManualDate(dateIso);
+    updateTabStates();
     renderCalendar();
     
     // Check if there's an existing entry for this date
@@ -2536,6 +2664,7 @@
         state.entries = (entries || []).map(sanitizeEntry);
         saveCache();
         renderEntries();
+        updateTabStates();
         ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
         setStatus('Synced', 'success');
       })

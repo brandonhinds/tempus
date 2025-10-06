@@ -1,7 +1,5 @@
 The next things we want to include:
 
-- Fix being able to switch back and forth between basic and advanced views for existing dates.
-
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
 - Add the ability to add salary sacrifice options, as well as a novated lease.
