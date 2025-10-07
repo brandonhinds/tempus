@@ -33,7 +33,8 @@
     pendingTaxRequest: null,
     selectedContractId: '',
     punchDraft: null,
-    currentTab: 'manual'
+    currentTab: 'manual',
+    calendarFilteredHourTypes: null
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'settings'];
@@ -563,32 +564,39 @@
 
   // Tabs
   function activateTab(id) {
-    // Prevent switching tabs when editing an existing entry or when punch draft has changes
-    const isEditingEntry = state.editingEntryId && state.currentTab !== id;
-    const isEditingPunch = state.punchDraft && state.punchDraft.dirty && state.currentTab !== id;
-    
-    // Also prevent switching if we're editing a basic entry and trying to switch to advanced, or vice versa
-    const isWrongEntryType = state.editingEntryId && (
-      (state.editingEntryType === 'basic' && id === 'punch') ||
-      (state.editingEntryType === 'advanced' && id === 'manual')
-    );
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
 
-    // Prevent switching tabs if the selected date already has data in the opposite format
-    const hasConflictingData = (() => {
-      if (!state.selectedCalendarDate) return false;
-      const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
-      if (!existingEntry) return false;
+    // With hour types enabled, allow switching between tabs to create entries for different hour types
+    if (!hourTypesEnabled) {
+      // Original validation logic when hour types are disabled
+      const isEditingEntry = state.editingEntryId && state.currentTab !== id;
+      const isEditingPunch = state.punchDraft && state.punchDraft.dirty && state.currentTab !== id;
 
-      // Prevent switching to basic if date has advanced entry
-      if (id === 'manual' && existingEntry.entry_type === 'advanced') return true;
-      // Prevent switching to advanced if date has basic entry
-      if (id === 'punch' && existingEntry.entry_type === 'basic') return true;
+      const isWrongEntryType = state.editingEntryId && (
+        (state.editingEntryType === 'basic' && id === 'punch') ||
+        (state.editingEntryType === 'advanced' && id === 'manual')
+      );
 
-      return false;
-    })();
+      const hasConflictingData = (() => {
+        if (!state.selectedCalendarDate) return false;
+        const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
+        if (!existingEntry) return false;
 
-    if (isEditingEntry || isEditingPunch || isWrongEntryType || hasConflictingData) {
-      return;
+        if (id === 'manual' && existingEntry.entry_type === 'advanced') return true;
+        if (id === 'punch' && existingEntry.entry_type === 'basic') return true;
+
+        return false;
+      })();
+
+      if (isEditingEntry || isEditingPunch || isWrongEntryType || hasConflictingData) {
+        return;
+      }
+    } else {
+      // With hour types enabled, only prevent switching if the current entry has unsaved changes
+      const hasUnsavedChanges = state.punchDraft && state.punchDraft.dirty && state.currentTab !== id;
+      if (hasUnsavedChanges) {
+        return;
+      }
     }
     
     // Update tab visual states
@@ -602,10 +610,127 @@
       if (el) el.style.display = pane === id ? 'block' : 'none';
     });
 
-    // When switching to advanced mode, sync the punch date with the selected calendar date
-    if (id === 'punch' && state.selectedCalendarDate && punchDate) {
+    const previousTab = state.currentTab;
+    const switchingTabs = previousTab && previousTab !== id;
+
+    // When switching tabs with hour types enabled, preserve hour type and date
+    if (hourTypesEnabled && switchingTabs) {
+      let currentDate = null;
+      let currentHourType = null;
+
+      // Get current values from the previous tab
+      if (previousTab === 'manual' && manualDate && manualHourType) {
+        currentDate = manualDate.value;
+        currentHourType = manualHourType.value;
+      } else if (previousTab === 'punch' && punchDate && punchHourType) {
+        currentDate = punchDate.value;
+        currentHourType = punchHourType.value;
+      }
+
+      // Apply to the new tab
+      if (id === 'punch' && currentDate && currentHourType) {
+        if (punchDate) punchDate.value = currentDate;
+        if (punchHourType) punchHourType.value = currentHourType;
+
+        // Check if there's ANY entry (basic or advanced) for this date + hour type
+        const anyEntry = state.entries.find(e =>
+          e.date === currentDate &&
+          (e.hour_type_id || getDefaultHourTypeId()) === currentHourType
+        );
+
+        if (anyEntry && anyEntry.entry_type === 'basic') {
+          // Hour type exists as basic entry - prevent switching to advanced
+          // Switch back to the original tab
+          state.currentTab = previousTab;
+          $$('.ts-tab').forEach((tab) => {
+            const target = tab.getAttribute('data-tab');
+            tab.classList.toggle('active', target === previousTab);
+          });
+          ['manual', 'punch'].forEach((pane) => {
+            const el = document.getElementById('tab-' + pane);
+            if (el) el.style.display = pane === previousTab ? 'block' : 'none';
+          });
+          alert('This hour type already has a basic entry for this date. Please use the hour type dropdown to switch between different hour types.');
+          return;
+        }
+
+        // Look for existing advanced entry with this hour type
+        const existingEntry = anyEntry && anyEntry.entry_type === 'advanced' ? anyEntry : null;
+
+        if (existingEntry) {
+          // Load existing entry
+          state.editingEntryId = existingEntry.id;
+          state.editingEntryType = existingEntry.entry_type;
+          updatePunchContractOptions(existingEntry.contract_id);
+          if (punchContract) punchContract.value = existingEntry.contract_id || '';
+          state.punchDraft = {
+            entryId: existingEntry.id,
+            contractId: existingEntry.contract_id || '',
+            date: existingEntry.date,
+            punches: clonePunches(existingEntry.punches || []),
+            dirty: false
+          };
+          renderPunchDraft();
+          updatePunchSummary();
+        } else {
+          // Create new entry
+          state.editingEntryId = null;
+          state.editingEntryType = null;
+          updatePunchContractOptions();
+          state.punchDraft = {
+            entryId: null,
+            contractId: punchContract ? punchContract.value : '',
+            date: currentDate,
+            punches: [{ in: '', out: '' }],
+            dirty: false
+          };
+          renderPunchDraft();
+          updatePunchSummary();
+        }
+        updatePunchContractVisibility();
+      } else if (id === 'manual' && currentDate && currentHourType) {
+        if (manualDate) manualDate.value = currentDate;
+        if (manualHourType) manualHourType.value = currentHourType;
+
+        // Check if there's ANY entry (basic or advanced) for this date + hour type
+        const anyEntry = state.entries.find(e =>
+          e.date === currentDate &&
+          (e.hour_type_id || getDefaultHourTypeId()) === currentHourType
+        );
+
+        if (anyEntry && anyEntry.entry_type === 'advanced') {
+          // Hour type exists as advanced entry - prevent switching to basic
+          // Switch back to the original tab
+          state.currentTab = previousTab;
+          $$('.ts-tab').forEach((tab) => {
+            const target = tab.getAttribute('data-tab');
+            tab.classList.toggle('active', target === previousTab);
+          });
+          ['manual', 'punch'].forEach((pane) => {
+            const el = document.getElementById('tab-' + pane);
+            if (el) el.style.display = pane === previousTab ? 'block' : 'none';
+          });
+          alert('This hour type already has an advanced entry for this date. Please use the hour type dropdown to switch between different hour types.');
+          return;
+        }
+
+        // Look for existing basic entry with this hour type
+        const existingEntry = anyEntry && anyEntry.entry_type === 'basic' ? anyEntry : null;
+
+        if (existingEntry) {
+          // Load existing entry
+          populateManualForm(existingEntry, true);
+        } else {
+          // Create new entry
+          clearManualEditing();
+          if (manualDate) manualDate.value = currentDate;
+          if (manualHourType) manualHourType.value = currentHourType;
+          updateManualContractVisibility();
+        }
+      }
+    } else if (id === 'punch' && state.selectedCalendarDate && punchDate) {
+      // Original behavior when hour types disabled
       punchDate.value = state.selectedCalendarDate;
-      // Clear any existing draft to prevent inheriting data from other dates
       state.punchDraft = null;
       ensurePunchDraft();
     }
@@ -618,13 +743,40 @@
 
   // Function to update tab disabled states
   function updateTabStates() {
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+
     $$('.ts-tab').forEach((tab) => {
       const target = tab.getAttribute('data-tab');
 
       // Check if this tab should be disabled
       let isDisabled = false;
       let disabledReason = '';
-      if (state.selectedCalendarDate) {
+
+      if (hourTypesEnabled && state.selectedCalendarDate) {
+        // With hour types enabled, check if the CURRENT hour type has an entry in the opposite format
+        const currentHourType = state.currentTab === 'manual'
+          ? (manualHourType ? manualHourType.value : getDefaultHourTypeId())
+          : (punchHourType ? punchHourType.value : getDefaultHourTypeId());
+
+        const existingEntry = state.entries.find(entry =>
+          entry.date === state.selectedCalendarDate &&
+          (entry.hour_type_id || getDefaultHourTypeId()) === currentHourType
+        );
+
+        if (existingEntry) {
+          // Disable basic tab if current hour type has advanced entry
+          if (target === 'manual' && existingEntry.entry_type === 'advanced') {
+            isDisabled = true;
+            disabledReason = 'This hour type has an advanced entry for this date';
+          }
+          // Disable advanced tab if current hour type has basic entry
+          if (target === 'punch' && existingEntry.entry_type === 'basic') {
+            isDisabled = true;
+            disabledReason = 'This hour type has a basic entry for this date';
+          }
+        }
+      } else if (!hourTypesEnabled && state.selectedCalendarDate) {
+        // Original behavior when hour types disabled
         const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
         if (existingEntry) {
           // Disable basic tab if date has advanced entry
@@ -937,6 +1089,21 @@
     // Get hour type
     const hourTypeId = punchHourType ? punchHourType.value : getDefaultHourTypeId();
     const selectedHourType = state.hourTypeMap[hourTypeId];
+
+    // Check for duplicate hour type on the same date (when not editing)
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+    if (hourTypesEnabled && draft && !draft.entryId) {
+      const duplicateEntry = state.entries.find(e =>
+        e.date === draft.date &&
+        (e.hour_type_id || getDefaultHourTypeId()) === hourTypeId &&
+        e.id !== draft.entryId
+      );
+      if (duplicateEntry) {
+        const hourTypeName = selectedHourType?.name || 'Work';
+        alert(`An entry with hour type "${hourTypeName}" already exists for ${draft.date}. Please switch to that hour type to edit it.`);
+        return;
+      }
+    }
 
     // Validate contract based on hour type
     if (selectedHourType && selectedHourType.requires_contract) {
@@ -1321,6 +1488,21 @@
     // Get hour type
     const hourTypeId = manualHourType ? manualHourType.value : getDefaultHourTypeId();
     const selectedHourType = state.hourTypeMap[hourTypeId];
+
+    // Check for duplicate hour type on the same date (when not editing)
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+    if (hourTypesEnabled && !state.editingEntryId) {
+      const duplicateEntry = state.entries.find(e =>
+        e.date === date &&
+        (e.hour_type_id || getDefaultHourTypeId()) === hourTypeId &&
+        e.id !== state.editingEntryId
+      );
+      if (duplicateEntry) {
+        const hourTypeName = selectedHourType?.name || 'Work';
+        alert(`An entry with hour type "${hourTypeName}" already exists for ${date}. Please switch to that hour type to edit it.`);
+        return null;
+      }
+    }
 
     // Validate contract based on hour type
     const contractId = manualContract ? manualContract.value : '';
@@ -2629,8 +2811,34 @@
   }
   function renderCalendar() {
     ensureCalendarState();
-    const totals = minutesByDate();
-    const hourTypeTotals = minutesByDateAndHourType();
+
+    // Get filtered hour type IDs
+    const activeHourTypeIds = state.calendarFilteredHourTypes || state.hourTypes.map(ht => ht.id);
+
+    // Filter entries by active hour types
+    const filteredEntries = state.entries.filter(entry => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      return activeHourTypeIds.includes(hourTypeId);
+    });
+
+    // Calculate totals based on filtered entries
+    const totals = filteredEntries.reduce((map, entry) => {
+      if (!entry.date) return map;
+      if (!map[entry.date]) map[entry.date] = 0;
+      map[entry.date] += Number(entry.duration_minutes) || 0;
+      return map;
+    }, {});
+
+    const hourTypeTotals = filteredEntries.reduce((map, entry) => {
+      if (!entry.date) return map;
+      const date = entry.date;
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      if (!map[date]) map[date] = {};
+      if (!map[date][hourTypeId]) map[date][hourTypeId] = 0;
+      map[date][hourTypeId] += Number(entry.duration_minutes) || 0;
+      return map;
+    }, {});
+
     const defaultHourType = getDefaultHourType();
     const defaultHourTypeId = defaultHourType?.id || getDefaultHourTypeId();
     const grid = document.getElementById('calendar-grid');
@@ -2649,7 +2857,7 @@
     // If hour types are enabled, also calculate income-contributing hours
     let monthIncomeMinutes = 0;
     if (getFeatureFlag('hour_types') && state.hourTypes.length > 0) {
-      const monthEntries = state.entries.filter(entry =>
+      const monthEntries = filteredEntries.filter(entry =>
         entry.date && entry.date.startsWith(monthKey)
       );
       monthIncomeMinutes = monthEntries.reduce((acc, entry) => {
@@ -2691,38 +2899,74 @@
       const dayHourTypes = hourTypeTotals[iso] || {};
 
       if (showHourTypes && Object.keys(dayHourTypes).length > 0) {
-        // Show default hour type as main total
         const defaultMinutes = dayHourTypes[defaultHourTypeId] || 0;
-        const totalEl = document.createElement('div');
-        totalEl.className = 'ts-calendar-total';
-        if (defaultMinutes === 0) totalEl.classList.add('empty');
-        if (defaultMinutes === 0) {
-          totalEl.textContent = state.showZeroHours ? '0' : '';
-        } else {
+        const hasDefault = defaultMinutes > 0;
+        const hasMultiple = Object.keys(dayHourTypes).length > 1 || (Object.keys(dayHourTypes).length === 1 && !hasDefault);
+
+        // When there are multiple hour types with default present: show non-default on top, default on bottom
+        // When only non-default hours exist: show them on bottom
+        if (hasMultiple && hasDefault) {
+          // Show other hour types as small colored indicators at top
+          const otherTypesEl = document.createElement('div');
+          otherTypesEl.className = 'ts-calendar-hour-types';
+          Object.keys(dayHourTypes).forEach(hourTypeId => {
+            if (hourTypeId !== defaultHourTypeId && dayHourTypes[hourTypeId] > 0) {
+              const hourType = state.hourTypeMap[hourTypeId];
+              if (hourType) {
+                const minutes = dayHourTypes[hourTypeId];
+                const roundedMinutes = roundDuration(minutes);
+                const indicator = document.createElement('span');
+                indicator.className = 'ts-calendar-hour-type-indicator';
+                indicator.style.color = hourType.color;
+                indicator.textContent = formatHours(roundedMinutes);
+                indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
+                otherTypesEl.appendChild(indicator);
+              }
+            }
+          });
+
+          // Show default hour type as main total at bottom
+          const totalEl = document.createElement('div');
+          totalEl.className = 'ts-calendar-total';
           const roundedMinutes = roundDuration(defaultMinutes);
           totalEl.textContent = formatHours(roundedMinutes);
-        }
 
-        // Show other hour types as small colored indicators
-        const otherTypesEl = document.createElement('div');
-        otherTypesEl.className = 'ts-calendar-hour-types';
-        Object.keys(dayHourTypes).forEach(hourTypeId => {
-          if (hourTypeId !== defaultHourTypeId && dayHourTypes[hourTypeId] > 0) {
-            const hourType = state.hourTypeMap[hourTypeId];
-            if (hourType) {
-              const minutes = dayHourTypes[hourTypeId];
-              const roundedMinutes = roundDuration(minutes);
-              const indicator = document.createElement('span');
-              indicator.className = 'ts-calendar-hour-type-indicator';
-              indicator.style.color = hourType.color;
-              indicator.textContent = formatHours(roundedMinutes);
-              indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
-              otherTypesEl.appendChild(indicator);
+          cell.append(dayEl, otherTypesEl, totalEl);
+        } else if (!hasDefault) {
+          // Only non-default hours exist - show them at bottom
+          const otherTypesEl = document.createElement('div');
+          otherTypesEl.className = 'ts-calendar-hour-types';
+          Object.keys(dayHourTypes).forEach(hourTypeId => {
+            if (dayHourTypes[hourTypeId] > 0) {
+              const hourType = state.hourTypeMap[hourTypeId];
+              if (hourType) {
+                const minutes = dayHourTypes[hourTypeId];
+                const roundedMinutes = roundDuration(minutes);
+                const indicator = document.createElement('span');
+                indicator.className = 'ts-calendar-hour-type-indicator';
+                indicator.style.color = hourType.color;
+                indicator.textContent = formatHours(roundedMinutes);
+                indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
+                otherTypesEl.appendChild(indicator);
+              }
             }
-          }
-        });
+          });
 
-        cell.append(dayEl, totalEl, otherTypesEl);
+          cell.append(dayEl, otherTypesEl);
+        } else {
+          // Only default hour type exists
+          const totalEl = document.createElement('div');
+          totalEl.className = 'ts-calendar-total';
+          if (defaultMinutes === 0) totalEl.classList.add('empty');
+          if (defaultMinutes === 0) {
+            totalEl.textContent = state.showZeroHours ? '0' : '';
+          } else {
+            const roundedMinutes = roundDuration(defaultMinutes);
+            totalEl.textContent = formatHours(roundedMinutes);
+          }
+
+          cell.append(dayEl, totalEl);
+        }
       } else {
         // Original behavior - show total hours
         const totalEl = document.createElement('div');
@@ -2747,25 +2991,25 @@
     setManualDate(dateIso);
     updateTabStates();
     renderCalendar();
-    
+
     // Check if there's an existing entry for this date
-    const existingEntry = state.entries.find(entry => entry.date === dateIso);
-    if (existingEntry) {
-      console.log('Found existing entry:', existingEntry.entry_type, existingEntry);
-      
-      // Determine entry type - if not set, try to detect from data structure
+    const existingEntries = state.entries.filter(entry => entry.date === dateIso);
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+
+    if (existingEntries.length > 0) {
+      const existingEntry = existingEntries[0];
+
+      // Determine entry type
       let entryType = existingEntry.entry_type;
       if (!entryType) {
-        // Basic entries typically have a single punch from 00:00 to total time
         const punches = existingEntry.punches || [];
         if (punches.length === 1 && punches[0].in === '00:00') {
           entryType = 'basic';
         } else {
           entryType = 'advanced';
         }
-        console.log('Detected entry type:', entryType);
       }
-      
+
       // Prepopulate the form with the existing entry
       if (entryType === 'basic') {
         populateManualForm(existingEntry, true);
@@ -2813,6 +3057,104 @@
   }
   document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
   document.getElementById('calendar-next').onclick = () => changeCalendarMonth(1);
+
+  // Calendar filtering
+  const calendarFilterToggle = document.getElementById('calendar-filter-toggle');
+  const calendarFilterPanel = document.getElementById('calendar-filter-panel');
+  const calendarFilterList = document.getElementById('calendar-filter-list');
+  const filterSelectAll = document.getElementById('filter-select-all');
+  const filterSelectNone = document.getElementById('filter-select-none');
+  const filterSelectIncome = document.getElementById('filter-select-income');
+
+  function renderCalendarFilters() {
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+
+    if (!hourTypesEnabled || !calendarFilterToggle) {
+      if (calendarFilterToggle) calendarFilterToggle.style.display = 'none';
+      if (calendarFilterPanel) calendarFilterPanel.style.display = 'none';
+      return;
+    }
+
+    calendarFilterToggle.style.display = 'block';
+
+    if (!calendarFilterList) return;
+
+    // Initialize filter state if null
+    if (state.calendarFilteredHourTypes === null) {
+      state.calendarFilteredHourTypes = state.hourTypes.map(ht => ht.id);
+    }
+
+    calendarFilterList.innerHTML = '';
+    state.hourTypes.forEach(hourType => {
+      const isActive = state.calendarFilteredHourTypes.includes(hourType.id);
+
+      const item = document.createElement('div');
+      item.className = 'ts-calendar-filter-item' + (isActive ? ' active' : '');
+      item.innerHTML = `
+        <input type="checkbox" class="ts-calendar-filter-checkbox" ${isActive ? 'checked' : ''} data-hour-type-id="${hourType.id}" />
+        <div class="ts-calendar-filter-color" style="background-color:${hourType.color};"></div>
+        <span class="ts-calendar-filter-name">${hourType.name}</span>
+      `;
+
+      item.onclick = () => toggleHourTypeFilter(hourType.id);
+      calendarFilterList.appendChild(item);
+    });
+  }
+
+  function toggleHourTypeFilter(hourTypeId) {
+    if (!state.calendarFilteredHourTypes) {
+      state.calendarFilteredHourTypes = state.hourTypes.map(ht => ht.id);
+    }
+
+    const index = state.calendarFilteredHourTypes.indexOf(hourTypeId);
+    if (index > -1) {
+      state.calendarFilteredHourTypes.splice(index, 1);
+    } else {
+      state.calendarFilteredHourTypes.push(hourTypeId);
+    }
+
+    saveCache();
+    renderCalendarFilters();
+    renderCalendar();
+  }
+
+  if (calendarFilterToggle) {
+    calendarFilterToggle.onclick = () => {
+      if (calendarFilterPanel) {
+        const isHidden = calendarFilterPanel.style.display === 'none';
+        calendarFilterPanel.style.display = isHidden ? 'block' : 'none';
+      }
+    };
+  }
+
+  if (filterSelectAll) {
+    filterSelectAll.onclick = () => {
+      state.calendarFilteredHourTypes = state.hourTypes.map(ht => ht.id);
+      saveCache();
+      renderCalendarFilters();
+      renderCalendar();
+    };
+  }
+
+  if (filterSelectNone) {
+    filterSelectNone.onclick = () => {
+      state.calendarFilteredHourTypes = [];
+      saveCache();
+      renderCalendarFilters();
+      renderCalendar();
+    };
+  }
+
+  if (filterSelectIncome) {
+    filterSelectIncome.onclick = () => {
+      state.calendarFilteredHourTypes = state.hourTypes
+        .filter(ht => ht.contributes_to_income)
+        .map(ht => ht.id);
+      saveCache();
+      renderCalendarFilters();
+      renderCalendar();
+    };
+  }
 
   // Settings persistence
   document.getElementById('btn-save-settings').onclick = function () {
@@ -3575,6 +3917,8 @@
         updateHourTypeMap();
         renderHourTypes();
         updateHourTypeFormVisibility();
+        renderCalendarFilters();
+        renderCalendar();
         saveCache();
         setStatus('Idle');
       })
@@ -3600,7 +3944,6 @@
       if (hourType.contributes_to_income) badges.push('<span class="ts-hour-type-badge income">Income</span>');
 
       const isWork = hourType.slug === 'work';
-      const editText = isWork ? 'Settings' : 'Edit';
 
       return `
         <div class="ts-hour-type-item ${isWork ? 'work' : ''}" data-id="${hourType.id}">
@@ -3611,7 +3954,7 @@
             <div class="ts-hour-type-badges">${badges.join('')}</div>
           </div>
           <div class="ts-hour-type-actions">
-            <button class="ghost small" onclick="editHourType('${hourType.id}')">${editText}</button>
+            <button class="ghost small" onclick="editHourType('${hourType.id}')">Edit</button>
             <button class="ghost small danger" onclick="deleteHourType('${hourType.id}')" ${isWork ? 'style="display:none;"' : ''}>Delete</button>
           </div>
         </div>
@@ -3705,6 +4048,30 @@
     };
 
     if (state.editingHourTypeId) {
+      // Optimistically update the UI if setting as default
+      if (isDefault) {
+        // Unset default on all other hour types
+        state.hourTypes.forEach(ht => {
+          if (ht.id !== state.editingHourTypeId) {
+            ht.is_default = false;
+          }
+        });
+        // Set default on this hour type
+        const index = state.hourTypes.findIndex(ht => ht.id === state.editingHourTypeId);
+        if (index !== -1) {
+          state.hourTypes[index] = {
+            ...state.hourTypes[index],
+            name,
+            slug,
+            color,
+            contributes_to_income: contributesToIncome,
+            is_default: true
+          };
+        }
+        updateHourTypeMap();
+        renderHourTypes();
+      }
+
       // Update existing
       google.script.run
         .withSuccessHandler((result) => {
@@ -3714,6 +4081,9 @@
           }
           updateHourTypeMap();
           renderHourTypes();
+          updateHourTypeFormVisibility();
+          renderCalendarFilters();
+          renderCalendar();
           saveCache();
           hideHourTypeModal();
           setStatus('Hour type updated');
@@ -3725,15 +4095,27 @@
           alert('Failed to update hour type: ' + error.message);
           saveBtn.textContent = 'Save Hour Type';
           saveBtn.disabled = false;
+          // Reload hour types to revert optimistic update
+          loadHourTypes();
         })
         .api_updateHourType(state.editingHourTypeId, data);
     } else {
       // Create new
       google.script.run
         .withSuccessHandler((result) => {
-          state.hourTypes.push(sanitizeHourType(result));
+          const newHourType = sanitizeHourType(result);
+          state.hourTypes.push(newHourType);
+
+          // Add new hour type to calendar filter so it's immediately visible
+          if (state.calendarFilteredHourTypes) {
+            state.calendarFilteredHourTypes.push(newHourType.id);
+          }
+
           updateHourTypeMap();
           renderHourTypes();
+          updateHourTypeFormVisibility();
+          renderCalendarFilters();
+          renderCalendar();
           saveCache();
           hideHourTypeModal();
           setStatus('Hour type created');
@@ -3786,8 +4168,17 @@
     google.script.run
       .withSuccessHandler(() => {
         state.hourTypes = state.hourTypes.filter(ht => ht.id !== id);
+
+        // Remove from calendar filter
+        if (state.calendarFilteredHourTypes) {
+          state.calendarFilteredHourTypes = state.calendarFilteredHourTypes.filter(htId => htId !== id);
+        }
+
         updateHourTypeMap();
         renderHourTypes();
+        updateHourTypeFormVisibility();
+        renderCalendarFilters();
+        renderCalendar();
         saveCache();
         modal.style.display = 'none';
         setStatus('Hour type deleted');
@@ -3926,8 +4317,11 @@
         option.textContent = contract.name;
         manualContract.appendChild(option);
       });
+      manualContract.value = '';
+      manualContract.disabled = false;
       manualContract.style.fontStyle = 'italic';
       manualContract.style.opacity = '0.8';
+      if (manualContractWarning) manualContractWarning.style.display = 'none';
     } else {
       // Normal contract requirement
       manualContract.style.fontStyle = 'normal';
@@ -3951,8 +4345,11 @@
         option.textContent = contract.name;
         punchContract.appendChild(option);
       });
+      punchContract.value = '';
+      punchContract.disabled = false;
       punchContract.style.fontStyle = 'italic';
       punchContract.style.opacity = '0.8';
+      if (punchContractWarning) punchContractWarning.style.display = 'none';
     } else {
       // Normal contract requirement
       punchContract.style.fontStyle = 'normal';
@@ -3969,11 +4366,112 @@
 
   // Event listeners for hour type changes
   if (manualHourType) {
-    manualHourType.addEventListener('change', updateManualContractVisibility);
+    manualHourType.addEventListener('change', () => {
+      updateManualContractVisibility();
+      handleManualHourTypeChange();
+    });
   }
 
   if (punchHourType) {
-    punchHourType.addEventListener('change', updatePunchContractVisibility);
+    punchHourType.addEventListener('change', () => {
+      updatePunchContractVisibility();
+      handlePunchHourTypeChange();
+    });
+  }
+
+  function handleManualHourTypeChange() {
+    if (!manualHourType || !manualDate) return;
+
+    const selectedHourTypeId = manualHourType.value || getDefaultHourTypeId();
+    const currentDate = manualDate.value;
+
+    if (!currentDate) return;
+
+    // Find if there's an existing entry for this date and hour type
+    const existingEntry = state.entries.find(e =>
+      e.date === currentDate &&
+      (e.hour_type_id || getDefaultHourTypeId()) === selectedHourTypeId
+    );
+
+    if (existingEntry) {
+      // Prepopulate with existing entry data
+      populateManualForm(existingEntry, true);
+    } else {
+      // Clear the form for new entry but keep date and hour type
+      const currentHourType = manualHourType.value;
+      clearManualEditing();
+      if (manualDate) manualDate.value = currentDate;
+      if (manualHourType) manualHourType.value = currentHourType;
+      updateManualContractVisibility();
+    }
+
+    // Update tab states to enable/disable the other tab
+    updateTabStates();
+  }
+
+  function handlePunchHourTypeChange() {
+    if (!punchHourType || !punchDate || !punchContract) return;
+
+    const selectedHourTypeId = punchHourType.value || getDefaultHourTypeId();
+    const currentDate = punchDate.value;
+
+    if (!currentDate) return;
+
+    // Find if there's an existing entry for this date and hour type
+    const existingEntry = state.entries.find(e =>
+      e.date === currentDate &&
+      (e.hour_type_id || getDefaultHourTypeId()) === selectedHourTypeId &&
+      e.entry_type === 'advanced'
+    );
+
+    if (existingEntry) {
+      // Load the existing entry
+      state.editingEntryId = existingEntry.id;
+      state.editingEntryType = existingEntry.entry_type;
+
+      // Update contract dropdown to show the entry's contract
+      if (punchContract) {
+        updatePunchContractOptions(existingEntry.contract_id);
+        punchContract.value = existingEntry.contract_id || '';
+      }
+
+      // Create the punch draft with existing entry data
+      state.punchDraft = {
+        entryId: existingEntry.id,
+        contractId: existingEntry.contract_id || '',
+        date: existingEntry.date,
+        punches: clonePunches(existingEntry.punches || []),
+        dirty: false
+      };
+
+      renderPunchDraft();
+      updatePunchSummary();
+    } else {
+      // Clear for new entry but keep date and hour type
+      const currentHourType = punchHourType.value;
+      state.editingEntryId = null;
+      state.editingEntryType = null;
+
+      // Update contract options for the new entry
+      updatePunchContractOptions();
+
+      // Create fresh punch draft
+      state.punchDraft = {
+        entryId: null,
+        contractId: punchContract.value || '',
+        date: currentDate,
+        punches: [{ in: '', out: '' }],
+        dirty: false
+      };
+
+      if (punchHourType) punchHourType.value = currentHourType;
+      renderPunchDraft();
+      updatePunchSummary();
+      updatePunchContractVisibility();
+    }
+
+    // Update tab states to enable/disable the other tab
+    updateTabStates();
   }
 
   // Call the main init function

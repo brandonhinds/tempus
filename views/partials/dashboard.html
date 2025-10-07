@@ -80,11 +80,27 @@
         <div class="ts-badge" id="calendar-month-total">Total hours: 0</div>
         <button class="ts-badge ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">Net income: --</button>
       </div>
-      <div class="ts-calendar-nav">
-        <button class="ghost" id="calendar-prev" title="Previous Month">◀</button>
-        <div id="calendar-label" style="min-width:140px; text-align:center;"></div>
-        <button class="ghost" id="calendar-next" title="Next Month">▶</button>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button class="ghost" id="calendar-filter-toggle" style="display:none;" title="Filter hour types">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <div class="ts-calendar-nav">
+          <button class="ghost" id="calendar-prev" title="Previous Month">◀</button>
+          <div id="calendar-label" style="min-width:140px; text-align:center;"></div>
+          <button class="ghost" id="calendar-next" title="Next Month">▶</button>
+        </div>
       </div>
+    </div>
+    <div class="ts-calendar-filter-panel" id="calendar-filter-panel" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-weight:600;">Filter Hour Types</span>
+        <div style="display:flex; gap:8px;">
+          <button class="ghost" id="filter-select-all" style="font-size:12px; padding:4px 8px;">All</button>
+          <button class="ghost" id="filter-select-none" style="font-size:12px; padding:4px 8px;">None</button>
+          <button class="ghost" id="filter-select-income" style="font-size:12px; padding:4px 8px;">Income Only</button>
+        </div>
+      </div>
+      <div id="calendar-filter-list" class="ts-calendar-filter-list"></div>
     </div>
     <div class="ts-income-breakdown" id="income-breakdown" hidden>
       <div class="ts-income-row"><span class="ts-income-row-label">Total package</span><span class="ts-income-row-value" id="income-total-package">--</span></div>

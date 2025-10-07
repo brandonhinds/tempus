@@ -135,9 +135,10 @@
   .ts-container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
   .ts-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.3); overflow:hidden; }
   .ts-row { display:flex; gap:16px; flex-wrap:wrap; }
-  .ts-col { flex:1 1 320px; min-width:320px; }
+  .ts-col { flex:1 1 200px; min-width:200px; }
   input, select, textarea, button { font: inherit; }
   input, select, textarea { background: var(--panel); color: var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; width:100%; max-width:100%; display:block; }
+  input[readonly], textarea[readonly] { background: var(--bg); opacity: 0.7; cursor: not-allowed; }
   .ts-punch-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
   .ts-punch-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
   .ts-punch-row .ts-punch-input { width:120px; }
@@ -256,5 +257,13 @@
   .ts-hour-type-item.work .ts-hour-type-actions .danger { display:none; }
   .ts-calendar-hour-types { display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
   .ts-calendar-hour-type-indicator { font-size:10px; font-weight:500; padding:1px 4px; border-radius:3px; background:rgba(255,255,255,0.1); border:1px solid currentColor; opacity:0.8; }
+  .ts-calendar-filter-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .ts-calendar-filter-list { display:flex; flex-wrap:wrap; gap:8px; }
+  .ts-calendar-filter-item { display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:all 0.2s; }
+  .ts-calendar-filter-item:hover { border-color:var(--primary); }
+  .ts-calendar-filter-item.active { background:var(--primary-soft-bg); border-color:var(--primary); }
+  .ts-calendar-filter-checkbox { width:14px; height:14px; }
+  .ts-calendar-filter-color { width:12px; height:12px; border-radius:50%; border:1px solid var(--border); }
+  .ts-calendar-filter-name { font-size:13px; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
 </style>
