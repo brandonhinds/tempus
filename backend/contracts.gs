@@ -14,6 +14,16 @@ function normalizeContractTotalHours(value) {
   return Math.round(num * 100) / 100;
 }
 
+function contractParseBoolean(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === null || value === undefined || value === '') return false;
+  var str = String(value).trim().toLowerCase();
+  if (str === 'true' || str === '1' || str === 'yes') return true;
+  if (str === 'false' || str === '0' || str === 'no') return false;
+  return false;
+}
+
 function normalizeContractObject(contract) {
   if (!contract) return contract;
   var normalized = {
@@ -23,6 +33,7 @@ function normalizeContractObject(contract) {
     end_date: toIsoDate(contract.end_date || contract.endDate),
     hourly_rate: normalizeHourlyRate(contract.hourly_rate || contract.hourlyRate),
     total_hours: normalizeContractTotalHours(contract.total_hours || contract.totalHours),
+    include_weekends: contractParseBoolean(contract.include_weekends != null ? contract.include_weekends : contract.includeWeekends),
     created_at: toIsoDateTime(contract.created_at)
   };
   if (!normalized.end_date || normalized.end_date === 'Invalid Date') normalized.end_date = '';
@@ -47,6 +58,7 @@ function buildContractRow(contract, createdAt) {
     normalized.end_date,
     normalized.hourly_rate,
     normalized.total_hours,
+    normalized.include_weekends ? 'TRUE' : 'FALSE',
     createdAt || normalized.created_at || toIsoDateTime(new Date())
   ];
 }
@@ -56,14 +68,14 @@ function ensureContractsSchema(sh) {
   var lastRow = sh.getLastRow();
   var lastColumn = sh.getLastColumn();
   if (lastRow === 0 || lastColumn === 0) {
-    sh.getRange(1, 1, 1, 7).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'created_at']]);
+    sh.getRange(1, 1, 1, 8).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'created_at']]);
     return;
   }
   var headerRange = sh.getRange(1, 1, 1, lastColumn);
   var headers = headerRange.getValues()[0];
   var hasHeaderContent = headers.some(function(value) { return String(value || '').trim() !== ''; });
   if (!hasHeaderContent) {
-    sh.getRange(1, 1, 1, 7).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'created_at']]);
+    sh.getRange(1, 1, 1, 8).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'created_at']]);
     return;
   }
   if (headers.indexOf('total_hours') === -1) {
@@ -80,6 +92,24 @@ function ensureContractsSchema(sh) {
     var rows = sh.getLastRow();
     if (rows > 1) {
       sh.getRange(2, newColIndex, rows - 1, 1).setValue(0);
+    }
+    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
+    headers = headerRange.getValues()[0];
+  }
+  if (headers.indexOf('include_weekends') === -1) {
+    var createdIndex = headers.indexOf('created_at');
+    var weekendsColIndex;
+    if (createdIndex !== -1) {
+      weekendsColIndex = createdIndex + 1;
+      sh.insertColumnBefore(weekendsColIndex);
+    } else {
+      sh.insertColumnAfter(sh.getLastColumn());
+      weekendsColIndex = sh.getLastColumn();
+    }
+    sh.getRange(1, weekendsColIndex).setValue('include_weekends');
+    var totalRows = sh.getLastRow();
+    if (totalRows > 1) {
+      sh.getRange(2, weekendsColIndex, totalRows - 1, 1).setValue('FALSE');
     }
   }
 }
@@ -147,13 +177,15 @@ function api_updateContract(contract) {
   if (!contract || !contract.id) throw new Error('Contract id is required.');
   var sh = getContractsSheet();
   var values = sh.getDataRange().getValues();
+  var headers = values.length ? values[0] : [];
+  var createdIdx = headers.indexOf('created_at');
   for (var i = 1; i < values.length; i++) {
     if (values[i][0] === contract.id) {
-      var originalCreated = values[i][6];
+      var createdValue = createdIdx !== -1 ? values[i][createdIdx] : values[i][6];
       var normalized = normalizeContractObject(contract);
       normalized.id = contract.id;
       validateContractDates(normalized);
-      normalized.created_at = toIsoDateTime(originalCreated);
+      normalized.created_at = toIsoDateTime(createdValue);
       var row = buildContractRow(normalized, normalized.created_at);
       sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
       cacheClearPrefix(CONTRACT_CACHE_PREFIX);

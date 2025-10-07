@@ -9,6 +9,7 @@ This document lists the feature flags supported by the Timesheet app. Each flag 
 | `show_zero_hours` | Disabled | Displays `0` for days without logged time in the calendar instead of leaving them blank. |
 | `default_inputs` | Disabled | Enables creating, using, and managing default time entry templates for faster data entry. |
 | `hour_types` | Disabled | Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization. |
+| `expected_monthly_hours` | Disabled | Shows a calendar badge that projects contract hours for the active month and highlights whether you are ahead or behind the target. |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.

@@ -55,6 +55,7 @@ Contracts describe a billable agreement and govern whether time can be logged fo
 | `end_date` | string (ISO) | Last day the contract is valid. Blank indicates open-ended. | `2025-12-31` |
 | `hourly_rate` | number | Billing rate in the sheet's currency units. | `125.00` |
 | `total_hours` | number | Optional cap on total hours allowed for the engagement. `0` means unlimited. | `160.0` |
+| `include_weekends` | boolean/string | `TRUE`/`FALSE` indicating whether weekends should count toward expected averages and projections. | `FALSE` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the contract row was created server-side. | `2024-05-06T10:15:00Z` |
 
 ### Suggested improvements

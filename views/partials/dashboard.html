@@ -79,6 +79,7 @@
         <h3 style="margin:0;">Calendar</h3>
         <button class="ts-badge ts-hour-types-badge" id="calendar-month-total" type="button" aria-expanded="false">Total hours: 0</button>
         <button class="ts-badge ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">Net income: --</button>
+        <button class="ts-badge ts-expected-badge" id="calendar-expected-hours" type="button" aria-expanded="false" style="display:none;">Avg daily: --</button>
       </div>
       <div style="display:flex; align-items:center; gap:12px;">
         <button class="ghost" id="calendar-filter-toggle" style="display:none;" title="Filter hour types">
@@ -114,6 +115,9 @@
       <div class="ts-income-row"><span class="ts-income-row-label">Taxable income</span><span class="ts-income-row-value" id="income-taxable">--</span></div>
       <div class="ts-income-row"><span class="ts-income-row-label">Tax</span><span class="ts-income-row-value" id="income-tax">--</span></div>
       <div class="ts-income-row"><span class="ts-income-row-label">Net income</span><span class="ts-income-row-value" id="income-net">--</span></div>
+    </div>
+    <div class="ts-expected-breakdown" id="expected-hours-breakdown" hidden>
+      <div id="expected-hours-content"></div>
     </div>
     <div class="ts-calendar-grid" id="calendar-weekdays">
       <div class="ts-calendar-weekday">Mon</div>

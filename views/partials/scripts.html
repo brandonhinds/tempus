@@ -34,7 +34,8 @@
     selectedContractId: '',
     punchDraft: null,
     currentTab: 'manual',
-    calendarFilteredHourTypes: null
+    calendarFilteredHourTypes: null,
+    expectedHoursSummary: null
   };
 
   const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'settings'];
@@ -167,6 +168,27 @@
     out = out.replace(/(\.\d)0$/, '$1');
     return out === '' ? '0' : out;
   };
+  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const isWeekendDate = (date) => {
+    const day = date.getDay();
+    return day === 0 || day === 6;
+  };
+  function collectBusinessDays(startDate, endDate, includeWeekends) {
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return [];
+    if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) return [];
+    const start = startOfDay(startDate);
+    const end = startOfDay(endDate);
+    if (end < start) return [];
+    const days = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      if (includeWeekends || !isWeekendDate(cursor)) {
+        days.push(isoDate(cursor));
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }
   const minutesToTime = (minutes) => {
     const mins = Math.max(0, Math.round(Number(minutes) || 0));
     if (mins >= 24 * 60) return '23:59';
@@ -403,6 +425,11 @@
     if (Number.isNaN(clone.hourly_rate)) clone.hourly_rate = 0;
     clone.total_hours = Number(clone.total_hours != null ? clone.total_hours : (clone.totalHours != null ? clone.totalHours : 0));
     if (Number.isNaN(clone.total_hours) || clone.total_hours < 0) clone.total_hours = 0;
+    clone.include_weekends = Boolean(
+      clone.include_weekends === true ||
+      clone.include_weekends === 'TRUE' ||
+      String(clone.include_weekends != null ? clone.include_weekends : '').toLowerCase() === 'true'
+    );
     delete clone.startDate;
     delete clone.endDate;
     delete clone.hourlyRate;
@@ -440,6 +467,10 @@
     hour_types: {
       name: 'Hour Types',
       description: 'Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization.'
+    },
+    expected_monthly_hours: {
+      name: 'Expected monthly hours insights',
+      description: 'Adds a badge that breaks down projected contract hours for the active month.'
     }
   };
 
@@ -1727,6 +1758,26 @@
   }
   applyHourTypesBreakdownVisibility();
 
+  const expectedHoursBadge = document.getElementById('calendar-expected-hours');
+  const expectedHoursBreakdownEl = document.getElementById('expected-hours-breakdown');
+  const expectedHoursContentEl = document.getElementById('expected-hours-content');
+  let expectedHoursExpanded = false;
+
+  function applyExpectedHoursVisibility() {
+    if (!expectedHoursBadge || !expectedHoursBreakdownEl) return;
+    expectedHoursBadge.setAttribute('data-expanded', expectedHoursExpanded ? 'true' : 'false');
+    expectedHoursBadge.setAttribute('aria-expanded', expectedHoursExpanded ? 'true' : 'false');
+    expectedHoursBreakdownEl.hidden = !expectedHoursExpanded;
+  }
+
+  if (expectedHoursBadge) {
+    expectedHoursBadge.addEventListener('click', () => {
+      expectedHoursExpanded = !expectedHoursExpanded;
+      renderExpectedHoursSummary();
+    });
+  }
+  applyExpectedHoursVisibility();
+
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
@@ -1736,6 +1787,7 @@
   const contractEndInput = document.getElementById('contract-end');
   const contractRateInput = document.getElementById('contract-rate');
   const contractTotalHoursInput = document.getElementById('contract-total-hours');
+  const contractIncludeWeekendsInput = document.getElementById('contract-include-weekends');
   const contractSaveBtn = document.getElementById('contract-save');
   const contractCancelBtn = document.getElementById('contract-cancel');
   const contractAddToggle = document.getElementById('contract-toggle-add');
@@ -1764,12 +1816,20 @@
     return DECIMAL_HOURS_FORMATTER.format(Math.max(0, Math.round((Number(value) || 0) * 100) / 100));
   }
 
+  function formatSignedHours(value) {
+    const num = Math.round((Number(value) || 0) * 100) / 100;
+    if (num === 0) return '0';
+    const prefix = num > 0 ? '+' : '-';
+    return prefix + DECIMAL_HOURS_FORMATTER.format(Math.abs(num));
+  }
+
   function resetContractFormFields() {
     if (contractNameInput) contractNameInput.value = '';
     if (contractStartInput) contractStartInput.value = '';
     if (contractEndInput) contractEndInput.value = '';
     if (contractRateInput) contractRateInput.value = '';
     if (contractTotalHoursInput) contractTotalHoursInput.value = '';
+    if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = false;
   }
 
   function placeContractFormAtDefault() {
@@ -1843,12 +1903,14 @@
       return null;
     }
     const totalHours = Math.round(Number(totalHoursValue || 0) * 100) / 100;
+    const includeWeekends = contractIncludeWeekendsInput ? contractIncludeWeekendsInput.checked : false;
     return {
       name,
       start_date: startDate,
       end_date: endDate,
       hourly_rate: Math.round(hourlyRate * 100) / 100,
-      total_hours: totalHours
+      total_hours: totalHours,
+      include_weekends: includeWeekends
     };
   }
 
@@ -1862,6 +1924,7 @@
       const totalHours = Number(contract.total_hours || 0);
       contractTotalHoursInput.value = totalHours > 0 ? String(totalHours) : '';
     }
+    if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = !!contract.include_weekends;
     placeContractFormInDetail();
     setContractFormMode('edit');
     if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
@@ -2040,6 +2103,7 @@
     addDetail('Date range', rangeLabel);
     addDetail('Hourly rate', `${Number(contract.hourly_rate || 0).toFixed(2)} / hr`);
     addDetail('Total hours', totalHoursValue > 0 ? `${formatDecimalHours(totalHoursValue)} hrs` : 'Unlimited');
+    addDetail('Weekends counted', contract.include_weekends ? 'Yes (all days)' : 'No (Mon-Fri)');
     addDetail('Hours logged', `${formatDecimalHours(usage.totalHours)} hrs`);
 
     contractDetailEl.appendChild(grid);
@@ -2553,6 +2617,15 @@
     const prefix = monthKeyFor(year, month);
     return state.entries.filter((entry) => entry.date && entry.date.startsWith(prefix));
   }
+  function entryContributesToIncome(entry) {
+    if (!entry) return false;
+    const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+    const hourType = hourTypeId ? state.hourTypeMap[hourTypeId] : null;
+    if (hourType && Object.prototype.hasOwnProperty.call(hourType, 'contributes_to_income')) {
+      return !!hourType.contributes_to_income;
+    }
+    return true;
+  }
   function buildIncomeSummary(year, month) {
     const allEntries = entriesForMonth(year, month);
     // Filter to only include entries from hour types that contribute to income
@@ -2757,6 +2830,328 @@
       requestTaxEstimate(summary);
     } else {
       state.pendingTaxRequest = null;
+    }
+  }
+
+  function buildExpectedHoursSummary(year, month) {
+    if (!getFeatureFlag('expected_monthly_hours')) return null;
+    const monthEntries = entriesForMonth(year, month);
+    const filteredEntries = monthEntries.filter((entry) => {
+      if (!entry || !entry.contract_id || !entry.date) return false;
+      if (!entryContributesToIncome(entry)) return false;
+      const contract = state.contractMap[entry.contract_id];
+      if (!contract) return false;
+      if (!contractIsValid(contract, entry.date)) return false;
+      return true;
+    });
+    if (!filteredEntries.length) return null;
+
+    const contractBuckets = new Map();
+    filteredEntries.forEach((entry) => {
+      const contract = state.contractMap[entry.contract_id];
+      if (!contract) return;
+      if (!contractBuckets.has(contract.id)) {
+        contractBuckets.set(contract.id, { contract, entries: [] });
+      }
+      contractBuckets.get(contract.id).entries.push(entry);
+    });
+    if (!contractBuckets.size) return null;
+
+    const monthStartDate = startOfDay(new Date(year, month, 1));
+    const monthEndDate = startOfDay(new Date(year, month + 1, 0));
+
+    const aggregatedEvaluatedDays = new Set();
+    const aggregatedMonthDays = new Set();
+    let aggregatedHoursToDate = 0;
+    let aggregatedExpectedMonthlyHours = 0;
+    let aggregatedExpectedHoursToDate = 0;
+    let aggregatedProjectedHours = 0;
+    let baselineContracts = 0;
+
+    const contractSummaries = [];
+
+    contractBuckets.forEach(({ contract, entries }) => {
+      const sortedEntries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+      const contractStartRaw = contract.start_date ? parseIsoDate(contract.start_date) : null;
+      if (!contractStartRaw || Number.isNaN(contractStartRaw.getTime())) return;
+      const contractStart = startOfDay(contractStartRaw);
+      const contractEndRaw = contract.end_date ? parseIsoDate(contract.end_date) : null;
+      const includeWeekends = !!contract.include_weekends;
+
+      const periodStart = contractStart > monthStartDate ? contractStart : monthStartDate;
+      const boundedContractEnd = (contractEndRaw && !Number.isNaN(contractEndRaw.getTime())) ? startOfDay(contractEndRaw) : null;
+      const periodEnd = boundedContractEnd && boundedContractEnd < monthEndDate ? boundedContractEnd : monthEndDate;
+      if (periodEnd < periodStart) return;
+
+      const periodStartIso = isoDate(periodStart);
+      const periodEndIso = isoDate(periodEnd);
+
+      const monthBusinessDaysList = collectBusinessDays(periodStart, periodEnd, includeWeekends);
+      monthBusinessDaysList.forEach((day) => aggregatedMonthDays.add(day));
+      const monthBusinessDays = monthBusinessDaysList.length;
+
+      const recordedBusinessDaysSet = new Set();
+      const totalMinutes = sortedEntries.reduce((acc, entry) => {
+        if (!entry || !entry.date) return acc;
+        if (entry.date < periodStartIso || entry.date > periodEndIso) return acc;
+        const entryDateObj = parseIsoDate(entry.date);
+        if (!entryDateObj || Number.isNaN(entryDateObj.getTime())) return acc;
+        const minutes = Number(entry.duration_minutes) || 0;
+        if (!includeWeekends && isWeekendDate(entryDateObj)) {
+          return acc + minutes;
+        }
+        recordedBusinessDaysSet.add(isoDate(startOfDay(entryDateObj)));
+        return acc + minutes;
+      }, 0);
+
+      const totalHours = totalMinutes / 60;
+      const recordedBusinessDays = recordedBusinessDaysSet.size;
+      if (recordedBusinessDays === 0) return;
+
+      recordedBusinessDaysSet.forEach((day) => aggregatedEvaluatedDays.add(day));
+      aggregatedHoursToDate += totalHours;
+
+      const averageDailyHours = totalHours / recordedBusinessDays;
+
+      const hasBaseline = Number(contract.total_hours || 0) > 0 && contract.end_date;
+      let expectedDailyHours = null;
+      let expectedMonthlyHours = null;
+      let expectedHoursToDate = null;
+      let expectedHoursRemaining = null;
+      let projectedTotalHours = monthBusinessDays > 0 ? averageDailyHours * monthBusinessDays : totalHours;
+      let projectedVariance = null;
+      let varianceToDate = null;
+
+      if (hasBaseline && monthBusinessDays > 0) {
+        const contractBusinessDaysList = collectBusinessDays(contractStart, boundedContractEnd || periodEnd, includeWeekends);
+        const contractBusinessDays = contractBusinessDaysList.length;
+        if (contractBusinessDays > 0) {
+          expectedDailyHours = Number(contract.total_hours || 0) / contractBusinessDays;
+          expectedMonthlyHours = expectedDailyHours * monthBusinessDays;
+          expectedHoursToDate = expectedDailyHours * Math.min(recordedBusinessDays, monthBusinessDays);
+          expectedHoursRemaining = Math.max(0, expectedMonthlyHours - (expectedHoursToDate || 0));
+          varianceToDate = totalHours - (expectedHoursToDate || 0);
+        }
+      }
+
+      if (expectedMonthlyHours != null) {
+        projectedVariance = projectedTotalHours - expectedMonthlyHours;
+      }
+
+      const businessDaysRemaining = Math.max(0, monthBusinessDays - Math.min(recordedBusinessDays, monthBusinessDays));
+
+      let status = 'ontrack';
+      let statusText = 'Projected on target';
+      if (projectedVariance != null) {
+        const roundedVariance = Math.round(projectedVariance * 100) / 100;
+        const varianceMagnitude = Math.abs(roundedVariance);
+        if (roundedVariance > 0.01) {
+          status = 'ahead';
+          statusText = `Projected ahead by ${formatDecimalHours(varianceMagnitude)} hrs`;
+        } else if (roundedVariance < -0.01) {
+          status = 'behind';
+          statusText = `Projected behind by ${formatDecimalHours(varianceMagnitude)} hrs`;
+        }
+      }
+      if (expectedMonthlyHours == null) {
+        status = 'ontrack';
+        statusText = 'No expected hours configured';
+      }
+
+      const summary = {
+        contractId: contract.id,
+        contractName: contract.name || 'Untitled contract',
+        includeWeekends,
+        monthBusinessDays,
+        recordedBusinessDays,
+        businessDaysRemaining,
+        totalHours,
+        hoursToDate: totalHours,
+        averageDailyHours,
+        calculationDays: recordedBusinessDays,
+        calculationLabel: 'Recorded work days',
+        expectedDailyHours,
+        expectedMonthlyHours,
+        expectedHoursToDate,
+        expectedHoursRemaining,
+        varianceToDate,
+        projectedTotalHours,
+        projectedVariance,
+        status,
+        statusText
+      };
+
+      contractSummaries.push(summary);
+
+      if (hasBaseline && expectedMonthlyHours != null) {
+        baselineContracts += 1;
+        aggregatedExpectedMonthlyHours += expectedMonthlyHours;
+        aggregatedExpectedHoursToDate += expectedHoursToDate || 0;
+        aggregatedProjectedHours += projectedTotalHours || 0;
+      }
+    });
+
+    if (!contractSummaries.length) return null;
+
+    const uniqueRecordedDays = aggregatedEvaluatedDays.size;
+    if (uniqueRecordedDays <= 2) return null;
+
+    const totalBusinessDays = aggregatedMonthDays.size || contractSummaries.reduce((max, summary) => Math.max(max, summary.monthBusinessDays), 0);
+    const averageHours = aggregatedHoursToDate / uniqueRecordedDays;
+    const overallProjectedVariance = baselineContracts > 0 ? (aggregatedProjectedHours - aggregatedExpectedMonthlyHours) : null;
+
+    contractSummaries.sort((a, b) => a.contractName.localeCompare(b.contractName));
+
+    return {
+      monthKey: monthKeyFor(year, month),
+      contracts: contractSummaries,
+      contractCount: contractSummaries.length,
+      averageHours,
+      totalHoursToDate: aggregatedHoursToDate,
+      daysEvaluated: uniqueRecordedDays,
+      totalBusinessDays,
+      totalExpectedMonthlyHours: aggregatedExpectedMonthlyHours,
+      totalExpectedHoursToDate: aggregatedExpectedHoursToDate,
+      totalProjectedHours: aggregatedProjectedHours,
+      baselineContractCount: baselineContracts,
+      overallProjectedVariance
+    };
+
+  }
+
+  function renderExpectedHoursBreakdown(summary) {
+    if (!expectedHoursContentEl) return;
+    expectedHoursContentEl.innerHTML = '';
+    if (!summary || !summary.contracts || !summary.contracts.length) return;
+
+    const makeLine = (label, value) => {
+      const row = document.createElement('div');
+      row.className = 'ts-expected-line';
+      const labelEl = document.createElement('span');
+      labelEl.textContent = label;
+      const valueEl = document.createElement('span');
+      valueEl.textContent = value;
+      row.append(labelEl, valueEl);
+      return row;
+    };
+
+    const aggregate = document.createElement('div');
+    aggregate.className = 'ts-expected-aggregate';
+    aggregate.appendChild(makeLine('Average daily hours to date', `${formatDecimalHours(summary.averageHours)} hrs`));
+    const daysLabel = summary.totalBusinessDays > 0
+      ? `${summary.daysEvaluated} of ${summary.totalBusinessDays}`
+      : String(summary.daysEvaluated);
+    aggregate.appendChild(makeLine('Business days evaluated', daysLabel));
+    aggregate.appendChild(makeLine('Total hours logged this month', `${formatDecimalHours(summary.totalHoursToDate)} hrs`));
+
+    if (summary.baselineContractCount > 0 && summary.totalExpectedMonthlyHours > 0) {
+      aggregate.appendChild(makeLine('Total expected hours this month', `${formatDecimalHours(summary.totalExpectedMonthlyHours)} hrs`));
+      if (summary.totalExpectedHoursToDate > 0) {
+        aggregate.appendChild(makeLine('Expected hours to date', `${formatDecimalHours(summary.totalExpectedHoursToDate)} hrs`));
+      }
+      if (summary.overallProjectedVariance !== null) {
+        aggregate.appendChild(makeLine('Projected month variance', `${formatSignedHours(summary.overallProjectedVariance)} hrs`));
+        const overallStatus = document.createElement('div');
+        const varianceMagnitude = Math.abs(Math.round(summary.overallProjectedVariance * 100) / 100);
+        if (summary.overallProjectedVariance > 0.01) {
+          overallStatus.className = 'ts-expected-status ahead';
+          overallStatus.textContent = `Overall projected ahead by ${formatDecimalHours(varianceMagnitude)} hrs`;
+        } else if (summary.overallProjectedVariance < -0.01) {
+          overallStatus.className = 'ts-expected-status behind';
+          overallStatus.textContent = `Overall projected behind by ${formatDecimalHours(varianceMagnitude)} hrs`;
+        } else {
+          overallStatus.className = 'ts-expected-status ontrack';
+          overallStatus.textContent = 'Overall projected on target';
+        }
+        aggregate.appendChild(overallStatus);
+      }
+    }
+
+    expectedHoursContentEl.appendChild(aggregate);
+
+    summary.contracts.forEach((contract) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ts-expected-contract';
+
+      const header = document.createElement('div');
+      header.className = 'ts-expected-contract-header';
+      const nameEl = document.createElement('span');
+      nameEl.textContent = contract.contractName;
+      const hoursEl = document.createElement('span');
+      hoursEl.textContent = `${formatDecimalHours(contract.hoursToDate)} hrs logged`;
+      header.append(nameEl, hoursEl);
+      wrapper.appendChild(header);
+
+      const meta = document.createElement('div');
+      meta.className = 'ts-expected-meta';
+      meta.textContent = contract.includeWeekends
+        ? 'Including weekends in averages'
+        : 'Weekdays only (Mon-Fri)';
+      wrapper.appendChild(meta);
+
+      const lines = document.createElement('div');
+      lines.className = 'ts-expected-lines';
+      lines.appendChild(makeLine('Average daily hours', `${formatDecimalHours(contract.averageDailyHours)} hrs`));
+      lines.appendChild(makeLine('Days in calculation', `${contract.calculationDays} (${contract.calculationLabel})`));
+      if (contract.expectedMonthlyHours != null) {
+        const expectedToDate = contract.expectedHoursToDate != null ? formatDecimalHours(contract.expectedHoursToDate) : '0';
+        lines.appendChild(makeLine('Hours logged vs expected to date', `${formatDecimalHours(contract.hoursToDate)} / ${expectedToDate} hrs`));
+        lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining || 0)} hrs`));
+      } else {
+        lines.appendChild(makeLine('Expected hours remaining', 'Not available for unlimited contracts'));
+      }
+      lines.appendChild(makeLine('Projected month total', `${formatDecimalHours(contract.projectedTotalHours)} hrs`));
+      if (contract.projectedVariance != null) {
+        lines.appendChild(makeLine('Projected variance', `${formatSignedHours(contract.projectedVariance)} hrs`));
+      }
+      lines.appendChild(makeLine('Business days remaining', String(contract.businessDaysRemaining)));
+      wrapper.appendChild(lines);
+
+      const statusEl = document.createElement('div');
+      statusEl.className = `ts-expected-status ${contract.status}`;
+      statusEl.textContent = contract.statusText;
+      wrapper.appendChild(statusEl);
+
+      expectedHoursContentEl.appendChild(wrapper);
+    });
+  }
+
+  function renderExpectedHoursSummary() {
+    if (!expectedHoursBadge || !expectedHoursBreakdownEl) return;
+    if (!getFeatureFlag('expected_monthly_hours')) {
+      expectedHoursBadge.style.display = 'none';
+      expectedHoursBadge.textContent = 'Avg daily: --';
+      state.expectedHoursSummary = null;
+      expectedHoursExpanded = false;
+      applyExpectedHoursVisibility();
+      if (expectedHoursContentEl) expectedHoursContentEl.innerHTML = '';
+      return;
+    }
+
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const summary = buildExpectedHoursSummary(year, month);
+    state.expectedHoursSummary = summary;
+
+    if (!summary) {
+      expectedHoursBadge.style.display = 'none';
+      expectedHoursBadge.textContent = 'Avg daily: --';
+      expectedHoursExpanded = false;
+      applyExpectedHoursVisibility();
+      if (expectedHoursContentEl) expectedHoursContentEl.innerHTML = '';
+      return;
+    }
+
+    expectedHoursBadge.style.display = 'inline-flex';
+    const averageLabel = formatDecimalHours(summary.averageHours);
+    const suffix = summary.contractCount > 1 ? ` (${summary.contractCount})` : '';
+    expectedHoursBadge.textContent = `Avg daily: ${averageLabel}h${suffix}`;
+
+    applyExpectedHoursVisibility();
+    if (expectedHoursExpanded) {
+      renderExpectedHoursBreakdown(summary);
+    } else if (expectedHoursContentEl) {
+      expectedHoursContentEl.innerHTML = '';
     }
   }
   function renderEntries() {
@@ -3017,6 +3412,7 @@
       grid.appendChild(cell);
     }
     renderIncomeSummary();
+    renderExpectedHoursSummary();
   }
 
   function renderHourTypesBreakdown(entries, monthKey) {
