@@ -77,7 +77,7 @@
     <div class="ts-calendar-header">
       <div style="display:flex; align-items:center; gap:16px;">
         <h3 style="margin:0;">Calendar</h3>
-        <div class="ts-badge" id="calendar-month-total">Total hours: 0</div>
+        <button class="ts-badge ts-hour-types-badge" id="calendar-month-total" type="button" aria-expanded="false">Total hours: 0</button>
         <button class="ts-badge ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">Net income: --</button>
       </div>
       <div style="display:flex; align-items:center; gap:12px;">
@@ -101,6 +101,9 @@
         </div>
       </div>
       <div id="calendar-filter-list" class="ts-calendar-filter-list"></div>
+    </div>
+    <div class="ts-hour-types-breakdown" id="hour-types-breakdown" hidden>
+      <div id="hour-types-breakdown-list"></div>
     </div>
     <div class="ts-income-breakdown" id="income-breakdown" hidden>
       <div class="ts-income-row"><span class="ts-income-row-label">Total package</span><span class="ts-income-row-value" id="income-total-package">--</span></div>

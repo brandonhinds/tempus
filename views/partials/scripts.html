@@ -1699,6 +1699,34 @@
   }
   applyIncomeBreakdownVisibility();
 
+  // Hour types breakdown toggle
+  const hourTypesToggleBtn = document.getElementById('calendar-month-total');
+  const hourTypesBreakdownEl = document.getElementById('hour-types-breakdown');
+  const hourTypesBreakdownListEl = document.getElementById('hour-types-breakdown-list');
+  let hourTypesBreakdownExpanded = false;
+
+  function applyHourTypesBreakdownVisibility() {
+    if (!hourTypesBreakdownEl || !hourTypesToggleBtn) return;
+
+    if (hourTypesBreakdownExpanded) {
+      hourTypesBreakdownEl.hidden = false;
+      hourTypesToggleBtn.setAttribute('data-expanded', 'true');
+      hourTypesToggleBtn.setAttribute('aria-expanded', 'true');
+    } else {
+      hourTypesBreakdownEl.hidden = true;
+      hourTypesToggleBtn.setAttribute('data-expanded', 'false');
+      hourTypesToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  if (hourTypesToggleBtn) {
+    hourTypesToggleBtn.addEventListener('click', () => {
+      hourTypesBreakdownExpanded = !hourTypesBreakdownExpanded;
+      applyHourTypesBreakdownVisibility();
+    });
+  }
+  applyHourTypesBreakdownVisibility();
+
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
@@ -2878,6 +2906,10 @@
     } else {
       monthTotalEl.textContent = `Total hours: ${formatHours(roundedMonthTotal)}`;
     }
+
+    // Render hour types breakdown
+    renderHourTypesBreakdown(filteredEntries, monthKey);
+
     grid.innerHTML = '';
     const start = calendarStartDate(state.calendar.year, state.calendar.month);
     for (let i = 0; i < 42; i++) {
@@ -2986,6 +3018,54 @@
     }
     renderIncomeSummary();
   }
+
+  function renderHourTypesBreakdown(entries, monthKey) {
+    if (!hourTypesBreakdownListEl) return;
+
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+    if (!hourTypesEnabled) {
+      hourTypesBreakdownListEl.innerHTML = '';
+      return;
+    }
+
+    // Calculate totals for each hour type in the month
+    const monthEntries = entries.filter(entry => entry.date && entry.date.startsWith(monthKey));
+    const hourTypeTotals = monthEntries.reduce((map, entry) => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      if (!map[hourTypeId]) map[hourTypeId] = 0;
+      map[hourTypeId] += Number(entry.duration_minutes) || 0;
+      return map;
+    }, {});
+
+    // Sort hour types by total (descending)
+    const sortedHourTypes = Object.keys(hourTypeTotals)
+      .map(id => ({
+        id,
+        hourType: state.hourTypeMap[id],
+        minutes: hourTypeTotals[id]
+      }))
+      .filter(item => item.hourType && item.minutes > 0)
+      .sort((a, b) => b.minutes - a.minutes);
+
+    if (sortedHourTypes.length === 0) {
+      hourTypesBreakdownListEl.innerHTML = '<div class="ts-note">No hours tracked this month</div>';
+      return;
+    }
+
+    const html = sortedHourTypes.map(item => {
+      const roundedMinutes = roundDuration(item.minutes);
+      return `
+        <div class="ts-hour-type-breakdown-row">
+          <div class="ts-hour-type-breakdown-color" style="background-color: ${item.hourType.color}"></div>
+          <div class="ts-hour-type-breakdown-name">${item.hourType.name}</div>
+          <div class="ts-hour-type-breakdown-value">${formatHours(roundedMinutes)}</div>
+        </div>
+      `;
+    }).join('');
+
+    hourTypesBreakdownListEl.innerHTML = html;
+  }
+
   function handleCalendarClick(dateIso) {
     state.selectedCalendarDate = dateIso;
     setManualDate(dateIso);
