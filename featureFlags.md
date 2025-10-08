@@ -10,6 +10,8 @@ This document lists the feature flags supported by the Timesheet app. Each flag 
 | `default_inputs` | Disabled | Enables creating, using, and managing default time entry templates for faster data entry. |
 | `hour_types` | Disabled | Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization. |
 | `expected_monthly_hours` | Disabled | Shows a calendar badge that projects contract hours for the active month and highlights whether you are ahead or behind the target. |
+| `xero_payroll_helper` | Disabled | Adds a modal that slices the active month into Xero's fixed weekly ranges with cumulative hour totals. |
+| `myob_payroll_helper` | Disabled | Adds a modal that groups the active month into weekly MYOB-ready totals with a monthly cross-check. |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.

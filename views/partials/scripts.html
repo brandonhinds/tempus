@@ -471,6 +471,14 @@
     expected_monthly_hours: {
       name: 'Expected monthly hours insights',
       description: 'Adds a badge that breaks down projected contract hours for the active month.'
+    },
+    xero_payroll_helper: {
+      name: 'Xero payroll helper',
+      description: 'Adds a modal with week-by-week totals formatted for Xero payroll entry.'
+    },
+    myob_payroll_helper: {
+      name: 'MYOB payroll helper',
+      description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.'
     }
   };
 
@@ -1807,10 +1815,23 @@
     : null;
   const clearCacheWrapper = document.getElementById('clear-cache-wrapper');
   const clearCacheBtn = document.getElementById('btn-clear-cache');
+  const payrollXeroBtn = document.getElementById('calendar-xero-helper');
+  const payrollMyobBtn = document.getElementById('calendar-myob-helper');
+  const xeroHelperModal = document.getElementById('modal-xero-helper');
+  const myobHelperModal = document.getElementById('modal-myob-helper');
+  const xeroHelperContent = document.getElementById('xero-helper-content');
+  const myobHelperContent = document.getElementById('myob-helper-content');
 
   const DECIMAL_HOURS_FORMATTER = new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
+  });
+  const MONTH_DAY_FORMATTER = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric'
+  });
+  const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short'
   });
 
   function formatDecimalHours(value) {
@@ -2549,6 +2570,8 @@
       contractIncludeWeekendsRow.style.display = expectedMonthlyFlag.enabled ? 'flex' : 'none';
     }
 
+    updatePayrollHelperButtons();
+
     // Show/hide hour types navigation
     const hourTypesFlag = state.featureFlags.hour_types || DEFAULT_FEATURE_FLAGS.hour_types || { enabled: false };
     if (navHourTypesBtn) {
@@ -2612,6 +2635,20 @@
     });
   }
 
+  if (payrollXeroBtn) {
+    payrollXeroBtn.addEventListener('click', () => {
+      renderXeroPayrollHelper();
+      showModal(xeroHelperModal);
+    });
+  }
+
+  if (payrollMyobBtn) {
+    payrollMyobBtn.addEventListener('click', () => {
+      renderMyobPayrollHelper();
+      showModal(myobHelperModal);
+    });
+  }
+
   // Entries & KPIs
   function minutesForDate(date) {
     return state.entries
@@ -2623,6 +2660,107 @@
     const prefix = monthKeyFor(year, month);
     return state.entries.filter((entry) => entry.date && entry.date.startsWith(prefix));
   }
+  function payrollEligibleEntries(year, month) {
+    return entriesForMonth(year, month).filter((entry) => entry && entry.date && entryContributesToIncome(entry));
+  }
+  function formatRangeLabel(startDate, endDate) {
+    const startLabel = MONTH_DAY_FORMATTER.format(startDate);
+    const endLabel = MONTH_DAY_FORMATTER.format(endDate);
+    return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+  }
+  function buildXeroPayrollReport(year, month) {
+    const eligibleEntries = payrollEligibleEntries(year, month);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const minutesByDay = Array.from({ length: daysInMonth + 1 }, () => 0);
+    eligibleEntries.forEach((entry) => {
+      const dayString = entry.date ? entry.date.slice(-2) : '';
+      const day = Number(dayString);
+      if (!Number.isFinite(day)) return;
+      minutesByDay[day] += Number(entry.duration_minutes) || 0;
+    });
+    const weeks = [];
+    let cumulativeMinutes = 0;
+    for (let start = 1; start <= daysInMonth; start += 7) {
+      const end = Math.min(start + 6, daysInMonth);
+      let weekMinutes = 0;
+      const days = [];
+      for (let offset = 0; offset < 7; offset += 1) {
+        const day = start + offset;
+        const existsInMonth = day <= daysInMonth;
+        const dateObj = new Date(year, month, existsInMonth ? day : end);
+        const minutes = existsInMonth ? (minutesByDay[day] || 0) : 0;
+        if (existsInMonth) weekMinutes += minutes;
+        days.push({
+          date: dateObj,
+          minutes,
+          inMonth: existsInMonth
+        });
+      }
+      cumulativeMinutes += weekMinutes;
+      weeks.push({
+        startDay: start,
+        endDay: end,
+        days,
+        weekMinutes,
+        cumulativeMinutes
+      });
+    }
+    return {
+      weeks,
+      totalMinutes: cumulativeMinutes,
+      hasEntries: eligibleEntries.length > 0
+    };
+  }
+  function buildMyobPayrollReport(year, month) {
+    const eligibleEntries = payrollEligibleEntries(year, month);
+    const minutesByDate = eligibleEntries.reduce((map, entry) => {
+      if (!entry.date) return map;
+      map[entry.date] = (map[entry.date] || 0) + (Number(entry.duration_minutes) || 0);
+      return map;
+    }, {});
+    const monthStart = startOfDay(new Date(year, month, 1));
+    const monthEnd = startOfDay(new Date(year, month + 1, 0));
+    const firstWeekStart = (() => {
+      const first = new Date(monthStart);
+      const offset = (first.getDay() + 6) % 7; // shift Sunday to 6, Monday to 0
+      first.setDate(first.getDate() - offset);
+      return startOfDay(first);
+    })();
+    const weeks = [];
+    for (let cursor = new Date(firstWeekStart); cursor <= monthEnd; cursor.setDate(cursor.getDate() + 7)) {
+      const weekStart = startOfDay(new Date(cursor));
+      const weekEnd = startOfDay(new Date(cursor));
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const days = [];
+      let weekMinutes = 0;
+      for (let i = 0; i < 7; i += 1) {
+        const dayDate = new Date(weekStart);
+        dayDate.setDate(dayDate.getDate() + i);
+        const key = isoDate(dayDate);
+        const inMonth = dayDate >= monthStart && dayDate <= monthEnd;
+        const minutes = inMonth ? (minutesByDate[key] || 0) : 0;
+        if (inMonth) weekMinutes += minutes;
+        days.push({
+          date: dayDate,
+          minutes,
+          inMonth
+        });
+      }
+      weeks.push({
+        weekStart,
+        weekEnd,
+        days,
+        weekMinutes
+      });
+      if (weekEnd >= monthEnd) break;
+    }
+    const totalMinutes = weeks.reduce((acc, week) => acc + week.weekMinutes, 0);
+    return {
+      weeks,
+      totalMinutes,
+      hasEntries: eligibleEntries.length > 0
+    };
+  }
   function entryContributesToIncome(entry) {
     if (!entry) return false;
     const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
@@ -2631,6 +2769,166 @@
       return !!hourType.contributes_to_income;
     }
     return true;
+  }
+  function renderXeroPayrollHelper() {
+    if (!xeroHelperContent) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const report = buildXeroPayrollReport(year, month);
+    xeroHelperContent.innerHTML = '';
+
+    report.weeks.forEach((week) => {
+      const section = document.createElement('section');
+      section.className = 'ts-payroll-week ts-payroll-xero';
+      const rangeStart = new Date(year, month, week.startDay);
+      const rangeEnd = new Date(year, month, week.endDay);
+
+      const heading = document.createElement('div');
+      heading.className = 'ts-payroll-week-header';
+      const title = document.createElement('h4');
+      title.textContent = `Week ending ${MONTH_DAY_FORMATTER.format(rangeEnd)}`;
+      heading.appendChild(title);
+      section.appendChild(heading);
+
+      const table = document.createElement('table');
+      table.className = 'ts-payroll-table ts-payroll-table-grid';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      week.days.forEach((day) => {
+        const th = document.createElement('th');
+        const label = `${WEEKDAY_FORMATTER.format(day.date)} ${MONTH_DAY_FORMATTER.format(day.date)}`;
+        th.textContent = label;
+        if (!day.inMonth) th.classList.add('ts-payroll-outside');
+        headRow.appendChild(th);
+      });
+      const totalHead = document.createElement('th');
+      totalHead.textContent = 'Week total';
+      headRow.appendChild(totalHead);
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      const row = document.createElement('tr');
+      week.days.forEach((day) => {
+        const td = document.createElement('td');
+        if (!day.inMonth) {
+          td.classList.add('ts-payroll-outside');
+          td.textContent = '—';
+        } else {
+          td.textContent = formatDecimalHours((day.minutes || 0) / 60);
+        }
+        row.appendChild(td);
+      });
+      const totalCell = document.createElement('td');
+      totalCell.textContent = formatDecimalHours((week.weekMinutes || 0) / 60);
+      row.appendChild(totalCell);
+      tbody.appendChild(row);
+      table.appendChild(tbody);
+
+      section.appendChild(table);
+      xeroHelperContent.appendChild(section);
+    });
+
+    const total = document.createElement('div');
+    total.className = 'ts-payroll-total';
+    total.textContent = `Monthly total across all weeks: ${formatDecimalHours((report.totalMinutes || 0) / 60)} hrs`;
+    xeroHelperContent.appendChild(total);
+
+    if (!report.hasEntries) {
+      const empty = document.createElement('p');
+      empty.className = 'ts-note';
+      empty.textContent = 'No income-contributing hours logged for this month yet. Week ranges are shown with zero values so you can prepare entries ahead of time.';
+      xeroHelperContent.appendChild(empty);
+    }
+  }
+  function renderMyobPayrollHelper() {
+    if (!myobHelperContent) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const report = buildMyobPayrollReport(year, month);
+    myobHelperContent.innerHTML = '';
+
+    report.weeks.forEach((week) => {
+      const section = document.createElement('section');
+      section.className = 'ts-payroll-week ts-payroll-myob';
+
+      const heading = document.createElement('div');
+      heading.className = 'ts-payroll-week-header';
+      const title = document.createElement('h4');
+      title.textContent = `Week of ${MONTH_DAY_FORMATTER.format(week.weekStart)}`;
+      heading.appendChild(title);
+      section.appendChild(heading);
+
+      const table = document.createElement('table');
+      table.className = 'ts-payroll-table ts-myob-table';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      week.days.forEach((day) => {
+        const th = document.createElement('th');
+        th.textContent = `${WEEKDAY_FORMATTER.format(day.date)} ${MONTH_DAY_FORMATTER.format(day.date)}`;
+        if (!day.inMonth) th.classList.add('ts-payroll-outside');
+        headRow.appendChild(th);
+      });
+      const totalHead = document.createElement('th');
+      totalHead.textContent = 'Week total';
+      headRow.appendChild(totalHead);
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      const row = document.createElement('tr');
+      week.days.forEach((day) => {
+        const td = document.createElement('td');
+        if (!day.inMonth) {
+          td.classList.add('ts-payroll-outside');
+          td.textContent = '—';
+        } else {
+          td.textContent = formatDecimalHours((day.minutes || 0) / 60);
+        }
+        row.appendChild(td);
+      });
+      const totalCell = document.createElement('td');
+      totalCell.textContent = formatDecimalHours((week.weekMinutes || 0) / 60);
+      row.appendChild(totalCell);
+      tbody.appendChild(row);
+      table.appendChild(tbody);
+      section.appendChild(table);
+      myobHelperContent.appendChild(section);
+    });
+
+    const total = document.createElement('div');
+    total.className = 'ts-payroll-total';
+    total.textContent = `Monthly total across all weeks: ${formatDecimalHours((report.totalMinutes || 0) / 60)} hrs`;
+    myobHelperContent.appendChild(total);
+
+    if (!report.hasEntries) {
+      const empty = document.createElement('p');
+      empty.className = 'ts-note';
+      empty.textContent = 'No income-contributing hours logged for this month yet. Weekly ranges include out-of-month days for context; in-month days show 0 hrs.';
+      myobHelperContent.appendChild(empty);
+    }
+  }
+  function updatePayrollHelperButtons() {
+    if (!payrollXeroBtn && !payrollMyobBtn) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const hasEligibleEntries = payrollEligibleEntries(year, month).length > 0;
+    if (payrollXeroBtn) {
+      const visible = getFeatureFlag('xero_payroll_helper');
+      payrollXeroBtn.style.display = visible ? 'inline-flex' : 'none';
+      payrollXeroBtn.setAttribute('aria-disabled', visible && !hasEligibleEntries ? 'true' : 'false');
+      payrollXeroBtn.title = visible && !hasEligibleEntries
+        ? 'No income-contributing hours logged yet in this month'
+        : 'Open the Xero payroll helper';
+    }
+    if (payrollMyobBtn) {
+      const visible = getFeatureFlag('myob_payroll_helper');
+      payrollMyobBtn.style.display = visible ? 'inline-flex' : 'none';
+      payrollMyobBtn.setAttribute('aria-disabled', visible && !hasEligibleEntries ? 'true' : 'false');
+      payrollMyobBtn.title = visible && !hasEligibleEntries
+        ? 'No income-contributing hours logged yet in this month'
+        : 'Open the MYOB payroll helper';
+    }
   }
   function buildIncomeSummary(year, month) {
     const allEntries = entriesForMonth(year, month);
@@ -3493,11 +3791,12 @@
       }
 
       cell.onclick = () => handleCalendarClick(iso);
-      grid.appendChild(cell);
-    }
-    renderIncomeSummary();
-    renderExpectedHoursSummary();
+    grid.appendChild(cell);
   }
+  renderIncomeSummary();
+  renderExpectedHoursSummary();
+  updatePayrollHelperButtons();
+}
 
   function renderHourTypesBreakdown(entries, monthKey) {
     if (!hourTypesBreakdownListEl) return;
@@ -4410,6 +4709,16 @@
     const cancelCreateBtn = document.getElementById('btn-cancel-create-default');
     if (cancelCreateBtn) {
       cancelCreateBtn.addEventListener('click', () => hideModal(createDefaultModal));
+    }
+
+    const closeXeroHelperBtn = document.getElementById('btn-close-xero-helper');
+    if (closeXeroHelperBtn && xeroHelperModal) {
+      closeXeroHelperBtn.addEventListener('click', () => hideModal(xeroHelperModal));
+    }
+
+    const closeMyobHelperBtn = document.getElementById('btn-close-myob-helper');
+    if (closeMyobHelperBtn && myobHelperModal) {
+      closeMyobHelperBtn.addEventListener('click', () => hideModal(myobHelperModal));
     }
 
     const saveDefaultBtn = document.getElementById('btn-save-default');

@@ -130,8 +130,43 @@
     </div>
     <div class="ts-calendar-grid" id="calendar-grid"></div>
     <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries.</div>
+    <div class="ts-payroll-helper-actions" id="payroll-helper-actions" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+      <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero payroll helper</button>
+      <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB payroll helper</button>
+    </div>
   </div>
 </section>
+
+<!-- Payroll Helper Modals -->
+<div class="ts-modal" id="modal-xero-helper" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 720px;">
+    <div class="ts-modal-header">
+      <h3>Xero Payroll Helper</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div id="xero-helper-content"></div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-close-xero-helper">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-myob-helper" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 720px;">
+    <div class="ts-modal-header">
+      <h3>MYOB Payroll Helper</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div id="myob-helper-content"></div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-close-myob-helper">Close</button>
+    </div>
+  </div>
+</div>
 
 <!-- Default Entry Modals -->
 <div class="ts-modal" id="modal-create-default" style="display:none;">
