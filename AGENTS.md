@@ -16,6 +16,7 @@
 - Functions in `backend/` follow `api_*` or verb-first names (`cacheSet`, `getOrCreateSheet`). Preserve this when adding endpoints so the public surface stays predictable.
 - Prefer `const`/`let` on the client and stick to `var` on the server to maintain Apps Script compatibility.
 - Keep inline comments short and intent-focused; explain non-obvious decisions rather than restating code.
+- Configurable UI toggles must use the `.ts-toggle` switch styling; do not introduce plain checkboxes for binary settings.
 
 ## Testing Guidelines
 - No automated suite exists. Verify manually in the deployed preview: create, edit, and delete entries, and confirm cached UI state stays in sync after page reloads.

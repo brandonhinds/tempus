@@ -1787,6 +1787,7 @@
   const contractEndInput = document.getElementById('contract-end');
   const contractRateInput = document.getElementById('contract-rate');
   const contractTotalHoursInput = document.getElementById('contract-total-hours');
+  const contractIncludeWeekendsRow = document.getElementById('contract-weekends-row');
   const contractIncludeWeekendsInput = document.getElementById('contract-include-weekends');
   const contractSaveBtn = document.getElementById('contract-save');
   const contractCancelBtn = document.getElementById('contract-cancel');
@@ -2543,6 +2544,11 @@
     renderCalendar();
     updateClearCacheVisibility();
 
+    const expectedMonthlyFlag = state.featureFlags.expected_monthly_hours || DEFAULT_FEATURE_FLAGS.expected_monthly_hours || { enabled: false };
+    if (contractIncludeWeekendsRow) {
+      contractIncludeWeekendsRow.style.display = expectedMonthlyFlag.enabled ? 'flex' : 'none';
+    }
+
     // Show/hide hour types navigation
     const hourTypesFlag = state.featureFlags.hour_types || DEFAULT_FEATURE_FLAGS.hour_types || { enabled: false };
     if (navHourTypesBtn) {
@@ -2946,11 +2952,11 @@
         const roundedVariance = Math.round(projectedVariance * 100) / 100;
         const varianceMagnitude = Math.abs(roundedVariance);
         if (roundedVariance > 0.01) {
-          status = 'ahead';
-          statusText = `Projected ahead by ${formatDecimalHours(varianceMagnitude)} hrs`;
-        } else if (roundedVariance < -0.01) {
           status = 'behind';
-          statusText = `Projected behind by ${formatDecimalHours(varianceMagnitude)} hrs`;
+          statusText = `Projected over by ${formatDecimalHours(varianceMagnitude)} hrs`;
+        } else if (roundedVariance < -0.01) {
+          status = 'ahead';
+          statusText = `Projected under by ${formatDecimalHours(varianceMagnitude)} hrs`;
         }
       }
       if (expectedMonthlyHours == null) {
@@ -3035,6 +3041,30 @@
       return row;
     };
 
+    const buildVarianceStatus = (variance, prefix) => {
+      if (variance === null || variance === undefined) return null;
+      const rounded = Math.round(variance * 100) / 100;
+      const magnitude = Math.abs(rounded);
+      const statusEl = document.createElement('div');
+      if (rounded > 0.01) {
+        statusEl.className = 'ts-expected-status behind';
+        statusEl.textContent = prefix
+          ? `${prefix} projected over by ${formatDecimalHours(magnitude)} hrs`
+          : `Projected over by ${formatDecimalHours(magnitude)} hrs`;
+      } else if (rounded < -0.01) {
+        statusEl.className = 'ts-expected-status ahead';
+        statusEl.textContent = prefix
+          ? `${prefix} projected under by ${formatDecimalHours(magnitude)} hrs`
+          : `Projected under by ${formatDecimalHours(magnitude)} hrs`;
+      } else {
+        statusEl.className = 'ts-expected-status ontrack';
+        statusEl.textContent = prefix
+          ? `${prefix} projected on target`
+          : 'Projected on target';
+      }
+      return statusEl;
+    };
+
     const aggregate = document.createElement('div');
     aggregate.className = 'ts-expected-aggregate';
     aggregate.appendChild(makeLine('Average daily hours to date', `${formatDecimalHours(summary.averageHours)} hrs`));
@@ -3044,83 +3074,139 @@
     aggregate.appendChild(makeLine('Business days evaluated', daysLabel));
     aggregate.appendChild(makeLine('Total hours logged this month', `${formatDecimalHours(summary.totalHoursToDate)} hrs`));
 
-    if (summary.baselineContractCount > 0 && summary.totalExpectedMonthlyHours > 0) {
+    const hasExpectedTotals = summary.baselineContractCount > 0 && summary.totalExpectedMonthlyHours > 0;
+    let overallStatus = null;
+    if (summary.contractCount > 1 && hasExpectedTotals) {
       aggregate.appendChild(makeLine('Total expected hours this month', `${formatDecimalHours(summary.totalExpectedMonthlyHours)} hrs`));
       if (summary.totalExpectedHoursToDate > 0) {
         aggregate.appendChild(makeLine('Expected hours to date', `${formatDecimalHours(summary.totalExpectedHoursToDate)} hrs`));
       }
       if (summary.overallProjectedVariance !== null) {
         aggregate.appendChild(makeLine('Projected month variance', `${formatSignedHours(summary.overallProjectedVariance)} hrs`));
-        const overallStatus = document.createElement('div');
-        const varianceMagnitude = Math.abs(Math.round(summary.overallProjectedVariance * 100) / 100);
-        if (summary.overallProjectedVariance > 0.01) {
-          overallStatus.className = 'ts-expected-status ahead';
-          overallStatus.textContent = `Overall projected ahead by ${formatDecimalHours(varianceMagnitude)} hrs`;
-        } else if (summary.overallProjectedVariance < -0.01) {
-          overallStatus.className = 'ts-expected-status behind';
-          overallStatus.textContent = `Overall projected behind by ${formatDecimalHours(varianceMagnitude)} hrs`;
-        } else {
-          overallStatus.className = 'ts-expected-status ontrack';
-          overallStatus.textContent = 'Overall projected on target';
-        }
-        aggregate.appendChild(overallStatus);
+        overallStatus = buildVarianceStatus(summary.overallProjectedVariance, 'Overall');
       }
+    }
+
+    if (summary.contractCount === 1) {
+      const contract = summary.contracts[0];
+      const hasExpected = contract.expectedMonthlyHours != null;
+      const expectedMonthlyValue = hasExpected
+        ? `${formatDecimalHours(contract.expectedMonthlyHours)} hrs`
+        : 'Not available for unlimited contracts';
+      aggregate.appendChild(makeLine('Total expected hours this month', expectedMonthlyValue));
+
+      const expectedToDateValue = hasExpected
+        ? `${formatDecimalHours(contract.expectedHoursToDate || 0)} hrs`
+        : 'Not available for unlimited contracts';
+      aggregate.appendChild(makeLine('Expected hours to date', expectedToDateValue));
+
+      const projectedVarianceValue = contract.projectedVariance != null
+        ? `${formatSignedHours(contract.projectedVariance)} hrs`
+        : 'Not available';
+      aggregate.appendChild(makeLine('Projected month variance', projectedVarianceValue));
+
+      const varianceStatus = buildVarianceStatus(contract.projectedVariance);
+      if (varianceStatus) {
+        aggregate.appendChild(varianceStatus);
+      } else {
+        const varianceUnavailable = document.createElement('div');
+        varianceUnavailable.className = 'ts-expected-status ontrack';
+        varianceUnavailable.textContent = hasExpected
+          ? 'Projected variance not available'
+          : 'Projected variance not available for unlimited contracts';
+        aggregate.appendChild(varianceUnavailable);
+      }
+    } else if (overallStatus) {
+      aggregate.appendChild(overallStatus);
     }
 
     expectedHoursContentEl.appendChild(aggregate);
 
-    summary.contracts.forEach((contract) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'ts-expected-contract';
+    if (summary.contractCount > 1) {
+      summary.contracts.forEach((contract) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'ts-expected-contract';
 
-      const header = document.createElement('div');
-      header.className = 'ts-expected-contract-header';
-      const nameEl = document.createElement('span');
-      nameEl.textContent = contract.contractName;
-      const hoursEl = document.createElement('span');
-      hoursEl.textContent = `${formatDecimalHours(contract.hoursToDate)} hrs logged`;
-      header.append(nameEl, hoursEl);
-      wrapper.appendChild(header);
+        const header = document.createElement('div');
+        header.className = 'ts-expected-contract-header';
+        const nameEl = document.createElement('span');
+        nameEl.textContent = contract.contractName;
+        const hoursEl = document.createElement('span');
+        hoursEl.textContent = `${formatDecimalHours(contract.hoursToDate)} hrs logged`;
+        header.append(nameEl, hoursEl);
+        wrapper.appendChild(header);
 
-      const meta = document.createElement('div');
-      meta.className = 'ts-expected-meta';
-      meta.textContent = contract.includeWeekends
-        ? 'Including weekends in averages'
-        : 'Weekdays only (Mon-Fri)';
-      wrapper.appendChild(meta);
+        const meta = document.createElement('div');
+        meta.className = 'ts-expected-meta';
+        meta.textContent = contract.includeWeekends
+          ? 'Including weekends in averages'
+          : 'Weekdays only (Mon-Fri)';
+        wrapper.appendChild(meta);
 
-      const lines = document.createElement('div');
-      lines.className = 'ts-expected-lines';
-      lines.appendChild(makeLine('Average daily hours', `${formatDecimalHours(contract.averageDailyHours)} hrs`));
-      lines.appendChild(makeLine('Days in calculation', `${contract.calculationDays} (${contract.calculationLabel})`));
-      if (contract.expectedMonthlyHours != null) {
-        const expectedToDate = contract.expectedHoursToDate != null ? formatDecimalHours(contract.expectedHoursToDate) : '0';
-        lines.appendChild(makeLine('Hours logged vs expected to date', `${formatDecimalHours(contract.hoursToDate)} / ${expectedToDate} hrs`));
-        lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining || 0)} hrs`));
-      } else {
-        lines.appendChild(makeLine('Expected hours remaining', 'Not available for unlimited contracts'));
-      }
-      lines.appendChild(makeLine('Projected month total', `${formatDecimalHours(contract.projectedTotalHours)} hrs`));
-      if (contract.projectedVariance != null) {
-        lines.appendChild(makeLine('Projected variance', `${formatSignedHours(contract.projectedVariance)} hrs`));
-      }
-      lines.appendChild(makeLine('Business days remaining', String(contract.businessDaysRemaining)));
-      wrapper.appendChild(lines);
+        const lines = document.createElement('div');
+        lines.className = 'ts-expected-lines';
+        lines.appendChild(makeLine('Average daily hours', `${formatDecimalHours(contract.averageDailyHours)} hrs`));
+        lines.appendChild(makeLine('Days in calculation', `${contract.calculationDays} (${contract.calculationLabel})`));
+        if (contract.expectedMonthlyHours != null) {
+          const expectedToDate = contract.expectedHoursToDate != null ? formatDecimalHours(contract.expectedHoursToDate) : '0';
+          lines.appendChild(makeLine('Hours logged vs expected to date', `${formatDecimalHours(contract.hoursToDate)} / ${expectedToDate} hrs`));
+          lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining || 0)} hrs`));
+        } else {
+          lines.appendChild(makeLine('Expected hours remaining', 'Not available for unlimited contracts'));
+        }
+        lines.appendChild(makeLine('Projected month total', `${formatDecimalHours(contract.projectedTotalHours)} hrs`));
+        if (contract.projectedVariance != null) {
+          lines.appendChild(makeLine('Projected variance', `${formatSignedHours(contract.projectedVariance)} hrs`));
+        }
+        lines.appendChild(makeLine('Business days remaining', String(contract.businessDaysRemaining)));
+        wrapper.appendChild(lines);
 
-      const statusEl = document.createElement('div');
-      statusEl.className = `ts-expected-status ${contract.status}`;
-      statusEl.textContent = contract.statusText;
-      wrapper.appendChild(statusEl);
+        const statusEl = document.createElement('div');
+        statusEl.className = `ts-expected-status ${contract.status}`;
+        statusEl.textContent = contract.statusText;
+        wrapper.appendChild(statusEl);
 
-      expectedHoursContentEl.appendChild(wrapper);
-    });
+        expectedHoursContentEl.appendChild(wrapper);
+      });
+    }
+  }
+
+  function resetExpectedHoursBadge(text) {
+    if (!expectedHoursBadge) return;
+    expectedHoursBadge.className = 'ts-badge ts-expected-badge';
+    expectedHoursBadge.textContent = text || 'Projected variance: --';
+  }
+
+  function applyExpectedHoursBadge(summary) {
+    if (!expectedHoursBadge) return;
+    resetExpectedHoursBadge();
+    if (!summary) return;
+
+    let varianceValue = summary.overallProjectedVariance;
+    if ((varianceValue === null || varianceValue === undefined) && summary.contractCount === 1 && summary.contracts[0]) {
+      varianceValue = summary.contracts[0].projectedVariance;
+    }
+
+    const suffix = summary.contractCount > 1 ? ` (${summary.contractCount})` : '';
+    if (varianceValue === null || varianceValue === undefined) {
+      expectedHoursBadge.textContent = `Projected variance: --${suffix}`;
+      return;
+    }
+
+    const rounded = Math.round(varianceValue * 100) / 100;
+    expectedHoursBadge.textContent = `Projected variance: ${formatSignedHours(varianceValue)} hrs${suffix}`;
+    if (rounded > 0.01) {
+      expectedHoursBadge.classList.add('error');
+    } else if (rounded < -0.01) {
+      expectedHoursBadge.classList.add('success');
+    }
   }
 
   function renderExpectedHoursSummary() {
     if (!expectedHoursBadge || !expectedHoursBreakdownEl) return;
     if (!getFeatureFlag('expected_monthly_hours')) {
       expectedHoursBadge.style.display = 'none';
-      expectedHoursBadge.textContent = 'Avg daily: --';
+      resetExpectedHoursBadge();
       state.expectedHoursSummary = null;
       expectedHoursExpanded = false;
       applyExpectedHoursVisibility();
@@ -3135,7 +3221,7 @@
 
     if (!summary) {
       expectedHoursBadge.style.display = 'none';
-      expectedHoursBadge.textContent = 'Avg daily: --';
+      resetExpectedHoursBadge();
       expectedHoursExpanded = false;
       applyExpectedHoursVisibility();
       if (expectedHoursContentEl) expectedHoursContentEl.innerHTML = '';
@@ -3143,9 +3229,7 @@
     }
 
     expectedHoursBadge.style.display = 'inline-flex';
-    const averageLabel = formatDecimalHours(summary.averageHours);
-    const suffix = summary.contractCount > 1 ? ` (${summary.contractCount})` : '';
-    expectedHoursBadge.textContent = `Avg daily: ${averageLabel}h${suffix}`;
+    applyExpectedHoursBadge(summary);
 
     applyExpectedHoursVisibility();
     if (expectedHoursExpanded) {

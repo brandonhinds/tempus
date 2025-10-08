@@ -67,6 +67,7 @@ The core system supports two modes:
 - Client code: prefer `const`/`let`
 - Server code: use `var` for Apps Script compatibility
 - Function naming: `api_*` for endpoints, verb-first for utilities (e.g., `cacheSet`, `getOrCreateSheet`)
+- Binary configuration controls must use the shared `.ts-toggle` styling; avoid introducing checkbox UI for toggles.
 
 ### Data Handling
 - Dates: ISO format `yyyy-MM-dd`
