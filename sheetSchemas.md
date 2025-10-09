@@ -78,6 +78,31 @@ Feature flags gate optional behaviours. Each row records a single flag and its c
 - Keep feature identifiers kebab- or snake-cased so the client can map them safely to object keys.
 - Expand the sheet with owner and rollout metadata once multiple flags are in play.
 
+## deductions
+Stores configured deductions that affect monthly income calculations. Deductions can be personal (salary sacrifice) or company expenses, and may be one-off or recurring. Extra super contributions are modelled as a special deduction type.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `0d9f9c03-e9fb-4fb6-b8d7-46df2315bd1b` |
+| `name` | string | Human-readable deduction name. | `Novated lease` |
+| `category` | string | Either `personal` or `company`. | `personal` |
+| `deduction_type` | string | `standard` or `extra_super`. | `extra_super` |
+| `amount_type` | string | `flat` (currency) or `percent` (for extra super). | `percent` |
+| `amount_value` | number | Flat amount in dollars or percentage (stored as decimal). | `0.02` |
+| `gst_inclusive` | boolean/string | `TRUE`/`FALSE` to indicate whether the entered amount includes GST. Ignored for extra super. | `TRUE` |
+| `gst_amount` | number | GST component recorded for company deductions when inclusive. | `45.45` |
+| `frequency` | string | Recurrence cadence: `once`, `weekly`, `fortnightly`, `monthly`, `quarterly`, `yearly`. | `monthly` |
+| `start_date` | string (ISO date) | First deduction date. | `2025-01-15` |
+| `end_date` | string (ISO date) | Optional final deduction date; blank for indefinite. | `` |
+| `notes` | string | Optional free-form notes. | `Lease finishing Dec 2026` |
+| `active` | boolean/string | `TRUE`/`FALSE` flag controlling whether the deduction is in use. | `TRUE` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the deduction was created. | `2025-10-08T00:12:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-10-08T00:12:00Z` |
+
+### Suggested improvements
+- Store an attachment reference once file uploads are supported for deductions.
+- Track audit metadata (user, change reason) when collaborative workflows are introduced.
+
 ## hour_types
 Hour types define categories of time that can be tracked (work, annual leave, sick leave, training, etc.). Each type has configurable properties affecting contract requirements, income calculations, and visualization.
 

@@ -14,6 +14,24 @@ function getOrCreateSheet(name) {
       sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
     } else if (name === 'hour_types') {
       sh.getRange(1,1,1,8).setValues([['id','name','slug','color','contributes_to_income','requires_contract','is_default','created_at']]);
+    } else if (name === 'deductions') {
+      sh.getRange(1,1,1,15).setValues([[
+        'id',
+        'name',
+        'category',
+        'deduction_type',
+        'amount_type',
+        'amount_value',
+        'gst_inclusive',
+        'gst_amount',
+        'frequency',
+        'start_date',
+        'end_date',
+        'notes',
+        'active',
+        'created_at',
+        'updated_at'
+      ]]);
     }
   }
   if (name === 'timesheet_entries') {
@@ -108,6 +126,19 @@ function getOrCreateSheet(name) {
     sh.getRange('B:D').setNumberFormat('@');
     sh.getRange('E:G').setNumberFormat('@');
     sh.getRange('H:H').setNumberFormat('@');
+  }
+  if (name === 'deductions') {
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('B:C').setNumberFormat('@');
+    sh.getRange('D:E').setNumberFormat('@');
+    sh.getRange('F:F').setNumberFormat('0.00');
+    sh.getRange('G:G').setNumberFormat('@');
+    sh.getRange('H:H').setNumberFormat('0.00');
+    sh.getRange('I:I').setNumberFormat('@');
+    sh.getRange('J:K').setNumberFormat('@');
+    sh.getRange('L:L').setNumberFormat('@');
+    sh.getRange('M:M').setNumberFormat('@');
+    sh.getRange('N:O').setNumberFormat('@');
   }
   return sh;
 }

@@ -3,13 +3,42 @@
   const pageTime = document.getElementById('page-time');
   const pageContracts = document.getElementById('page-contracts');
   const pageHourTypes = document.getElementById('page-hour-types');
+  const pageDeductions = document.getElementById('page-deductions');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');
   const navTimeBtn = document.getElementById('nav-time');
   const navContractsBtn = document.getElementById('nav-contracts');
   const navHourTypesBtn = document.getElementById('nav-hour-types');
+  const navDeductionsBtn = document.getElementById('nav-deductions');
   const navSettingsBtn = document.getElementById('nav-settings');
+  const deductionsListEl = document.getElementById('deductions-list');
+  const deductionsEmptyEl = document.getElementById('deductions-empty');
+  const deductionCompanyDisabledNote = document.getElementById('deduction-company-disabled-note');
+  const btnAddDeduction = document.getElementById('btn-add-deduction');
+  const deductionCategoryReadonly = document.getElementById('deduction-category-readonly');
+  const deductionFormModal = document.getElementById('modal-deduction-form');
+  const deductionFormTitle = document.getElementById('deduction-form-title');
+  const deductionNameInput = document.getElementById('deduction-name');
+  const deductionCategorySelect = document.getElementById('deduction-category');
+  const deductionTypeSelect = document.getElementById('deduction-type');
+  const deductionAmountInput = document.getElementById('deduction-amount');
+  const deductionPercentInput = document.getElementById('deduction-percent');
+  const deductionAmountModeWrapper = document.getElementById('deduction-amount-mode-wrapper');
+  const deductionAmountModeSelect = document.getElementById('deduction-amount-mode');
+  const deductionAmountWrapper = document.getElementById('deduction-amount-wrapper');
+  const deductionPercentWrapper = document.getElementById('deduction-percent-wrapper');
+  const deductionGstWrapper = document.getElementById('deduction-gst-wrapper');
+  const deductionGstToggle = document.getElementById('deduction-gst');
+  const deductionCompanyGstNote = document.getElementById('deduction-company-gst-note');
+  const deductionFrequencySelect = document.getElementById('deduction-frequency');
+  const deductionStartDateInput = document.getElementById('deduction-start-date');
+  const deductionEndDateInput = document.getElementById('deduction-end-date');
+  const deductionEndDateWrapper = document.getElementById('deduction-end-date-wrapper');
+  const deductionNotesInput = document.getElementById('deduction-notes');
+  const deductionOccurrencePreview = document.getElementById('deduction-occurrence-preview');
+  const btnCancelDeduction = document.getElementById('btn-cancel-deduction');
+  const btnSaveDeduction = document.getElementById('btn-save-deduction');
 
   const state = {
     cacheKey: 'ts_cache',
@@ -19,11 +48,13 @@
     contractMap: {},
     hourTypes: [],
     hourTypeMap: {},
+    deductions: [],
     featureFlags: {},
     editingEntryId: null,
     editingEntryType: null,
     editingContractId: null,
     editingHourTypeId: null,
+    editingDeductionId: null,
     contractFormMode: 'hidden',
     calendar: null,
     selectedCalendarDate: null,
@@ -35,10 +66,17 @@
     punchDraft: null,
     currentTab: 'manual',
     calendarFilteredHourTypes: null,
-    expectedHoursSummary: null
+    expectedHoursSummary: null,
+    companyTrackingEnabled: false
   };
 
-  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'settings'];
+  const deductionFormState = {
+    mode: 'create',
+    editingId: null,
+    original: null
+  };
+
+  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -59,6 +97,7 @@
       time: pageTime,
       contracts: pageContracts,
       'hour-types': pageHourTypes,
+      deductions: pageDeductions,
       settings: pageSettings
     };
     Object.keys(pages).forEach((key) => {
@@ -122,9 +161,35 @@
   if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
   if (navHourTypesBtn) navHourTypesBtn.onclick = () => { closeNavMenu(); showPage('hour-types'); };
+  if (navDeductionsBtn) navDeductionsBtn.onclick = () => { closeNavMenu(); showPage('deductions'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
   showPage('time', { skipRemember: true });
+
+  if (btnAddDeduction) {
+    btnAddDeduction.addEventListener('click', () => openDeductionForm('create'));
+  }
+  if (btnCancelDeduction) {
+    btnCancelDeduction.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeDeductionForm();
+    });
+  }
+  if (btnSaveDeduction) {
+    btnSaveDeduction.addEventListener('click', (event) => {
+      event.preventDefault();
+      handleSaveDeduction();
+    });
+  }
+  if (deductionTypeSelect) deductionTypeSelect.addEventListener('change', updateDeductionFormVisibility);
+  if (deductionCategorySelect) deductionCategorySelect.addEventListener('change', () => {
+    updateDeductionCompanyOptions();
+    updateDeductionFormVisibility();
+  });
+  if (deductionAmountModeSelect) deductionAmountModeSelect.addEventListener('change', updateDeductionFormVisibility);
+  if (deductionFrequencySelect) deductionFrequencySelect.addEventListener('change', updateDeductionFormVisibility);
+  if (deductionStartDateInput) deductionStartDateInput.addEventListener('change', updateDeductionOccurrencePreview);
+  if (deductionEndDateInput) deductionEndDateInput.addEventListener('change', updateDeductionOccurrencePreview);
 
   // Helpers
 
@@ -197,6 +262,7 @@
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
   const DEFAULT_SUPER_RATE = 0.12;
+  const GST_RATE = 0.1;
   const currencyFormatter = new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: 'AUD',
@@ -207,6 +273,20 @@
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
     return currencyFormatter.format(num);
+  };
+  const addDays = (date, amount) => {
+    const next = new Date(date.getTime());
+    next.setDate(next.getDate() + amount);
+    return next;
+  };
+  const addMonthsClamped = (date, amount) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+    const target = new Date(year, month + amount + 1, 0);
+    const maxDay = target.getDate();
+    target.setDate(Math.min(day, maxDay));
+    return startOfDay(target);
   };
   const getSuperRateSetting = () => {
     const raw = state.settings ? state.settings.superannuation_rate : undefined;
@@ -222,8 +302,6 @@
     if (Number.isFinite(num) && num >= 0) return Math.round(num * 10) / 10;
     return Math.round(DEFAULT_SUPER_RATE * 1000) / 10;
   };
-  const getSalarySacrificePlaceholder = () => 0; // Stub for salary sacrifice configuration.
-  const getExtraSuperPlaceholder = () => 0; // Stub for future extra super contributions.
 
   const getRoundInterval = () => {
     const value = Number(state.settings.round_to_nearest);
@@ -451,6 +529,705 @@
     return clone;
   };
 
+  const sanitizeDeduction = (deduction) => {
+    if (!deduction) return deduction;
+    const clone = { ...deduction };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.name = clone.name ? String(clone.name).trim() : '';
+    clone.category = clone.category === 'company' ? 'company' : 'personal';
+    clone.deduction_type = clone.deduction_type === 'extra_super' ? 'extra_super' : 'standard';
+    clone.amount_type = clone.amount_type === 'percent' ? 'percent' : 'flat';
+    let amountValue = Number(clone.amount_value);
+    if (!Number.isFinite(amountValue) || amountValue < 0) amountValue = 0;
+    if (clone.amount_type === 'percent' && amountValue > 1) {
+      amountValue = amountValue / 100;
+    }
+    clone.amount_value = amountValue;
+    clone.gst_inclusive = !!clone.gst_inclusive;
+    clone.gst_amount = Number(clone.gst_amount) || 0;
+    clone.frequency = DEDUCTION_FREQUENCIES.includes(clone.frequency) ? clone.frequency : 'once';
+    clone.start_date = clone.start_date ? String(clone.start_date) : '';
+    clone.end_date = clone.end_date ? String(clone.end_date) : '';
+    clone.notes = clone.notes ? String(clone.notes) : '';
+    clone.active = clone.active !== false;
+    clone.created_at = clone.created_at || '';
+    clone.updated_at = clone.updated_at || '';
+    return clone;
+  };
+
+  function nextOccurrenceDate(current, frequency) {
+    if (!current) return null;
+    switch (frequency) {
+      case 'weekly':
+        return addDays(current, 7);
+      case 'fortnightly':
+        return addDays(current, 14);
+      case 'monthly':
+        return addMonthsClamped(current, 1);
+      case 'quarterly':
+        return addMonthsClamped(current, 3);
+      case 'yearly':
+        return addMonthsClamped(current, 12);
+      default:
+        return null;
+    }
+  }
+
+  function advanceOccurrenceTo(startDate, frequency, targetDate, endDate) {
+    if (!startDate) return null;
+    if (frequency === 'once') {
+      return startDate;
+    }
+    var current = startDate;
+    var safety = 0;
+    while (current < targetDate && safety < 1000) {
+      var next = nextOccurrenceDate(current, frequency);
+      if (!next) return current;
+      if (endDate && next > endDate) return next;
+      if (next.getTime() === current.getTime()) return next;
+      current = next;
+      safety++;
+    }
+    return current;
+  }
+
+  function getDeductionOccurrencesBetween(deduction, rangeStart, rangeEnd, limit) {
+    const occurrences = [];
+    if (!deduction || !deduction.start_date) return occurrences;
+    const startSource = parseIsoDate(deduction.start_date);
+    if (!startSource || Number.isNaN(startSource.getTime())) return occurrences;
+    let current = startOfDay(startSource);
+    const endBoundary = deduction.end_date ? parseIsoDate(deduction.end_date) : null;
+    const endDate = endBoundary ? startOfDay(endBoundary) : null;
+    const frequency = deduction.frequency || 'once';
+    const hasRangeStart = !!rangeStart;
+    const hasRangeEnd = !!rangeEnd;
+    const rangeStartDate = hasRangeStart ? startOfDay(rangeStart) : null;
+    const rangeEndDate = hasRangeEnd ? startOfDay(rangeEnd) : null;
+
+    if (rangeStartDate && current < rangeStartDate && frequency !== 'once') {
+      current = advanceOccurrenceTo(current, frequency, rangeStartDate, endDate);
+    }
+
+    const maxIterations = 1000;
+    let iterations = 0;
+    while (current && iterations < maxIterations) {
+      if (rangeStartDate && current < rangeStartDate) {
+        // Occurrence is before range start; skip but continue advancing unless once
+      } else if (!rangeEndDate || current <= rangeEndDate) {
+        occurrences.push(startOfDay(current));
+      } else {
+        break;
+      }
+
+      if (limit && occurrences.length >= limit) break;
+      if (frequency === 'once') break;
+
+      const next = nextOccurrenceDate(current, frequency);
+      if (!next) break;
+      if (endDate && next > endDate) break;
+      if (next.getTime() === current.getTime()) break;
+      current = next;
+      iterations++;
+    }
+
+    return occurrences;
+  }
+
+  function getDeductionPreviewDates(deduction, limit) {
+    const occurrences = getDeductionOccurrencesBetween(
+      deduction,
+      parseIsoDate(deduction.start_date),
+      deduction.end_date ? parseIsoDate(deduction.end_date) : null,
+      limit || 5
+    );
+    return occurrences.map((occ) => isoDate(occ));
+  }
+
+  function getUpcomingDeductionDates(deduction, limit) {
+    const today = startOfDay(new Date());
+    const occurrences = getDeductionOccurrencesBetween(
+      deduction,
+      today,
+      deduction.end_date ? parseIsoDate(deduction.end_date) : null,
+      limit || 5
+    );
+    return occurrences.map((occ) => isoDate(occ));
+  }
+
+  function formatFrequencyLabel(frequency) {
+    switch (frequency) {
+      case 'weekly':
+        return 'Weekly';
+      case 'fortnightly':
+        return 'Fortnightly';
+      case 'monthly':
+        return 'Monthly';
+      case 'quarterly':
+        return 'Quarterly';
+      case 'yearly':
+        return 'Yearly';
+      case 'once':
+      default:
+        return 'One-off';
+    }
+  }
+
+  function formatDeductionAmount(deduction) {
+    if (deduction.amount_type === 'percent') {
+      const pct = Math.round((deduction.amount_value * 100) * 100) / 100;
+      return `${pct}% of gross income`;
+    }
+    const value = deduction.gst_inclusive
+      ? deduction.amount_value / (1 + GST_RATE)
+      : deduction.amount_value;
+    const rounded = Math.round((Number(value) || 0) * 100) / 100;
+    return formatCurrency(rounded);
+  }
+
+  function computeMonthlyDeductionTotals(year, month) {
+    const result = {
+      standardTotal: 0,
+      personalStandardTotal: 0,
+      companyStandardTotal: 0,
+      companyGstTotal: 0,
+      extraSuperFlat: 0,
+      extraSuperPercentRate: 0
+    };
+    if (!Array.isArray(state.deductions) || !state.deductions.length) return result;
+    const monthStart = startOfDay(new Date(year, month, 1));
+    const monthEnd = startOfDay(new Date(year, month + 1, 0));
+    state.deductions.forEach((deduction) => {
+      if (!deduction || deduction.active === false) return;
+      const occurrences = getDeductionOccurrencesBetween(deduction, monthStart, monthEnd);
+      if (!occurrences.length) return;
+      if (deduction.deduction_type === 'extra_super') {
+        if (deduction.amount_type === 'percent') {
+          result.extraSuperPercentRate += deduction.amount_value * occurrences.length;
+        } else {
+          result.extraSuperFlat += deduction.amount_value * occurrences.length;
+        }
+        return;
+      }
+      if (deduction.amount_type === 'percent') {
+        return;
+      }
+      let netAmount = deduction.amount_value;
+      if (deduction.gst_inclusive) {
+        netAmount = deduction.amount_value / (1 + GST_RATE);
+      }
+      const totalAmount = netAmount * occurrences.length;
+      result.standardTotal += totalAmount;
+      if (deduction.category === 'company') {
+        result.companyStandardTotal += totalAmount;
+        if (deduction.gst_inclusive) {
+          const inclusive = deduction.amount_value;
+          const gstComponent = inclusive - (inclusive / (1 + GST_RATE));
+          result.companyGstTotal += gstComponent * occurrences.length;
+        }
+      } else {
+        result.personalStandardTotal += totalAmount;
+      }
+    });
+    return result;
+  }
+
+  function updateDeductionCompanyOptions() {
+    if (!deductionCategorySelect) return;
+    const options = Array.from(deductionCategorySelect.options);
+    const companyOption = options.find((opt) => opt.value === 'company');
+    if (!companyOption) return;
+
+    if (state.companyTrackingEnabled) {
+      companyOption.disabled = false;
+      if (deductionCategoryReadonly) deductionCategoryReadonly.style.display = 'none';
+      deductionCategorySelect.style.display = '';
+      deductionCategorySelect.disabled = false;
+    } else {
+      companyOption.disabled = true;
+      if (deductionCategorySelect.value === 'company') {
+        deductionCategorySelect.value = 'personal';
+      }
+      deductionCategorySelect.style.display = 'none';
+      deductionCategorySelect.disabled = true;
+      if (deductionCategoryReadonly) {
+        deductionCategoryReadonly.style.display = 'block';
+        deductionCategoryReadonly.value = 'Salary sacrifice';
+      }
+    }
+  }
+
+  function renderDeductionsList() {
+    if (!deductionsListEl) return;
+    const list = Array.isArray(state.deductions) ? [...state.deductions] : [];
+    list.sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    const hasItems = list.length > 0;
+    if (deductionsEmptyEl) {
+      deductionsEmptyEl.style.display = hasItems ? 'none' : 'block';
+    }
+    deductionsListEl.innerHTML = '';
+    const showReadonlyNote = !state.companyTrackingEnabled && list.some((item) => item.category === 'company');
+    if (deductionCompanyDisabledNote) {
+      deductionCompanyDisabledNote.style.display = showReadonlyNote ? 'inline-flex' : 'none';
+    }
+    list.forEach((deduction) => {
+      const card = createDeductionCard(deduction);
+      deductionsListEl.appendChild(card);
+    });
+  }
+
+  function createDeductionCard(deduction) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ts-item';
+    if (!deduction.active || (deduction.category === 'company' && !state.companyTrackingEnabled)) {
+      wrapper.classList.add('ts-deduction-readonly');
+    }
+
+    const details = document.createElement('div');
+    details.className = 'ts-deduction-details';
+
+    const header = document.createElement('div');
+    header.className = 'ts-deduction-header';
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.textContent = deduction.name || 'Untitled deduction';
+    header.appendChild(title);
+
+    const categoryBadge = document.createElement('span');
+    categoryBadge.className = 'ts-badge';
+    categoryBadge.textContent = deduction.category === 'company' ? 'Company expense' : 'Salary sacrifice';
+    header.appendChild(categoryBadge);
+
+    if (deduction.deduction_type === 'extra_super') {
+      const typeBadge = document.createElement('span');
+      typeBadge.className = 'ts-badge';
+      typeBadge.textContent = 'Extra super';
+      header.appendChild(typeBadge);
+    }
+
+    details.appendChild(header);
+
+    const meta = document.createElement('div');
+    meta.className = 'ts-deduction-meta';
+    const amountSpan = document.createElement('span');
+    amountSpan.textContent = formatDeductionAmount(deduction);
+    if (deduction.gst_inclusive && deduction.amount_type !== 'percent') {
+      amountSpan.textContent += ' (GST excl.)';
+      amountSpan.title = `Entered ${formatCurrency(deduction.amount_value)} incl. GST`;
+    }
+    meta.appendChild(amountSpan);
+
+    const freqSpan = document.createElement('span');
+    freqSpan.textContent = formatFrequencyLabel(deduction.frequency);
+    meta.appendChild(freqSpan);
+
+    const startSpan = document.createElement('span');
+    startSpan.textContent = `Starts ${deduction.start_date ? DATE_FULL_FORMATTER.format(parseIsoDate(deduction.start_date)) : '—'}`;
+    meta.appendChild(startSpan);
+
+    if (deduction.end_date) {
+      const endSpan = document.createElement('span');
+      endSpan.textContent = `Ends ${DATE_FULL_FORMATTER.format(parseIsoDate(deduction.end_date))}`;
+      meta.appendChild(endSpan);
+    }
+    details.appendChild(meta);
+
+    const upcomingDates = getUpcomingDeductionDates(deduction, 5);
+    if (deduction.frequency !== 'once') {
+      const occurrenceEl = document.createElement('div');
+      occurrenceEl.className = 'ts-deduction-occurrences';
+      if (upcomingDates.length) {
+        occurrenceEl.textContent = `Next deduction on ${DATE_FULL_FORMATTER.format(parseIsoDate(upcomingDates[0]))}`;
+      } else {
+        occurrenceEl.textContent = 'No upcoming deductions scheduled.';
+      }
+      meta.appendChild(occurrenceEl);
+    }
+
+    if (deduction.notes) {
+      const noteEl = document.createElement('div');
+      noteEl.className = 'ts-deduction-note';
+      noteEl.textContent = deduction.notes;
+      details.appendChild(noteEl);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'ts-deduction-actions';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'ghost small';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => openDeductionForm('edit', deduction));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'ghost small danger';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => handleDeleteDeduction(deduction));
+
+    const readOnly = (!deduction.active) || (deduction.category === 'company' && !state.companyTrackingEnabled);
+    if (readOnly) {
+      editBtn.disabled = true;
+      deleteBtn.disabled = true;
+      editBtn.title = 'Company tracking is disabled; this deduction is read-only.';
+      deleteBtn.title = editBtn.title;
+    }
+
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+
+    wrapper.appendChild(details);
+    wrapper.appendChild(actions);
+    return wrapper;
+  }
+
+  function resetDeductionForm() {
+    if (!deductionNameInput) return;
+    deductionFormState.mode = 'create';
+    deductionFormState.editingId = null;
+    deductionFormState.original = null;
+    deductionNameInput.value = '';
+    if (deductionCategorySelect) deductionCategorySelect.value = 'personal';
+    if (deductionCategoryReadonly) deductionCategoryReadonly.value = 'Salary sacrifice';
+    if (deductionTypeSelect) deductionTypeSelect.value = 'standard';
+    if (deductionAmountInput) deductionAmountInput.value = '';
+    if (deductionPercentInput) deductionPercentInput.value = '';
+    if (deductionAmountModeSelect) deductionAmountModeSelect.value = 'flat';
+    if (deductionGstToggle) deductionGstToggle.checked = false;
+    if (deductionFrequencySelect) deductionFrequencySelect.value = 'once';
+    if (deductionStartDateInput) deductionStartDateInput.value = todayIso();
+    if (deductionEndDateInput) deductionEndDateInput.value = '';
+    if (deductionNotesInput) deductionNotesInput.value = '';
+    if (deductionOccurrencePreview) deductionOccurrencePreview.textContent = '';
+    updateDeductionCompanyOptions();
+    updateDeductionFormVisibility();
+  }
+
+  function closeDeductionForm() {
+    deductionFormState.mode = 'create';
+    deductionFormState.editingId = null;
+    deductionFormState.original = null;
+    hideModal(deductionFormModal);
+  }
+
+  function openDeductionForm(mode, deduction) {
+    if (!deductionFormModal) return;
+    if (mode === 'edit' && deduction && deduction.category === 'company' && !state.companyTrackingEnabled) {
+      setStatus('Enable company tracking features to edit company deductions.', 'warn');
+      return;
+    }
+    resetDeductionForm();
+    deductionFormState.mode = mode;
+    deductionFormState.editingId = deduction ? deduction.id : null;
+    deductionFormState.original = deduction || null;
+    if (deductionFormTitle) {
+      deductionFormTitle.textContent = mode === 'edit' ? 'Edit deduction' : 'Add deduction';
+    }
+    if (mode === 'edit' && deduction) {
+      if (deductionNameInput) deductionNameInput.value = deduction.name || '';
+      if (deductionCategorySelect) deductionCategorySelect.value = deduction.category === 'company' ? 'company' : 'personal';
+      if (deductionTypeSelect) deductionTypeSelect.value = deduction.deduction_type === 'extra_super' ? 'extra_super' : 'standard';
+      const amountMode = deduction.amount_type === 'percent' ? 'percent' : 'flat';
+      if (deductionAmountModeSelect) deductionAmountModeSelect.value = amountMode;
+      if (amountMode === 'percent') {
+        if (deductionPercentInput) {
+          deductionPercentInput.value = Math.round(deduction.amount_value * 10000) / 100;
+        }
+      } else if (deductionAmountInput) {
+        deductionAmountInput.value = Number(deduction.amount_value).toFixed(2);
+      }
+      if (deductionGstToggle) deductionGstToggle.checked = !!deduction.gst_inclusive;
+      if (deductionFrequencySelect) deductionFrequencySelect.value = deduction.frequency || 'once';
+      if (deductionStartDateInput) deductionStartDateInput.value = deduction.start_date || '';
+      if (deductionEndDateInput) deductionEndDateInput.value = deduction.end_date || '';
+      if (deductionNotesInput) deductionNotesInput.value = deduction.notes || '';
+    }
+    updateDeductionCompanyOptions();
+    updateDeductionFormVisibility();
+    updateDeductionOccurrencePreview();
+    showModal(deductionFormModal);
+    if (deductionNameInput) deductionNameInput.focus();
+  }
+
+  function updateDeductionFormVisibility() {
+    if (!deductionTypeSelect) return;
+    const type = deductionTypeSelect.value === 'extra_super' ? 'extra_super' : 'standard';
+    let rawCategory = deductionCategorySelect ? deductionCategorySelect.value : 'personal';
+    if (type === 'extra_super' && rawCategory === 'company') {
+      rawCategory = 'personal';
+      if (deductionCategorySelect) deductionCategorySelect.value = 'personal';
+    }
+    const category = (rawCategory === 'company' && state.companyTrackingEnabled) ? 'company' : 'personal';
+    const amountMode = type === 'extra_super' && deductionAmountModeSelect ? deductionAmountModeSelect.value : 'flat';
+
+    if (deductionAmountModeWrapper) {
+      deductionAmountModeWrapper.style.display = type === 'extra_super' ? 'block' : 'none';
+    }
+    if (deductionPercentWrapper) {
+      deductionPercentWrapper.style.display = type === 'extra_super' && amountMode === 'percent' ? 'block' : 'none';
+    }
+    if (deductionAmountWrapper) {
+      deductionAmountWrapper.style.display = !(type === 'extra_super' && amountMode === 'percent') ? 'block' : 'none';
+    }
+
+    const showGstToggle = type === 'standard';
+    if (deductionGstWrapper) {
+      deductionGstWrapper.style.display = showGstToggle ? 'flex' : 'none';
+    }
+    if (deductionCompanyGstNote) {
+      if (showGstToggle) {
+        deductionCompanyGstNote.style.display = 'block';
+        deductionCompanyGstNote.textContent = category === 'company'
+          ? 'GST component is tracked for company deductions and excluded from totals.'
+          : 'If the amount includes GST, the GST portion is excluded before applying the deduction.';
+      } else {
+        deductionCompanyGstNote.style.display = 'none';
+      }
+    }
+    if (deductionGstToggle) {
+      if (!showGstToggle) {
+        deductionGstToggle.checked = false;
+      }
+      deductionGstToggle.disabled = !showGstToggle;
+    }
+
+    const restrictToMonthly = type === 'extra_super' && amountMode === 'percent';
+    if (deductionFrequencySelect) {
+      Array.from(deductionFrequencySelect.options).forEach((option) => {
+        if (restrictToMonthly && option.value !== 'monthly') {
+          option.disabled = true;
+        } else {
+          option.disabled = false;
+        }
+      });
+      if (restrictToMonthly) {
+        deductionFrequencySelect.value = 'monthly';
+      }
+    }
+
+    if (deductionFrequencySelect && deductionFrequencySelect.value === 'once') {
+      if (deductionEndDateWrapper) deductionEndDateWrapper.style.display = 'none';
+      if (deductionEndDateInput) deductionEndDateInput.value = '';
+    } else if (deductionEndDateWrapper) {
+      deductionEndDateWrapper.style.display = 'block';
+    }
+
+    updateDeductionCompanyOptions();
+    updateDeductionOccurrencePreview();
+  }
+
+  function updateDeductionOccurrencePreview() {
+    if (!deductionOccurrencePreview || !deductionStartDateInput) return;
+    const startDateValue = deductionStartDateInput.value;
+    const frequency = deductionFrequencySelect ? deductionFrequencySelect.value : 'once';
+    const endDateValue = deductionEndDateInput ? deductionEndDateInput.value : '';
+    if (!startDateValue) {
+      deductionOccurrencePreview.textContent = 'Select a start date to preview the schedule.';
+      return;
+    }
+    const preview = {
+      start_date: startDateValue,
+      end_date: frequency === 'once' ? '' : endDateValue,
+      frequency: frequency
+    };
+    const previewDates = getDeductionPreviewDates(preview, 5);
+    if (!previewDates.length) {
+      if (frequency === 'once') {
+      deductionOccurrencePreview.textContent = `Occurs on ${DATE_FULL_FORMATTER.format(parseIsoDate(startDateValue))}.`;
+      } else {
+        deductionOccurrencePreview.textContent = 'No future occurrences within the configured range.';
+      }
+      return;
+    }
+    const labels = previewDates.map((iso) => DATE_FULL_FORMATTER.format(parseIsoDate(iso)));
+    deductionOccurrencePreview.textContent = `Next ${labels.length > 1 ? labels.length : 1} deduction${labels.length > 1 ? 's' : ''}: ${labels.join(', ')}`;
+  }
+
+  function collectDeductionPayload() {
+    if (!deductionNameInput) return null;
+    const name = deductionNameInput.value.trim();
+    if (!name) {
+      setStatus('Deduction name is required.', 'warn');
+      return null;
+    }
+    const category = deductionCategorySelect ? deductionCategorySelect.value : 'personal';
+    const type = deductionTypeSelect ? deductionTypeSelect.value : 'standard';
+    const amountMode = type === 'extra_super' && deductionAmountModeSelect ? deductionAmountModeSelect.value : 'flat';
+    let amountValue;
+    if (amountMode === 'percent') {
+      amountValue = Number(deductionPercentInput ? deductionPercentInput.value : '');
+      if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        setStatus('Enter a valid percentage for the deduction.', 'warn');
+        return null;
+      }
+      if (amountValue > 50) {
+        setStatus('Percentage deductions must be 50% or less.', 'warn');
+        return null;
+      }
+    } else {
+      amountValue = Number(deductionAmountInput ? deductionAmountInput.value : '');
+      if (!Number.isFinite(amountValue) || amountValue < 0) {
+        setStatus('Enter a valid amount for the deduction.', 'warn');
+        return null;
+      }
+    }
+    const frequency = deductionFrequencySelect ? deductionFrequencySelect.value : 'once';
+    const startDateValue = deductionStartDateInput ? deductionStartDateInput.value : '';
+    if (!startDateValue) {
+      setStatus('Select a start date for the deduction.', 'warn');
+      return null;
+    }
+    let endDateValue = deductionEndDateInput ? deductionEndDateInput.value : '';
+    if (frequency === 'once') {
+      endDateValue = '';
+    } else if (endDateValue && endDateValue < startDateValue) {
+      setStatus('End date must be on or after the start date.', 'warn');
+      return null;
+    }
+    const payload = {
+      id: deductionFormState.mode === 'edit' ? deductionFormState.editingId : undefined,
+      name,
+      category,
+      deduction_type: type,
+      amount_type: amountMode,
+      amount_value: amountValue,
+      gst_inclusive: type === 'standard' ? (deductionGstToggle ? deductionGstToggle.checked : false) : false,
+      frequency,
+      start_date: startDateValue,
+      end_date: endDateValue,
+      notes: deductionNotesInput ? deductionNotesInput.value.trim() : '',
+      active: true
+    };
+    if (payload.deduction_type === 'extra_super') {
+      payload.category = 'personal';
+      payload.gst_inclusive = false;
+    }
+    if (type === 'extra_super' && amountMode === 'percent') {
+      payload.frequency = 'monthly';
+    }
+    return payload;
+  }
+
+  function buildOptimisticDeduction(payload, existing) {
+    const nowIso = new Date().toISOString();
+    const id = payload.id || `temp_${Date.now()}`;
+    const amountDecimal = payload.amount_type === 'percent'
+      ? (Number(payload.amount_value) / 100)
+      : Number(payload.amount_value);
+    const base = {
+      id,
+      name: payload.name,
+      category: payload.category,
+      deduction_type: payload.deduction_type,
+      amount_type: payload.amount_type,
+      amount_value: payload.amount_type === 'percent' ? amountDecimal : amountDecimal,
+      gst_inclusive: !!payload.gst_inclusive,
+      gst_amount: payload.category === 'company' && payload.deduction_type === 'standard' && payload.gst_inclusive
+        ? Math.round((Number(payload.amount_value) - (Number(payload.amount_value) / (1 + GST_RATE))) * 100) / 100
+        : 0,
+      frequency: payload.frequency,
+      start_date: payload.start_date,
+      end_date: payload.frequency === 'once' ? '' : payload.end_date,
+      notes: payload.notes || '',
+      active: true,
+      created_at: existing && existing.created_at ? existing.created_at : nowIso,
+      updated_at: nowIso
+    };
+    return sanitizeDeduction(base);
+  }
+
+  function handleSaveDeduction() {
+    const payload = collectDeductionPayload();
+    if (!payload) return;
+    const isEdit = deductionFormState.mode === 'edit' && deductionFormState.editingId;
+    if (isEdit) {
+      payload.id = deductionFormState.editingId;
+    }
+    const previousList = state.deductions.slice();
+    const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
+    const existing = existingIndex !== -1 ? state.deductions[existingIndex] : null;
+    const optimisticId = isEdit ? payload.id : `temp_${Date.now()}`;
+    const optimisticDeduction = buildOptimisticDeduction({ ...payload, id: optimisticId }, existing);
+
+    if (isEdit && existingIndex !== -1) {
+      state.deductions.splice(existingIndex, 1, optimisticDeduction);
+    } else {
+      state.deductions.push(optimisticDeduction);
+    }
+
+    saveCache();
+    renderDeductionsList();
+    renderIncomeSummary();
+    closeDeductionForm();
+    setStatus('Saving deduction...', 'warn');
+
+    const serverPayload = { ...payload };
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success && res.deduction) {
+          const updated = sanitizeDeduction(res.deduction);
+          const matchIndex = state.deductions.findIndex((item) => item.id === optimisticId);
+          if (matchIndex !== -1) {
+            state.deductions.splice(matchIndex, 1, updated);
+          } else if (isEdit) {
+            const editIndex = state.deductions.findIndex((item) => item.id === payload.id);
+            if (editIndex !== -1) state.deductions.splice(editIndex, 1, updated);
+          } else {
+            state.deductions.push(updated);
+          }
+          saveCache();
+          renderDeductionsList();
+          renderIncomeSummary();
+          setStatus('Deduction saved', 'success');
+        } else {
+          state.deductions = previousList;
+          saveCache();
+          renderDeductionsList();
+          renderIncomeSummary();
+          setStatus('Deduction save failed', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.deductions = previousList;
+        saveCache();
+        renderDeductionsList();
+        renderIncomeSummary();
+        setStatus('Deduction save failed', 'error');
+      })
+      .api_upsertDeduction(serverPayload);
+  }
+
+  function handleDeleteDeduction(deduction) {
+    if (!deduction || !deduction.id) return;
+    if (!confirm('Delete this deduction?')) return;
+    if (deduction.category === 'company' && !state.companyTrackingEnabled) {
+      setStatus('Enable company tracking to modify company deductions.', 'warn');
+      return;
+    }
+    const previousList = state.deductions.slice();
+    state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
+    saveCache();
+    renderDeductionsList();
+    renderIncomeSummary();
+    setStatus('Deleting deduction...', 'warn');
+    google.script.run
+      .withSuccessHandler(() => {
+        setStatus('Deduction deleted', 'success');
+      })
+      .withFailureHandler(() => {
+        state.deductions = previousList;
+        saveCache();
+        renderDeductionsList();
+        renderIncomeSummary();
+        setStatus('Failed to delete deduction', 'error');
+      })
+      .api_deleteDeduction(deduction.id);
+  }
+
   const DEFAULT_FEATURE_FLAGS = {
     remember_last_page: {
       name: 'Remember last page on refresh',
@@ -479,8 +1256,14 @@
     myob_payroll_helper: {
       name: 'MYOB payroll helper',
       description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.'
+    },
+    enable_company_tracking_features: {
+      name: 'Enable Company Tracking Features',
+      description: 'Unlocks company-focused fields such as company deduction categories.'
     }
   };
+
+  const DEDUCTION_FREQUENCIES = ['once', 'weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'];
 
   const THEME_KEYS = ['dark', 'light', 'rose', 'og'];
 
@@ -572,6 +1355,7 @@
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.hourTypes = Array.isArray(obj.hourTypes) ? obj.hourTypes.map(sanitizeHourType) : [];
+      state.deductions = Array.isArray(obj.deductions) ? obj.deductions.map(sanitizeDeduction) : [];
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
 
       // Set initial tab based on today's entry type
@@ -595,6 +1379,7 @@
         settings: state.settings,
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
+        deductions: state.deductions.map(sanitizeDeduction),
         featureFlags: normalizeFeatureFlags(state.featureFlags)
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
@@ -1724,6 +2509,8 @@
   const incomeTotalPackageEl = document.getElementById('income-total-package');
   const incomeGrossEl = document.getElementById('income-gross');
   const incomeSuperGuaranteeEl = document.getElementById('income-super-guarantee');
+  const incomeSuperLostRow = document.getElementById('income-super-lost-row');
+  const incomeSuperLostEl = document.getElementById('income-super-lost');
   const incomeExtraSuperEl = document.getElementById('income-extra-super');
   const incomeOtherDeductionsEl = document.getElementById('income-other-deductions');
   const incomeTaxableEl = document.getElementById('income-taxable');
@@ -1829,6 +2616,11 @@
   const MONTH_DAY_FORMATTER = new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric'
+  });
+  const DATE_FULL_FORMATTER = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   });
   const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, {
     weekday: 'short'
@@ -2570,6 +3362,13 @@
       contractIncludeWeekendsRow.style.display = expectedMonthlyFlag.enabled ? 'flex' : 'none';
     }
 
+    const companyFlag = state.featureFlags.enable_company_tracking_features || DEFAULT_FEATURE_FLAGS.enable_company_tracking_features || { enabled: false };
+    state.companyTrackingEnabled = !!companyFlag.enabled;
+    updateDeductionCompanyOptions();
+    updateDeductionFormVisibility();
+    renderDeductionsList();
+    renderIncomeSummary();
+
     updatePayrollHelperButtons();
 
     // Show/hide hour types navigation
@@ -2939,8 +3738,6 @@
       return hourType ? hourType.contributes_to_income : true; // Default to true for backwards compatibility
     });
     const periodStart = new Date(year, month, 1);
-    const salarySacrifice = getSalarySacrificePlaceholder();
-    const extraSuper = getExtraSuperPlaceholder();
     const superRate = getSuperRateSetting();
     if (!entries.length) {
       return {
@@ -2953,8 +3750,9 @@
         grossIncome: 0,
         superRate,
         superGuarantee: 0,
-        extraSuper,
-        otherDeductions: salarySacrifice,
+        extraSuper: 0,
+        otherDeductions: 0,
+        superLostDueToDeductions: 0,
         taxableIncome: 0,
         taxStatus: 'resolved',
         tax: 0,
@@ -3001,8 +3799,15 @@
     }
     const denominator = 1 + superRate;
     const grossIncome = denominator !== 0 ? totalPackage / denominator : totalPackage;
-    const superGuarantee = Math.max(0, (grossIncome - salarySacrifice) * superRate);
-    const taxableIncome = grossIncome - extraSuper - salarySacrifice;
+    const deductionTotals = computeMonthlyDeductionTotals(year, month);
+    const salarySacrifice = deductionTotals.standardTotal;
+    const extraSuperPercent = Math.max(0, deductionTotals.extraSuperPercentRate) * grossIncome;
+    const extraSuper = deductionTotals.extraSuperFlat + extraSuperPercent;
+    const superBase = Math.max(0, grossIncome - salarySacrifice);
+    const idealSuper = Math.max(0, grossIncome * superRate);
+    const superGuarantee = Math.max(0, superBase * superRate);
+    const superLostDueToDeductions = Math.max(0, idealSuper - superGuarantee);
+    const taxableIncome = Math.max(0, grossIncome - extraSuper - salarySacrifice);
     const requestKey = `${monthKeyFor(year, month)}:${Math.round(taxableIncome * 100)}`;
     return {
       monthKey: monthKeyFor(year, month),
@@ -3016,7 +3821,9 @@
       superGuarantee,
       extraSuper,
       otherDeductions: salarySacrifice,
+      totalSuper: superGuarantee + extraSuper,
       taxableIncome,
+      superLostDueToDeductions,
       taxStatus: taxableIncome > 0 ? 'pending' : 'resolved',
       tax: taxableIncome > 0 ? null : 0,
       netIncome: taxableIncome > 0 ? null : taxableIncome,
@@ -3039,6 +3846,8 @@
       if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = '--';
       if (incomeGrossEl) incomeGrossEl.textContent = '--';
       if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = '--';
+      if (incomeSuperLostEl) incomeSuperLostEl.textContent = '--';
+      if (incomeSuperLostRow) incomeSuperLostRow.style.display = 'none';
       if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = '--';
       if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = '--';
       if (incomeTaxableEl) incomeTaxableEl.textContent = '--';
@@ -3061,6 +3870,10 @@
     if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = formatCurrency(summary.totalPackage);
     if (incomeGrossEl) incomeGrossEl.textContent = formatCurrency(summary.grossIncome);
     if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
+    if (incomeSuperLostEl) incomeSuperLostEl.textContent = formatCurrency(summary.superLostDueToDeductions || 0);
+    if (incomeSuperLostRow) {
+      incomeSuperLostRow.style.display = summary.superLostDueToDeductions && summary.superLostDueToDeductions > 0.009 ? 'flex' : 'none';
+    }
     if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = formatCurrency(summary.extraSuper);
     if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = formatCurrency(summary.otherDeductions);
     if (incomeTaxableEl) incomeTaxableEl.textContent = formatCurrency(summary.taxableIncome);
@@ -4051,6 +4864,7 @@
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
     applyTheme(state.settings.theme || 'dark');
     renderContractsUI();
+    renderDeductionsList();
     hideContractForm();
     refreshContractBindings();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
@@ -4097,6 +4911,15 @@
       })
       .withFailureHandler(() => {})
       .api_getFeatureFlags();
+    google.script.run
+      .withSuccessHandler((deductions) => {
+        state.deductions = (deductions || []).map(sanitizeDeduction);
+        saveCache();
+        renderDeductionsList();
+        renderIncomeSummary();
+      })
+      .withFailureHandler(() => setStatus('Deductions sync failed', 'error'))
+      .api_getDeductions();
   }
 
   // Default Entries Functionality
@@ -4692,7 +5515,11 @@
     document.querySelectorAll('.ts-modal-close').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const modal = e.target.closest('.ts-modal');
-        hideModal(modal);
+        if (modal === deductionFormModal) {
+          closeDeductionForm();
+        } else {
+          hideModal(modal);
+        }
       });
     });
 
@@ -4700,7 +5527,11 @@
     document.querySelectorAll('.ts-modal').forEach(modal => {
       modal.addEventListener('click', (e) => {
         if (e.target === modal) {
-          hideModal(modal);
+          if (modal === deductionFormModal) {
+            closeDeductionForm();
+          } else {
+            hideModal(modal);
+          }
         }
       });
     });

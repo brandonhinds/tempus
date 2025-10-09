@@ -1,5 +1,7 @@
 The next things we want to include:
 
+- Incorporate the public holiday API to update the public holidays once a day. We can use [this website](https://date.nager.at/swagger/index.html). We will need the user to provide their state from a dropdown list (assume ACT).
+
 - Add the ability to add salary sacrifice options, as well as a novated lease.
 
 - Add the invoice requirements (all behind feature flags)
@@ -19,13 +21,7 @@ The next things we want to include:
 
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
 
-- Add Xero reporting mode
-
-- Add MYOB reporting mode (weekly total hours)
-
 - Make it clear that the "Save Settings" button needs to be clicked when settings are updated. The theme, for example switches immediately, even though it has not be saved.
-
-- It looks like defaults_hours are not being saved in the backend, so moving to a new browser or clearing your cache likely removes them.
 
 - Make buttons / UI element *sexy* like JB's
 
