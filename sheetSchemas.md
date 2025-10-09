@@ -103,6 +103,22 @@ Stores configured deductions that affect monthly income calculations. Deductions
 - Store an attachment reference once file uploads are supported for deductions.
 - Track audit metadata (user, change reason) when collaborative workflows are introduced.
 
+## BAS reporting (derived)
+The BAS page renders a financial-year view composed from existing sheets. Data is not persisted; it is calculated on demand from contracts, entries, and deductions.
+
+| Field | Description |
+| --- | --- |
+| Invoice total | Company income (hourly rate × hours) plus GST (10%). |
+| Invoice GST | GST component of the invoice total. |
+| Company income | Revenue before GST. |
+| Business expenses total | Company deductions (GST-exclusive). |
+| Business expenses GST | GST component from company deductions that were entered inclusive of GST. |
+| Employee gross income | Company income minus business expenses. |
+| Employee superannuation | Superannuation guarantee plus extra contributions. |
+| Employee deductions | Salary sacrifice deductions. |
+| Employee tax | Estimated PAYG tax for the period (0 when estimation is unavailable). |
+| Employee net income | Net income after tax and deductions. |
+
 ## hour_types
 Hour types define categories of time that can be tracked (work, annual leave, sick leave, training, etc.). Each type has configurable properties affecting contract requirements, income calculations, and visualization.
 

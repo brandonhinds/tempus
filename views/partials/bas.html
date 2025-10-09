@@ -1,0 +1,36 @@
+<section class="ts-card" id="page-bas" style="display:none;">
+  <div class="ts-toolbar" style="margin-bottom:12px;">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <h3 style="margin:0;">BAS Reporting</h3>
+      <p class="ts-note" style="margin:0;">Review invoiced income, company expenses, and payroll figures across the financial year.</p>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <label class="ts-select-label" style="display:flex; flex-direction:column; font-size:12px;">
+        Financial year
+        <select id="bas-fy-select" style="min-width:160px;"></select>
+      </label>
+    </div>
+  </div>
+  <div id="bas-quarterly-note" class="ts-note" style="display:none; margin-bottom:12px;">Quarterly totals shown (Q1 = Jul–Sep).</div>
+  <div class="ts-note" id="bas-empty" style="display:none;">No company activity found for the selected year.</div>
+  <div class="ts-bas-table-wrapper">
+    <table class="ts-table" id="bas-table" style="width:100%; min-width:880px;">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Invoice total</th>
+          <th>Invoice GST</th>
+          <th>Company income</th>
+          <th>Business expenses</th>
+          <th>Business GST</th>
+          <th>Employee gross income</th>
+          <th>Employee super</th>
+          <th>Employee deductions</th>
+          <th>Employee tax</th>
+          <th>Employee net income</th>
+        </tr>
+      </thead>
+      <tbody id="bas-table-body"></tbody>
+    </table>
+  </div>
+</section>

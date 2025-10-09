@@ -13,6 +13,7 @@ This document lists the feature flags supported by the Timesheet app. Each flag 
 | `xero_payroll_helper` | Disabled | Adds a modal that slices the active month into Xero's fixed weekly ranges with cumulative hour totals. |
 | `myob_payroll_helper` | Disabled | Adds a modal that groups the active month into weekly MYOB-ready totals with a monthly cross-check. |
 | `enable_company_tracking_features` | Disabled | Unlocks company-focused fields, including company deduction categories. |
+| `enable_company_quarterly_bas` | Disabled | Switches BAS reporting to quarterly totals (only available when company tracking is enabled). |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.

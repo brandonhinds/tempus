@@ -4,6 +4,7 @@
   const pageContracts = document.getElementById('page-contracts');
   const pageHourTypes = document.getElementById('page-hour-types');
   const pageDeductions = document.getElementById('page-deductions');
+  const pageBas = document.getElementById('page-bas');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');
@@ -11,6 +12,7 @@
   const navContractsBtn = document.getElementById('nav-contracts');
   const navHourTypesBtn = document.getElementById('nav-hour-types');
   const navDeductionsBtn = document.getElementById('nav-deductions');
+  const navBasBtn = document.getElementById('nav-bas');
   const navSettingsBtn = document.getElementById('nav-settings');
   const deductionsListEl = document.getElementById('deductions-list');
   const deductionsEmptyEl = document.getElementById('deductions-empty');
@@ -39,6 +41,10 @@
   const deductionOccurrencePreview = document.getElementById('deduction-occurrence-preview');
   const btnCancelDeduction = document.getElementById('btn-cancel-deduction');
   const btnSaveDeduction = document.getElementById('btn-save-deduction');
+  const basFySelect = document.getElementById('bas-fy-select');
+  const basTableBody = document.getElementById('bas-table-body');
+  const basQuarterlyNote = document.getElementById('bas-quarterly-note');
+  const basEmptyNote = document.getElementById('bas-empty');
 
   const state = {
     cacheKey: 'ts_cache',
@@ -67,7 +73,9 @@
     currentTab: 'manual',
     calendarFilteredHourTypes: null,
     expectedHoursSummary: null,
-    companyTrackingEnabled: false
+    companyTrackingEnabled: false,
+    companyBasQuarterly: false,
+    basCurrentFy: null
   };
 
   const deductionFormState = {
@@ -76,7 +84,7 @@
     original: null
   };
 
-  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'bas', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -98,6 +106,7 @@
       contracts: pageContracts,
       'hour-types': pageHourTypes,
       deductions: pageDeductions,
+      bas: pageBas,
       settings: pageSettings
     };
     Object.keys(pages).forEach((key) => {
@@ -105,6 +114,9 @@
       if (page) page.style.display = key === normalized ? 'block' : 'none';
     });
     state.currentPage = normalized;
+    if (normalized === 'bas') {
+      renderBasReporting();
+    }
     if (!opts.skipRemember) {
       persistLastPage(normalized);
     }
@@ -162,6 +174,7 @@
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
   if (navHourTypesBtn) navHourTypesBtn.onclick = () => { closeNavMenu(); showPage('hour-types'); };
   if (navDeductionsBtn) navDeductionsBtn.onclick = () => { closeNavMenu(); showPage('deductions'); };
+  if (navBasBtn) navBasBtn.onclick = () => { closeNavMenu(); showPage('bas'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
   showPage('time', { skipRemember: true });
@@ -190,6 +203,12 @@
   if (deductionFrequencySelect) deductionFrequencySelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionStartDateInput) deductionStartDateInput.addEventListener('change', updateDeductionOccurrencePreview);
   if (deductionEndDateInput) deductionEndDateInput.addEventListener('change', updateDeductionOccurrencePreview);
+  if (basFySelect) {
+    basFySelect.addEventListener('change', () => {
+      state.basCurrentFy = Number(basFySelect.value);
+      renderBasReporting();
+    });
+  }
 
   // Helpers
 
@@ -732,6 +751,161 @@
     return result;
   }
 
+  function collectFinancialYears() {
+    let minDate = null;
+    let maxDate = null;
+    const consider = (date) => {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
+      const normalized = startOfDay(date);
+      if (!minDate || normalized < minDate) minDate = normalized;
+      if (!maxDate || normalized > maxDate) maxDate = normalized;
+    };
+    state.entries.forEach((entry) => {
+      if (entry && entry.date) consider(parseIsoDate(entry.date));
+    });
+    state.deductions.forEach((deduction) => {
+      if (deduction && deduction.start_date) consider(parseIsoDate(deduction.start_date));
+      if (deduction && deduction.end_date) consider(parseIsoDate(deduction.end_date));
+    });
+    consider(new Date());
+    if (!minDate || !maxDate) {
+      const today = startOfDay(new Date());
+      minDate = today;
+      maxDate = today;
+    }
+    const startYear = financialYearStartYear(minDate);
+    const endYear = financialYearStartYear(maxDate);
+    const years = [];
+    for (let year = startYear; year <= endYear; year += 1) {
+      years.push(year);
+    }
+    return years;
+  }
+
+  function formatBasRow(label, values) {
+    return `
+      <tr>
+        <td>${label}</td>
+        <td>${formatCurrency(values.invoiceTotal)}</td>
+        <td>${formatCurrency(values.invoiceGst)}</td>
+        <td>${formatCurrency(values.companyIncome)}</td>
+        <td>${formatCurrency(values.companyExpenses)}</td>
+        <td>${formatCurrency(values.companyExpensesGst)}</td>
+        <td>${formatCurrency(values.employeeGrossIncome)}</td>
+        <td>${formatCurrency(values.employeeSuper)}</td>
+        <td>${formatCurrency(values.employeeDeductions)}</td>
+        <td>${formatCurrency(values.employeeTax)}</td>
+        <td>${formatCurrency(values.employeeNetIncome)}</td>
+      </tr>
+    `;
+  }
+
+  function buildMonthlyBasRows(fyStartYear) {
+    const months = getFinancialYearMonths(fyStartYear);
+    return months.map(({ year, month }) => {
+      const summary = buildIncomeSummary(year, month);
+      const companyIncome = summary.companyIncome || 0;
+      const invoiceTotal = summary.invoiceTotal || 0;
+      const companyExpenses = summary.companyExpenses || 0;
+      const companyExpensesGst = summary.companyExpensesGst || 0;
+      const employeeGross = summary.grossIncome || 0;
+      const employeeSuper = (summary.superGuarantee || 0) + (summary.extraSuper || 0);
+      const employeeDeductions = summary.otherDeductions || 0;
+      const tax = summary.tax != null ? summary.tax : 0;
+      const netIncome = summary.netIncome != null ? summary.netIncome : Math.max(0, (summary.taxableIncome || 0) - tax);
+      const invoiceGst = invoiceTotal - companyIncome;
+      return {
+        label: MONTH_YEAR_FORMATTER.format(new Date(year, month, 1)),
+        invoiceTotal,
+        invoiceGst,
+        companyIncome,
+        companyExpenses,
+        companyExpensesGst,
+        employeeGrossIncome: employeeGross,
+        employeeSuper,
+        employeeDeductions,
+        employeeTax: tax,
+        employeeNetIncome: netIncome,
+        hasActivity: invoiceTotal > 0.01 || companyExpenses > 0.01 || employeeGross > 0.01 || employeeDeductions > 0.01 || employeeSuper > 0.01
+      };
+    });
+  }
+
+  function buildQuarterlyBasRows(monthRows) {
+    const labels = ['Q1 (Jul–Sep)', 'Q2 (Oct–Dec)', 'Q3 (Jan–Mar)', 'Q4 (Apr–Jun)'];
+    const quarters = [];
+    for (let i = 0; i < 4; i += 1) {
+      const slice = monthRows.slice(i * 3, i * 3 + 3);
+      const totals = slice.reduce((acc, row) => {
+        acc.invoiceTotal += row.invoiceTotal;
+        acc.invoiceGst += row.invoiceGst;
+        acc.companyIncome += row.companyIncome;
+        acc.companyExpenses += row.companyExpenses;
+        acc.companyExpensesGst += row.companyExpensesGst;
+        acc.employeeGrossIncome += row.employeeGrossIncome;
+        acc.employeeSuper += row.employeeSuper;
+        acc.employeeDeductions += row.employeeDeductions;
+        acc.employeeTax += row.employeeTax;
+        acc.employeeNetIncome += row.employeeNetIncome;
+        acc.hasActivity = acc.hasActivity || row.hasActivity;
+        return acc;
+      }, {
+        invoiceTotal: 0,
+        invoiceGst: 0,
+        companyIncome: 0,
+        companyExpenses: 0,
+        companyExpensesGst: 0,
+        employeeGrossIncome: 0,
+        employeeSuper: 0,
+        employeeDeductions: 0,
+        employeeTax: 0,
+        employeeNetIncome: 0,
+        hasActivity: false
+      });
+      totals.label = labels[i] || `Q${i + 1}`;
+      quarters.push(totals);
+    }
+    return quarters;
+  }
+
+  function renderBasReporting() {
+    if (!pageBas) return;
+    if (!state.companyTrackingEnabled) {
+      if (basTableBody) basTableBody.innerHTML = '';
+      if (basEmptyNote) basEmptyNote.style.display = 'none';
+      if (basQuarterlyNote) basQuarterlyNote.style.display = 'none';
+      return;
+    }
+
+    const years = collectFinancialYears();
+    if (!years.length) years.push(financialYearStartYear(new Date()));
+    years.sort((a, b) => a - b);
+    const latestYear = years[years.length - 1];
+    if (!state.basCurrentFy || !years.includes(state.basCurrentFy)) {
+      state.basCurrentFy = latestYear;
+    }
+
+    if (basFySelect) {
+      basFySelect.innerHTML = years.map((year) => `<option value="${year}">${financialYearLabel(year)}</option>`).join('');
+      basFySelect.value = String(state.basCurrentFy);
+    }
+
+    const monthRows = buildMonthlyBasRows(state.basCurrentFy);
+    const dataset = state.companyBasQuarterly ? buildQuarterlyBasRows(monthRows) : monthRows;
+    const hasActivity = dataset.some((row) => row.hasActivity);
+
+    if (basQuarterlyNote) basQuarterlyNote.style.display = state.companyBasQuarterly ? 'block' : 'none';
+    if (basEmptyNote) basEmptyNote.style.display = hasActivity ? 'none' : 'block';
+
+    if (basTableBody) {
+      const bodyHtml = dataset
+        .filter((row) => row.hasActivity || hasActivity) // keep blank rows when overall activity exists
+        .map((row) => formatBasRow(row.label, row))
+        .join('');
+      basTableBody.innerHTML = bodyHtml || '<tr><td colspan="11" style="text-align:center; padding:16px;">No company activity recorded.</td></tr>';
+    }
+  }
+
   function updateDeductionCompanyOptions() {
     if (!deductionCategorySelect) return;
     const options = Array.from(deductionCategorySelect.options);
@@ -838,7 +1012,7 @@
 
     const upcomingDates = getUpcomingDeductionDates(deduction, 5);
     if (deduction.frequency !== 'once') {
-      const occurrenceEl = document.createElement('div');
+      const occurrenceEl = document.createElement('span');
       occurrenceEl.className = 'ts-deduction-occurrences';
       if (upcomingDates.length) {
         occurrenceEl.textContent = `Next deduction on ${DATE_FULL_FORMATTER.format(parseIsoDate(upcomingDates[0]))}`;
@@ -1231,35 +1405,48 @@
   const DEFAULT_FEATURE_FLAGS = {
     remember_last_page: {
       name: 'Remember last page on refresh',
-      description: 'When enabled, the app reopens on the most recently viewed page.'
+      description: 'When enabled, the app reopens on the most recently viewed page.',
+      order: 100
     },
     show_clear_cache: {
       name: 'Show cache clear button',
-      description: 'Displays a button that lets you clear cached entries and settings from this browser.'
+      description: 'Displays a button that lets you clear cached entries and settings from this browser.',
+      order: 110
     },
     show_zero_hours: {
       name: 'Show zero hours on empty days',
-      description: 'When enabled, days without logged time display a 0 instead of being blank.'
+      description: 'When enabled, days without logged time display a 0 instead of being blank.',
+      order: 120
     },
     hour_types: {
       name: 'Hour Types',
-      description: 'Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization.'
+      description: 'Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization.',
+      order: 130
     },
     expected_monthly_hours: {
       name: 'Expected monthly hours insights',
-      description: 'Adds a badge that breaks down projected contract hours for the active month.'
+      description: 'Adds a badge that breaks down projected contract hours for the active month.',
+      order: 140
     },
     xero_payroll_helper: {
       name: 'Xero payroll helper',
-      description: 'Adds a modal with week-by-week totals formatted for Xero payroll entry.'
+      description: 'Adds a modal with week-by-week totals formatted for Xero payroll entry.',
+      order: 150
     },
     myob_payroll_helper: {
       name: 'MYOB payroll helper',
-      description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.'
+      description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.',
+      order: 160
     },
     enable_company_tracking_features: {
       name: 'Enable Company Tracking Features',
-      description: 'Unlocks company-focused fields such as company deduction categories.'
+      description: 'Unlocks company-focused fields such as company deduction categories and BAS reporting.',
+      order: 200
+    },
+    enable_company_quarterly_bas: {
+      name: 'Enable Company BAS quarterly reporting',
+      description: 'Displays BAS reporting in quarterly totals instead of monthly.',
+      order: 201
     }
   };
 
@@ -1356,6 +1543,7 @@
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.hourTypes = Array.isArray(obj.hourTypes) ? obj.hourTypes.map(sanitizeHourType) : [];
       state.deductions = Array.isArray(obj.deductions) ? obj.deductions.map(sanitizeDeduction) : [];
+      if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
 
       // Set initial tab based on today's entry type
@@ -1380,7 +1568,8 @@
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
         deductions: state.deductions.map(sanitizeDeduction),
-        featureFlags: normalizeFeatureFlags(state.featureFlags)
+        featureFlags: normalizeFeatureFlags(state.featureFlags),
+        basCurrentFy: state.basCurrentFy
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -2506,7 +2695,12 @@
   const incomeNetBadge = document.getElementById('calendar-net-income');
   const incomeToggleBtn = incomeNetBadge;
   const incomeBreakdownEl = document.getElementById('income-breakdown');
-  const incomeTotalPackageEl = document.getElementById('income-total-package');
+  const incomeInvoiceTotalRow = document.getElementById('income-invoice-total-row');
+  const incomeInvoiceTotalEl = document.getElementById('income-invoice-total');
+  const incomeCompanyIncomeRow = document.getElementById('income-company-income-row');
+  const incomeCompanyIncomeEl = document.getElementById('income-company-income');
+  const incomeCompanyExpensesRow = document.getElementById('income-company-expenses-row');
+  const incomeCompanyExpensesEl = document.getElementById('income-company-expenses');
   const incomeGrossEl = document.getElementById('income-gross');
   const incomeSuperGuaranteeEl = document.getElementById('income-super-guarantee');
   const incomeSuperLostRow = document.getElementById('income-super-lost-row');
@@ -2622,6 +2816,35 @@
     day: 'numeric',
     year: 'numeric'
   });
+  const MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    year: 'numeric'
+  });
+  const FINANCIAL_YEAR_START_MONTH = 6; // July (0-indexed)
+
+  function financialYearLabel(startYear) {
+    const endYear = startYear + 1;
+    return `FY ${startYear}-${String(endYear).slice(-2)}`;
+  }
+
+  function financialYearStartYear(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return new Date().getFullYear();
+    return date.getMonth() >= FINANCIAL_YEAR_START_MONTH ? date.getFullYear() : date.getFullYear() - 1;
+  }
+
+  function getFinancialYearMonths(startYear) {
+    const months = [];
+    for (let i = 0; i < 12; i += 1) {
+      const monthIndex = (FINANCIAL_YEAR_START_MONTH + i) % 12;
+      const yearOffset = Math.floor((FINANCIAL_YEAR_START_MONTH + i) / 12);
+      months.push({ year: startYear + yearOffset, month: monthIndex });
+    }
+    return months;
+  }
+
+  function startOfFinancialYear(startYear) {
+    return startOfDay(new Date(startYear, FINANCIAL_YEAR_START_MONTH, 1));
+  }
   const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, {
     weekday: 'short'
   });
@@ -3255,12 +3478,23 @@
   function renderFeatureFlags() {
     if (!featureFlagsListEl) return;
     featureFlagsListEl.innerHTML = '';
-    const entries = Object.keys(state.featureFlags).map((key) => ({
+    const entries = Object.keys(state.featureFlags)
+      .filter((key) => {
+        if (key === 'enable_company_quarterly_bas') {
+          return !!state.featureFlags.enable_company_tracking_features?.enabled;
+        }
+        return true;
+      })
+      .map((key) => ({
       key,
       enabled: !!state.featureFlags[key].enabled,
       name: state.featureFlags[key].name || key,
-      description: state.featureFlags[key].description || ''
-    })).sort((a, b) => a.name.localeCompare(b.name));
+      description: state.featureFlags[key].description || '',
+      order: (DEFAULT_FEATURE_FLAGS[key] && DEFAULT_FEATURE_FLAGS[key].order) || 0
+    })).sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.name.localeCompare(b.name);
+    });
     if (!entries.length) {
       const empty = document.createElement('div');
       empty.className = 'ts-note';
@@ -3368,6 +3602,16 @@
     updateDeductionFormVisibility();
     renderDeductionsList();
     renderIncomeSummary();
+
+    const quarterlyFlag = state.featureFlags.enable_company_quarterly_bas || DEFAULT_FEATURE_FLAGS.enable_company_quarterly_bas || { enabled: false };
+    state.companyBasQuarterly = state.companyTrackingEnabled && !!quarterlyFlag.enabled;
+    if (navBasBtn) {
+      navBasBtn.style.display = state.companyTrackingEnabled ? 'block' : 'none';
+    }
+    if (!state.companyTrackingEnabled && state.currentPage === 'bas') {
+      showPage('time');
+    }
+    renderBasReporting();
 
     updatePayrollHelperButtons();
 
@@ -3739,29 +3983,13 @@
     });
     const periodStart = new Date(year, month, 1);
     const superRate = getSuperRateSetting();
-    if (!entries.length) {
-      return {
-        monthKey: monthKeyFor(year, month),
-        periodStart,
-        hasEntries: false,
-        totalMinutes: 0,
-        totalHours: 0,
-        totalPackage: 0,
-        grossIncome: 0,
-        superRate,
-        superGuarantee: 0,
-        extraSuper: 0,
-        otherDeductions: 0,
-        superLostDueToDeductions: 0,
-        taxableIncome: 0,
-        taxStatus: 'resolved',
-        tax: 0,
-        netIncome: 0,
-        requestKey: `${monthKeyFor(year, month)}:0`
-      };
+    let totalMinutes = 0;
+    let totalHours = 0;
+    let totalPackage = 0;
+    if (entries.length) {
+      totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
+      totalHours = totalMinutes / 60;
     }
-    const totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
-    const totalHours = totalMinutes / 60;
     const validContractsUsed = entries.reduce((set, entry) => {
       const contract = state.contractMap[entry.contract_id];
       if (contract && contractIsValid(contract, entry.date)) set.add(contract.id);
@@ -3772,7 +4000,6 @@
       valids.forEach((contract) => set.add(contract.id));
       return set;
     }, new Set());
-    let totalPackage = 0;
     if (validContractsUsed.size === 1) {
       const onlyId = Array.from(validContractsUsed)[0];
       const contract = state.contractMap[onlyId];
@@ -3797,11 +4024,25 @@
         return acc + (minutes / 60) * rate;
       }, 0);
     }
-    const denominator = 1 + superRate;
-    const grossIncome = denominator !== 0 ? totalPackage / denominator : totalPackage;
     const deductionTotals = computeMonthlyDeductionTotals(year, month);
-    const salarySacrifice = deductionTotals.standardTotal;
-    const extraSuperPercent = Math.max(0, deductionTotals.extraSuperPercentRate) * grossIncome;
+    const salarySacrifice = deductionTotals.personalStandardTotal;
+    const companyExpenses = deductionTotals.companyStandardTotal;
+    const companyExpensesGst = deductionTotals.companyGstTotal;
+
+    let grossIncome;
+    let companyIncome = totalPackage;
+    let invoiceTotal = 0;
+    if (state.companyTrackingEnabled) {
+      invoiceTotal = companyIncome * (1 + GST_RATE);
+      grossIncome = Math.max(0, companyIncome - companyExpenses);
+    } else {
+      const denominator = 1 + superRate;
+      grossIncome = denominator !== 0 ? totalPackage / denominator : totalPackage;
+      companyIncome = 0;
+      invoiceTotal = 0;
+    }
+
+    const extraSuperPercent = Math.max(0, deductionTotals.extraSuperPercentRate) * Math.max(0, grossIncome);
     const extraSuper = deductionTotals.extraSuperFlat + extraSuperPercent;
     const superBase = Math.max(0, grossIncome - salarySacrifice);
     const idealSuper = Math.max(0, grossIncome * superRate);
@@ -3816,6 +4057,11 @@
       totalMinutes,
       totalHours,
       totalPackage,
+      companyIncome,
+      invoiceTotal,
+      invoiceGst: invoiceTotal - companyIncome,
+      companyExpenses,
+      companyExpensesGst,
       grossIncome,
       superRate,
       superGuarantee,
@@ -3843,7 +4089,12 @@
     if (!summary) {
       if (incomeNetBadge) incomeNetBadge.textContent = 'Net income: --';
       if (incomeNetDetailEl) incomeNetDetailEl.textContent = '--';
-      if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = '--';
+      if (incomeInvoiceTotalEl) incomeInvoiceTotalEl.textContent = '--';
+      if (incomeCompanyIncomeEl) incomeCompanyIncomeEl.textContent = '--';
+      if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.style.display = 'none';
+      if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.style.display = 'none';
+      if (incomeCompanyExpensesEl) incomeCompanyExpensesEl.textContent = '--';
+      if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.style.display = 'none';
       if (incomeGrossEl) incomeGrossEl.textContent = '--';
       if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = '--';
       if (incomeSuperLostEl) incomeSuperLostEl.textContent = '--';
@@ -3867,7 +4118,17 @@
     })();
     if (incomeNetBadge) incomeNetBadge.textContent = `Net income: ${netDisplay}`;
     if (incomeNetDetailEl) incomeNetDetailEl.textContent = netDisplay;
-    if (incomeTotalPackageEl) incomeTotalPackageEl.textContent = formatCurrency(summary.totalPackage);
+    if (incomeInvoiceTotalEl) incomeInvoiceTotalEl.textContent = formatCurrency(summary.invoiceTotal || 0);
+    if (incomeCompanyIncomeEl) incomeCompanyIncomeEl.textContent = formatCurrency(summary.companyIncome || 0);
+    if (incomeCompanyExpensesEl) incomeCompanyExpensesEl.textContent = formatCurrency(summary.companyExpenses || 0);
+    if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
+    if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
+    if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
+    if (!state.companyTrackingEnabled) {
+      if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.style.display = 'none';
+      if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.style.display = 'none';
+      if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.style.display = 'none';
+    }
     if (incomeGrossEl) incomeGrossEl.textContent = formatCurrency(summary.grossIncome);
     if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
     if (incomeSuperLostEl) incomeSuperLostEl.textContent = formatCurrency(summary.superLostDueToDeductions || 0);
@@ -3948,6 +4209,7 @@
     } else {
       state.pendingTaxRequest = null;
     }
+    renderBasReporting();
   }
 
   function buildExpectedHoursSummary(year, month) {
@@ -4879,6 +5141,7 @@
         updateTabStates();
         ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
         setStatus('Synced', 'success');
+        renderBasReporting();
       })
       .withFailureHandler(() => setStatus('Entries sync failed', 'error'))
       .api_getEntries({});

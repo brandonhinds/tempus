@@ -132,7 +132,7 @@
     --text-secondary: var(--muted);
   }
   .ts-body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text); }
-  .ts-container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+  .ts-container { max-width: 1280px; margin: 24px auto; padding: 0 16px; }
   .ts-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.3); overflow:hidden; }
   .ts-row { display:flex; gap:16px; flex-wrap:wrap; }
   .ts-col { flex:1 1 200px; min-width:200px; }
@@ -229,6 +229,11 @@
   .ts-deduction-readonly { opacity:0.7; }
   #deduction-category-readonly { width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background: var(--panel); color: var(--muted); }
   #deduction-gst-wrapper { justify-content:center; align-items:center; }
+  .ts-bas-table-wrapper { overflow-x:auto; padding:0 12px; }
+  .ts-table { border-collapse:collapse; width:100%; min-width:1000px; }
+  .ts-table th, .ts-table td { text-align:right; padding:8px 10px; border-bottom:1px solid var(--border); font-size:13px; white-space:nowrap; }
+  .ts-table th:first-child, .ts-table td:first-child { text-align:left; }
+  .ts-table thead th { background: var(--panel); position:sticky; top:0; z-index:1; }
   .contract-detail-grid { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
   .contract-detail { margin-top:12px; }
   .contract-detail-item { flex:1 1 220px; min-width:220px; background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; }

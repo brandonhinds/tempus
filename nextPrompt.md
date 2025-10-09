@@ -1,15 +1,19 @@
 The next things we want to include:
 
-- Incorporate the public holiday API to update the public holidays once a day. We can use [this website](https://date.nager.at/swagger/index.html). We will need the user to provide their state from a dropdown list (assume ACT).
+- Make BAS reporting table much wider
 
-- Add the ability to add salary sacrifice options, as well as a novated lease.
+- Make the BAS table clickable to get relevant details in BAS form format
+
+- Add ability to make BAS entry as reported
+
+- Incorporate the public holiday API to update the public holidays once a day. We can use [this website](https://date.nager.at/swagger/index.html). We will need the user to provide their state from a dropdown list (assume ACT).
 
 - Add the invoice requirements (all behind feature flags)
 
 - Add a thinkStack employee feature flag, which will do things like include the lost super in the expected pay
 
-- Add BAS tracking
-    * Enable both monthly and quarterly payments
+- Expand BAS reporting
+    * Provide export/print options for monthly or quarterly lodgements
 
 - Add ability to switch months using a date picker (with just months and years)
 
@@ -17,13 +21,15 @@ The next things we want to include:
 
 - Update some settings to force a cache flush when enabled or updated (e.g the superannuation percentage)
 
-- Remove the New Entry button from the entries list at the bottom of the sheet.
-
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
 
 - Make it clear that the "Save Settings" button needs to be clicked when settings are updated. The theme, for example switches immediately, even though it has not be saved.
 
 - Make buttons / UI element *sexy* like JB's
+
+- Payroll helper reports need to respect rounding setting
+
+- Xero add accumulated hours to weekly report
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
