@@ -132,8 +132,10 @@
     --text-secondary: var(--muted);
   }
   .ts-body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text); }
-  .ts-container { max-width: 1280px; margin: 24px auto; padding: 0 16px; }
-  .ts-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.3); overflow:hidden; }
+  .ts-container { width:100%; max-width:1280px; margin:24px auto; padding:0 16px; }
+  .ts-container--fluid { max-width:none; }
+  .ts-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.3); overflow:hidden; width:100%; max-width:min(1280px, calc(100vw - 32px)); margin-left:auto; margin-right:auto; }
+  .ts-card--wide { max-width:min(1600px, calc(100vw - 32px)); }
   .ts-row { display:flex; gap:16px; flex-wrap:wrap; }
   .ts-col { flex:1 1 200px; min-width:200px; }
   input, select, textarea, button { font: inherit; }

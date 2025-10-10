@@ -68,6 +68,7 @@ The core system supports two modes:
 - Server code: use `var` for Apps Script compatibility
 - Function naming: `api_*` for endpoints, verb-first for utilities (e.g., `cacheSet`, `getOrCreateSheet`)
 - Binary configuration controls must use the shared `.ts-toggle` styling; avoid introducing checkbox UI for toggles.
+- Layout containers: default to the 1280px `.ts-container`; apply `.ts-container--fluid` only when content truly needs to be extra wide (currently just BAS reporting).
 
 ### Data Handling
 - Dates: ISO format `yyyy-MM-dd`
