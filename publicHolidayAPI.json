@@ -1,0 +1,101 @@
+[
+  {
+    "date": "2025-01-01",
+    "localName": "New Year's Day",
+    "name": "New Year's Day",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-01-27",
+    "localName": "Australia Day",
+    "name": "Australia Day",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-03-03",
+    "localName": "Labour Day",
+    "name": "Labour Day",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": false,
+    "counties": ["AU-WA"],
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-03-10",
+    "localName": "Canberra Day",
+    "name": "Canberra Day",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": false,
+    "counties": ["AU-ACT"],
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-04-18",
+    "localName": "Good Friday",
+    "name": "Good Friday",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-04-25",
+    "localName": "Anzac Day",
+    "name": "Anzac Day",
+    "countryCode": "AU",
+    "fixed": true,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-06-09",
+    "localName": "Queen's Birthday",
+    "name": "Queen's Birthday",
+    "countryCode": "AU",
+    "fixed": false,
+    "global": false,
+    "counties": ["AU-NSW", "AU-VIC", "AU-SA", "AU-TAS", "AU-ACT", "AU-NT"],
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-12-25",
+    "localName": "Christmas Day",
+    "name": "Christmas Day",
+    "countryCode": "AU",
+    "fixed": true,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  },
+  {
+    "date": "2025-12-26",
+    "localName": "Boxing Day",
+    "name": "Boxing Day",
+    "countryCode": "AU",
+    "fixed": true,
+    "global": true,
+    "counties": null,
+    "launchYear": null,
+    "types": ["Public"]
+  }
+]

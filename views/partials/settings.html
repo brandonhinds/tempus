@@ -2,12 +2,12 @@
   <div class="ts-row">
     <div class="ts-col">
       <h3 style="margin-top:0;">Settings</h3>
-      <div class="ts-row">
-        <div class="ts-col">
+      <div class="ts-settings-grid">
+        <div>
           <label>Round to Nearest (minutes)</label>
           <input type="number" id="set-round" min="0" step="1" />
         </div>
-        <div class="ts-col">
+        <div>
           <label>Theme</label>
           <select id="set-theme">
             <option value="dark">Dark</option>
@@ -16,9 +16,22 @@
             <option value="og">The OG</option>
           </select>
         </div>
-        <div class="ts-col">
+        <div>
           <label>Superannuation rate (%)</label>
           <input type="number" id="set-super-rate" min="0" step="0.1" />
+        </div>
+        <div id="public-holiday-state-col" style="display:none;">
+          <label>State/Territory</label>
+          <select id="set-public-holiday-state">
+            <option value="ACT">Australian Capital Territory</option>
+            <option value="NSW">New South Wales</option>
+            <option value="NT">Northern Territory</option>
+            <option value="QLD">Queensland</option>
+            <option value="SA">South Australia</option>
+            <option value="TAS">Tasmania</option>
+            <option value="VIC">Victoria</option>
+            <option value="WA">Western Australia</option>
+          </select>
         </div>
       </div>
       <div style="margin-top:8px; text-align:right;"><button id="btn-save-settings">Save Settings</button></div>

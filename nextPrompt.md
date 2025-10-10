@@ -1,12 +1,10 @@
 The next things we want to include:
 
-- Make BAS reporting table much wider
+- Public holidays are currently off by one, and need to respect theme.
 
 - Make the BAS table clickable to get relevant details in BAS form format
 
 - Add ability to make BAS entry as reported
-
-- Incorporate the public holiday API to update the public holidays once a day. We can use [this website](https://date.nager.at/swagger/index.html). We will need the user to provide their state from a dropdown list (assume ACT).
 
 - Add the invoice requirements (all behind feature flags)
 

@@ -13,6 +13,7 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 - `round_to_nearest` (number) - Minute increment used when rounding manual or timer entries client-side.
 - `theme` (string) - UI theme identifier (`dark`, `light`, `rose`, `og`).
 - `superannuation_rate` (number) - Percentage used when deriving income + payroll summaries. Stored as a whole-number percent (e.g., `12` => 12%).
+- `public_holiday_state` (string) - Australian state/territory code for filtering public holidays (`ACT`, `NSW`, `NT`, `SA`, `TAS`, `WA`, `VIC`, `QLD`). Defaults to `ACT`.
 
 ### Suggested improvements
 - Maintain a canonical enum of allowed keys in the client to prevent accidental misspellings (e.g., `round_to_nearest`, `theme`).
@@ -140,3 +141,26 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 - Validate that only one hour type is marked as default at any time.
 - Ensure slug uniqueness within the sheet.
 - Consider adding display order for consistent UI presentation.
+
+## public_holidays
+Stores fetched public holiday data from the Nager.Date API. This sheet caches holiday information to minimize API calls and allows offline access to previously fetched holidays.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `date` | string (ISO) | Holiday date in `yyyy-MM-dd` format. | `2025-01-27` |
+| `name` | string | Human-readable holiday name. | `Australia Day` |
+| `local_name` | string | Localized holiday name (same as name for AU). | `Australia Day` |
+| `counties` | string (JSON) | JSON-encoded array of state/territory codes where the holiday applies. `null` or `[]` means nationwide. | `["AU-WA"]` |
+| `types` | string (JSON) | JSON-encoded array of holiday types (e.g., `["Public"]`). | `["Public"]` |
+| `year` | number | Year of the holiday for efficient querying. | `2025` |
+| `fetched_at` | string (ISO datetime, UTC) | Timestamp when this holiday data was fetched from the API. | `2025-10-10T12:00:00Z` |
+
+### Filtering logic
+- Holidays with `counties = null` or `counties = []` apply to all Australian states/territories
+- Holidays with specific counties (e.g., `["AU-WA"]`) only apply to users with matching state settings
+- Users see holidays where: `counties == null || counties == [] || counties.includes('AU-{userState}')`
+
+### Suggested improvements
+- Add an index on `year` column if query performance becomes an issue
+- Consider adding a `global` boolean flag for faster filtering of nationwide holidays
+- Track API response metadata (rate limits, response time) for monitoring

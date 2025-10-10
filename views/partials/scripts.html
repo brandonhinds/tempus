@@ -56,6 +56,8 @@
     hourTypeMap: {},
     deductions: [],
     featureFlags: {},
+    publicHolidays: [],
+    publicHolidayMap: {},
     editingEntryId: null,
     editingEntryType: null,
     editingContractId: null,
@@ -1447,6 +1449,11 @@
       name: 'Enable Company BAS quarterly reporting',
       description: 'Displays BAS reporting in quarterly totals instead of monthly.',
       order: 201
+    },
+    enable_public_holidays: {
+      name: 'Australian Public Holidays',
+      description: 'Displays Australian public holidays in the calendar view with automatic API sync.',
+      order: 170
     }
   };
 
@@ -1545,6 +1552,8 @@
       state.deductions = Array.isArray(obj.deductions) ? obj.deductions.map(sanitizeDeduction) : [];
       if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
+      state.publicHolidays = Array.isArray(obj.publicHolidays) ? obj.publicHolidays : [];
+      updatePublicHolidayMap();
 
       // Set initial tab based on today's entry type
       const today = todayIso();
@@ -1569,7 +1578,8 @@
         hourTypes: state.hourTypes.map(sanitizeHourType),
         deductions: state.deductions.map(sanitizeDeduction),
         featureFlags: normalizeFeatureFlags(state.featureFlags),
-        basCurrentFy: state.basCurrentFy
+        basCurrentFy: state.basCurrentFy,
+        publicHolidays: state.publicHolidays
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -2771,6 +2781,8 @@
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
   const superRateInput = document.getElementById('set-super-rate');
+  const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
+  const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -3624,6 +3636,15 @@
       loadHourTypes();
     }
     updateHourTypeFormVisibility();
+
+    // Show/hide public holidays state setting
+    const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
+    if (publicHolidayStateCol) {
+      publicHolidayStateCol.style.display = publicHolidaysFlag.enabled ? 'block' : 'none';
+    }
+    if (publicHolidaysFlag.enabled) {
+      loadPublicHolidays();
+    }
   }
 
   if (contractSaveBtn) {
@@ -4776,7 +4797,17 @@
       if (iso === state.selectedCalendarDate) cell.classList.add('selected');
       const dayEl = document.createElement('div');
       dayEl.className = 'ts-calendar-day';
-      dayEl.textContent = current.getDate();
+
+      // Check for public holiday
+      const holiday = state.publicHolidayMap[iso];
+      if (holiday && getFeatureFlag('enable_public_holidays')) {
+        const holidayName = holiday.localName || holiday.name || '';
+        const truncatedName = holidayName.length > 12 ? holidayName.substring(0, 12) + '…' : holidayName;
+        dayEl.innerHTML = `${current.getDate()} <span class="ts-calendar-holiday-label">${truncatedName}</span>`;
+        cell.classList.add('ts-calendar-holiday');
+      } else {
+        dayEl.textContent = current.getDate();
+      }
 
       // Check if hour types feature is enabled and we have multiple hour types
       const showHourTypes = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
@@ -4978,6 +5009,7 @@
   }
   function changeCalendarMonth(delta) {
     ensureCalendarState();
+    const oldYear = state.calendar.year;
     const next = new Date(state.calendar.year, state.calendar.month + delta, 1);
     state.calendar.year = next.getFullYear();
     state.calendar.month = next.getMonth();
@@ -4986,6 +5018,10 @@
       if (selected.getFullYear() !== state.calendar.year || selected.getMonth() !== state.calendar.month) {
         state.selectedCalendarDate = null;
       }
+    }
+    // Reload public holidays if year changed
+    if (oldYear !== state.calendar.year && getFeatureFlag('enable_public_holidays')) {
+      loadPublicHolidays(true); // Re-render after load when year changes
     }
     renderCalendar();
   }
@@ -5094,10 +5130,12 @@
   document.getElementById('btn-save-settings').onclick = function () {
     const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
     const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
+    const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
     const next = {
       round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
       theme: nextTheme,
-      superannuation_rate: superRatePercent
+      superannuation_rate: superRatePercent,
+      public_holiday_state: publicHolidayState
     };
     applyTheme(nextTheme);
     if (superRateInput) superRateInput.value = String(next.superannuation_rate);
@@ -5151,6 +5189,7 @@
         saveCache();
         if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
         if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
+        if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
         applyTheme(state.settings.theme || 'dark');
         renderCalendar();
       })
@@ -5171,6 +5210,7 @@
         saveCache();
         renderFeatureFlags();
         applyFeatureFlags();
+        loadPublicHolidays();
       })
       .withFailureHandler(() => {})
       .api_getFeatureFlags();
@@ -5925,6 +5965,48 @@
     }).join('');
 
     container.innerHTML = html;
+  }
+
+  function loadPublicHolidays(renderAfterLoad = false) {
+    if (!state.featureFlags.enable_public_holidays || !state.featureFlags.enable_public_holidays.enabled) return;
+
+    ensureCalendarState();
+    const year = state.calendar.year;
+
+    // Background sync with backend
+    google.script.run
+      .withSuccessHandler((holidays) => {
+        const newHolidays = Array.isArray(holidays) ? holidays : [];
+
+        // Only update and re-render if data actually changed
+        const oldJson = JSON.stringify(state.publicHolidays);
+        const newJson = JSON.stringify(newHolidays);
+
+        if (oldJson !== newJson) {
+          state.publicHolidays = newHolidays;
+          updatePublicHolidayMap();
+          saveCache();
+
+          // Only re-render if explicitly requested or if data changed
+          if (renderAfterLoad) {
+            renderCalendar();
+          }
+        }
+      })
+      .withFailureHandler((error) => {
+        console.error('Failed to load public holidays:', error);
+      })
+      .api_getPublicHolidays({ year: year });
+  }
+
+  function updatePublicHolidayMap() {
+    const map = {};
+    state.publicHolidays.forEach(holiday => {
+      if (holiday.date) {
+        map[holiday.date] = holiday;
+      }
+    });
+    state.publicHolidayMap = map;
   }
 
   function showHourTypeModal(hourType = null) {
