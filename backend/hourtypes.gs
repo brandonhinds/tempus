@@ -14,17 +14,40 @@ function api_getHourTypes() {
   }
 
   var hourTypes = rows.map(function(row) {
-    var obj = {};
-    for (var i = 0; i < headers.length; i++) {
-      obj[headers[i]] = row[i];
-    }
-    return obj;
+    return normalizeHourTypeRow(headers, row);
   });
 
   var cacheKey = 'hour_types_all';
   cacheSet(cacheKey, hourTypes);
 
   return hourTypes;
+}
+
+function boolFromSheetCell(value) {
+  return value === true || value === 'TRUE';
+}
+
+function normalizeHourTypeRow(headers, row) {
+  if (!headers || !row) return {};
+  function cell(header) {
+    var idx = headers.indexOf(header);
+    return idx === -1 ? '' : row[idx];
+  }
+  var autoHoursRaw = cell('auto_populate_hours');
+  var autoHours = Number(autoHoursRaw);
+  if (isNaN(autoHours) || !isFinite(autoHours) || autoHours < 0) autoHours = 0;
+  return {
+    id: cell('id'),
+    name: cell('name'),
+    slug: cell('slug'),
+    color: cell('color') || '#6b7280',
+    contributes_to_income: boolFromSheetCell(cell('contributes_to_income')),
+    requires_contract: boolFromSheetCell(cell('requires_contract')),
+    is_default: boolFromSheetCell(cell('is_default')),
+    auto_populate_public_holidays: boolFromSheetCell(cell('auto_populate_public_holidays')),
+    auto_populate_hours: autoHours,
+    created_at: cell('created_at')
+  };
 }
 
 function api_createHourType(data) {
@@ -58,29 +81,47 @@ function api_createHourType(data) {
   var id = Utilities.getUuid();
   var now = toIsoDateTime(new Date());
 
-  var newRow = [
-    id,
-    data.name,
-    data.slug,
-    data.color || '#6b7280',
-    data.contributes_to_income ? 'TRUE' : 'FALSE',
-    data.contributes_to_income ? 'TRUE' : 'FALSE', // requires_contract = contributes_to_income
-    data.is_default ? 'TRUE' : 'FALSE',
-    now
-  ];
+  var autoPopulate = data.auto_populate_public_holidays ? 'TRUE' : 'FALSE';
+  var autoHours = Number(data.auto_populate_hours);
+  if (isNaN(autoHours) || !isFinite(autoHours) || autoHours < 0) {
+    autoHours = data.auto_populate_public_holidays ? 7.5 : 0;
+  }
+
+  var newRow = headers.map(function(header) {
+    switch (header) {
+      case 'id':
+        return id;
+      case 'name':
+        return data.name;
+      case 'slug':
+        return data.slug;
+      case 'color':
+        return data.color || '#6b7280';
+      case 'contributes_to_income':
+        return data.contributes_to_income ? 'TRUE' : 'FALSE';
+      case 'requires_contract':
+        return data.contributes_to_income ? 'TRUE' : 'FALSE';
+      case 'is_default':
+        return data.is_default ? 'TRUE' : 'FALSE';
+      case 'auto_populate_public_holidays':
+        return autoPopulate;
+      case 'auto_populate_hours':
+        return autoHours;
+      case 'created_at':
+        return now;
+      default:
+        return '';
+    }
+  });
 
   sh.appendRow(newRow);
 
-  var newHourType = {
-    id: id,
-    name: data.name,
-    slug: data.slug,
-    color: data.color || '#6b7280',
-    contributes_to_income: data.contributes_to_income || false,
-    requires_contract: data.contributes_to_income || false, // requires_contract = contributes_to_income
-    is_default: data.is_default || false,
-    created_at: now
-  };
+  var newHourType = normalizeHourTypeRow(headers, newRow);
+
+  // normalizeHourTypeRow returns requires_contract from sheet value; ensure consistency
+  newHourType.requires_contract = !!data.contributes_to_income;
+  newHourType.auto_populate_public_holidays = data.auto_populate_public_holidays ? true : false;
+  newHourType.auto_populate_hours = autoHours;
 
   cacheClearPrefix('hour_types');
 
@@ -153,19 +194,22 @@ function api_updateHourType(id, data) {
     updatedRow[headers.indexOf('requires_contract')] = data.contributes_to_income ? 'TRUE' : 'FALSE'; // requires_contract = contributes_to_income
   }
   if (data.hasOwnProperty('is_default')) updatedRow[headers.indexOf('is_default')] = data.is_default ? 'TRUE' : 'FALSE';
+  var autoPopulateIndex = headers.indexOf('auto_populate_public_holidays');
+  if (autoPopulateIndex !== -1 && data.hasOwnProperty('auto_populate_public_holidays')) {
+    updatedRow[autoPopulateIndex] = data.auto_populate_public_holidays ? 'TRUE' : 'FALSE';
+  }
+  var autoHoursIndex = headers.indexOf('auto_populate_hours');
+  if (autoHoursIndex !== -1 && data.hasOwnProperty('auto_populate_hours')) {
+    var normalizedHours = Number(data.auto_populate_hours);
+    if (isNaN(normalizedHours) || !isFinite(normalizedHours) || normalizedHours < 0) {
+      normalizedHours = 0;
+    }
+    updatedRow[autoHoursIndex] = normalizedHours;
+  }
 
   sh.getRange(rowIndex + 2, 1, 1, updatedRow.length).setValues([updatedRow]);
 
-  var updatedHourType = {
-    id: updatedRow[0],
-    name: updatedRow[1],
-    slug: updatedRow[2],
-    color: updatedRow[3],
-    contributes_to_income: updatedRow[4] === 'TRUE',
-    requires_contract: updatedRow[5] === 'TRUE',
-    is_default: updatedRow[6] === 'TRUE',
-    created_at: updatedRow[7]
-  };
+  var updatedHourType = normalizeHourTypeRow(headers, updatedRow);
 
   cacheClearPrefix('hour_types');
 
@@ -225,88 +269,62 @@ function api_deleteHourType(id) {
 function ensureWorkHourType() {
   var sh = getOrCreateSheet('hour_types');
   var data = sh.getDataRange().getValues();
+  var headers = data[0];
+  
+  function buildWorkRow(id, now) {
+    return headers.map(function(header) {
+      switch (header) {
+        case 'id':
+          return id;
+        case 'name':
+          return 'Work';
+        case 'slug':
+          return 'work';
+        case 'color':
+          return '#3b82f6';
+        case 'contributes_to_income':
+        case 'requires_contract':
+        case 'is_default':
+          return 'TRUE';
+        case 'auto_populate_public_holidays':
+          return 'FALSE';
+        case 'auto_populate_hours':
+          return 0;
+        case 'created_at':
+          return now;
+        default:
+          return '';
+      }
+    });
+  }
 
   if (data.length === 1) {
     // Only headers, no data rows - create work hour type
-    var id = Utilities.getUuid();
-    var now = toIsoDateTime(new Date());
-
-    var workRow = [
-      id,
-      'Work',
-      'work',
-      '#3b82f6',
-      'TRUE', // contributes_to_income
-      'TRUE', // requires_contract (same as contributes_to_income)
-      'TRUE', // is_default
-      now
-    ];
-
+    var newId = Utilities.getUuid();
+    var created = toIsoDateTime(new Date());
+    var workRow = buildWorkRow(newId, created);
     sh.appendRow(workRow);
     cacheClearPrefix('hour_types');
-
-    return {
-      id: id,
-      name: 'Work',
-      slug: 'work',
-      color: '#3b82f6',
-      contributes_to_income: true,
-      requires_contract: true,
-      is_default: true,
-      created_at: now
-    };
-  } else {
-    // Check if work hour type exists
-    var headers = data[0];
-    var rows = data.slice(1);
-    var slugIndex = headers.indexOf('slug');
-
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i][slugIndex] === 'work') {
-        // Return existing work hour type as object
-        var row = rows[i];
-        return {
-          id: row[0],
-          name: row[1],
-          slug: row[2],
-          color: row[3],
-          contributes_to_income: row[4] === 'TRUE',
-          requires_contract: row[5] === 'TRUE',
-          is_default: row[6] === 'TRUE',
-          created_at: row[7]
-        };
-      }
-    }
-
-    // Work hour type doesn't exist, create it
-    var id = Utilities.getUuid();
-    var now = toIsoDateTime(new Date());
-
-    var workRow = [
-      id,
-      'Work',
-      'work',
-      '#3b82f6',
-      'TRUE', // contributes_to_income
-      'TRUE', // requires_contract (same as contributes_to_income)
-      'TRUE', // is_default
-      now
-    ];
-
-    sh.appendRow(workRow);
-    cacheClearPrefix('hour_types');
-
-    return {
-      id: id,
-      name: 'Work',
-      slug: 'work',
-      color: '#3b82f6',
-      contributes_to_income: true,
-      requires_contract: true,
-      is_default: true,
-      created_at: now
-    };
+    return normalizeHourTypeRow(headers, workRow);
   }
+
+  var rows = data.slice(1);
+  var slugIndex = headers.indexOf('slug');
+
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i][slugIndex] === 'work') {
+      return normalizeHourTypeRow(headers, rows[i]);
+    }
+  }
+
+  // Work hour type doesn't exist, create it
+  var id = Utilities.getUuid();
+  var now = toIsoDateTime(new Date());
+  var workRowNew = buildWorkRow(id, now);
+  sh.appendRow(workRowNew);
+  cacheClearPrefix('hour_types');
+
+  return normalizeHourTypeRow(headers, workRowNew);
 }
 
 function getDefaultHourTypeId() {

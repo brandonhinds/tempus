@@ -13,7 +13,18 @@ function getOrCreateSheet(name) {
     } else if (name === 'feature_flags') {
       sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
     } else if (name === 'hour_types') {
-      sh.getRange(1,1,1,8).setValues([['id','name','slug','color','contributes_to_income','requires_contract','is_default','created_at']]);
+      sh.getRange(1,1,1,10).setValues([[
+        'id',
+        'name',
+        'slug',
+        'color',
+        'contributes_to_income',
+        'requires_contract',
+        'is_default',
+        'auto_populate_public_holidays',
+        'auto_populate_hours',
+        'created_at'
+      ]]);
     } else if (name === 'deductions') {
       sh.getRange(1,1,1,15).setValues([[
         'id',
@@ -122,10 +133,59 @@ function getOrCreateSheet(name) {
     sh.getRange('C:D').setNumberFormat('@');
   }
   if (name === 'hour_types') {
-    sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:D').setNumberFormat('@');
-    sh.getRange('E:G').setNumberFormat('@');
-    sh.getRange('H:H').setNumberFormat('@');
+    const expectedHourTypeHeaders = [
+      'id',
+      'name',
+      'slug',
+      'color',
+      'contributes_to_income',
+      'requires_contract',
+      'is_default',
+      'auto_populate_public_holidays',
+      'auto_populate_hours',
+      'created_at'
+    ];
+    const headerRange = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedHourTypeHeaders.length));
+    let headers = headerRange.getValues()[0];
+    const rowCount = sh.getLastRow();
+
+    function ensureHourTypeColumn(headerName, defaultValue, insertBeforeHeader) {
+      headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedHourTypeHeaders.length)).getValues()[0];
+      if (headers.indexOf(headerName) !== -1) return;
+      let insertPosition = headers.indexOf(insertBeforeHeader);
+      if (insertPosition === -1) {
+        insertPosition = headers.length;
+        sh.insertColumnAfter(insertPosition);
+        sh.getRange(1, insertPosition + 1).setValue(headerName);
+      } else {
+        sh.insertColumnBefore(insertPosition + 1);
+        sh.getRange(1, insertPosition + 1).setValue(headerName);
+      }
+      if (rowCount > 1 && defaultValue !== undefined) {
+        sh.getRange(2, insertPosition + 1, rowCount - 1, 1).setValue(defaultValue);
+      }
+    }
+
+    ensureHourTypeColumn('auto_populate_public_holidays', 'FALSE', 'created_at');
+    ensureHourTypeColumn('auto_populate_hours', 7.5, 'created_at');
+
+    sh.getRange(1, 1, 1, expectedHourTypeHeaders.length).setValues([expectedHourTypeHeaders]);
+
+    const idColumn = expectedHourTypeHeaders.indexOf('id') + 1;
+    sh.getRange(1, idColumn, sh.getMaxRows(), 1).setNumberFormat('@');
+    const textColumns = ['name', 'slug', 'color'];
+    textColumns.forEach(function(header) {
+      const col = expectedHourTypeHeaders.indexOf(header) + 1;
+      sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
+    });
+    ['contributes_to_income', 'requires_contract', 'is_default', 'auto_populate_public_holidays'].forEach(function(header) {
+      const col = expectedHourTypeHeaders.indexOf(header) + 1;
+      sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
+    });
+    const autoHoursCol = expectedHourTypeHeaders.indexOf('auto_populate_hours') + 1;
+    sh.getRange(1, autoHoursCol, sh.getMaxRows(), 1).setNumberFormat('0.00');
+    const createdAtCol = expectedHourTypeHeaders.indexOf('created_at') + 1;
+    sh.getRange(1, createdAtCol, sh.getMaxRows(), 1).setNumberFormat('@');
   }
   if (name === 'deductions') {
     sh.getRange('A:A').setNumberFormat('@');

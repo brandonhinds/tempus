@@ -1,6 +1,10 @@
 The next things we want to include:
 
-- Public holidays are currently off by one, and need to respect theme.
+- Make annual views for both calendar and financial year. Feature multiple graphs and breakdowns of all the information stored in the sheet. Have pie charts for income breakdown, pie charts for leave, bar charts for income, etc.
+
+- Add the easter easter egg. Add a Konami Code.
+
+- Implement some sort of loading screen. Can we expand on that cool CSS box?
 
 - Make the BAS table clickable to get relevant details in BAS form format
 

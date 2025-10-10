@@ -132,6 +132,8 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 | `contributes_to_income` | boolean/string | `TRUE`/`FALSE` indicating if this hour type should be included in income calculations. | `FALSE` |
 | `requires_contract` | boolean/string | `TRUE`/`FALSE` indicating if entries of this type must have a contract selected. | `FALSE` |
 | `is_default` | boolean/string | `TRUE`/`FALSE` indicating if this is the default hour type for new entries. Only one can be default. | `FALSE` |
+| `auto_populate_public_holidays` | boolean/string | `TRUE`/`FALSE` flag enabling automatic entry creation on weekday public holidays. Requires public holiday feature. | `FALSE` |
+| `auto_populate_hours` | number | Hours (decimal) to record when auto-populating a weekday public holiday. | `7.5` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the hour type was created server-side. | `2025-10-06T10:15:00Z` |
 
 ### Built-in hour types
@@ -141,6 +143,7 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 - Validate that only one hour type is marked as default at any time.
 - Ensure slug uniqueness within the sheet.
 - Consider adding display order for consistent UI presentation.
+- Auto-populated holidays skip hour types requiring a contract to avoid creating invalid entries.
 
 ## public_holidays
 Stores fetched public holiday data from the Nager.Date API. This sheet caches holiday information to minimize API calls and allows offline access to previously fetched holidays.

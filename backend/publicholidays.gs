@@ -2,6 +2,29 @@
 var PUBLIC_HOLIDAYS_CACHE_KEY = 'public_holidays_v1';
 var PUBLIC_HOLIDAYS_LAST_CHECK_KEY = 'public_holidays_last_check';
 var NAGER_API_BASE = 'https://date.nager.at/api/v3';
+var _spreadsheetTimeZoneCache = null;
+
+function getSpreadsheetTimeZone() {
+  if (_spreadsheetTimeZoneCache) return _spreadsheetTimeZoneCache;
+  var tz = null;
+  try {
+    var ss = SpreadsheetApp.getActive();
+    if (ss) tz = ss.getSpreadsheetTimeZone();
+  } catch (e) {}
+  if (!tz) tz = Session.getScriptTimeZone() || 'UTC';
+  _spreadsheetTimeZoneCache = tz;
+  return tz;
+}
+
+function formatSheetDateKey(value, timezone) {
+  if (!value && value !== 0) return '';
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, timezone, 'yyyy-MM-dd');
+  }
+  var str = String(value).trim();
+  if (!str) return '';
+  return str.split('T')[0];
+}
 
 /**
  * Fetches public holidays for a specific year from the Nager.Date API
@@ -48,20 +71,29 @@ function storePublicHolidays(holidays) {
   var sh = getOrCreateSheet('public_holidays');
   var values = sh.getDataRange().getValues();
   var headers = values.length > 0 ? values[0] : ['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at'];
+  var timezone = getSpreadsheetTimeZone();
 
   if (values.length === 0) {
     sh.appendRow(headers);
+    values = sh.getDataRange().getValues();
   }
 
   var existingDates = {};
   for (var i = 1; i < values.length; i++) {
-    existingDates[values[i][0]] = i + 1; // Store row number
+    var existingKey = formatSheetDateKey(values[i][0], timezone);
+    if (existingKey && !existingDates[existingKey]) {
+      existingDates[existingKey] = i + 1; // Store row number
+    }
   }
 
   var timestamp = new Date().toISOString();
+  var processedDates = {};
 
   holidays.forEach(function(holiday) {
-    var dateStr = holiday.date;
+    var dateStr = formatSheetDateKey(holiday.date, timezone);
+    if (!dateStr) return;
+    if (processedDates[dateStr]) return;
+    processedDates[dateStr] = true;
     var year = parseInt(dateStr.split('-')[0]);
     var counties = holiday.counties ? JSON.stringify(holiday.counties) : '';
     var types = holiday.types ? JSON.stringify(holiday.types) : '["Public"]';
@@ -82,6 +114,7 @@ function storePublicHolidays(holidays) {
     } else {
       // Append new row
       sh.appendRow(rowData);
+      existingDates[dateStr] = sh.getLastRow();
     }
   });
 
@@ -97,6 +130,8 @@ function getStoredPublicHolidays(years) {
   var values = sh.getDataRange().getValues();
 
   if (values.length <= 1) return [];
+
+  var effectiveTimeZone = getSpreadsheetTimeZone();
 
   var headers = values[0];
   var dateIdx = headers.indexOf('date');
@@ -127,14 +162,7 @@ function getStoredPublicHolidays(years) {
     // Get date as-is from the sheet, avoiding any timezone conversion
     var dateValue = dateIdx !== -1 ? row[dateIdx] : '';
     var dateStr = '';
-    if (dateValue instanceof Date) {
-      // Format using Utilities.formatDate to get the date in the sheet's timezone without conversion
-      // This preserves the exact date stored in the sheet (e.g., 2025-12-25 stays 2025-12-25)
-      dateStr = Utilities.formatDate(dateValue, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    } else {
-      // If it's already a string, extract just the date part (YYYY-MM-DD)
-      dateStr = String(dateValue).split('T')[0];
-    }
+    dateStr = formatSheetDateKey(dateValue, effectiveTimeZone);
 
     holidays.push({
       date: dateStr,
@@ -186,28 +214,21 @@ function api_getPublicHolidays(payload) {
     return cached;
   }
 
-  // Only check for missing years if we don't have data in the sheet at all
-  var sh = getOrCreateSheet('public_holidays');
-  var rowCount = sh.getLastRow();
+  // Ensure neighbouring years are populated if missing
+  var missingYears = [];
+  years.forEach(function(y) {
+    if (!hasHolidaysForYear(y)) {
+      missingYears.push(y);
+    }
+  });
 
-  // If we have very little data (just headers or a few rows), fetch all years
-  if (rowCount < 50) {
-    var missingYears = [];
-    years.forEach(function(y) {
-      if (!hasHolidaysForYear(y)) {
-        missingYears.push(y);
+  if (missingYears.length > 0) {
+    missingYears.forEach(function(y) {
+      var holidays = fetchPublicHolidaysForYear(y);
+      if (holidays.length > 0) {
+        storePublicHolidays(holidays);
       }
     });
-
-    // Fetch missing years
-    if (missingYears.length > 0) {
-      missingYears.forEach(function(y) {
-        var holidays = fetchPublicHolidaysForYear(y);
-        if (holidays.length > 0) {
-          storePublicHolidays(holidays);
-        }
-      });
-    }
   }
 
   // Check if we should do the daily "next holidays" check (for newly announced holidays)

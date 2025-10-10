@@ -77,7 +77,9 @@
     expectedHoursSummary: null,
     companyTrackingEnabled: false,
     companyBasQuarterly: false,
-    basCurrentFy: null
+    basCurrentFy: null,
+    entriesLoaded: false,
+    isAutoPopulatingPublicHolidays: false
   };
 
   const deductionFormState = {
@@ -233,6 +235,24 @@
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+  const normalizeHolidayDate = (value) => {
+    if (!value && value !== 0) return '';
+    if (value instanceof Date) return isoDate(value);
+    if (typeof value === 'number') {
+      return isoDate(new Date(value));
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '') return '';
+      if (!trimmed.includes('T')) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) {
+        return isoDate(parsed);
+      }
+      return trimmed.split('T')[0];
+    }
+    return '';
   };
   const isoDateTime = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const parseIsoDate = (value) => {
@@ -546,6 +566,11 @@
     clone.contributes_to_income = Boolean(clone.contributes_to_income === 'TRUE' || clone.contributes_to_income === true);
     clone.requires_contract = Boolean(clone.requires_contract === 'TRUE' || clone.requires_contract === true);
     clone.is_default = Boolean(clone.is_default === 'TRUE' || clone.is_default === true);
+    clone.auto_populate_public_holidays = Boolean(
+      clone.auto_populate_public_holidays === 'TRUE' || clone.auto_populate_public_holidays === true
+    );
+    const autoHours = Number(clone.auto_populate_hours != null ? clone.auto_populate_hours : 0);
+    clone.auto_populate_hours = Number.isFinite(autoHours) && autoHours > 0 ? autoHours : 0;
     clone.created_at = clone.created_at || '';
     return clone;
   };
@@ -5174,12 +5199,14 @@
     google.script.run
       .withSuccessHandler((entries) => {
         state.entries = (entries || []).map(sanitizeEntry);
+        state.entriesLoaded = true;
         saveCache();
         renderEntries();
         updateTabStates();
         ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
         setStatus('Synced', 'success');
         renderBasReporting();
+        maybeAutoPopulatePublicHolidayEntries();
       })
       .withFailureHandler(() => setStatus('Entries sync failed', 'error'))
       .api_getEntries({});
@@ -5924,6 +5951,7 @@
         renderCalendar();
         saveCache();
         setStatus('Idle');
+        maybeAutoPopulatePublicHolidayEntries();
       })
       .withFailureHandler((error) => {
         console.error('Failed to load hour types:', error);
@@ -5945,6 +5973,11 @@
       const badges = [];
       if (hourType.is_default) badges.push('<span class="ts-hour-type-badge default">Default</span>');
       if (hourType.contributes_to_income) badges.push('<span class="ts-hour-type-badge income">Income</span>');
+      if (hourType.auto_populate_public_holidays) {
+        const hoursValue = Number(hourType.auto_populate_hours) || 0;
+        const hoursLabel = hoursValue % 1 === 0 ? hoursValue.toFixed(0) : hoursValue.toFixed(2).replace(/0$/, '');
+        badges.push(`<span class="ts-hour-type-badge holiday">Public holiday auto (${hoursLabel}h)</span>`);
+      }
 
       const isWork = hourType.slug === 'work';
 
@@ -5977,7 +6010,6 @@
     google.script.run
       .withSuccessHandler((holidays) => {
         const newHolidays = Array.isArray(holidays) ? holidays : [];
-
         // Only update and re-render if data actually changed
         const oldJson = JSON.stringify(state.publicHolidays);
         const newJson = JSON.stringify(newHolidays);
@@ -5986,12 +6018,11 @@
           state.publicHolidays = newHolidays;
           updatePublicHolidayMap();
           saveCache();
-
-          // Only re-render if explicitly requested or if data changed
-          if (renderAfterLoad) {
-            renderCalendar();
-          }
+          renderCalendar();
+        } else if (renderAfterLoad) {
+          renderCalendar();
         }
+        maybeAutoPopulatePublicHolidayEntries();
       })
       .withFailureHandler((error) => {
         console.error('Failed to load public holidays:', error);
@@ -6002,11 +6033,94 @@
   function updatePublicHolidayMap() {
     const map = {};
     state.publicHolidays.forEach(holiday => {
-      if (holiday.date) {
-        map[holiday.date] = holiday;
-      }
+      const normalizedDate = normalizeHolidayDate(holiday.date);
+      if (!normalizedDate) return;
+      if (holiday.date !== normalizedDate) holiday.date = normalizedDate;
+      map[normalizedDate] = holiday;
     });
     state.publicHolidayMap = map;
+  }
+
+  function maybeAutoPopulatePublicHolidayEntries() {
+    if (state.isAutoPopulatingPublicHolidays) return;
+    if (!state.entriesLoaded) return;
+    const publicHolidayFeature = getFeatureFlag('enable_public_holidays');
+    const hourTypesFeature = getFeatureFlag('hour_types');
+    if (!publicHolidayFeature || !hourTypesFeature) return;
+    if (!state.publicHolidays.length || !state.hourTypes.length) return;
+
+    const eligibleHourTypes = state.hourTypes.filter(ht => ht.auto_populate_public_holidays && Number(ht.auto_populate_hours) > 0);
+    if (!eligibleHourTypes.length) return;
+
+    const entryKeys = new Set(state.entries.map(entry => `${entry.date}__${entry.hour_type_id || getDefaultHourTypeId()}`));
+
+    const queue = [];
+    state.publicHolidays.forEach(holiday => {
+      const iso = normalizeHolidayDate(holiday.date);
+      if (!iso) return;
+      const dateObj = parseIsoDate(iso);
+      if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return;
+      const day = dateObj.getDay();
+      if (day === 0 || day === 6) return; // Skip weekends
+
+      eligibleHourTypes.forEach(hourType => {
+        if (hourType.requires_contract) return;
+        const key = `${iso}__${hourType.id}`;
+        if (entryKeys.has(key)) return;
+        entryKeys.add(key);
+        queue.push({
+          date: iso,
+          hourTypeId: hourType.id,
+          hours: Number(hourType.auto_populate_hours) || 0
+        });
+      });
+    });
+
+    if (!queue.length) return;
+
+    state.isAutoPopulatingPublicHolidays = true;
+    processHolidayAutoPopulateQueue(queue, []);
+  }
+
+  function processHolidayAutoPopulateQueue(queue, createdEntries) {
+    if (!queue.length) {
+      if (createdEntries.length) {
+        createdEntries.forEach(entry => {
+          state.entries.push(entry);
+        });
+        saveCache();
+        renderEntries();
+        updateTabStates();
+      }
+      state.isAutoPopulatingPublicHolidays = false;
+      return;
+    }
+
+    const next = queue.shift();
+    const minutes = Math.round(next.hours * 60);
+    if (!minutes || minutes <= 0) {
+      processHolidayAutoPopulateQueue(queue, createdEntries);
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success && res.entry) {
+          const sanitized = sanitizeEntry(res.entry);
+          createdEntries.push(sanitized);
+        }
+        processHolidayAutoPopulateQueue(queue, createdEntries);
+      })
+      .withFailureHandler((error) => {
+        processHolidayAutoPopulateQueue(queue, createdEntries);
+      })
+      .api_addEntry({
+        date: next.date,
+        duration_minutes: minutes,
+        entry_type: 'basic',
+        hour_type_id: next.hourTypeId,
+        contract_id: ''
+      });
   }
 
   function showHourTypeModal(hourType = null) {
@@ -6022,6 +6136,7 @@
 
     state.editingHourTypeId = hourType ? hourType.id : null;
     const isWork = hourType && hourType.slug === 'work';
+    const publicHolidayFlag = getFeatureFlag('enable_public_holidays');
 
     title.textContent = isWork ? 'Work Hour Type Settings' : (hourType ? 'Edit Hour Type' : 'Add Hour Type');
     nameInput.value = hourType ? hourType.name : '';
@@ -6029,6 +6144,23 @@
     colorInput.value = hourType ? hourType.color : generateRandomColor();
     contributesInput.checked = hourType ? hourType.contributes_to_income : false;
     defaultInput.checked = hourType ? hourType.is_default : false;
+
+    if (hourTypeAutoHolidayToggle) {
+      hourTypeAutoHolidayToggle.checked = hourType ? !!hourType.auto_populate_public_holidays : false;
+      hourTypeAutoHolidayToggle.disabled = !publicHolidayFlag;
+    }
+    if (hourTypeAutoHolidayHoursInput) {
+      const hoursValue = hourType && Number(hourType.auto_populate_hours) > 0 ? Number(hourType.auto_populate_hours) : 7.5;
+      hourTypeAutoHolidayHoursInput.value = hoursValue;
+    }
+    if (hourTypeAutoHolidayRow) {
+      hourTypeAutoHolidayRow.style.display = publicHolidayFlag ? 'flex' : 'none';
+    }
+    if (!publicHolidayFlag && hourTypeAutoHolidayHoursRow) {
+      hourTypeAutoHolidayHoursRow.style.display = 'none';
+    } else {
+      syncHourTypeHolidayHoursVisibility();
+    }
 
     // Disable editing core properties of work hour type
     nameInput.disabled = isWork;
@@ -6081,6 +6213,15 @@
       return;
     }
 
+    const publicHolidayFeatureEnabled = getFeatureFlag('enable_public_holidays');
+    const autoPopulateHolidays = publicHolidayFeatureEnabled && hourTypeAutoHolidayToggle && hourTypeAutoHolidayToggle.checked;
+    let autoHolidayHours = hourTypeAutoHolidayHoursInput ? parseFloat(hourTypeAutoHolidayHoursInput.value) : 7.5;
+    if (Number.isNaN(autoHolidayHours) || autoHolidayHours < 0) autoHolidayHours = 0;
+    if (autoPopulateHolidays && autoHolidayHours <= 0) {
+      alert('Please enter a positive number of hours to apply on public holidays.');
+      return;
+    }
+
     saveBtn.textContent = 'Saving...';
     saveBtn.disabled = true;
 
@@ -6089,7 +6230,9 @@
       slug,
       color,
       contributes_to_income: contributesToIncome,
-      is_default: isDefault
+      is_default: isDefault,
+      auto_populate_public_holidays: autoPopulateHolidays,
+      auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0
     };
 
     if (state.editingHourTypeId) {
@@ -6110,7 +6253,9 @@
             slug,
             color,
             contributes_to_income: contributesToIncome,
-            is_default: true
+            is_default: true,
+            auto_populate_public_holidays: autoPopulateHolidays,
+            auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0
           };
         }
         updateHourTypeMap();
@@ -6130,6 +6275,7 @@
           renderCalendarFilters();
           renderCalendar();
           saveCache();
+          maybeAutoPopulatePublicHolidayEntries();
           hideHourTypeModal();
           setStatus('Hour type updated');
           saveBtn.textContent = 'Save Hour Type';
@@ -6162,6 +6308,7 @@
           renderCalendarFilters();
           renderCalendar();
           saveCache();
+          maybeAutoPopulatePublicHolidayEntries();
           hideHourTypeModal();
           setStatus('Hour type created');
           saveBtn.textContent = 'Save Hour Type';
@@ -6271,6 +6418,16 @@
   // Auto-generate slug from name
   const hourTypeNameInput = document.getElementById('hour-type-name');
   const hourTypeSlugInput = document.getElementById('hour-type-slug');
+  const hourTypeAutoHolidayRow = document.getElementById('hour-type-holiday-toggle-row');
+  const hourTypeAutoHolidayHoursRow = document.getElementById('hour-type-holiday-hours-row');
+  const hourTypeAutoHolidayToggle = document.getElementById('hour-type-auto-public-holidays');
+  const hourTypeAutoHolidayHoursInput = document.getElementById('hour-type-holiday-hours');
+
+  function syncHourTypeHolidayHoursVisibility() {
+    if (!hourTypeAutoHolidayHoursRow) return;
+    const shouldShow = hourTypeAutoHolidayToggle && hourTypeAutoHolidayToggle.checked;
+    hourTypeAutoHolidayHoursRow.style.display = shouldShow ? 'flex' : 'none';
+  }
 
   if (hourTypeNameInput && hourTypeSlugInput) {
     hourTypeNameInput.addEventListener('input', () => {
@@ -6284,6 +6441,10 @@
         hourTypeSlugInput.value = slug;
       }
     });
+  }
+
+  if (hourTypeAutoHolidayToggle) {
+    hourTypeAutoHolidayToggle.addEventListener('change', syncHourTypeHolidayHoursVisibility);
   }
 
   // Close modals when clicking close button or outside

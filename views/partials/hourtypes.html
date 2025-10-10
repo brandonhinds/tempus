@@ -63,6 +63,25 @@
           </span>
         </label>
       </div>
+      <div class="ts-flag-row" id="hour-type-holiday-toggle-row" style="margin-top:16px; display:none;">
+        <div class="ts-flag-meta">
+          <div class="ts-flag-title">Auto-populate weekday public holidays</div>
+          <div class="ts-flag-desc">When enabled, this hour type is added automatically for each weekday public holiday that matches your state.</div>
+        </div>
+        <label class="ts-toggle">
+          <input type="checkbox" id="hour-type-auto-public-holidays" />
+          <span class="ts-toggle-track">
+            <span class="ts-toggle-thumb"></span>
+          </span>
+        </label>
+      </div>
+      <div class="ts-row" id="hour-type-holiday-hours-row" style="margin-top:16px; display:none;">
+        <div class="ts-col">
+          <label>Hours applied</label>
+          <input type="number" id="hour-type-holiday-hours" min="0" step="0.25" value="7.5" />
+          <div class="ts-note">Default hours recorded on each weekday public holiday when auto-populate is enabled.</div>
+        </div>
+      </div>
     </div>
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-cancel-hour-type">Cancel</button>

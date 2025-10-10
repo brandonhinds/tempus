@@ -34,6 +34,9 @@
     --hover-bg: rgba(59, 130, 246, 0.08);
     --border-color: var(--border);
     --text-secondary: var(--muted);
+    --holiday-bg: rgba(16, 185, 129, 0.16);
+    --holiday-border: rgba(16, 185, 129, 0.45);
+    --holiday-hover: rgba(16, 185, 129, 0.7);
   }
   .ts-theme-light {
     --bg: #f4f5f9;
@@ -66,6 +69,9 @@
     --hover-bg: rgba(37, 99, 235, 0.08);
     --border-color: var(--border);
     --text-secondary: var(--muted);
+    --holiday-bg: rgba(5, 150, 105, 0.12);
+    --holiday-border: rgba(5, 150, 105, 0.35);
+    --holiday-hover: rgba(5, 150, 105, 0.55);
   }
   .ts-theme-rose {
     --bg: #fff5f8;
@@ -98,6 +104,9 @@
     --hover-bg: rgba(209, 107, 134, 0.08);
     --border-color: var(--border);
     --text-secondary: var(--muted);
+    --holiday-bg: rgba(168, 90, 125, 0.16);
+    --holiday-border: rgba(168, 90, 125, 0.45);
+    --holiday-hover: rgba(168, 90, 125, 0.65);
   }
   .ts-theme-og {
     --bg: #061424;
@@ -130,6 +139,9 @@
     --hover-bg: rgba(249, 115, 22, 0.08);
     --border-color: var(--border);
     --text-secondary: var(--muted);
+    --holiday-bg: rgba(34, 211, 238, 0.18);
+    --holiday-border: rgba(34, 211, 238, 0.5);
+    --holiday-hover: rgba(34, 211, 238, 0.7);
   }
   .ts-body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text); }
   .ts-container { width:100%; max-width:1280px; margin:24px auto; padding:0 16px; }
@@ -273,8 +285,8 @@
   .ts-calendar-cell.today { border-color: var(--primary-600); }
   .ts-calendar-cell.selected { box-shadow: 0 0 0 2px var(--primary-glow); border-color: var(--primary); }
   .ts-calendar-cell.has-entries { background: var(--primary-hint-bg); border-color: var(--primary-hint-border); }
-  .ts-calendar-cell.ts-calendar-holiday { background: rgba(144, 238, 144, 0.1); border-color: rgba(144, 238, 144, 0.4); }
-  .ts-calendar-cell.ts-calendar-holiday:hover { border-color: rgba(144, 238, 144, 0.7); }
+  .ts-calendar-cell.ts-calendar-holiday { background: var(--holiday-bg); border-color: var(--holiday-border); }
+  .ts-calendar-cell.ts-calendar-holiday:hover { border-color: var(--holiday-hover); }
   .ts-calendar-day { font-weight:600; font-size:14px; color: var(--text); }
   .ts-calendar-holiday-label { font-size:11px; font-weight:400; color: var(--muted); margin-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ts-calendar-total { margin-top:auto; font-size:20px; font-weight:600; color: var(--text); }
@@ -314,6 +326,7 @@
   .ts-hour-type-badge { font-size:10px; background:var(--badge-bg); border:1px solid var(--badge-border); color:var(--badge-text); padding:2px 6px; border-radius:4px; }
   .ts-hour-type-badge.default { background:var(--badge-success-bg); border-color:var(--badge-success-border); color:var(--badge-success-text); }
   .ts-hour-type-badge.income { background:var(--primary-soft-bg); border-color:var(--primary-soft-border); color:var(--primary-soft-text); }
+  .ts-hour-type-badge.holiday { background: var(--holiday-bg); border-color: var(--holiday-border); color: var(--holiday-hover); }
   .ts-hour-type-actions { display:flex; gap:8px; }
   .ts-hour-type-item.work .ts-hour-type-actions .danger { display:none; }
   .ts-calendar-hour-types { display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
