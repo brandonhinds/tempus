@@ -43,6 +43,24 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'bas_submissions') {
+      sh.getRange(1,1,1,15).setValues([[
+        'id',
+        'financial_year',
+        'period_type',
+        'quarter',
+        'month',
+        'g1_total_sales',
+        'g1_includes_gst',
+        'field_1a_gst_on_sales',
+        'field_1b_gst_on_purchases',
+        't1_payg_income',
+        't2_instalment_rate',
+        'submitted',
+        'submitted_at',
+        'created_at',
+        'updated_at'
+      ]]);
     }
   }
   if (name === 'timesheet_entries') {
@@ -199,6 +217,18 @@ function getOrCreateSheet(name) {
     sh.getRange('L:L').setNumberFormat('@');
     sh.getRange('M:M').setNumberFormat('@');
     sh.getRange('N:O').setNumberFormat('@');
+  }
+  if (name === 'bas_submissions') {
+    sh.getRange('A:A').setNumberFormat('@'); // id
+    sh.getRange('B:B').setNumberFormat('0'); // financial_year
+    sh.getRange('C:C').setNumberFormat('@'); // period_type
+    sh.getRange('D:E').setNumberFormat('0'); // quarter, month
+    sh.getRange('F:F').setNumberFormat('0.00'); // g1_total_sales
+    sh.getRange('G:G').setNumberFormat('@'); // g1_includes_gst
+    sh.getRange('H:J').setNumberFormat('0.00'); // field_1a, field_1b, t1
+    sh.getRange('K:K').setNumberFormat('0.0000'); // t2_instalment_rate
+    sh.getRange('L:L').setNumberFormat('@'); // submitted
+    sh.getRange('M:O').setNumberFormat('@'); // submitted_at, created_at, updated_at
   }
   return sh;
 }

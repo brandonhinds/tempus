@@ -80,6 +80,7 @@
     companyTrackingEnabled: false,
     companyBasQuarterly: false,
     basCurrentFy: null,
+    basSubmissions: [],
     entriesLoaded: false,
     isAutoPopulatingPublicHolidays: false,
     annualYearType: 'financial',
@@ -851,10 +852,19 @@
     return years;
   }
 
-  function formatBasRow(label, values) {
+  function formatBasRow(label, values, fyYear, quarter, month) {
+    const submittedIndicator = values.submitted ? '<span style="color:var(--success); font-weight:600;">\u2713</span>' : '';
+    const rowClass = values.hasActivity ? 'bas-row-clickable' : '';
+    const dataAttrs = [];
+    if (fyYear) dataAttrs.push(`data-fy="${fyYear}"`);
+    if (quarter) dataAttrs.push(`data-quarter="${quarter}"`);
+    if (month) dataAttrs.push(`data-month="${month}"`);
+    const dataAttrsStr = dataAttrs.length ? dataAttrs.join(' ') : '';
+
     return `
-      <tr>
+      <tr class="${rowClass}" ${dataAttrsStr} style="${rowClass ? 'cursor:pointer;' : ''}">
         <td>${label}</td>
+        <td style="text-align:center;">${submittedIndicator}</td>
         <td>${formatCurrency(values.invoiceTotal)}</td>
         <td>${formatCurrency(values.invoiceGst)}</td>
         <td>${formatCurrency(values.companyIncome)}</td>
@@ -885,6 +895,8 @@
       const invoiceGst = invoiceTotal - companyIncome;
       return {
         label: MONTH_YEAR_FORMATTER.format(new Date(year, month, 1)),
+        year,
+        month,
         invoiceTotal,
         invoiceGst,
         companyIncome,
@@ -932,6 +944,7 @@
         hasActivity: false
       });
       totals.label = labels[i] || `Q${i + 1}`;
+      totals.quarter = i + 1; // Add quarter number for identification
       quarters.push(totals);
     }
     return quarters;
@@ -963,16 +976,56 @@
     const dataset = state.companyBasQuarterly ? buildQuarterlyBasRows(monthRows) : monthRows;
     const hasActivity = dataset.some((row) => row.hasActivity);
 
+    // Merge BAS submission data into dataset
+    dataset.forEach((row) => {
+      const submission = state.basSubmissions.find(s => {
+        if (s.financial_year !== state.basCurrentFy) return false;
+        if (state.companyBasQuarterly) {
+          return s.period_type === 'quarterly' && s.quarter === row.quarter;
+        } else {
+          return s.period_type === 'monthly' && s.month === row.month;
+        }
+      });
+      if (submission) {
+        row.submitted = submission.submitted;
+      }
+    });
+
     if (basQuarterlyNote) basQuarterlyNote.style.display = state.companyBasQuarterly ? 'block' : 'none';
     if (basEmptyNote) basEmptyNote.style.display = hasActivity ? 'none' : 'block';
 
     if (basTableBody) {
       const bodyHtml = dataset
         .filter((row) => row.hasActivity || hasActivity) // keep blank rows when overall activity exists
-        .map((row) => formatBasRow(row.label, row))
+        .map((row) => {
+          const fyYear = state.basCurrentFy;
+          const quarter = state.companyBasQuarterly ? row.quarter : null;
+          const month = !state.companyBasQuarterly ? row.month : null;
+          return formatBasRow(row.label, row, fyYear, quarter, month);
+        })
         .join('');
-      basTableBody.innerHTML = bodyHtml || '<tr><td colspan="11" style="text-align:center; padding:16px;">No company activity recorded.</td></tr>';
+      basTableBody.innerHTML = bodyHtml || '<tr><td colspan="12" style="text-align:center; padding:16px;">No company activity recorded.</td></tr>';
+
+      // Add click handlers to clickable rows
+      attachBasRowClickHandlers();
     }
+  }
+
+  function attachBasRowClickHandlers() {
+    if (!basTableBody) return;
+    const clickableRows = basTableBody.querySelectorAll('.bas-row-clickable');
+    clickableRows.forEach(row => {
+      row.addEventListener('click', () => {
+        const fyYear = row.getAttribute('data-fy');
+        const quarter = row.getAttribute('data-quarter');
+        const month = row.getAttribute('data-month');
+        if (fyYear && quarter) {
+          openBasDetailModal(Number(fyYear), Number(quarter), null);
+        } else if (fyYear && month) {
+          openBasDetailModal(Number(fyYear), null, Number(month));
+        }
+      });
+    });
   }
 
   // Annual Views
@@ -2621,6 +2674,11 @@
       description: 'Displays BAS reporting in quarterly totals instead of monthly.',
       order: 201
     },
+    is_sole_trader: {
+      name: 'Sole Trader mode',
+      description: 'Indicates the business is a sole trader. Affects PAYG income calculations in BAS reporting.',
+      order: 202
+    },
     enable_public_holidays: {
       name: 'Australian Public Holidays',
       description: 'Displays Australian public holidays in the calendar view with automatic API sync.',
@@ -3956,6 +4014,8 @@
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
   const superRateInput = document.getElementById('set-super-rate');
+  const paygRateInput = document.getElementById('set-payg-rate');
+  const paygRateCol = document.getElementById('payg-rate-col');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
   const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
@@ -4670,7 +4730,7 @@
     featureFlagsListEl.innerHTML = '';
     const entries = Object.keys(state.featureFlags)
       .filter((key) => {
-        if (key === 'enable_company_quarterly_bas') {
+        if (key === 'enable_company_quarterly_bas' || key === 'is_sole_trader') {
           return !!state.featureFlags.enable_company_tracking_features?.enabled;
         }
         return true;
@@ -4822,6 +4882,11 @@
     }
     if (publicHolidaysFlag.enabled) {
       loadPublicHolidays();
+    }
+
+    // Show/hide PAYG rate setting (only when company tracking is enabled)
+    if (paygRateCol) {
+      paygRateCol.style.display = state.companyTrackingEnabled ? 'block' : 'none';
     }
   }
 
@@ -6322,6 +6387,7 @@
       round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
       theme: themeSelect ? themeSelect.value : 'dark',
       superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
+      payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
       public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
     };
   }
@@ -6331,12 +6397,14 @@
       round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
       theme: themeSelect ? themeSelect.value : 'dark',
       superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
+      payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
       public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
     };
 
     const isDirty = current.round_to_nearest !== settingsInitialState.round_to_nearest ||
                     current.theme !== settingsInitialState.theme ||
                     current.superannuation_rate !== settingsInitialState.superannuation_rate ||
+                    current.payg_instalment_rate !== settingsInitialState.payg_instalment_rate ||
                     current.public_holiday_state !== settingsInitialState.public_holiday_state;
 
     if (saveSettingsBtn) saveSettingsBtn.disabled = !isDirty;
@@ -6349,6 +6417,7 @@
     if (roundInput) roundInput.value = settingsInitialState.round_to_nearest || 0;
     if (themeSelect) themeSelect.value = settingsInitialState.theme || 'dark';
     if (superRateInput) superRateInput.value = String(settingsInitialState.superannuation_rate);
+    if (paygRateInput) paygRateInput.value = String(settingsInitialState.payg_instalment_rate || 2);
     if (publicHolidayStateSelect) publicHolidayStateSelect.value = settingsInitialState.public_holiday_state || 'ACT';
     applyTheme(settingsInitialState.theme || 'dark');
     checkSettingsDirty();
@@ -6358,6 +6427,7 @@
   if (roundInput) roundInput.addEventListener('input', checkSettingsDirty);
   if (themeSelect) themeSelect.addEventListener('change', checkSettingsDirty);
   if (superRateInput) superRateInput.addEventListener('input', checkSettingsDirty);
+  if (paygRateInput) paygRateInput.addEventListener('input', checkSettingsDirty);
   if (publicHolidayStateSelect) publicHolidayStateSelect.addEventListener('change', checkSettingsDirty);
 
   // Settings persistence
@@ -6365,15 +6435,18 @@
     saveSettingsBtn.onclick = function () {
       const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
       const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
+      const paygRatePercent = paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2);
       const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
       const next = {
         round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
         theme: nextTheme,
         superannuation_rate: superRatePercent,
+        payg_instalment_rate: paygRatePercent,
         public_holiday_state: publicHolidayState
       };
       applyTheme(nextTheme);
       if (superRateInput) superRateInput.value = String(next.superannuation_rate);
+      if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
       saveCache();
       renderCalendar();
@@ -6407,6 +6480,7 @@
   function init() {
     loadCache();
     if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
+    if (paygRateInput) paygRateInput.value = String(Number(state.settings.payg_instalment_rate) || 2);
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
     if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
@@ -6441,6 +6515,7 @@
         saveCache();
         if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
         if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
+        if (paygRateInput) paygRateInput.value = String(Number(state.settings.payg_instalment_rate) || 2);
         if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
         applyTheme(state.settings.theme || 'dark');
         captureSettingsState();
@@ -6477,6 +6552,14 @@
       })
       .withFailureHandler(() => setStatus('Deductions sync failed', 'error'))
       .api_getDeductions();
+    google.script.run
+      .withSuccessHandler((submissions) => {
+        state.basSubmissions = submissions || [];
+        saveCache();
+        renderBasReporting();
+      })
+      .withFailureHandler(() => {})
+      .api_getBasSubmissions();
   }
 
   // Default Entries Functionality
@@ -6666,6 +6749,226 @@
 
       showModal(modal);
       okBtn.focus();
+    });
+  }
+
+  // BAS Detail Modal
+  let currentBasPeriod = { fyYear: null, quarter: null, month: null };
+
+  async function copyToClipboard(text, element) {
+    try {
+      await navigator.clipboard.writeText(text);
+      // Visual feedback
+      if (element) {
+        element.classList.add('copied');
+        setTimeout(() => {
+          element.classList.remove('copied');
+        }, 300);
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      return false;
+    }
+  }
+
+  function openBasDetailModal(fyYear, quarter, month) {
+    currentBasPeriod = { fyYear, quarter, month };
+
+    const modal = document.getElementById('modal-bas-detail');
+    const titleEl = document.getElementById('bas-detail-title');
+
+    const monthRows = buildMonthlyBasRows(fyYear);
+    let periodData;
+    let periodLabel;
+
+    if (quarter) {
+      // Quarterly BAS
+      const quarterlyRows = buildQuarterlyBasRows(monthRows);
+      periodData = quarterlyRows[quarter - 1];
+      periodLabel = ['Q1 (Jul–Sep)', 'Q2 (Oct–Dec)', 'Q3 (Jan–Mar)', 'Q4 (Apr–Jun)'][quarter - 1];
+    } else if (month !== null && month !== undefined) {
+      // Monthly BAS
+      periodData = monthRows.find(r => r.month === month);
+      const date = new Date(periodData.year, month, 1);
+      periodLabel = MONTH_YEAR_FORMATTER.format(date);
+    }
+
+    if (!periodData) {
+      customAlert('Unable to load BAS data for this period.');
+      return;
+    }
+
+    // Calculate BAS fields
+    const g1TotalSales = periodData.invoiceTotal;
+    const field1aGstOnSales = periodData.invoiceGst;
+    const field1bGstOnPurchases = periodData.companyExpensesGst;
+
+    // Get PAYG rate from settings (default 2%)
+    const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
+
+    // Calculate T1 based on sole trader flag
+    const isSoleTrader = getFeatureFlag('is_sole_trader');
+    const t1PaygIncome = isSoleTrader
+      ? periodData.employeeGrossIncome // For sole traders: gross income minus expenses
+      : periodData.companyIncome; // For companies: company income
+
+    const t2InstalmentRate = paygRate * 100; // Convert back to percentage for display
+
+    // Update modal title
+    if (titleEl) {
+      titleEl.textContent = `BAS Details - FY ${fyYear}-${String(fyYear + 1).slice(-2)} ${periodLabel}`;
+    }
+
+    // Update field values
+    const g1El = document.getElementById('bas-g1-value');
+    const field1aEl = document.getElementById('bas-1a-value');
+    const field1bEl = document.getElementById('bas-1b-value');
+    const t1El = document.getElementById('bas-t1-value');
+    const t2El = document.getElementById('bas-t2-value');
+
+    if (g1El) g1El.textContent = formatCurrency(g1TotalSales);
+    if (field1aEl) field1aEl.textContent = formatCurrency(field1aGstOnSales);
+    if (field1bEl) field1bEl.textContent = formatCurrency(field1bGstOnPurchases);
+    if (t1El) t1El.textContent = formatCurrency(t1PaygIncome);
+    if (t2El) t2El.textContent = t2InstalmentRate.toFixed(2) + '%';
+
+    // Load submission status
+    const submission = state.basSubmissions.find(s => {
+      if (s.financial_year !== fyYear) return false;
+      if (quarter) {
+        return s.period_type === 'quarterly' && s.quarter === quarter;
+      } else {
+        return s.period_type === 'monthly' && s.month === month;
+      }
+    });
+    const submittedToggle = document.getElementById('bas-submitted-toggle');
+    if (submittedToggle) {
+      submittedToggle.checked = submission ? submission.submitted : false;
+    }
+
+    // Attach click-to-copy handlers
+    attachBasFieldCopyHandlers();
+
+    showModal(modal);
+  }
+
+  function attachBasFieldCopyHandlers() {
+    const fields = document.querySelectorAll('.bas-field-value[data-field]');
+    fields.forEach(field => {
+      const handler = async () => {
+        // Extract numeric value (remove $ and ,)
+        const text = field.textContent.replace(/[$,]/g, '').trim();
+        const success = await copyToClipboard(text, field);
+        if (success) {
+          // Optional: show a toast notification
+          setStatus('Copied to clipboard', 'success');
+        }
+      };
+      // Remove existing listeners to avoid duplicates
+      field.replaceWith(field.cloneNode(true));
+    });
+    // Re-query and attach
+    document.querySelectorAll('.bas-field-value[data-field]').forEach(field => {
+      field.addEventListener('click', async () => {
+        const text = field.textContent.replace(/[$,]/g, '').trim();
+        const success = await copyToClipboard(text, field);
+        if (success) {
+          setStatus('Copied to clipboard', 'success');
+        }
+      });
+    });
+  }
+
+  // BAS Detail Modal - Close and Save handlers
+  const basDetailCloseBtn = document.getElementById('btn-bas-detail-close');
+  const basDetailSaveBtn = document.getElementById('btn-bas-detail-save');
+
+  if (basDetailCloseBtn) {
+    basDetailCloseBtn.addEventListener('click', () => {
+      const modal = document.getElementById('modal-bas-detail');
+      hideModal(modal);
+    });
+  }
+
+  if (basDetailSaveBtn) {
+    basDetailSaveBtn.addEventListener('click', async () => {
+      const submittedToggle = document.getElementById('bas-submitted-toggle');
+      const submitted = submittedToggle ? submittedToggle.checked : false;
+
+      const { fyYear, quarter, month } = currentBasPeriod;
+      if (!fyYear) return;
+      if (!quarter && (month === null || month === undefined)) return;
+
+      // Calculate all fields
+      const monthRows = buildMonthlyBasRows(fyYear);
+      let periodData;
+
+      if (quarter) {
+        const quarterlyRows = buildQuarterlyBasRows(monthRows);
+        periodData = quarterlyRows[quarter - 1];
+      } else {
+        periodData = monthRows.find(r => r.month === month);
+      }
+
+      if (!periodData) return;
+
+      const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
+      const isSoleTrader = getFeatureFlag('is_sole_trader');
+
+      const basData = {
+        financial_year: fyYear,
+        period_type: quarter ? 'quarterly' : 'monthly',
+        quarter: quarter || null,
+        month: month !== null && month !== undefined ? month : null,
+        g1_total_sales: periodData.invoiceTotal,
+        g1_includes_gst: true,
+        field_1a_gst_on_sales: periodData.invoiceGst,
+        field_1b_gst_on_purchases: periodData.companyExpensesGst,
+        t1_payg_income: isSoleTrader ? periodData.employeeGrossIncome : periodData.companyIncome,
+        t2_instalment_rate: paygRate,
+        submitted: submitted
+      };
+
+      // Save to backend
+      setStatus('Saving BAS submission...', 'warn');
+      basDetailSaveBtn.disabled = true;
+      basDetailSaveBtn.textContent = 'Saving...';
+
+      google.script.run
+        .withSuccessHandler((savedSubmission) => {
+          // Update local state
+          const index = state.basSubmissions.findIndex(s => {
+            if (s.financial_year !== fyYear) return false;
+            if (quarter) {
+              return s.period_type === 'quarterly' && s.quarter === quarter;
+            } else {
+              return s.period_type === 'monthly' && s.month === month;
+            }
+          });
+          if (index >= 0) {
+            state.basSubmissions[index] = savedSubmission;
+          } else {
+            state.basSubmissions.push(savedSubmission);
+          }
+          saveCache();
+
+          // Close modal and refresh BAS report
+          const modal = document.getElementById('modal-bas-detail');
+          hideModal(modal);
+          renderBasReporting();
+          setStatus('BAS submission saved', 'success');
+          basDetailSaveBtn.disabled = false;
+          basDetailSaveBtn.textContent = 'Save';
+        })
+        .withFailureHandler((error) => {
+          console.error('Failed to save BAS submission:', error);
+          customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
+          basDetailSaveBtn.disabled = false;
+          basDetailSaveBtn.textContent = 'Save';
+          setStatus('Failed to save', 'error');
+        })
+        .api_upsertBasSubmission(basData);
     });
   }
 

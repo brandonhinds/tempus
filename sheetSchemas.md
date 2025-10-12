@@ -13,6 +13,7 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 - `round_to_nearest` (number) - Minute increment used when rounding manual or timer entries client-side.
 - `theme` (string) - UI theme identifier (`dark`, `light`, `rose`, `og`).
 - `superannuation_rate` (number) - Percentage used when deriving income + payroll summaries. Stored as a whole-number percent (e.g., `12` => 12%).
+- `payg_instalment_rate` (number) - PAYG instalment rate used for BAS T2 calculations. Stored as a whole-number percent (e.g., `2` => 2%). Defaults to `2`.
 - `public_holiday_state` (string) - Australian state/territory code for filtering public holidays (`ACT`, `NSW`, `NT`, `SA`, `TAS`, `WA`, `VIC`, `QLD`). Defaults to `ACT`.
 
 ### Suggested improvements
@@ -167,3 +168,38 @@ Stores fetched public holiday data from the Nager.Date API. This sheet caches ho
 - Add an index on `year` column if query performance becomes an issue
 - Consider adding a `global` boolean flag for faster filtering of nationwide holidays
 - Track API response metadata (rate limits, response time) for monitoring
+
+## bas_submissions
+Stores Business Activity Statement (BAS) submission data for each period (monthly or quarterly). Records calculated GST and PAYG values along with submission status.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `c5e42da1-7b66-4aa0-9df0-aeae6402fd5c` |
+| `financial_year` | number | Starting year of the financial year. | `2024` |
+| `period_type` | string | Period type: `monthly` or `quarterly`. | `quarterly` |
+| `quarter` | number | Quarter number (1-4) for quarterly periods. Null for monthly. | `2` |
+| `month` | number | Month number (0-11) for monthly periods. Null for quarterly. | `6` |
+| `g1_total_sales` | number | Total sales including GST (G1 field). | `55000.00` |
+| `g1_includes_gst` | boolean/string | Always `TRUE` - indicates G1 includes GST. | `TRUE` |
+| `field_1a_gst_on_sales` | number | GST collected on sales (1A field). | `5000.00` |
+| `field_1b_gst_on_purchases` | number | GST paid on purchases (1B field). | `500.00` |
+| `t1_payg_income` | number | PAYG instalment income (T1 field). | `50000.00` |
+| `t2_instalment_rate` | number | PAYG instalment rate as decimal (T2 field). | `0.02` |
+| `submitted` | boolean/string | `TRUE`/`FALSE` indicating if BAS has been lodged with ATO. | `FALSE` |
+| `submitted_at` | string (ISO datetime, UTC) | Timestamp when the BAS was marked as submitted. Empty if not submitted. | `2025-01-28T10:15:00Z` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when this record was first created. | `2025-01-28T09:00:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-01-28T10:15:00Z` |
+
+### Field calculations
+- **G1 (Total Sales)**: Sum of invoice totals (including 10% GST) for all income-contributing entries in the quarter
+- **1A (GST on Sales)**: GST component of G1 (calculated as invoice total ÷ 11)
+- **1B (GST on Purchases)**: Sum of GST amounts from company deductions in the quarter
+- **T1 (PAYG Income)**:
+  - For sole traders: Gross income minus business expenses for the quarter
+  - For companies: Gross income for the quarter
+- **T2 (Instalment Rate)**: User-configured rate (stored in user_settings as `payg_instalment_rate`)
+
+### Suggested improvements
+- Add validation to prevent duplicate submissions for the same financial year, period_type, and quarter/month combination
+- Track who submitted the BAS when multi-user support is added
+- Consider adding fields for other BAS sections (W1, W2, etc.) as needed
