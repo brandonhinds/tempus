@@ -1282,12 +1282,24 @@
     const taxEl = document.getElementById('annual-stat-tax');
     const netEl = document.getElementById('annual-stat-net');
     const hoursEl = document.getElementById('annual-stat-hours');
+    const taxRateEl = document.getElementById('annual-stat-tax-rate');
+    const avgMonthlyEl = document.getElementById('annual-stat-avg-monthly');
+    const hourlyRateEl = document.getElementById('annual-stat-hourly-rate');
 
     if (grossEl) grossEl.textContent = formatCurrency(totals.grossIncome);
     if (superEl) superEl.textContent = formatCurrency(totals.superGuarantee + totals.extraSuper);
     if (taxEl) taxEl.textContent = formatCurrency(totals.tax);
     if (netEl) netEl.textContent = formatCurrency(totals.netIncome);
     if (hoursEl) hoursEl.textContent = totals.totalHours.toFixed(1) + ' hrs';
+
+    // Calculate and display new metrics
+    const effectiveTaxRate = totals.grossIncome > 0 ? (totals.tax / totals.grossIncome) * 100 : 0;
+    const avgMonthlyIncome = totals.grossIncome / 12;
+    const effectiveHourlyRate = totals.totalHours > 0 ? totals.grossIncome / totals.totalHours : 0;
+
+    if (taxRateEl) taxRateEl.textContent = effectiveTaxRate.toFixed(1) + '%';
+    if (avgMonthlyEl) avgMonthlyEl.textContent = formatCurrency(avgMonthlyIncome);
+    if (hourlyRateEl) hourlyRateEl.textContent = formatCurrency(effectiveHourlyRate) + '/hr';
 
     // Update breakdown table
     updateAnnualBreakdownTable();
@@ -1315,30 +1327,73 @@
     const totalSuper = totals.superGuarantee + totals.extraSuper;
     const gross = totals.grossIncome;
 
+    // Gross Income (always 100%)
     document.getElementById('annual-breakdown-gross').textContent = formatCurrency(gross);
     document.getElementById('annual-breakdown-gross-pct').textContent = '100%';
+    document.getElementById('annual-breakdown-gross-bar').style.width = '100%';
 
+    // Superannuation
+    const superPct = gross > 0 ? (totalSuper / gross) * 100 : 0;
     document.getElementById('annual-breakdown-super').textContent = formatCurrency(totalSuper);
-    document.getElementById('annual-breakdown-super-pct').textContent = gross > 0 ? ((totalSuper / gross) * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('annual-breakdown-super-pct').textContent = superPct.toFixed(1) + '%';
+    document.getElementById('annual-breakdown-super-bar').style.width = superPct.toFixed(1) + '%';
 
+    // Superannuation Lost
     const superLostRow = document.getElementById('annual-breakdown-super-lost-row');
     if (totals.superLost > 0.01) {
       if (superLostRow) superLostRow.style.display = '';
+      const superLostPct = gross > 0 ? (totals.superLost / gross) * 100 : 0;
       document.getElementById('annual-breakdown-super-lost').textContent = formatCurrency(totals.superLost);
-      document.getElementById('annual-breakdown-super-lost-pct').textContent = gross > 0 ? ((totals.superLost / gross) * 100).toFixed(1) + '%' : '0%';
+      document.getElementById('annual-breakdown-super-lost-pct').textContent = superLostPct.toFixed(1) + '%';
+      document.getElementById('annual-breakdown-super-lost-bar').style.width = superLostPct.toFixed(1) + '%';
     } else {
       if (superLostRow) superLostRow.style.display = 'none';
     }
 
+    // Deductions
+    const deductionsPct = gross > 0 ? (totals.otherDeductions / gross) * 100 : 0;
     document.getElementById('annual-breakdown-deductions').textContent = formatCurrency(totals.otherDeductions);
-    document.getElementById('annual-breakdown-deductions-pct').textContent = gross > 0 ? ((totals.otherDeductions / gross) * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('annual-breakdown-deductions-pct').textContent = deductionsPct.toFixed(1) + '%';
+    document.getElementById('annual-breakdown-deductions-bar').style.width = deductionsPct.toFixed(1) + '%';
 
+    // Tax
+    const taxPct = gross > 0 ? (totals.tax / gross) * 100 : 0;
     document.getElementById('annual-breakdown-tax').textContent = formatCurrency(totals.tax);
-    document.getElementById('annual-breakdown-tax-pct').textContent = gross > 0 ? ((totals.tax / gross) * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('annual-breakdown-tax-pct').textContent = taxPct.toFixed(1) + '%';
+    document.getElementById('annual-breakdown-tax-bar').style.width = taxPct.toFixed(1) + '%';
 
+    // Net Income
+    const netPct = gross > 0 ? (totals.netIncome / gross) * 100 : 0;
     document.getElementById('annual-breakdown-net').textContent = formatCurrency(totals.netIncome);
-    document.getElementById('annual-breakdown-net-pct').textContent = gross > 0 ? ((totals.netIncome / gross) * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('annual-breakdown-net-pct').textContent = netPct.toFixed(1) + '%';
+    document.getElementById('annual-breakdown-net-bar').style.width = netPct.toFixed(1) + '%';
   }
+
+  // Chart.js plugin for center text in donut charts
+  const centerTextPlugin = {
+    id: 'centerText',
+    beforeDraw: (chart) => {
+      if (!chart.config.options.plugins.centerText) return;
+
+      const { ctx, chartArea: { left, top, right, bottom, width, height } } = chart;
+      const centerX = left + width / 2;
+      const centerY = top + height / 2;
+
+      ctx.save();
+
+      const text = chart.config.options.plugins.centerText.text || '';
+      const color = chart.config.options.plugins.centerText.color || '#ffffff';
+
+      // Main text (large, centered)
+      ctx.font = 'bold 26px Inter, system-ui, sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, centerX, centerY);
+
+      ctx.restore();
+    }
+  };
 
   function renderAnnualIncomeChart() {
     const canvas = document.getElementById('annual-income-chart');
@@ -1384,8 +1439,8 @@
         responsive: true,
         maintainAspectRatio: false,
         interaction: {
-          mode: 'index',
-          intersect: false
+          mode: 'dataset',
+          intersect: true
         },
         plugins: {
           datalabels: {
@@ -1481,6 +1536,8 @@
     const totals = state.annualData.yearTotals;
     const colors = getThemeColors();
 
+    const grossIncome = totals.grossIncome;
+
     const ctx = canvas.getContext('2d');
     state.annualCharts.incomePie = new Chart(ctx, {
       type: 'doughnut',
@@ -1504,8 +1561,12 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '45%',
+        cutout: '65%',
         plugins: {
+          centerText: {
+            text: formatCurrency(grossIncome),
+            color: colors.text
+          },
           datalabels: {
             display: false
           },
@@ -1539,7 +1600,8 @@
         layout: {
           padding: 20
         }
-      }
+      },
+      plugins: [centerTextPlugin]
     });
   }
 
@@ -1557,6 +1619,8 @@
     container.style.display = 'block';
     const colors = getThemeColors();
     const chartColors = [colors.primary, colors.success, colors.warning, colors.danger, '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b'];
+
+    const totalIncome = contractBreakdown.reduce((sum, c) => sum + c.grossIncome, 0);
 
     const ctx = canvas.getContext('2d');
     state.annualCharts.contractPie = new Chart(ctx, {
@@ -1576,8 +1640,12 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '45%',
+        cutout: '65%',
         plugins: {
+          centerText: {
+            text: formatCurrency(totalIncome),
+            color: colors.text
+          },
           datalabels: {
             display: false
           },
@@ -1611,7 +1679,8 @@
         layout: {
           padding: 20
         }
-      }
+      },
+      plugins: [centerTextPlugin]
     });
   }
 
@@ -1701,10 +1770,12 @@
     const hours = monthlyData.map(m => m.totalHours);
     const colors = getThemeColors();
 
-    // Generate colors for each month
+    const totalHours = hours.reduce((sum, h) => sum + h, 0);
+
+    // Use rainbow gradient for 12 months (ordered visually)
     const monthColors = hours.map((_, index) => {
-      const hue = (index * 30) % 360; // Spread hues across spectrum
-      return `hsl(${hue}, 60%, 55%)`;
+      const hue = (index * 30) % 360; // 0, 30, 60, 90, 120... (full spectrum)
+      return `hsl(${hue}, 70%, 60%)`;
     });
 
     const ctx = canvas.getContext('2d');
@@ -1725,82 +1796,12 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '45%',
+        cutout: '65%',
         plugins: {
-          datalabels: {
-            display: false // Don't show data labels on pie charts
+          centerText: {
+            text: totalHours.toFixed(1) + ' hrs',
+            color: colors.text
           },
-          legend: {
-            position: 'bottom',
-            labels: {
-              color: colors.text,
-              font: { size: 11, weight: '500' },
-              padding: 12,
-              usePointStyle: true,
-              pointStyle: 'circle'
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(0, 0, 0, 0.9)',
-            padding: 12,
-            titleFont: { size: 13, weight: 'bold' },
-            bodyFont: { size: 12 },
-            cornerRadius: 8,
-            callbacks: {
-              label: (context) => {
-                const label = context.label || '';
-                const hoursVal = context.parsed.toFixed(1);
-                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                const pct = ((context.parsed / total) * 100).toFixed(1);
-                return '  ' + label + ': ' + hoursVal + ' hrs (' + pct + '%)';
-              }
-            }
-          }
-        },
-        layout: {
-          padding: 20
-        }
-      }
-    });
-  }
-
-  function renderAnnualTotalHoursByTypePieChart() {
-    const canvas = document.getElementById('annual-total-hours-by-type-pie-chart');
-    if (!canvas || !state.annualData) return;
-
-    const hourTypeBreakdown = state.annualData.hourTypeBreakdown;
-    if (!hourTypeBreakdown || hourTypeBreakdown.length === 0) {
-      console.log('No hour type breakdown data available', state.annualData);
-      return;
-    }
-
-    console.log('Rendering hour types pie chart with data:', hourTypeBreakdown);
-
-    const labels = hourTypeBreakdown.map(ht => ht.hourTypeName);
-    const hours = hourTypeBreakdown.map(ht => ht.hours);
-    const hourColors = hourTypeBreakdown.map(ht => ht.hourTypeColor);
-    const colors = getThemeColors();
-
-    const ctx = canvas.getContext('2d');
-    state.annualCharts.totalHoursByTypePie = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: labels,
-        datasets: [{
-          data: hours,
-          backgroundColor: hourColors,
-          borderWidth: 3,
-          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
-          hoverBorderWidth: 4,
-          hoverBorderColor: '#fff',
-          hoverOffset: 8
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '45%',
-        plugins: {
           datalabels: {
             display: false
           },
@@ -1834,7 +1835,89 @@
         layout: {
           padding: 20
         }
-      }
+      },
+      plugins: [centerTextPlugin]
+    });
+  }
+
+  function renderAnnualTotalHoursByTypePieChart() {
+    const canvas = document.getElementById('annual-total-hours-by-type-pie-chart');
+    if (!canvas || !state.annualData) return;
+
+    const hourTypeBreakdown = state.annualData.hourTypeBreakdown;
+    if (!hourTypeBreakdown || hourTypeBreakdown.length === 0) {
+      console.log('No hour type breakdown data available', state.annualData);
+      return;
+    }
+
+    console.log('Rendering hour types pie chart with data:', hourTypeBreakdown);
+
+    const labels = hourTypeBreakdown.map(ht => ht.hourTypeName);
+    const hours = hourTypeBreakdown.map(ht => ht.hours);
+    const hourColors = hourTypeBreakdown.map(ht => ht.hourTypeColor);
+    const colors = getThemeColors();
+
+    const totalHours = hours.reduce((sum, h) => sum + h, 0);
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.totalHoursByTypePie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: hours,
+          backgroundColor: hourColors,
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '65%',
+        plugins: {
+          centerText: {
+            text: totalHours.toFixed(1) + ' hrs',
+            color: colors.text
+          },
+          datalabels: {
+            display: false
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const hoursVal = context.parsed.toFixed(1);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + hoursVal + ' hrs (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      },
+      plugins: [centerTextPlugin]
     });
   }
 

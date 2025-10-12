@@ -342,4 +342,15 @@
   .ts-calendar-filter-color { width:12px; height:12px; border-radius:50%; border:1px solid var(--border); }
   .ts-calendar-filter-name { font-size:13px; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
+  .ts-annual-stat-card:hover { transform: translateY(-2px); box-shadow:0 4px 16px rgba(0,0,0,0.15); border-color:var(--primary); }
+  @keyframes fadeInUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+  .ts-annual-stat-card { animation: fadeInUp 0.4s ease-out; opacity:0; animation-fill-mode: forwards; }
+  .ts-annual-stat-card:nth-child(1) { animation-delay: 0.05s; }
+  .ts-annual-stat-card:nth-child(2) { animation-delay: 0.1s; }
+  .ts-annual-stat-card:nth-child(3) { animation-delay: 0.15s; }
+  .ts-annual-stat-card:nth-child(4) { animation-delay: 0.2s; }
+  .ts-annual-stat-card:nth-child(5) { animation-delay: 0.25s; }
+  .ts-annual-stat-card:nth-child(6) { animation-delay: 0.3s; }
+  .ts-annual-stat-card:nth-child(7) { animation-delay: 0.35s; }
+  .ts-annual-stat-card:nth-child(8) { animation-delay: 0.4s; }
 </style>

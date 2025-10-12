@@ -32,28 +32,53 @@
   </div>
 
   <!-- Summary Statistics -->
-  <div class="ts-annual-summary-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:20px;">
-    <div class="ts-annual-stat-card" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div class="ts-annual-stat-label" style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Gross Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-gross" style="font-size:24px; font-weight:700;">--</div>
+  <div class="ts-annual-summary-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:24px;">
+    <!-- Row 1 -->
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Gross Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-gross" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div class="ts-annual-stat-label" style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Total Superannuation</div>
-      <div class="ts-annual-stat-value" id="annual-stat-super" style="font-size:24px; font-weight:700;">--</div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Superannuation</div>
+      <div class="ts-annual-stat-value" id="annual-stat-super" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div class="ts-annual-stat-label" style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Total Tax</div>
-      <div class="ts-annual-stat-value" id="annual-stat-tax" style="font-size:24px; font-weight:700;">--</div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Tax</div>
+      <div class="ts-annual-stat-value" id="annual-stat-tax" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div class="ts-annual-stat-label" style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Net Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-net" style="font-size:24px; font-weight:700;">--</div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Net Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-net" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div class="ts-annual-stat-label" style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Total Hours</div>
-      <div class="ts-annual-stat-value" id="annual-stat-hours" style="font-size:24px; font-weight:700;">--</div>
+    <!-- Row 2 -->
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Hours</div>
+      <div class="ts-annual-stat-value" id="annual-stat-hours" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    </div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Avg Monthly Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-avg-monthly" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    </div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Effective Tax Rate</div>
+      <div class="ts-annual-stat-value" id="annual-stat-tax-rate" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    </div>
+    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
+      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Effective Hourly Rate</div>
+      <div class="ts-annual-stat-value" id="annual-stat-hourly-rate" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
     </div>
   </div>
+  <style>
+    @media (max-width: 1200px) {
+      .ts-annual-summary-grid { grid-template-columns: repeat(3, 1fr) !important; }
+    }
+    @media (max-width: 900px) {
+      .ts-annual-summary-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    }
+    @media (max-width: 600px) {
+      .ts-annual-summary-grid { grid-template-columns: 1fr !important; }
+    }
+  </style>
 
   <!-- Detailed Income Breakdown Table -->
   <div style="margin-bottom:24px;">
@@ -64,39 +89,81 @@
           <tr>
             <th style="text-align:left;">Category</th>
             <th style="text-align:right;">Amount</th>
-            <th style="text-align:right;">Percentage</th>
+            <th style="text-align:left; width:180px;">Percentage</th>
           </tr>
         </thead>
         <tbody id="annual-income-breakdown-table">
           <tr>
             <td>Gross Income</td>
             <td id="annual-breakdown-gross" style="text-align:right;">--</td>
-            <td id="annual-breakdown-gross-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-gross-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-gross-bar" style="height:100%; background:linear-gradient(90deg, #3b82f6, #60a5fa); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-gross-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
           <tr>
             <td style="padding-left:20px;">Superannuation (Guarantee + Extra)</td>
             <td id="annual-breakdown-super" style="text-align:right;">--</td>
-            <td id="annual-breakdown-super-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-super-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-super-bar" style="height:100%; background:linear-gradient(90deg, #10b981, #34d399); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-super-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
           <tr id="annual-breakdown-super-lost-row" style="display:none;">
             <td style="padding-left:20px;">Superannuation Lost (Deductions)</td>
             <td id="annual-breakdown-super-lost" style="text-align:right;">--</td>
-            <td id="annual-breakdown-super-lost-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-super-lost-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-super-lost-bar" style="height:100%; background:linear-gradient(90deg, #64748b, #94a3b8); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-super-lost-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
           <tr>
             <td style="padding-left:20px;">Deductions</td>
             <td id="annual-breakdown-deductions" style="text-align:right;">--</td>
-            <td id="annual-breakdown-deductions-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-deductions-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-deductions-bar" style="height:100%; background:linear-gradient(90deg, #f59e0b, #fbbf24); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-deductions-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
           <tr>
             <td style="padding-left:20px;">Tax</td>
             <td id="annual-breakdown-tax" style="text-align:right;">--</td>
-            <td id="annual-breakdown-tax-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-tax-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-tax-bar" style="height:100%; background:linear-gradient(90deg, #ef4444, #f87171); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-tax-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
           <tr style="font-weight:600; border-top:2px solid var(--border);">
             <td>Net Income</td>
             <td id="annual-breakdown-net" style="text-align:right;">--</td>
-            <td id="annual-breakdown-net-pct" style="text-align:right;">--</td>
+            <td id="annual-breakdown-net-pct-cell" style="padding:8px 12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+                  <div id="annual-breakdown-net-bar" style="height:100%; background:linear-gradient(90deg, #8b5cf6, #a78bfa); width:0%; transition:width 0.6s ease;"></div>
+                </div>
+                <span id="annual-breakdown-net-pct" style="font-size:13px; font-weight:600; min-width:45px; text-align:right;">--</span>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -156,12 +223,12 @@
           <div id="annual-tax-paid" style="font-size:20px; font-weight:600;">--</div>
         </div>
         <div>
-          <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Expected Tax (ATO)</div>
+          <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Expected Tax</div>
           <div id="annual-tax-expected" style="font-size:20px; font-weight:600;">--</div>
         </div>
         <div>
           <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Difference</div>
-          <div id="annual-tax-difference" style="font-size:20px; font-weight:600;">--</div>
+          <div id="annual-tax-difference" style="font-size:20px; font-weight:600; cursor:help;" title="This analysis is only useful towards the end of the financial year. The tax you pay each pay period is calculated assuming that is your average for the entire year, while the expected tax field is based on the assumption that your taxable income is finished for the year.">--</div>
         </div>
       </div>
       <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
