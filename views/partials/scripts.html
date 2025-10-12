@@ -116,9 +116,32 @@
     } catch (e) {}
   }
 
-  function showPage(target, options) {
+  async function showPage(target, options) {
     const opts = options || {};
     const normalized = PAGE_KEYS.includes(target) ? target : 'time';
+
+    // Check if leaving settings page with unsaved changes
+    if (state.currentPage === 'settings' && normalized !== 'settings') {
+      if (typeof checkSettingsDirty === 'function' && checkSettingsDirty()) {
+        const confirmed = await customConfirm(
+          'You have unsaved changes in Settings. Do you want to discard them and continue?',
+          {
+            title: 'Unsaved Changes',
+            okText: 'Discard and Continue',
+            cancelText: 'Stay on Settings',
+            danger: true
+          }
+        );
+        if (!confirmed) {
+          return; // Stay on settings page
+        }
+        // Discard changes and continue
+        if (typeof resetSettingsToInitial === 'function') {
+          resetSettingsToInitial();
+        }
+      }
+    }
+
     const pages = {
       time: pageTime,
       contracts: pageContracts,
@@ -2524,9 +2547,10 @@
       .api_upsertDeduction(serverPayload);
   }
 
-  function handleDeleteDeduction(deduction) {
+  async function handleDeleteDeduction(deduction) {
     if (!deduction || !deduction.id) return;
-    if (!confirm('Delete this deduction?')) return;
+    const confirmed = await customConfirm('Delete this deduction?', { danger: true });
+    if (!confirmed) return;
     if (deduction.category === 'company' && !state.companyTrackingEnabled) {
       setStatus('Enable company tracking to modify company deductions.', 'warn');
       return;
@@ -2820,7 +2844,7 @@
             const el = document.getElementById('tab-' + pane);
             if (el) el.style.display = pane === previousTab ? 'block' : 'none';
           });
-          alert('This hour type already has a basic entry for this date. Please use the hour type dropdown to switch between different hour types.');
+          customAlert('This hour type already has a basic entry for this date. Please use the hour type dropdown to switch between different hour types.');
           return;
         }
 
@@ -2880,7 +2904,7 @@
             const el = document.getElementById('tab-' + pane);
             if (el) el.style.display = pane === previousTab ? 'block' : 'none';
           });
-          alert('This hour type already has an advanced entry for this date. Please use the hour type dropdown to switch between different hour types.');
+          customAlert('This hour type already has an advanced entry for this date. Please use the hour type dropdown to switch between different hour types.');
           return;
         }
 
@@ -3270,7 +3294,7 @@
       );
       if (duplicateEntry) {
         const hourTypeName = selectedHourType?.name || 'Work';
-        alert(`An entry with hour type "${hourTypeName}" already exists for ${draft.date}. Please switch to that hour type to edit it.`);
+        customAlert(`An entry with hour type "${hourTypeName}" already exists for ${draft.date}. Please switch to that hour type to edit it.`);
         return;
       }
     }
@@ -3278,7 +3302,7 @@
     // Validate contract based on hour type
     if (selectedHourType && selectedHourType.requires_contract) {
       if (!draft || !draft.contractId) {
-        alert('Select a contract before saving punches.');
+        customAlert('Select a contract before saving punches.');
         return;
       }
     }
@@ -3286,7 +3310,7 @@
     const punches = normalizePunchList(draft.punches || []);
     const validationError = validatePunches(punches, { allowOpen: !requireClosed, requireClosed });
     if (validationError) {
-      alert(validationError);
+      customAlert(validationError);
       return;
     }
     const summary = summarizePunches(punches);
@@ -3391,7 +3415,7 @@
   function handlePunchToggle() {
     const draft = state.punchDraft;
     if (!draft || !draft.contractId) {
-      alert('Select a contract before punching in.');
+      customAlert('Select a contract before punching in.');
       return;
     }
     const now = new Date();
@@ -3431,12 +3455,14 @@
     ensurePunchDraft(state.punchDraft.contractId);
   }
 
-  function handlePunchDelete() {
+  async function handlePunchDelete() {
     if (!state.punchDraft || !state.punchDraft.entryId) return;
 
-    if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
-      return;
-    }
+    const confirmed = await customConfirm(
+      'Are you sure you want to delete this entry? This action cannot be undone.',
+      { danger: true }
+    );
+    if (!confirmed) return;
 
     const entryId = state.punchDraft.entryId;
     const currentDate = state.punchDraft.date;
@@ -3637,22 +3663,22 @@
   function getManualPayload() {
     const date = manualDate.value || todayIso();
     if (!date) {
-      alert('Date is required.');
+      customAlert('Date is required.');
       return null;
     }
     const hoursRaw = manualHoursInput ? manualHoursInput.value.trim() : '';
     const totalHours = Number(hoursRaw);
     if (!Number.isFinite(totalHours) || totalHours <= 0) {
-      alert('Enter the total number of hours worked.');
+      customAlert('Enter the total number of hours worked.');
       return null;
     }
     const totalMinutes = Math.round(totalHours * 60);
     if (totalMinutes > 24 * 60) {
-      alert('Total hours must be within a single day (24 hours or less).');
+      customAlert('Total hours must be within a single day (24 hours or less).');
       return null;
     }
     if (totalMinutes <= 0) {
-      alert('Total hours must be greater than zero.');
+      customAlert('Total hours must be greater than zero.');
       return null;
     }
     // Get hour type
@@ -3669,7 +3695,7 @@
       );
       if (duplicateEntry) {
         const hourTypeName = selectedHourType?.name || 'Work';
-        alert(`An entry with hour type "${hourTypeName}" already exists for ${date}. Please switch to that hour type to edit it.`);
+        customAlert(`An entry with hour type "${hourTypeName}" already exists for ${date}. Please switch to that hour type to edit it.`);
         return null;
       }
     }
@@ -3678,16 +3704,16 @@
     const contractId = manualContract ? manualContract.value : '';
     if (selectedHourType && selectedHourType.requires_contract) {
       if (!contractId) {
-        alert('Select a contract for this date.');
+        customAlert('Select a contract for this date.');
         return null;
       }
       const contract = state.contractMap[contractId];
       if (!contract) {
-        alert('Selected contract is no longer available.');
+        customAlert('Selected contract is no longer available.');
         return null;
       }
       if (!contractIsValid(contract, date) && !state.editingEntryId) {
-        alert('Selected contract is not valid for this date.');
+        customAlert('Selected contract is not valid for this date.');
         return null;
       }
     }
@@ -3778,12 +3804,14 @@
   };
 
   if (manualDeleteBtn) {
-    manualDeleteBtn.onclick = function () {
+    manualDeleteBtn.onclick = async function () {
       if (!state.editingEntryId) return;
 
-      if (!confirm('Are you sure you want to delete this entry? This action cannot be undone.')) {
-        return;
-      }
+      const confirmed = await customConfirm(
+        'Are you sure you want to delete this entry? This action cannot be undone.',
+        { danger: true }
+      );
+      if (!confirmed) return;
 
       const entryId = state.editingEntryId;
       const currentDate = manualDate ? manualDate.value : todayIso();
@@ -3930,6 +3958,8 @@
   const superRateInput = document.getElementById('set-super-rate');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
   const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
+  const saveSettingsBtn = document.getElementById('btn-save-settings');
+  const discardSettingsBtn = document.getElementById('btn-discard-settings');
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -4079,23 +4109,23 @@
     const totalHoursRaw = contractTotalHoursInput ? contractTotalHoursInput.value : '';
     const totalHoursValue = totalHoursRaw === '' ? 0 : Number(totalHoursRaw);
     if (!name) {
-      alert('Contract name is required.');
+      customAlert('Contract name is required.');
       return null;
     }
     if (!startDate) {
-      alert('Contract start date is required.');
+      customAlert('Contract start date is required.');
       return null;
     }
     if (endDate && endDate < startDate) {
-      alert('End date must be on or after the start date.');
+      customAlert('End date must be on or after the start date.');
       return null;
     }
     if (hourlyRate < 0) {
-      alert('Hourly rate must be zero or greater.');
+      customAlert('Hourly rate must be zero or greater.');
       return null;
     }
     if (Number.isNaN(totalHoursValue) || totalHoursValue < 0) {
-      alert('Total hours must be zero or greater.');
+      customAlert('Total hours must be zero or greater.');
       return null;
     }
     const totalHours = Math.round(Number(totalHoursValue || 0) * 100) / 100;
@@ -4608,14 +4638,15 @@
     showPage('contracts');
   }
 
-  function handleContractDelete(id) {
+  async function handleContractDelete(id) {
     if (!id) return;
     const hasEntries = state.entries.some((entry) => entry.contract_id === id);
     if (hasEntries) {
-      alert('This contract already has time entries and cannot be deleted.');
+      customAlert('This contract already has time entries and cannot be deleted.');
       return;
     }
-    if (!confirm('Delete this contract?')) return;
+    const confirmed = await customConfirm('Delete this contract?', { danger: true });
+    if (!confirmed) return;
     setStatus('Deleting contract...', 'warn');
     google.script.run
       .withSuccessHandler(() => {
@@ -4836,8 +4867,12 @@
   }
 
   if (clearCacheBtn) {
-    clearCacheBtn.addEventListener('click', () => {
-      if (!confirm('Clear cached entries and settings from this browser?')) return;
+    clearCacheBtn.addEventListener('click', async () => {
+      const confirmed = await customConfirm('Clear cached entries and settings from this browser?', {
+        title: 'Clear Cache',
+        danger: true
+      });
+      if (!confirmed) return;
       try {
         localStorage.removeItem(state.cacheKey);
         localStorage.removeItem(LAST_PAGE_KEY);
@@ -5026,12 +5061,14 @@
           td.classList.add('ts-payroll-outside');
           td.textContent = '—';
         } else {
-          td.textContent = formatDecimalHours((day.minutes || 0) / 60);
+          const rounded = roundDuration(day.minutes || 0);
+          td.textContent = formatDecimalHours(rounded / 60);
         }
         row.appendChild(td);
       });
       const totalCell = document.createElement('td');
-      totalCell.textContent = formatDecimalHours((week.weekMinutes || 0) / 60);
+      const roundedTotal = roundDuration(week.weekMinutes || 0);
+      totalCell.textContent = formatDecimalHours(roundedTotal / 60);
       row.appendChild(totalCell);
       tbody.appendChild(row);
       table.appendChild(tbody);
@@ -5042,7 +5079,8 @@
 
     const total = document.createElement('div');
     total.className = 'ts-payroll-total';
-    total.textContent = `Monthly total across all weeks: ${formatDecimalHours((report.totalMinutes || 0) / 60)} hrs`;
+    const roundedMonthlyTotal = roundDuration(report.totalMinutes || 0);
+    total.textContent = `Monthly total across all weeks: ${formatDecimalHours(roundedMonthlyTotal / 60)} hrs`;
     xeroHelperContent.appendChild(total);
 
     if (!report.hasEntries) {
@@ -5094,12 +5132,14 @@
           td.classList.add('ts-payroll-outside');
           td.textContent = '—';
         } else {
-          td.textContent = formatDecimalHours((day.minutes || 0) / 60);
+          const rounded = roundDuration(day.minutes || 0);
+          td.textContent = formatDecimalHours(rounded / 60);
         }
         row.appendChild(td);
       });
       const totalCell = document.createElement('td');
-      totalCell.textContent = formatDecimalHours((week.weekMinutes || 0) / 60);
+      const roundedTotal = roundDuration(week.weekMinutes || 0);
+      totalCell.textContent = formatDecimalHours(roundedTotal / 60);
       row.appendChild(totalCell);
       tbody.appendChild(row);
       table.appendChild(tbody);
@@ -5109,7 +5149,8 @@
 
     const total = document.createElement('div');
     total.className = 'ts-payroll-total';
-    total.textContent = `Monthly total across all weeks: ${formatDecimalHours((report.totalMinutes || 0) / 60)} hrs`;
+    const roundedMonthlyTotal = roundDuration(report.totalMinutes || 0);
+    total.textContent = `Monthly total across all weeks: ${formatDecimalHours(roundedMonthlyTotal / 60)} hrs`;
     myobHelperContent.appendChild(total);
 
     if (!report.hasEntries) {
@@ -6273,28 +6314,87 @@
     };
   }
 
-  // Settings persistence
-  document.getElementById('btn-save-settings').onclick = function () {
-    const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
-    const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
-    const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
-    const next = {
-      round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
-      theme: nextTheme,
-      superannuation_rate: superRatePercent,
-      public_holiday_state: publicHolidayState
+  // Settings dirty state tracking
+  let settingsInitialState = {};
+
+  function captureSettingsState() {
+    settingsInitialState = {
+      round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
+      theme: themeSelect ? themeSelect.value : 'dark',
+      superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
+      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
     };
-    applyTheme(nextTheme);
-    if (superRateInput) superRateInput.value = String(next.superannuation_rate);
-    state.settings = { ...state.settings, ...next };
-    saveCache();
-    renderCalendar();
-    setStatus('Saving settings...', 'warn');
-    google.script.run
-      .withSuccessHandler(() => setStatus('Settings saved', 'success'))
-      .withFailureHandler(() => setStatus('Settings failed', 'error'))
-      .api_updateSettings(next);
-  };
+  }
+
+  function checkSettingsDirty() {
+    const current = {
+      round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
+      theme: themeSelect ? themeSelect.value : 'dark',
+      superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
+      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
+    };
+
+    const isDirty = current.round_to_nearest !== settingsInitialState.round_to_nearest ||
+                    current.theme !== settingsInitialState.theme ||
+                    current.superannuation_rate !== settingsInitialState.superannuation_rate ||
+                    current.public_holiday_state !== settingsInitialState.public_holiday_state;
+
+    if (saveSettingsBtn) saveSettingsBtn.disabled = !isDirty;
+    if (discardSettingsBtn) discardSettingsBtn.style.display = isDirty ? 'inline-flex' : 'none';
+
+    return isDirty;
+  }
+
+  function resetSettingsToInitial() {
+    if (roundInput) roundInput.value = settingsInitialState.round_to_nearest || 0;
+    if (themeSelect) themeSelect.value = settingsInitialState.theme || 'dark';
+    if (superRateInput) superRateInput.value = String(settingsInitialState.superannuation_rate);
+    if (publicHolidayStateSelect) publicHolidayStateSelect.value = settingsInitialState.public_holiday_state || 'ACT';
+    applyTheme(settingsInitialState.theme || 'dark');
+    checkSettingsDirty();
+  }
+
+  // Attach change listeners to settings inputs
+  if (roundInput) roundInput.addEventListener('input', checkSettingsDirty);
+  if (themeSelect) themeSelect.addEventListener('change', checkSettingsDirty);
+  if (superRateInput) superRateInput.addEventListener('input', checkSettingsDirty);
+  if (publicHolidayStateSelect) publicHolidayStateSelect.addEventListener('change', checkSettingsDirty);
+
+  // Settings persistence
+  if (saveSettingsBtn) {
+    saveSettingsBtn.onclick = function () {
+      const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
+      const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
+      const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
+      const next = {
+        round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
+        theme: nextTheme,
+        superannuation_rate: superRatePercent,
+        public_holiday_state: publicHolidayState
+      };
+      applyTheme(nextTheme);
+      if (superRateInput) superRateInput.value = String(next.superannuation_rate);
+      state.settings = { ...state.settings, ...next };
+      saveCache();
+      renderCalendar();
+      setStatus('Saving settings...', 'warn');
+      google.script.run
+        .withSuccessHandler(() => {
+          setStatus('Settings saved', 'success');
+          captureSettingsState();
+          checkSettingsDirty();
+        })
+        .withFailureHandler(() => setStatus('Settings failed', 'error'))
+        .api_updateSettings(next);
+    };
+  }
+
+  // Discard settings changes
+  if (discardSettingsBtn) {
+    discardSettingsBtn.onclick = function () {
+      resetSettingsToInitial();
+    };
+  }
 
   if (themeSelect) {
     themeSelect.addEventListener('change', () => {
@@ -6309,7 +6409,10 @@
     if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
+    if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
     applyTheme(state.settings.theme || 'dark');
+    captureSettingsState();
+    checkSettingsDirty();
     renderContractsUI();
     renderDeductionsList();
     hideContractForm();
@@ -6340,6 +6443,8 @@
         if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
         if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
         applyTheme(state.settings.theme || 'dark');
+        captureSettingsState();
+        checkSettingsDirty();
         renderCalendar();
       })
       .withFailureHandler(() => {})
@@ -6441,6 +6546,127 @@
 
   function hideModal(modal) {
     if (modal) modal.style.display = 'none';
+  }
+
+  // Custom confirm dialog replacement
+  function customConfirm(message, options) {
+    return new Promise((resolve) => {
+      const opts = options || {};
+      const title = opts.title || 'Confirm';
+      const okText = opts.okText || 'OK';
+      const cancelText = opts.cancelText || 'Cancel';
+      const isDanger = opts.danger || false;
+
+      const modal = document.getElementById('modal-confirm');
+      const titleEl = document.getElementById('confirm-title');
+      const messageEl = document.getElementById('confirm-message');
+      const okBtn = document.getElementById('btn-confirm-ok');
+      const cancelBtn = document.getElementById('btn-confirm-cancel');
+
+      if (!modal || !titleEl || !messageEl || !okBtn || !cancelBtn) {
+        // Fallback to native confirm if modal not found
+        resolve(confirm(message));
+        return;
+      }
+
+      titleEl.textContent = title;
+      messageEl.textContent = message;
+      okBtn.textContent = okText;
+      cancelBtn.textContent = cancelText;
+
+      // Apply danger styling if requested
+      if (isDanger) {
+        okBtn.className = 'danger';
+      } else {
+        okBtn.className = '';
+      }
+
+      const handleOk = () => {
+        cleanup();
+        resolve(true);
+      };
+
+      const handleCancel = () => {
+        cleanup();
+        resolve(false);
+      };
+
+      const handleEscape = (e) => {
+        if (e.key === 'Escape') {
+          handleCancel();
+        } else if (e.key === 'Enter' && !isDanger) {
+          // Only allow Enter to confirm if not a danger action
+          handleOk();
+        }
+      };
+
+      const cleanup = () => {
+        okBtn.removeEventListener('click', handleOk);
+        cancelBtn.removeEventListener('click', handleCancel);
+        document.removeEventListener('keydown', handleEscape);
+        hideModal(modal);
+      };
+
+      okBtn.addEventListener('click', handleOk);
+      cancelBtn.addEventListener('click', handleCancel);
+      document.addEventListener('keydown', handleEscape);
+
+      showModal(modal);
+      // Focus the appropriate button
+      if (isDanger) {
+        cancelBtn.focus();
+      } else {
+        okBtn.focus();
+      }
+    });
+  }
+
+  // Custom alert dialog replacement
+  function customAlert(message, options) {
+    return new Promise((resolve) => {
+      const opts = options || {};
+      const title = opts.title || 'Notice';
+      const okText = opts.okText || 'OK';
+
+      const modal = document.getElementById('modal-alert');
+      const titleEl = document.getElementById('alert-title');
+      const messageEl = document.getElementById('alert-message');
+      const okBtn = document.getElementById('btn-alert-ok');
+
+      if (!modal || !titleEl || !messageEl || !okBtn) {
+        // Fallback to native alert if modal not found
+        alert(message);
+        resolve();
+        return;
+      }
+
+      titleEl.textContent = title;
+      messageEl.textContent = message;
+      okBtn.textContent = okText;
+
+      const handleOk = () => {
+        cleanup();
+        resolve();
+      };
+
+      const handleEscape = (e) => {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          handleOk();
+        }
+      };
+
+      const cleanup = () => {
+        okBtn.removeEventListener('click', handleOk);
+        document.removeEventListener('keydown', handleEscape);
+        hideModal(modal);
+      };
+
+      okBtn.addEventListener('click', handleOk);
+      document.addEventListener('keydown', handleEscape);
+
+      showModal(modal);
+      okBtn.focus();
+    });
   }
 
   function getCurrentFormData(type) {
@@ -6642,9 +6868,10 @@
       deleteBtn.textContent = 'Delete';
       deleteBtn.className = 'ghost';
       deleteBtn.style.marginLeft = '12px';
-      deleteBtn.addEventListener('click', (e) => {
+      deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm(`Delete the "${defaultData.name}" default?`)) {
+        const confirmed = await customConfirm(`Delete the "${defaultData.name}" default?`, { danger: true });
+        if (confirmed) {
           deleteEntryDefault(defaultData.name, deleteBtn);
         }
       });
@@ -7324,14 +7551,14 @@
     const isDefault = defaultInput.checked;
 
     if (!name || !slug) {
-      alert('Name and slug are required');
+      customAlert('Name and slug are required');
       return;
     }
 
     // Check slug uniqueness
     const existingType = state.hourTypes.find(ht => ht.slug === slug && ht.id !== state.editingHourTypeId);
     if (existingType) {
-      alert('A hour type with this slug already exists');
+      customAlert('A hour type with this slug already exists');
       return;
     }
 
@@ -7340,7 +7567,7 @@
     let autoHolidayHours = hourTypeAutoHolidayHoursInput ? parseFloat(hourTypeAutoHolidayHoursInput.value) : 7.5;
     if (Number.isNaN(autoHolidayHours) || autoHolidayHours < 0) autoHolidayHours = 0;
     if (autoPopulateHolidays && autoHolidayHours <= 0) {
-      alert('Please enter a positive number of hours to apply on public holidays.');
+      customAlert('Please enter a positive number of hours to apply on public holidays.');
       return;
     }
 
@@ -7405,7 +7632,7 @@
         })
         .withFailureHandler((error) => {
           console.error('Failed to update hour type:', error);
-          alert('Failed to update hour type: ' + error.message);
+          customAlert('Failed to update hour type: ' + error.message, { title: 'Error' });
           saveBtn.textContent = 'Save Hour Type';
           saveBtn.disabled = false;
           // Reload hour types to revert optimistic update
@@ -7438,7 +7665,7 @@
         })
         .withFailureHandler((error) => {
           console.error('Failed to create hour type:', error);
-          alert('Failed to create hour type: ' + error.message);
+          customAlert('Failed to create hour type: ' + error.message, { title: 'Error' });
           saveBtn.textContent = 'Save Hour Type';
           saveBtn.disabled = false;
         })
@@ -7501,7 +7728,7 @@
       })
       .withFailureHandler((error) => {
         console.error('Failed to delete hour type:', error);
-        alert('Failed to delete hour type: ' + error.message);
+        customAlert('Failed to delete hour type: ' + error.message, { title: 'Error' });
         confirmBtn.textContent = 'Delete Hour Type';
         confirmBtn.disabled = false;
       })
