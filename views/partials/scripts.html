@@ -5,6 +5,7 @@
   const pageHourTypes = document.getElementById('page-hour-types');
   const pageDeductions = document.getElementById('page-deductions');
   const pageBas = document.getElementById('page-bas');
+  const pageAnnualViews = document.getElementById('page-annual-views');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');
@@ -13,6 +14,7 @@
   const navHourTypesBtn = document.getElementById('nav-hour-types');
   const navDeductionsBtn = document.getElementById('nav-deductions');
   const navBasBtn = document.getElementById('nav-bas');
+  const navAnnualViewsBtn = document.getElementById('nav-annual-views');
   const navSettingsBtn = document.getElementById('nav-settings');
   const deductionsListEl = document.getElementById('deductions-list');
   const deductionsEmptyEl = document.getElementById('deductions-empty');
@@ -79,7 +81,19 @@
     companyBasQuarterly: false,
     basCurrentFy: null,
     entriesLoaded: false,
-    isAutoPopulatingPublicHolidays: false
+    isAutoPopulatingPublicHolidays: false,
+    annualYearType: 'financial',
+    annualCurrentYear: null,
+    annualFilteredContracts: [],
+    annualData: null,
+    annualCharts: {
+      income: null,
+      incomePie: null,
+      contractPie: null,
+      hourTypesPie: null,
+      totalHoursPie: null,
+      totalHoursByTypePie: null
+    }
   };
 
   const deductionFormState = {
@@ -88,7 +102,7 @@
     original: null
   };
 
-  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'bas', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'bas', 'annual-views', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -111,6 +125,7 @@
       'hour-types': pageHourTypes,
       deductions: pageDeductions,
       bas: pageBas,
+      'annual-views': pageAnnualViews,
       settings: pageSettings
     };
     Object.keys(pages).forEach((key) => {
@@ -120,6 +135,9 @@
     state.currentPage = normalized;
     if (normalized === 'bas') {
       renderBasReporting();
+    }
+    if (normalized === 'annual-views') {
+      renderAnnualViews();
     }
     if (!opts.skipRemember) {
       persistLastPage(normalized);
@@ -179,6 +197,7 @@
   if (navHourTypesBtn) navHourTypesBtn.onclick = () => { closeNavMenu(); showPage('hour-types'); };
   if (navDeductionsBtn) navDeductionsBtn.onclick = () => { closeNavMenu(); showPage('deductions'); };
   if (navBasBtn) navBasBtn.onclick = () => { closeNavMenu(); showPage('bas'); };
+  if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   closeNavMenu();
   showPage('time', { skipRemember: true });
@@ -932,6 +951,1026 @@
       basTableBody.innerHTML = bodyHtml || '<tr><td colspan="11" style="text-align:center; padding:16px;">No company activity recorded.</td></tr>';
     }
   }
+
+  // Annual Views
+  const annualYearTypeToggle = document.getElementById('annual-year-type-toggle');
+  const annualYearTypeLabel = document.getElementById('annual-year-type-label');
+  const annualYearSelect = document.getElementById('annual-year-select');
+  const annualContractFilterToggle = document.getElementById('annual-contract-filter-toggle');
+  const annualContractFilterPanel = document.getElementById('annual-contract-filter-panel');
+  const annualContractFilterList = document.getElementById('annual-contract-filter-list');
+  const annualFilterSelectAll = document.getElementById('annual-filter-select-all');
+  const annualEmpty = document.getElementById('annual-empty');
+
+  function getThemeColors() {
+    const computedStyle = getComputedStyle(document.body);
+    return {
+      text: computedStyle.getPropertyValue('--text').trim(),
+      muted: computedStyle.getPropertyValue('--muted').trim(),
+      border: computedStyle.getPropertyValue('--border').trim(),
+      primary: computedStyle.getPropertyValue('--primary').trim(),
+      danger: computedStyle.getPropertyValue('--danger').trim(),
+      success: computedStyle.getPropertyValue('--success').trim(),
+      warning: '#facc15'
+    };
+  }
+
+  function destroyAnnualCharts() {
+    if (state.annualCharts.income) {
+      state.annualCharts.income.destroy();
+      state.annualCharts.income = null;
+    }
+    if (state.annualCharts.incomePie) {
+      state.annualCharts.incomePie.destroy();
+      state.annualCharts.incomePie = null;
+    }
+    if (state.annualCharts.contractPie) {
+      state.annualCharts.contractPie.destroy();
+      state.annualCharts.contractPie = null;
+    }
+    if (state.annualCharts.hourTypesPie) {
+      state.annualCharts.hourTypesPie.destroy();
+      state.annualCharts.hourTypesPie = null;
+    }
+    if (state.annualCharts.totalHoursPie) {
+      state.annualCharts.totalHoursPie.destroy();
+      state.annualCharts.totalHoursPie = null;
+    }
+    if (state.annualCharts.totalHoursByTypePie) {
+      state.annualCharts.totalHoursByTypePie.destroy();
+      state.annualCharts.totalHoursByTypePie = null;
+    }
+  }
+
+  function showAnnualLoadingState() {
+    if (!pageAnnualViews) return;
+
+    // Add loading overlay
+    let overlay = document.getElementById('annual-loading-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'annual-loading-overlay';
+      overlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--bg);
+        opacity: 0.7;
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        border-radius: 12px;
+      `;
+      overlay.innerHTML = '<div style="font-size: 14px; color: var(--muted);">Loading data...</div>';
+      pageAnnualViews.style.position = 'relative';
+      pageAnnualViews.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+  }
+
+  function hideAnnualLoadingState() {
+    const overlay = document.getElementById('annual-loading-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+  }
+
+  function loadAnnualData() {
+    const payload = {
+      yearType: state.annualYearType,
+      startYear: state.annualCurrentYear,
+      contractIds: state.annualFilteredContracts
+    };
+
+    // Check if we have any cached annual data at all
+    const hasAnyCachedData = state.annualData !== null;
+
+    // Show cached data immediately if available (optimistic UI)
+    if (hasAnyCachedData) {
+      renderAnnualData();
+    } else {
+      // Show loading state only on very first load
+      showAnnualLoadingState();
+    }
+
+    // Then fetch fresh data in background
+    const statusMsg = hasAnyCachedData ? 'Updating annual data...' : 'Loading annual data...';
+    setStatus(statusMsg, 'info');
+    google.script.run
+      .withSuccessHandler((data) => {
+        state.annualData = data;
+        saveCache();
+        hideAnnualLoadingState();
+        renderAnnualData();
+        setStatus('Ready', 'success');
+      })
+      .withFailureHandler((error) => {
+        console.error('Failed to load annual data:', error);
+        hideAnnualLoadingState();
+        setStatus('Error loading annual data', 'error');
+      })
+      .api_getAnnualSummary(payload);
+  }
+
+  function renderAnnualViews() {
+    if (!pageAnnualViews) return;
+
+    // Get years based on current type
+    const allYears = collectAllYears();
+    const years = state.annualYearType === 'financial' ? allYears.financial : allYears.calendar;
+
+    if (years.length === 0) {
+      years.push(new Date().getFullYear());
+    }
+
+    if (!state.annualCurrentYear || !years.includes(state.annualCurrentYear)) {
+      state.annualCurrentYear = years[0];
+    }
+
+    // Initialize year selector
+    if (annualYearSelect) {
+      const options = years.map(year => {
+        const fy = financialYearLabel(year);
+        return `<option value="${year}">${state.annualYearType === 'financial' ? fy : year}</option>`;
+      }).join('');
+      annualYearSelect.innerHTML = options;
+      annualYearSelect.value = String(state.annualCurrentYear);
+    }
+
+    // Initialize year type toggle
+    if (annualYearTypeToggle) {
+      annualYearTypeToggle.checked = state.annualYearType === 'calendar';
+    }
+    if (annualYearTypeLabel) {
+      annualYearTypeLabel.textContent = state.annualYearType === 'financial' ? 'Financial Year' : 'Calendar Year';
+    }
+
+    // Initialize contract filter
+    renderAnnualContractFilter();
+
+    // Load data
+    loadAnnualData();
+  }
+
+  function renderAnnualContractFilter() {
+    if (!annualContractFilterList) return;
+
+    // Get year range based on year type
+    let yearStart, yearEnd;
+    if (state.annualYearType === 'financial') {
+      yearStart = new Date(state.annualCurrentYear, 6, 1); // July 1st
+      yearEnd = new Date(state.annualCurrentYear + 1, 5, 30, 23, 59, 59); // June 30th
+    } else {
+      yearStart = new Date(state.annualCurrentYear, 0, 1); // Jan 1st
+      yearEnd = new Date(state.annualCurrentYear, 11, 31, 23, 59, 59); // Dec 31st
+    }
+
+    // Filter contracts that overlap with the selected year
+    const relevantContracts = state.contracts.filter(c => {
+      if (!c || !c.id || !c.name) return false;
+
+      const contractStart = c.start_date ? new Date(c.start_date) : new Date(0);
+      const contractEnd = c.end_date ? new Date(c.end_date) : new Date(9999, 11, 31);
+
+      // Contract overlaps if it starts before year ends AND ends after year starts
+      return contractStart <= yearEnd && contractEnd >= yearStart;
+    });
+
+    if (relevantContracts.length <= 1) {
+      if (annualContractFilterToggle) annualContractFilterToggle.style.display = 'none';
+      if (annualContractFilterPanel) annualContractFilterPanel.style.display = 'none';
+      state.annualFilteredContracts = relevantContracts.map(c => c.id);
+      return;
+    }
+
+    // Show the filter toggle button
+    if (annualContractFilterToggle) annualContractFilterToggle.style.display = 'block';
+
+    // Panel starts hidden (user can click toggle to show)
+    if (!annualContractFilterPanel.dataset.initialized) {
+      if (annualContractFilterPanel) annualContractFilterPanel.style.display = 'none';
+      if (annualContractFilterPanel) annualContractFilterPanel.dataset.initialized = 'true';
+    }
+
+    // Initialize with all relevant contracts if not set or if filtered contracts are not relevant
+    const currentFilteredAreRelevant = state.annualFilteredContracts.every(id =>
+      relevantContracts.some(c => c.id === id)
+    );
+    if (state.annualFilteredContracts.length === 0 || !currentFilteredAreRelevant) {
+      state.annualFilteredContracts = relevantContracts.map(c => c.id);
+    }
+
+    const html = relevantContracts.map(contract => {
+      const isActive = state.annualFilteredContracts.includes(contract.id);
+      return `
+        <div class="ts-calendar-filter-item ${isActive ? 'active' : ''}" data-contract-id="${contract.id}">
+          <input type="checkbox" class="ts-calendar-filter-checkbox" ${isActive ? 'checked' : ''} />
+          <span class="ts-calendar-filter-name">${contract.name}</span>
+        </div>
+      `;
+    }).join('');
+
+    annualContractFilterList.innerHTML = html;
+
+    // Add click handlers
+    annualContractFilterList.querySelectorAll('.ts-calendar-filter-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const contractId = item.dataset.contractId;
+        const idx = state.annualFilteredContracts.indexOf(contractId);
+        if (idx >= 0) {
+          state.annualFilteredContracts.splice(idx, 1);
+        } else {
+          state.annualFilteredContracts.push(contractId);
+        }
+        saveCache();
+        renderAnnualContractFilter();
+        loadAnnualData();
+      });
+    });
+  }
+
+  function collectAllYears() {
+    // Get list of public holiday hour type IDs
+    const publicHolidayHourTypeIds = state.hourTypes
+      .filter(ht => ht.auto_populate_public_holidays === true || ht.auto_populate_public_holidays === 'TRUE')
+      .map(ht => ht.id);
+
+    // Group entries by year to check if year has non-public-holiday entries
+    const calendarYearEntries = {};
+    const financialYearEntries = {};
+
+    state.entries.forEach(entry => {
+      if (entry && entry.date) {
+        const duration = entry.duration_minutes || 0;
+        if (duration > 0) {
+          const date = new Date(entry.date);
+          const calendarYear = date.getFullYear();
+          const fyStart = financialYearStartYear(date);
+          const hourTypeId = entry.hour_type_id || '';
+          const isPublicHoliday = publicHolidayHourTypeIds.includes(hourTypeId);
+
+          // Track calendar year entries
+          if (!calendarYearEntries[calendarYear]) {
+            calendarYearEntries[calendarYear] = { total: 0, publicHolidays: 0 };
+          }
+          calendarYearEntries[calendarYear].total++;
+          if (isPublicHoliday) {
+            calendarYearEntries[calendarYear].publicHolidays++;
+          }
+
+          // Track financial year entries
+          if (!financialYearEntries[fyStart]) {
+            financialYearEntries[fyStart] = { total: 0, publicHolidays: 0 };
+          }
+          financialYearEntries[fyStart].total++;
+          if (isPublicHoliday) {
+            financialYearEntries[fyStart].publicHolidays++;
+          }
+        }
+      }
+    });
+
+    // Only include years that have at least one non-public-holiday entry
+    const calendarYears = Object.keys(calendarYearEntries)
+      .filter(year => {
+        const stats = calendarYearEntries[year];
+        return stats.total > stats.publicHolidays; // Has at least one non-PH entry
+      })
+      .map(y => parseInt(y))
+      .sort((a, b) => b - a);
+
+    const financialYears = Object.keys(financialYearEntries)
+      .filter(year => {
+        const stats = financialYearEntries[year];
+        return stats.total > stats.publicHolidays; // Has at least one non-PH entry
+      })
+      .map(y => parseInt(y))
+      .sort((a, b) => b - a);
+
+    return {
+      calendar: calendarYears,
+      financial: financialYears
+    };
+  }
+
+  function getCorrespondingYear(year, fromType, toType) {
+    if (fromType === toType) return year;
+
+    if (fromType === 'financial' && toType === 'calendar') {
+      // FY 2024 (Jul 2024 - Jun 2025) -> Calendar 2024
+      return year;
+    } else if (fromType === 'calendar' && toType === 'financial') {
+      // Calendar 2024 -> FY 2024 (Jul 2024 - Jun 2025)
+      return year;
+    }
+    return year;
+  }
+
+  function renderAnnualData() {
+    if (!state.annualData) return;
+
+    const data = state.annualData;
+    const totals = data.yearTotals;
+
+    // Update summary stats
+    const grossEl = document.getElementById('annual-stat-gross');
+    const superEl = document.getElementById('annual-stat-super');
+    const taxEl = document.getElementById('annual-stat-tax');
+    const netEl = document.getElementById('annual-stat-net');
+    const hoursEl = document.getElementById('annual-stat-hours');
+
+    if (grossEl) grossEl.textContent = formatCurrency(totals.grossIncome);
+    if (superEl) superEl.textContent = formatCurrency(totals.superGuarantee + totals.extraSuper);
+    if (taxEl) taxEl.textContent = formatCurrency(totals.tax);
+    if (netEl) netEl.textContent = formatCurrency(totals.netIncome);
+    if (hoursEl) hoursEl.textContent = totals.totalHours.toFixed(1) + ' hrs';
+
+    // Update breakdown table
+    updateAnnualBreakdownTable();
+
+    // Render charts
+    destroyAnnualCharts();
+    renderAnnualIncomeChart();
+    renderAnnualIncomePieChart();
+    renderAnnualContractPieChart();
+    renderAnnualHourTypesPieChart();
+    renderAnnualTotalHoursPieChart();
+    renderAnnualTotalHoursByTypePieChart();
+
+    // Update tax analysis
+    renderAnnualTaxAnalysis();
+
+    // Show/hide empty state
+    const hasData = data.monthlyData.some(m => m.grossIncome > 0 || m.totalHours > 0);
+    if (annualEmpty) annualEmpty.style.display = hasData ? 'none' : 'block';
+  }
+
+  function updateAnnualBreakdownTable() {
+    if (!state.annualData) return;
+    const totals = state.annualData.yearTotals;
+    const totalSuper = totals.superGuarantee + totals.extraSuper;
+    const gross = totals.grossIncome;
+
+    document.getElementById('annual-breakdown-gross').textContent = formatCurrency(gross);
+    document.getElementById('annual-breakdown-gross-pct').textContent = '100%';
+
+    document.getElementById('annual-breakdown-super').textContent = formatCurrency(totalSuper);
+    document.getElementById('annual-breakdown-super-pct').textContent = gross > 0 ? ((totalSuper / gross) * 100).toFixed(1) + '%' : '0%';
+
+    const superLostRow = document.getElementById('annual-breakdown-super-lost-row');
+    if (totals.superLost > 0.01) {
+      if (superLostRow) superLostRow.style.display = '';
+      document.getElementById('annual-breakdown-super-lost').textContent = formatCurrency(totals.superLost);
+      document.getElementById('annual-breakdown-super-lost-pct').textContent = gross > 0 ? ((totals.superLost / gross) * 100).toFixed(1) + '%' : '0%';
+    } else {
+      if (superLostRow) superLostRow.style.display = 'none';
+    }
+
+    document.getElementById('annual-breakdown-deductions').textContent = formatCurrency(totals.otherDeductions);
+    document.getElementById('annual-breakdown-deductions-pct').textContent = gross > 0 ? ((totals.otherDeductions / gross) * 100).toFixed(1) + '%' : '0%';
+
+    document.getElementById('annual-breakdown-tax').textContent = formatCurrency(totals.tax);
+    document.getElementById('annual-breakdown-tax-pct').textContent = gross > 0 ? ((totals.tax / gross) * 100).toFixed(1) + '%' : '0%';
+
+    document.getElementById('annual-breakdown-net').textContent = formatCurrency(totals.netIncome);
+    document.getElementById('annual-breakdown-net-pct').textContent = gross > 0 ? ((totals.netIncome / gross) * 100).toFixed(1) + '%' : '0%';
+  }
+
+  function renderAnnualIncomeChart() {
+    const canvas = document.getElementById('annual-income-chart');
+    if (!canvas || !state.annualData) return;
+
+    const monthlyData = state.annualData.monthlyData;
+    const labels = monthlyData.map(m => m.label);
+    const colors = getThemeColors();
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.income = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Tax',
+            data: monthlyData.map(m => m.tax),
+            backgroundColor: colors.danger,
+            borderWidth: 0
+          },
+          {
+            label: 'Deductions',
+            data: monthlyData.map(m => m.otherDeductions),
+            backgroundColor: colors.warning,
+            borderWidth: 0
+          },
+          {
+            label: 'Superannuation',
+            data: monthlyData.map(m => m.superGuarantee + m.extraSuper),
+            backgroundColor: colors.success,
+            borderWidth: 0
+          },
+          {
+            label: 'Net Income',
+            data: monthlyData.map(m => m.netIncome),
+            backgroundColor: colors.primary,
+            borderWidth: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        plugins: {
+          datalabels: {
+            color: '#fff',
+            font: { size: 10, weight: '600' },
+            formatter: (value) => {
+              if (value < 500) return ''; // Hide labels for small segments
+              return '$' + (value / 1000).toFixed(1) + 'k';
+            },
+            anchor: 'center',
+            align: 'center'
+          },
+          legend: {
+            position: 'top',
+            align: 'start',
+            labels: {
+              color: colors.text,
+              font: { size: 12, weight: '500' },
+              padding: 16,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            bodySpacing: 6,
+            cornerRadius: 8,
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              label: (context) => {
+                return '  ' + context.dataset.label + ': ' + formatCurrency(context.parsed.y);
+              },
+              footer: (items) => {
+                const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
+                return '\n  Gross Total: ' + formatCurrency(total);
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            stacked: true,
+            grid: {
+              display: false
+            },
+            ticks: {
+              color: colors.muted,
+              font: { size: 11 },
+              padding: 8
+            },
+            border: {
+              display: false
+            }
+          },
+          y: {
+            stacked: true,
+            grid: {
+              color: colors.border,
+              drawBorder: false,
+              lineWidth: 1
+            },
+            ticks: {
+              color: colors.muted,
+              font: { size: 11 },
+              padding: 8,
+              callback: (value) => '$' + (value / 1000).toFixed(0) + 'k'
+            },
+            border: {
+              display: false
+            }
+          }
+        },
+        layout: {
+          padding: {
+            top: 10,
+            right: 10,
+            bottom: 0,
+            left: 0
+          }
+        }
+      }
+    });
+  }
+
+  function renderAnnualIncomePieChart() {
+    const canvas = document.getElementById('annual-income-pie-chart');
+    if (!canvas || !state.annualData) return;
+
+    const totals = state.annualData.yearTotals;
+    const colors = getThemeColors();
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.incomePie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Net Income', 'Tax', 'Deductions', 'Superannuation'],
+        datasets: [{
+          data: [
+            totals.netIncome,
+            totals.tax,
+            totals.otherDeductions,
+            totals.superGuarantee + totals.extraSuper
+          ],
+          backgroundColor: [colors.primary, colors.danger, colors.warning, colors.success],
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '45%',
+        plugins: {
+          datalabels: {
+            display: false
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const value = formatCurrency(context.parsed);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + value + ' (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      }
+    });
+  }
+
+  function renderAnnualContractPieChart() {
+    const container = document.getElementById('annual-contract-pie-container');
+    const canvas = document.getElementById('annual-contract-pie-chart');
+    if (!canvas || !state.annualData || !container) return;
+
+    const contractBreakdown = state.annualData.contractBreakdown;
+    if (contractBreakdown.length <= 1) {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'block';
+    const colors = getThemeColors();
+    const chartColors = [colors.primary, colors.success, colors.warning, colors.danger, '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b'];
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.contractPie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: contractBreakdown.map(c => c.contractName),
+        datasets: [{
+          data: contractBreakdown.map(c => c.grossIncome),
+          backgroundColor: chartColors.slice(0, contractBreakdown.length),
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '45%',
+        plugins: {
+          datalabels: {
+            display: false
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const value = formatCurrency(context.parsed);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + value + ' (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      }
+    });
+  }
+
+  function renderAnnualHourTypesPieChart() {
+    const container = document.getElementById('annual-hour-types-pie-container');
+    const canvas = document.getElementById('annual-hour-types-pie-chart');
+    if (!canvas || !state.annualData || !container) return;
+
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+    if (!hourTypesEnabled) {
+      container.style.display = 'none';
+      return;
+    }
+
+    const hourTypeBreakdown = state.annualData.hourTypeBreakdown;
+    if (hourTypeBreakdown.length === 0) {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'block';
+    const colors = getThemeColors();
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.hourTypesPie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: hourTypeBreakdown.map(ht => ht.hourTypeName),
+        datasets: [{
+          data: hourTypeBreakdown.map(ht => ht.hours),
+          backgroundColor: hourTypeBreakdown.map(ht => ht.hourTypeColor || colors.muted),
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '45%',
+        plugins: {
+          datalabels: {
+            display: false
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const hours = context.parsed.toFixed(1);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + hours + ' hrs (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      }
+    });
+  }
+
+  function renderAnnualTotalHoursPieChart() {
+    const canvas = document.getElementById('annual-total-hours-pie-chart');
+    if (!canvas || !state.annualData) return;
+
+    const monthlyData = state.annualData.monthlyData;
+    const labels = monthlyData.map(m => m.label);
+    const hours = monthlyData.map(m => m.totalHours);
+    const colors = getThemeColors();
+
+    // Generate colors for each month
+    const monthColors = hours.map((_, index) => {
+      const hue = (index * 30) % 360; // Spread hues across spectrum
+      return `hsl(${hue}, 60%, 55%)`;
+    });
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.totalHoursPie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: hours,
+          backgroundColor: monthColors,
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '45%',
+        plugins: {
+          datalabels: {
+            display: false // Don't show data labels on pie charts
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const hoursVal = context.parsed.toFixed(1);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + hoursVal + ' hrs (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      }
+    });
+  }
+
+  function renderAnnualTotalHoursByTypePieChart() {
+    const canvas = document.getElementById('annual-total-hours-by-type-pie-chart');
+    if (!canvas || !state.annualData) return;
+
+    const hourTypeBreakdown = state.annualData.hourTypeBreakdown;
+    if (!hourTypeBreakdown || hourTypeBreakdown.length === 0) {
+      console.log('No hour type breakdown data available', state.annualData);
+      return;
+    }
+
+    console.log('Rendering hour types pie chart with data:', hourTypeBreakdown);
+
+    const labels = hourTypeBreakdown.map(ht => ht.hourTypeName);
+    const hours = hourTypeBreakdown.map(ht => ht.hours);
+    const hourColors = hourTypeBreakdown.map(ht => ht.hourTypeColor);
+    const colors = getThemeColors();
+
+    const ctx = canvas.getContext('2d');
+    state.annualCharts.totalHoursByTypePie = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: hours,
+          backgroundColor: hourColors,
+          borderWidth: 3,
+          borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
+          hoverBorderWidth: 4,
+          hoverBorderColor: '#fff',
+          hoverOffset: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '45%',
+        plugins: {
+          datalabels: {
+            display: false
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: colors.text,
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            padding: 12,
+            titleFont: { size: 13, weight: 'bold' },
+            bodyFont: { size: 12 },
+            cornerRadius: 8,
+            callbacks: {
+              label: (context) => {
+                const label = context.label || '';
+                const hoursVal = context.parsed.toFixed(1);
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = ((context.parsed / total) * 100).toFixed(1);
+                return '  ' + label + ': ' + hoursVal + ' hrs (' + pct + '%)';
+              }
+            }
+          }
+        },
+        layout: {
+          padding: 20
+        }
+      }
+    });
+  }
+
+  function calculateAustralianTax(annualTaxableIncome) {
+    // Australian tax brackets 2024/2025
+    let tax = 0;
+
+    if (annualTaxableIncome <= 18200) {
+      tax = 0;
+    } else if (annualTaxableIncome <= 45000) {
+      tax = (annualTaxableIncome - 18200) * 0.16;
+    } else if (annualTaxableIncome <= 135000) {
+      tax = 4288 + (annualTaxableIncome - 45000) * 0.30;
+    } else if (annualTaxableIncome <= 190000) {
+      tax = 31288 + (annualTaxableIncome - 135000) * 0.37;
+    } else {
+      tax = 51638 + (annualTaxableIncome - 190000) * 0.45;
+    }
+
+    // Add Medicare levy (2%)
+    const medicareLevy = annualTaxableIncome * 0.02;
+
+    return tax + medicareLevy;
+  }
+
+  function renderAnnualTaxAnalysis() {
+    if (!state.annualData) return;
+
+    const monthlyData = state.annualData.monthlyData;
+    const totals = state.annualData.yearTotals;
+    const paidTax = totals.tax;
+
+    // Calculate annual taxable income by summing monthly taxable incomes
+    const annualTaxableIncome = monthlyData.reduce((sum, m) => sum + m.taxableIncome, 0);
+
+    // Calculate expected ATO tax with Medicare levy
+    const expectedTax = calculateAustralianTax(annualTaxableIncome);
+    const difference = paidTax - expectedTax;
+
+    document.getElementById('annual-tax-paid').textContent = formatCurrency(paidTax);
+    document.getElementById('annual-tax-expected').textContent = formatCurrency(expectedTax);
+
+    const diffEl = document.getElementById('annual-tax-difference');
+    if (diffEl) {
+      diffEl.textContent = formatCurrency(Math.abs(difference));
+      diffEl.style.color = difference > 0 ? 'var(--danger)' : 'var(--success)';
+    }
+  }
+
+  // Event listeners for annual views
+  if (annualYearTypeToggle) {
+    annualYearTypeToggle.addEventListener('change', () => {
+      const oldType = state.annualYearType;
+      state.annualYearType = annualYearTypeToggle.checked ? 'calendar' : 'financial';
+
+      if (annualYearTypeLabel) {
+        annualYearTypeLabel.textContent = state.annualYearType === 'financial' ? 'Financial Year' : 'Calendar Year';
+      }
+
+      // Get corresponding year for new type
+      const correspondingYear = getCorrespondingYear(state.annualCurrentYear, oldType, state.annualYearType);
+
+      // Update year selector with new type's years
+      const allYears = collectAllYears();
+      const years = state.annualYearType === 'financial' ? allYears.financial : allYears.calendar;
+
+      if (years.length === 0) {
+        years.push(new Date().getFullYear());
+      }
+
+      // Set year to corresponding year if it exists, otherwise use first available
+      if (years.includes(correspondingYear)) {
+        state.annualCurrentYear = correspondingYear;
+      } else {
+        state.annualCurrentYear = years[0];
+      }
+
+      if (annualYearSelect) {
+        const options = years.map(year => {
+          const fy = financialYearLabel(year);
+          return `<option value="${year}">${state.annualYearType === 'financial' ? fy : year}</option>`;
+        }).join('');
+        annualYearSelect.innerHTML = options;
+        annualYearSelect.value = String(state.annualCurrentYear);
+      }
+
+      saveCache();
+      renderAnnualContractFilter();
+      loadAnnualData();
+    });
+  }
+
+  if (annualYearSelect) {
+    annualYearSelect.addEventListener('change', () => {
+      state.annualCurrentYear = Number(annualYearSelect.value);
+      saveCache();
+      loadAnnualData();
+    });
+  }
+
+  if (annualContractFilterToggle) {
+    annualContractFilterToggle.addEventListener('click', () => {
+      if (annualContractFilterPanel) {
+        const isHidden = annualContractFilterPanel.style.display === 'none';
+        annualContractFilterPanel.style.display = isHidden ? 'block' : 'none';
+      }
+    });
+  }
+
+  if (annualFilterSelectAll) {
+    annualFilterSelectAll.addEventListener('click', () => {
+      // Get year range based on year type
+      let yearStart, yearEnd;
+      if (state.annualYearType === 'financial') {
+        yearStart = new Date(state.annualCurrentYear, 6, 1);
+        yearEnd = new Date(state.annualCurrentYear + 1, 5, 30, 23, 59, 59);
+      } else {
+        yearStart = new Date(state.annualCurrentYear, 0, 1);
+        yearEnd = new Date(state.annualCurrentYear, 11, 31, 23, 59, 59);
+      }
+
+      // Select only relevant contracts for this year
+      const relevantContracts = state.contracts.filter(c => {
+        if (!c || !c.id) return false;
+        const contractStart = c.start_date ? new Date(c.start_date) : new Date(0);
+        const contractEnd = c.end_date ? new Date(c.end_date) : new Date(9999, 11, 31);
+        return contractStart <= yearEnd && contractEnd >= yearStart;
+      });
+
+      state.annualFilteredContracts = relevantContracts.map(c => c.id);
+      saveCache();
+      renderAnnualContractFilter();
+      loadAnnualData();
+    });
+  }
+
 
   function updateDeductionCompanyOptions() {
     if (!deductionCategorySelect) return;
