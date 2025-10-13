@@ -39,6 +39,9 @@
     --holiday-bg: rgba(16, 185, 129, 0.16);
     --holiday-border: rgba(16, 185, 129, 0.45);
     --holiday-hover: rgba(16, 185, 129, 0.7);
+    --calendar-selected-border: var(--primary);
+    --calendar-selected-glow: var(--primary-glow);
+    --calendar-selected-bg: var(--primary-soft-bg);
   }
   .ts-theme-light {
     --bg: #f4f5f9;
@@ -74,6 +77,9 @@
     --holiday-bg: rgba(5, 150, 105, 0.12);
     --holiday-border: rgba(5, 150, 105, 0.35);
     --holiday-hover: rgba(5, 150, 105, 0.55);
+    --calendar-selected-border: var(--primary);
+    --calendar-selected-glow: var(--primary-glow);
+    --calendar-selected-bg: var(--primary-soft-bg);
   }
   .ts-theme-rose {
     --bg: #fff5f8;
@@ -109,6 +115,9 @@
     --holiday-bg: rgba(168, 90, 125, 0.16);
     --holiday-border: rgba(168, 90, 125, 0.45);
     --holiday-hover: rgba(168, 90, 125, 0.65);
+    --calendar-selected-border: var(--primary);
+    --calendar-selected-glow: var(--primary-glow);
+    --calendar-selected-bg: var(--primary-soft-bg);
   }
   .ts-theme-og {
     --bg: #061424;
@@ -144,6 +153,9 @@
     --holiday-bg: rgba(34, 211, 238, 0.18);
     --holiday-border: rgba(34, 211, 238, 0.5);
     --holiday-hover: rgba(34, 211, 238, 0.7);
+    --calendar-selected-border: var(--primary);
+    --calendar-selected-glow: var(--primary-glow);
+    --calendar-selected-bg: var(--primary-soft-bg);
   }
   .ts-body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text); }
   .ts-container { width:100%; max-width:1280px; margin:24px auto; padding:0 16px; }
@@ -281,11 +293,17 @@
   .ts-calendar-nav { display:flex; align-items:center; gap:8px; }
   .ts-calendar-grid { display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:8px; }
   .ts-calendar-weekday { text-align:center; font-size:12px; color: var(--muted); }
-  .ts-calendar-cell { background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; min-height:88px; display:flex; flex-direction:column; gap:6px; cursor:pointer; transition: border-color .15s ease, transform .15s ease; }
+  .ts-calendar-cell { background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; min-height:88px; display:flex; flex-direction:column; gap:6px; cursor:pointer; transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; position:relative; }
   .ts-calendar-cell:hover { border-color: var(--primary); transform: translateY(-1px); }
   .ts-calendar-cell.inactive { opacity:0.4; }
   .ts-calendar-cell.today { border-color: var(--primary-600); }
-  .ts-calendar-cell.selected { box-shadow: 0 0 0 2px var(--primary-glow); border-color: var(--primary); }
+  .ts-calendar-cell.selected {
+    background: var(--calendar-selected-bg, var(--panel));
+    border-color: var(--calendar-selected-border, var(--primary));
+    border-width:1.6px;
+    box-shadow: 0 0 0 1px var(--calendar-selected-border, var(--primary)), 0 0 0 4px var(--calendar-selected-glow, rgba(37, 99, 235, 0.25)), 0 10px 18px -10px rgba(15, 23, 42, 0.35);
+    animation: calendarSelect 0.24s ease;
+  }
   .ts-calendar-cell.has-entries { background: var(--primary-hint-bg); border-color: var(--primary-hint-border); }
   .ts-calendar-cell.ts-calendar-holiday { background: var(--holiday-bg); border-color: var(--holiday-border); }
   .ts-calendar-cell.ts-calendar-holiday:hover { border-color: var(--holiday-hover); }
@@ -298,6 +316,9 @@
   .ts-calendar-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .ts-calendar-detail-list { display:flex; flex-direction:column; gap:10px; }
   .ts-calendar-detail-empty { font-size:12px; color: var(--muted); }
+  .ts-logo-button { width:34px; height:34px; border-radius:8px; background: var(--primary); color:#fff; border:none; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .ts-logo-button:hover { transform: translateY(-1px); box-shadow:0 6px 14px rgba(15, 23, 42, 0.25); }
+  .ts-logo-button:focus-visible { outline:2px solid var(--primary-soft-border); outline-offset:2px; }
   .ts-nav { position:relative; }
   .ts-nav-toggle { width:42px; height:42px; display:flex; align-items:center; justify-content:center; font-size:20px; }
   .ts-nav-menu { position:absolute; right:0; top:calc(100% + 8px); background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:8px; min-width:160px; box-shadow:0 12px 30px rgba(0,0,0,.35); z-index:10; }
@@ -343,6 +364,20 @@
   .ts-calendar-filter-name { font-size:13px; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
   .ts-annual-stat-card:hover { transform: translateY(-2px); box-shadow:0 4px 16px rgba(0,0,0,0.15); border-color:var(--primary); }
+  @keyframes calendarSelect {
+    0% {
+      transform: scale(0.98);
+      box-shadow: 0 0 0 0 var(--calendar-selected-border, var(--primary)), 0 0 0 0 var(--calendar-selected-glow, rgba(37, 99, 235, 0.25)), 0 0 0 0 rgba(15, 23, 42, 0.25);
+    }
+    55% {
+      transform: scale(1.02);
+      box-shadow: 0 0 0 1.4px var(--calendar-selected-border, var(--primary)), 0 0 0 5px var(--calendar-selected-glow, rgba(37, 99, 235, 0.25)), 0 12px 22px -12px rgba(15, 23, 42, 0.4);
+    }
+    100% {
+      transform: scale(1);
+      box-shadow: 0 0 0 1px var(--calendar-selected-border, var(--primary)), 0 0 0 4px var(--calendar-selected-glow, rgba(37, 99, 235, 0.25)), 0 10px 18px -10px rgba(15, 23, 42, 0.35);
+    }
+  }
   @keyframes fadeInUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
   .ts-annual-stat-card { animation: fadeInUp 0.4s ease-out; opacity:0; animation-fill-mode: forwards; }
   .ts-annual-stat-card:nth-child(1) { animation-delay: 0.05s; }

@@ -8,6 +8,7 @@
   const pageAnnualViews = document.getElementById('page-annual-views');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
+  const navHomeBtn = document.getElementById('nav-home');
   const navMenu = document.getElementById('nav-menu');
   const navTimeBtn = document.getElementById('nav-time');
   const navContractsBtn = document.getElementById('nav-contracts');
@@ -215,6 +216,29 @@
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closeNavMenu();
   });
+
+  if (navHomeBtn) {
+    navHomeBtn.addEventListener('click', async () => {
+      closeNavMenu();
+      await showPage('time');
+      if (state.currentPage !== 'time') return;
+
+      ensureCalendarState();
+      const now = new Date();
+      const previousYear = state.calendar.year;
+      const targetYear = now.getFullYear();
+      const targetMonth = now.getMonth();
+      const yearChanged = previousYear !== targetYear;
+      state.calendar.year = targetYear;
+      state.calendar.month = targetMonth;
+
+      const today = todayIso();
+      if (yearChanged && getFeatureFlag('enable_public_holidays')) {
+        loadPublicHolidays(true);
+      }
+      handleCalendarClick(today);
+    });
+  }
 
   if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
@@ -5113,7 +5137,7 @@
         headRow.appendChild(th);
       });
       const totalHead = document.createElement('th');
-      totalHead.textContent = 'Week total';
+      totalHead.textContent = 'Month-to-date total';
       headRow.appendChild(totalHead);
       thead.appendChild(headRow);
       table.appendChild(thead);
@@ -5132,7 +5156,7 @@
         row.appendChild(td);
       });
       const totalCell = document.createElement('td');
-      const roundedTotal = roundDuration(week.weekMinutes || 0);
+      const roundedTotal = roundDuration(week.cumulativeMinutes || 0);
       totalCell.textContent = formatDecimalHours(roundedTotal / 60);
       row.appendChild(totalCell);
       tbody.appendChild(row);
