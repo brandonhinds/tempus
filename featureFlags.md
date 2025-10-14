@@ -16,6 +16,8 @@ This document lists the feature flags supported by the Timesheet app. Each flag 
 | `enable_company_quarterly_bas` | Disabled | Switches BAS reporting to quarterly totals (only available when company tracking is enabled). |
 | `is_sole_trader` | Disabled | Indicates the business is a sole trader rather than a company. Affects PAYG income calculations in BAS reporting (only available when company tracking is enabled). |
 | `enable_public_holidays` | Disabled | Displays Australian public holidays in the calendar view with automatic API sync. |
+| `enable_colorblind_themes` | Disabled | Adds colorblind-friendly theme options to the settings dropdown and warns about problematic hour type colors. |
+| `custom_theme` | Disabled | Enables a custom theme where you can configure your own colors. The theme dropdown will be locked to "Custom" when enabled, and a configure button allows setting background, primary, text, and success colors. The app automatically generates complementary shades for the entire interface. |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.

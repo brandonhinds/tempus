@@ -11,7 +11,7 @@ Google Apps Script persists user preferences as key/value pairs. Values are writ
 
 ### Known keys
 - `round_to_nearest` (number) - Minute increment used when rounding manual or timer entries client-side.
-- `theme` (string) - UI theme identifier (`dark`, `light`, `rose`, `og`).
+- `theme` (string) - UI theme identifier (`dark`, `light`, `og`, `rose`, `sierra117`, `protanopia`, `deuteranopia`, `tritanopia`, `monochrome`).
 - `superannuation_rate` (number) - Percentage used when deriving income + payroll summaries. Stored as a whole-number percent (e.g., `12` => 12%).
 - `payg_instalment_rate` (number) - PAYG instalment rate used for BAS T2 calculations. Stored as a whole-number percent (e.g., `2` => 2%). Defaults to `2`.
 - `public_holiday_state` (string) - Australian state/territory code for filtering public holidays (`ACT`, `NSW`, `NT`, `SA`, `TAS`, `WA`, `VIC`, `QLD`). Defaults to `ACT`.

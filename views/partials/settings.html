@@ -9,12 +9,21 @@
         </div>
         <div>
           <label>Theme</label>
-          <select id="set-theme">
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-            <option value="rose">Rose Gold</option>
-            <option value="og">The OG</option>
-          </select>
+          <div style="display: flex; gap: 8px; align-items: stretch;">
+            <select id="set-theme" style="flex: 1;">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="og">The OG</option>
+              <option value="rose">Rose Gold</option>
+              <option value="sierra117">Sierra 117</option>
+              <option value="protanopia" class="ts-colorblind-theme" style="display:none;">Protanopia Friendly</option>
+              <option value="deuteranopia" class="ts-colorblind-theme" style="display:none;">Deuteranopia Friendly</option>
+              <option value="tritanopia" class="ts-colorblind-theme" style="display:none;">Tritanopia Friendly</option>
+              <option value="monochrome" class="ts-colorblind-theme" style="display:none;">Monochrome</option>
+              <option value="custom" class="ts-custom-theme" style="display:none;">Custom</option>
+            </select>
+            <button type="button" id="btn-configure-theme" class="secondary" style="display:none; white-space: nowrap;">Configure</button>
+          </div>
         </div>
         <div>
           <label>Superannuation rate (%)</label>
@@ -54,3 +63,44 @@
     </div>
   </div>
 </section>
+
+<!-- Custom Theme Configuration Modal -->
+<div class="ts-modal" id="modal-custom-theme" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Configure Custom Theme</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-note" style="margin-bottom: 16px;">Choose your main colors and the theme will automatically generate complementary shades for the entire interface.</div>
+      <div class="ts-row" style="margin-bottom: 16px;">
+        <div class="ts-col">
+          <label>Background Color</label>
+          <input type="color" id="custom-theme-bg" value="#0b1220" />
+          <div class="ts-note">Dark base color for the app background</div>
+        </div>
+        <div class="ts-col">
+          <label>Primary Color</label>
+          <input type="color" id="custom-theme-primary" value="#3b82f6" />
+          <div class="ts-note">Main accent color for buttons and highlights</div>
+        </div>
+      </div>
+      <div class="ts-row">
+        <div class="ts-col">
+          <label>Text Color</label>
+          <input type="color" id="custom-theme-text" value="#e2e8f0" />
+          <div class="ts-note">Main text color for readability</div>
+        </div>
+        <div class="ts-col">
+          <label>Success Color</label>
+          <input type="color" id="custom-theme-success" value="#10b981" />
+          <div class="ts-note">Color for success states and positive indicators</div>
+        </div>
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-custom-theme">Cancel</button>
+      <button id="btn-save-custom-theme">Save Theme</button>
+    </div>
+  </div>
+</div>

@@ -53,9 +53,3 @@ The next things we want to include:
 - Add ability to assume a regular number of hours worked for the rest of the month in the monthly insights view
 
 - BAS reporting year dropdown should filter out public holiday only years
-
-- Themes:
-	- Red / green colour colour blind
-	- All other colour blind options
-    - A masterchief inspired theme
-	- Have the ability to create a custom theme
