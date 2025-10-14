@@ -41,10 +41,6 @@ The next things we want to include:
 	* Company income
 	* Company expenses
 
-- Add colours to hour type drop down (or dots of the colour or somehting)
-
-- BUG: Switching hour types that use the other input method doesn't auto switch the view
-
 - The projected variance needs to account for leave/other inputs
     * Project income based on "standard hours" (make standard hours a setting)
 
@@ -53,3 +49,6 @@ The next things we want to include:
 - Add ability to assume a regular number of hours worked for the rest of the month in the monthly insights view
 
 - BAS reporting year dropdown should filter out public holiday only years
+
+- Things that may not be possible:
+    * Add colours to hour type drop down (or dots of the colour or something)

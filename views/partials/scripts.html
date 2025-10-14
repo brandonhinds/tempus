@@ -542,6 +542,16 @@
     }
     return [];
   };
+  function resolveEntryType(entry) {
+    if (!entry) return null;
+    if (entry.entry_type) return entry.entry_type;
+    const punches = entryPunches(entry);
+    if (!punches.length) return 'basic';
+    if (punches.length === 1 && punches[0].in === '00:00') {
+      return 'basic';
+    }
+    return 'advanced';
+  }
   const entryFirstPunchMinutes = (entry) => {
     const punches = entryPunches(entry);
     if (punches.length) {
@@ -846,32 +856,10 @@
   }
 
   function collectFinancialYears() {
-    let minDate = null;
-    let maxDate = null;
-    const consider = (date) => {
-      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
-      const normalized = startOfDay(date);
-      if (!minDate || normalized < minDate) minDate = normalized;
-      if (!maxDate || normalized > maxDate) maxDate = normalized;
-    };
-    state.entries.forEach((entry) => {
-      if (entry && entry.date) consider(parseIsoDate(entry.date));
-    });
-    state.deductions.forEach((deduction) => {
-      if (deduction && deduction.start_date) consider(parseIsoDate(deduction.start_date));
-      if (deduction && deduction.end_date) consider(parseIsoDate(deduction.end_date));
-    });
-    consider(new Date());
-    if (!minDate || !maxDate) {
-      const today = startOfDay(new Date());
-      minDate = today;
-      maxDate = today;
-    }
-    const startYear = financialYearStartYear(minDate);
-    const endYear = financialYearStartYear(maxDate);
-    const years = [];
-    for (let year = startYear; year <= endYear; year += 1) {
-      years.push(year);
+    const allYears = collectAllYears();
+    const years = Array.isArray(allYears.financial) ? [...allYears.financial] : [];
+    if (!years.length) {
+      years.push(financialYearStartYear(new Date()));
     }
     return years;
   }
@@ -3003,7 +2991,7 @@
       // Set initial tab based on today's entry type
       const today = todayIso();
       const todayEntry = state.entries.find(entry => entry.date === today);
-      if (todayEntry && todayEntry.entry_type === 'advanced') {
+      if (resolveEntryType(todayEntry) === 'advanced') {
         activateTab('punch');
         if (punchDate) punchDate.value = today;
         ensurePunchDraft(todayEntry.contract_id);
@@ -3050,8 +3038,9 @@
         const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
         if (!existingEntry) return false;
 
-        if (id === 'manual' && existingEntry.entry_type === 'advanced') return true;
-        if (id === 'punch' && existingEntry.entry_type === 'basic') return true;
+        const entryType = resolveEntryType(existingEntry);
+        if (id === 'manual' && entryType === 'advanced') return true;
+        if (id === 'punch' && entryType === 'basic') return true;
 
         return false;
       })();
@@ -3105,8 +3094,9 @@
           e.date === currentDate &&
           (e.hour_type_id || getDefaultHourTypeId()) === currentHourType
         );
+        const anyEntryType = anyEntry ? resolveEntryType(anyEntry) : null;
 
-        if (anyEntry && anyEntry.entry_type === 'basic') {
+        if (anyEntryType === 'basic') {
           // Hour type exists as basic entry - prevent switching to advanced
           // Switch back to the original tab
           state.currentTab = previousTab;
@@ -3122,13 +3112,11 @@
           return;
         }
 
-        // Look for existing advanced entry with this hour type
-        const existingEntry = anyEntry && anyEntry.entry_type === 'advanced' ? anyEntry : null;
-
-        if (existingEntry) {
+        if (anyEntryType === 'advanced') {
+          const existingEntry = anyEntry;
           // Load existing entry
           state.editingEntryId = existingEntry.id;
-          state.editingEntryType = existingEntry.entry_type;
+          state.editingEntryType = anyEntryType;
           updatePunchContractOptions(existingEntry.contract_id);
           if (punchContract) punchContract.value = existingEntry.contract_id || '';
           state.punchDraft = {
@@ -3165,8 +3153,9 @@
           e.date === currentDate &&
           (e.hour_type_id || getDefaultHourTypeId()) === currentHourType
         );
+        const anyEntryType = anyEntry ? resolveEntryType(anyEntry) : null;
 
-        if (anyEntry && anyEntry.entry_type === 'advanced') {
+        if (anyEntryType === 'advanced') {
           // Hour type exists as advanced entry - prevent switching to basic
           // Switch back to the original tab
           state.currentTab = previousTab;
@@ -3182,12 +3171,9 @@
           return;
         }
 
-        // Look for existing basic entry with this hour type
-        const existingEntry = anyEntry && anyEntry.entry_type === 'basic' ? anyEntry : null;
-
-        if (existingEntry) {
+        if (anyEntryType === 'basic') {
           // Load existing entry
-          populateManualForm(existingEntry, true);
+          populateManualForm(anyEntry, true);
         } else {
           // Create new entry
           clearManualEditing();
@@ -3232,13 +3218,14 @@
         );
 
         if (existingEntry) {
+          const entryType = resolveEntryType(existingEntry);
           // Disable basic tab if current hour type has advanced entry
-          if (target === 'manual' && existingEntry.entry_type === 'advanced') {
+          if (target === 'manual' && entryType === 'advanced') {
             isDisabled = true;
             disabledReason = 'This hour type has an advanced entry for this date';
           }
           // Disable advanced tab if current hour type has basic entry
-          if (target === 'punch' && existingEntry.entry_type === 'basic') {
+          if (target === 'punch' && entryType === 'basic') {
             isDisabled = true;
             disabledReason = 'This hour type has a basic entry for this date';
           }
@@ -3247,13 +3234,14 @@
         // Original behavior when hour types disabled
         const existingEntry = state.entries.find(entry => entry.date === state.selectedCalendarDate);
         if (existingEntry) {
+          const entryType = resolveEntryType(existingEntry);
           // Disable basic tab if date has advanced entry
-          if (target === 'manual' && existingEntry.entry_type === 'advanced') {
+          if (target === 'manual' && entryType === 'advanced') {
             isDisabled = true;
             disabledReason = 'This date already has an advanced entry';
           }
           // Disable advanced tab if date has basic entry
-          if (target === 'punch' && existingEntry.entry_type === 'basic') {
+          if (target === 'punch' && entryType === 'basic') {
             isDisabled = true;
             disabledReason = 'This date already has a basic entry';
           }
@@ -6459,16 +6447,7 @@
     if (existingEntries.length > 0) {
       const existingEntry = existingEntries[0];
 
-      // Determine entry type
-      let entryType = existingEntry.entry_type;
-      if (!entryType) {
-        const punches = existingEntry.punches || [];
-        if (punches.length === 1 && punches[0].in === '00:00') {
-          entryType = 'basic';
-        } else {
-          entryType = 'advanced';
-        }
-      }
+      const entryType = resolveEntryType(existingEntry);
 
       // Prepopulate the form with the existing entry
       if (entryType === 'basic') {
@@ -8634,6 +8613,17 @@
     return defaultType ? defaultType.id : state.hourTypes[0].id;
   }
 
+  function findEntryForDateAndHourType(dateIso, hourTypeId) {
+    if (!dateIso) return null;
+    const fallbackHourTypeId = getDefaultHourTypeId();
+    const targetHourTypeId = hourTypeId || fallbackHourTypeId;
+    return state.entries.find(entry => {
+      if (entry.date !== dateIso) return false;
+      const entryHourTypeId = entry.hour_type_id || fallbackHourTypeId;
+      return entryHourTypeId === targetHourTypeId;
+    }) || null;
+  }
+
   // Event listeners for hour type changes
   if (manualHourType) {
     manualHourType.addEventListener('change', () => {
@@ -8657,14 +8647,19 @@
 
     if (!currentDate) return;
 
-    // Find if there's an existing entry for this date and hour type
-    const existingEntry = state.entries.find(e =>
-      e.date === currentDate &&
-      (e.hour_type_id || getDefaultHourTypeId()) === selectedHourTypeId
-    );
+    const existingEntry = findEntryForDateAndHourType(currentDate, selectedHourTypeId);
 
     if (existingEntry) {
-      // Prepopulate with existing entry data
+      const entryType = resolveEntryType(existingEntry);
+
+      if (entryType === 'advanced') {
+        if (punchHourType) punchHourType.value = selectedHourTypeId;
+        if (punchDate) punchDate.value = currentDate;
+        state.selectedCalendarDate = currentDate;
+        activateTab('punch');
+        return;
+      }
+
       populateManualForm(existingEntry, true);
     } else {
       // Clear the form for new entry but keep date and hour type
@@ -8687,25 +8682,28 @@
 
     if (!currentDate) return;
 
-    // Find if there's an existing entry for this date and hour type
-    const existingEntry = state.entries.find(e =>
-      e.date === currentDate &&
-      (e.hour_type_id || getDefaultHourTypeId()) === selectedHourTypeId &&
-      e.entry_type === 'advanced'
-    );
+    const existingEntry = findEntryForDateAndHourType(currentDate, selectedHourTypeId);
 
     if (existingEntry) {
-      // Load the existing entry
-      state.editingEntryId = existingEntry.id;
-      state.editingEntryType = existingEntry.entry_type;
+      const entryType = resolveEntryType(existingEntry);
 
-      // Update contract dropdown to show the entry's contract
+      if (entryType === 'basic') {
+        if (manualDate) manualDate.value = currentDate;
+        if (manualHourType) manualHourType.value = selectedHourTypeId;
+        state.selectedCalendarDate = currentDate;
+        activateTab('manual');
+        return;
+      }
+
+      // Load the existing advanced entry
+      state.editingEntryId = existingEntry.id;
+      state.editingEntryType = entryType;
+
       if (punchContract) {
         updatePunchContractOptions(existingEntry.contract_id);
         punchContract.value = existingEntry.contract_id || '';
       }
 
-      // Create the punch draft with existing entry data
       state.punchDraft = {
         entryId: existingEntry.id,
         contractId: existingEntry.contract_id || '',
@@ -8722,10 +8720,8 @@
       state.editingEntryId = null;
       state.editingEntryType = null;
 
-      // Update contract options for the new entry
       updatePunchContractOptions();
 
-      // Create fresh punch draft
       state.punchDraft = {
         entryId: null,
         contractId: punchContract.value || '',
@@ -8737,8 +8733,9 @@
       if (punchHourType) punchHourType.value = currentHourType;
       renderPunchDraft();
       updatePunchSummary();
-      updatePunchContractVisibility();
     }
+
+    updatePunchContractVisibility();
 
     // Update tab states to enable/disable the other tab
     updateTabStates();
