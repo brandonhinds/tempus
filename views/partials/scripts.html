@@ -2666,6 +2666,11 @@
       description: 'Adds a badge that breaks down projected contract hours for the active month.',
       order: 140
     },
+    suggest_end_time: {
+      name: 'Suggest End Time',
+      description: 'Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours.',
+      order: 145
+    },
     xero_payroll_helper: {
       name: 'Xero payroll helper',
       description: 'Adds a modal with week-by-week totals formatted for Xero payroll entry.',
@@ -3270,6 +3275,7 @@
   const punchList = document.getElementById('punch-range-list');
   const punchOpenWarning = document.getElementById('punch-open-warning');
   const punchSummary = document.getElementById('punch-summary');
+  const punchSuggestion = document.getElementById('punch-suggestion');
 
   function currentPunchDate() {
     return punchDate && punchDate.value ? punchDate.value : todayIso();
@@ -3511,8 +3517,70 @@
     }
   }
 
+  function calculateEndTimeSuggestion(punches, openPunch, roundingMinutes, minimumEndTime) {
+    // Calculate total minutes from closed punches
+    var closedMinutes = 0;
+    for (var i = 0; i < punches.length; i++) {
+      if (punches[i].in && punches[i].out) {
+        var inParts = punches[i].in.split(':');
+        var outParts = punches[i].out.split(':');
+        var inMinutes = parseInt(inParts[0], 10) * 60 + parseInt(inParts[1], 10);
+        var outMinutes = parseInt(outParts[0], 10) * 60 + parseInt(outParts[1], 10);
+        closedMinutes += (outMinutes - inMinutes);
+      }
+    }
+
+    // Calculate minutes from open punch to current time
+    var inParts = openPunch.in.split(':');
+    var inMinutes = parseInt(inParts[0], 10) * 60 + parseInt(inParts[1], 10);
+
+    // Parse minimum end time
+    var minEndParts = minimumEndTime.split(':');
+    var minEndMinutes = parseInt(minEndParts[0], 10) * 60 + parseInt(minEndParts[1], 10);
+
+    // Calculate current total if we were to clock out at minimum end time
+    var currentTotal = closedMinutes + (minEndMinutes - inMinutes);
+
+    // If the open punch hasn't reached minimum end time yet, no suggestion
+    if (minEndMinutes < inMinutes) {
+      return null;
+    }
+
+    // Calculate what the rounded total should be
+    var roundedTotal = Math.ceil(currentTotal / roundingMinutes) * roundingMinutes;
+
+    // Calculate suggested clock-out time
+    var suggestedMinutes = inMinutes + (roundedTotal - closedMinutes);
+
+    // Make sure it's within the valid range
+    var maxEndMinutes = minEndMinutes + roundingMinutes;
+    if (suggestedMinutes < minEndMinutes || suggestedMinutes > maxEndMinutes) {
+      return null;
+    }
+
+    // Format the suggested time
+    var suggestedHours = Math.floor(suggestedMinutes / 60);
+    var suggestedMins = suggestedMinutes % 60;
+    var suggestedTime = String(suggestedHours).padStart(2, '0') + ':' + String(suggestedMins).padStart(2, '0');
+
+    // Format the total hours
+    var totalHours = roundedTotal / 60;
+    var formattedTotal = formatHours(roundedTotal);
+
+    // Determine AM/PM
+    var period = suggestedHours >= 12 ? 'pm' : 'am';
+    var displayHours = suggestedHours > 12 ? suggestedHours - 12 : (suggestedHours === 0 ? 12 : suggestedHours);
+    var displayTime = displayHours + ':' + String(suggestedMins).padStart(2, '0') + ' ' + period;
+
+    return {
+      time: suggestedTime,
+      total: formattedTotal,
+      message: 'Clock out at ' + displayTime + ' to round out your hours nicely to ' + formattedTotal
+    };
+  }
+
   function updatePunchSummary() {
-    if (!punchSummary || !punchOpenWarning) return;
+    if (!punchSummary || !punchOpenWarning || !punchSuggestion) return;
     const draft = state.punchDraft || { punches: [] };
     const punches = normalizePunchList(draft.punches || []);
     const summary = summarizePunches(punches);
@@ -3528,6 +3596,32 @@
       punchOpenWarning.style.display = 'block';
     } else {
       punchOpenWarning.style.display = 'none';
+    }
+
+    // Calculate and display end time suggestion
+    const suggestEndTimeEnabled = getFeatureFlag('suggest_end_time');
+    if (suggestEndTimeEnabled && punches.length > 1 && summary.openCount > 0) {
+      const lastOpen = punches.find((p) => !p.out);
+      if (lastOpen && lastOpen.in) {
+        const roundingMinutes = parseInt(state.settings.round_to_nearest, 10) || 0;
+        const minimumEndTime = state.settings.minimum_end_time || '17:00';
+
+        if (roundingMinutes > 0) {
+          const suggestion = calculateEndTimeSuggestion(punches, lastOpen, roundingMinutes, minimumEndTime);
+          if (suggestion) {
+            punchSuggestion.textContent = suggestion.message;
+            punchSuggestion.style.display = 'block';
+          } else {
+            punchSuggestion.style.display = 'none';
+          }
+        } else {
+          punchSuggestion.style.display = 'none';
+        }
+      } else {
+        punchSuggestion.style.display = 'none';
+      }
+    } else {
+      punchSuggestion.style.display = 'none';
     }
   }
 
@@ -4222,6 +4316,8 @@
   const paygRateCol = document.getElementById('payg-rate-col');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
   const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
+  const minimumEndTimeInput = document.getElementById('set-minimum-end-time');
+  const minimumEndTimeCol = document.getElementById('minimum-end-time-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
   const discardSettingsBtn = document.getElementById('btn-discard-settings');
   const contractNameInput = document.getElementById('contract-name');
@@ -5093,6 +5189,12 @@
       paygRateCol.style.display = state.companyTrackingEnabled ? 'block' : 'none';
     }
 
+    // Show/hide minimum end time setting
+    const suggestEndTimeFlag = state.featureFlags.suggest_end_time || DEFAULT_FEATURE_FLAGS.suggest_end_time || { enabled: false };
+    if (minimumEndTimeCol) {
+      minimumEndTimeCol.style.display = suggestEndTimeFlag.enabled ? 'block' : 'none';
+    }
+
     // Show/hide colorblind theme options
     const colorblindThemesFlag = state.featureFlags.enable_colorblind_themes || DEFAULT_FEATURE_FLAGS.enable_colorblind_themes || { enabled: false };
     const colorblindThemeOptions = document.querySelectorAll('.ts-colorblind-theme');
@@ -5228,7 +5330,7 @@
       for (let offset = 0; offset < 7; offset += 1) {
         const day = start + offset;
         const existsInMonth = day <= daysInMonth;
-        const dateObj = new Date(year, month, existsInMonth ? day : end);
+        const dateObj = new Date(year, month, day);
         const minutes = existsInMonth ? (minutesByDay[day] || 0) : 0;
         if (existsInMonth) weekMinutes += minutes;
         days.push({
@@ -6502,6 +6604,95 @@
   document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
   document.getElementById('calendar-next').onclick = () => changeCalendarMonth(1);
 
+  // Month picker modal
+  const monthPickerModal = document.getElementById('modal-month-picker');
+  const monthPickerJumpBtn = document.getElementById('calendar-jump');
+  const monthPickerYearDisplay = document.getElementById('month-picker-year-display');
+  const monthPickerYearPrev = document.getElementById('month-picker-year-prev');
+  const monthPickerYearNext = document.getElementById('month-picker-year-next');
+  const monthPickerGrid = document.getElementById('month-picker-grid');
+
+  var monthPickerState = {
+    year: null
+  };
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function openMonthPicker() {
+    if (!state.calendar) return;
+    monthPickerState.year = state.calendar.year;
+    renderMonthPicker();
+    monthPickerModal.style.display = 'flex';
+  }
+
+  function closeMonthPicker() {
+    monthPickerModal.style.display = 'none';
+  }
+
+  function renderMonthPicker() {
+    if (!state.calendar) return;
+    monthPickerYearDisplay.textContent = monthPickerState.year;
+
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth();
+    const activeYear = state.calendar.year;
+    const activeMonth = state.calendar.month;
+
+    monthPickerGrid.innerHTML = '';
+
+    for (var i = 0; i < 12; i++) {
+      var btn = document.createElement('button');
+      btn.className = 'month-picker-cell';
+      btn.textContent = monthNames[i];
+      btn.dataset.month = i;
+
+      // Highlight current month
+      if (i === currentMonth && monthPickerState.year === currentYear) {
+        btn.classList.add('current-month');
+      }
+
+      // Highlight active month
+      if (i === activeMonth && monthPickerState.year === activeYear) {
+        btn.classList.add('active');
+      }
+
+      btn.onclick = function() {
+        var selectedMonth = parseInt(this.dataset.month);
+        state.calendar.month = selectedMonth;
+        state.calendar.year = monthPickerState.year;
+        renderCalendar();
+        closeMonthPicker();
+      };
+
+      monthPickerGrid.appendChild(btn);
+    }
+  }
+
+  monthPickerJumpBtn.onclick = openMonthPicker;
+
+  monthPickerYearPrev.onclick = function() {
+    monthPickerState.year--;
+    renderMonthPicker();
+  };
+
+  monthPickerYearNext.onclick = function() {
+    monthPickerState.year++;
+    renderMonthPicker();
+  };
+
+  // Close modal when clicking the X or outside
+  var monthPickerClose = monthPickerModal.querySelector('.ts-modal-close');
+  if (monthPickerClose) {
+    monthPickerClose.onclick = closeMonthPicker;
+  }
+
+  monthPickerModal.onclick = function(e) {
+    if (e.target === monthPickerModal) {
+      closeMonthPicker();
+    }
+  };
+
   // Calendar filtering
   const calendarFilterToggle = document.getElementById('calendar-filter-toggle');
   const calendarFilterPanel = document.getElementById('calendar-filter-panel');
@@ -6601,7 +6792,7 @@
   }
 
   // Settings dirty state tracking
-  let settingsInitialState = {};
+  var settingsInitialState = {};
 
   function captureSettingsState() {
     settingsInitialState = {
@@ -6609,7 +6800,8 @@
       theme: themeSelect ? themeSelect.value : 'dark',
       superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
       payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
-      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
+      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT',
+      minimum_end_time: minimumEndTimeInput ? minimumEndTimeInput.value : '17:00'
     };
   }
 
@@ -6619,14 +6811,16 @@
       theme: themeSelect ? themeSelect.value : 'dark',
       superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
       payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
-      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT'
+      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT',
+      minimum_end_time: minimumEndTimeInput ? minimumEndTimeInput.value : '17:00'
     };
 
     const isDirty = current.round_to_nearest !== settingsInitialState.round_to_nearest ||
                     current.theme !== settingsInitialState.theme ||
                     current.superannuation_rate !== settingsInitialState.superannuation_rate ||
                     current.payg_instalment_rate !== settingsInitialState.payg_instalment_rate ||
-                    current.public_holiday_state !== settingsInitialState.public_holiday_state;
+                    current.public_holiday_state !== settingsInitialState.public_holiday_state ||
+                    current.minimum_end_time !== settingsInitialState.minimum_end_time;
 
     if (saveSettingsBtn) saveSettingsBtn.disabled = !isDirty;
     if (discardSettingsBtn) discardSettingsBtn.style.display = isDirty ? 'inline-flex' : 'none';
@@ -6640,6 +6834,7 @@
     if (superRateInput) superRateInput.value = String(settingsInitialState.superannuation_rate);
     if (paygRateInput) paygRateInput.value = String(settingsInitialState.payg_instalment_rate || 2);
     if (publicHolidayStateSelect) publicHolidayStateSelect.value = settingsInitialState.public_holiday_state || 'ACT';
+    if (minimumEndTimeInput) minimumEndTimeInput.value = settingsInitialState.minimum_end_time || '17:00';
     applyTheme(settingsInitialState.theme || 'dark');
     checkSettingsDirty();
   }
@@ -6650,6 +6845,7 @@
   if (superRateInput) superRateInput.addEventListener('input', checkSettingsDirty);
   if (paygRateInput) paygRateInput.addEventListener('input', checkSettingsDirty);
   if (publicHolidayStateSelect) publicHolidayStateSelect.addEventListener('change', checkSettingsDirty);
+  if (minimumEndTimeInput) minimumEndTimeInput.addEventListener('input', checkSettingsDirty);
 
   // Settings persistence
   if (saveSettingsBtn) {
@@ -6658,12 +6854,14 @@
       const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
       const paygRatePercent = paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2);
       const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
+      const minimumEndTime = minimumEndTimeInput ? minimumEndTimeInput.value : '17:00';
       const next = {
         round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
         theme: nextTheme,
         superannuation_rate: superRatePercent,
         payg_instalment_rate: paygRatePercent,
-        public_holiday_state: publicHolidayState
+        public_holiday_state: publicHolidayState,
+        minimum_end_time: minimumEndTime
       };
       applyTheme(nextTheme);
       if (superRateInput) superRateInput.value = String(next.superannuation_rate);
@@ -6705,6 +6903,7 @@
     renderEntries();
     if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
     if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
+    if (minimumEndTimeInput) minimumEndTimeInput.value = state.settings.minimum_end_time || '17:00';
     applyTheme(state.settings.theme || 'dark');
     captureSettingsState();
     checkSettingsDirty();
@@ -6749,6 +6948,7 @@
         if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
         if (paygRateInput) paygRateInput.value = String(Number(state.settings.payg_instalment_rate) || 2);
         if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
+        if (minimumEndTimeInput) minimumEndTimeInput.value = state.settings.minimum_end_time || '17:00';
         applyTheme(state.settings.theme || 'dark');
         captureSettingsState();
         checkSettingsDirty();

@@ -29,3 +29,11 @@
 - Pull requests should outline the user-visible impact, list touched sheets or scripts, and include manual test evidence. Attach screenshots or GIFs for UI updates.
 - When behaviour or architecture shifts, update all affected docs (`context.md`, `sheetSchemas.md`, `AGENTS.md`, `featureFlags.md`, etc.) within the same PR so future contributors stay in sync.
 - Reference relevant context or planning docs when applicable so reviewers can trace decisions quickly.
+
+## Feature Flags
+- Feature flags are documented in `featureFlags.md` and use snake_case identifiers.
+- **IMPORTANT:** When adding a new feature flag, you must add it to THREE places:
+  1. `featureFlags.md` - Documentation file with the flag description
+  2. `DEFAULT_FEATURE_FLAGS` object in `views/partials/scripts.html` (around line 2643) - This makes it appear in the Settings page UI with name, description, and order
+  3. The feature flag sheet schema in Google Sheets (handled by `api_setFeatureFlag` in `backend/settings.gs`)
+- The UI toggle for feature flags is automatically generated from the `DEFAULT_FEATURE_FLAGS` object, so skipping step 2 will result in the flag not appearing in Settings.

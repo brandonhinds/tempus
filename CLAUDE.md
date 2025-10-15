@@ -79,6 +79,11 @@ The core system supports two modes:
 ### Feature Flags
 Reference `featureFlags.md` for current flags. Use snake_case identifiers and update both the sheet schema and documentation when adding new flags.
 
+**IMPORTANT:** When adding a new feature flag, you must add it to THREE places:
+1. `featureFlags.md` - Documentation file with the flag description
+2. `DEFAULT_FEATURE_FLAGS` object in `views/partials/scripts.html` (around line 2643) - This makes it appear in the Settings page UI with name, description, and order
+3. The feature flag sheet schema in Google Sheets (handled by `api_setFeatureFlag` in `backend/settings.gs`)
+
 ## Important Documentation
 
 - `context.md` - Product requirements and feature specifications
