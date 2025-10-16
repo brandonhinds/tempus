@@ -1,6 +1,6 @@
 # Feature Flags
 
-This document lists the feature flags supported by the Timesheet app. Each flag is also persisted in the `feature_flags` sheet, but this file provides an at-a-glance reference for repository contributors.
+This document lists the feature flags supported by the Tempus app. Each flag is also persisted in the `feature_flags` sheet, but this file provides an at-a-glance reference for repository contributors.
 
 | Flag | Default | Description |
 | --- | --- | --- |

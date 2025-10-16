@@ -1,6 +1,6 @@
-# Timesheet App
+# Tempus
 
-I am making a timesheet app. This is going to use Google Sheets as the database, and serving it to a front end, all written in the sheet's app scripts.
+I am making a timesheet app called Tempus. This is going to use Google Sheets as the database, and serving it to a front end, all written in the sheet's app scripts.
 
 Performance is my number one concern, and needs to be built into the app from the very beginning. I need the UI to feel extremely performant, even if the backend takes some time to sync. This means I need strong caching, optimisitic loading, etc.
 
