@@ -14,8 +14,6 @@
 
 - Add a thinkStack employee feature flag, which will do things like include the lost super in the expected pay
 
-- Add ability to add actual pay for comparison
-
 - Make buttons / UI element *sexy* like JB's
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
@@ -25,6 +23,8 @@
 - Rate change preview
 
 ## Small Changes
+
+- Have actual pay appear on annual views
 
 - Add the easter easter egg. Add a Konami Code.
 
@@ -58,8 +58,7 @@
 
 - Update "Minimum End Time" to "Suggested Minimum End Time", with an info icon explaining how it works.
 
-- Fix "Timesheet App" appearing after a refresh where the cursor is.
-    * This is fixed, but now the tab has no name. We need to figure out how to get `document.title = "Tempus";`, which works when run in the console, to work from the code.
+- Update the Favicon to something real (especially important because we cannot set the tab title without the pop-up issue)
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.

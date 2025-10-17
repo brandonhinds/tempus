@@ -405,7 +405,7 @@
   .ts-kpi .box { flex:1; background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; }
   .ts-kpi .value { font-size:28px; font-weight:700; }
   .ts-note { font-size:12px; color: var(--muted); }
-  .ts-income-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; gap:8px; }
+  .ts-income-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; grid-template-columns:auto minmax(12ch, max-content) max-content; column-gap:16px; row-gap:8px; align-items:baseline; font-size:14px; }
   .ts-income-breakdown[hidden] { display:none; }
   .ts-hour-types-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; gap:8px; }
   .ts-hour-types-breakdown[hidden] { display:none; }
@@ -424,8 +424,10 @@
   .ts-expected-meta { font-size:12px; color: var(--muted); }
   .ts-expected-badge { cursor:pointer; }
   .ts-expected-badge[data-expanded="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
-  .ts-income-row { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:14px; }
-  .ts-income-row-label { color: var(--muted); }
+  .ts-income-row { display:contents; font-size:14px; }
+  .ts-income-row-label { color: var(--muted); white-space:nowrap; }
+  .ts-income-row-actual { font-size:12px; color: var(--muted); white-space:nowrap; }
+  .ts-income-row-est { font-weight:600; white-space:nowrap; justify-self:start; }
   .ts-income-row-value { font-weight:600; }
   .ts-income-badge { cursor:pointer; }
   .ts-income-badge[data-expanded="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }

@@ -10,6 +10,7 @@ This is a Google Apps Script timesheet application that uses Google Sheets as it
 
 ### Deployment
 - `clasp push` - Sync local files to Google Apps Script
+- **IMPORTANT: Never run `clasp push` automatically. The user will run deployment commands themselves.**
 - Deploy through Apps Script console after pushing changes
 - Test via the web app preview URL
 

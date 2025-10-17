@@ -58,6 +58,9 @@
     hourTypes: [],
     hourTypeMap: {},
     deductions: [],
+    actualIncome: [],
+    actualIncomeMap: {},
+    editingActualIncomeId: null,
     featureFlags: {},
     publicHolidays: [],
     publicHolidayMap: {},
@@ -2681,6 +2684,11 @@
       description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.',
       order: 160
     },
+    enable_actual_income: {
+      name: 'Enable Actual Income Tracking',
+      description: 'Enables tracking of actual income received, allowing comparison between estimated and actual earnings with variance indicators.',
+      order: 165
+    },
     enable_company_tracking_features: {
       name: 'Enable Company Tracking Features',
       description: 'Unlocks company-focused fields such as company deduction categories and BAS reporting.',
@@ -2991,7 +2999,9 @@
       if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
       state.publicHolidays = Array.isArray(obj.publicHolidays) ? obj.publicHolidays : [];
+      state.actualIncome = Array.isArray(obj.actualIncome) ? obj.actualIncome : [];
       updatePublicHolidayMap();
+      refreshActualIncomeMap();
 
       // Set initial tab based on today's entry type
       const today = todayIso();
@@ -3017,7 +3027,8 @@
         deductions: state.deductions.map(sanitizeDeduction),
         featureFlags: normalizeFeatureFlags(state.featureFlags),
         basCurrentFy: state.basCurrentFy,
-        publicHolidays: state.publicHolidays
+        publicHolidays: state.publicHolidays,
+        actualIncome: state.actualIncome
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -4247,10 +4258,15 @@
   const incomeSuperLostRow = document.getElementById('income-super-lost-row');
   const incomeSuperLostEl = document.getElementById('income-super-lost');
   const incomeExtraSuperEl = document.getElementById('income-extra-super');
+  const incomeSuperTotalEl = document.getElementById('income-super-total');
   const incomeOtherDeductionsEl = document.getElementById('income-other-deductions');
   const incomeTaxableEl = document.getElementById('income-taxable');
   const incomeTaxEl = document.getElementById('income-tax');
   const incomeNetDetailEl = document.getElementById('income-net');
+  const incomeActualGrossValueEl = document.getElementById('income-actual-gross-value');
+  const incomeActualSuperValueEl = document.getElementById('income-actual-super-value');
+  const incomeActualTaxValueEl = document.getElementById('income-actual-tax-value');
+  const incomeActualNetValueEl = document.getElementById('income-actual-net-value');
   let incomeBreakdownExpanded = false;
   if (incomeToggleBtn) {
     incomeToggleBtn.addEventListener('click', () => {
@@ -4351,6 +4367,18 @@
   const myobHelperModal = document.getElementById('modal-myob-helper');
   const xeroHelperContent = document.getElementById('xero-helper-content');
   const myobHelperContent = document.getElementById('myob-helper-content');
+  const actualIncomeBtn = document.getElementById('calendar-actual-income-btn');
+  const actualIncomeModal = document.getElementById('modal-actual-income');
+  const actualIncomeTitle = document.getElementById('actual-income-title');
+  const actualIncomeMonthInput = document.getElementById('actual-income-month');
+  const actualIncomeMonthDisplay = document.getElementById('actual-income-month-display');
+  const actualIncomeGrossInput = document.getElementById('actual-income-gross');
+  const actualIncomeSuperInput = document.getElementById('actual-income-super');
+  const actualIncomeTaxInput = document.getElementById('actual-income-tax');
+  const actualIncomeNetInput = document.getElementById('actual-income-net');
+  const btnSaveActualIncome = document.getElementById('btn-save-actual-income');
+  const btnCancelActualIncome = document.getElementById('btn-cancel-actual-income');
+  const btnDeleteActualIncome = document.getElementById('btn-delete-actual-income');
 
   const DECIMAL_HOURS_FORMATTER = new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 0,
@@ -5292,6 +5320,20 @@
     });
   }
 
+  // Actual Income Modal Event Listeners
+  if (actualIncomeBtn) {
+    actualIncomeBtn.addEventListener('click', openActualIncomeModal);
+  }
+  if (btnSaveActualIncome) {
+    btnSaveActualIncome.addEventListener('click', saveActualIncome);
+  }
+  if (btnCancelActualIncome) {
+    btnCancelActualIncome.addEventListener('click', closeActualIncomeModal);
+  }
+  if (btnDeleteActualIncome) {
+    btnDeleteActualIncome.addEventListener('click', deleteActualIncome);
+  }
+
   // Entries & KPIs
   function minutesForDate(date) {
     return state.entries
@@ -5578,7 +5620,156 @@
         ? 'No income-contributing hours logged yet in this month'
         : 'Open the MYOB payroll helper';
     }
+    // Update actual income button visibility
+    if (actualIncomeBtn) {
+      const visible = getFeatureFlag('enable_actual_income');
+      actualIncomeBtn.style.display = visible ? 'inline-flex' : 'none';
+      actualIncomeBtn.title = 'Add or view actual income for the current month';
+    }
   }
+
+  // Actual Income Functions
+  function openActualIncomeModal() {
+    if (!actualIncomeModal) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+    // Format month display text to match calendar (e.g., "October 2025")
+    const monthDate = new Date(year, month, 1);
+    const monthDisplayText = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    if (actualIncomeMonthDisplay) actualIncomeMonthDisplay.textContent = monthDisplayText;
+
+    // Check if there's existing data for this month
+    const existing = state.actualIncome.find(item => item.month === monthStr);
+
+    if (existing) {
+      state.editingActualIncomeId = existing.id;
+      if (actualIncomeTitle) actualIncomeTitle.textContent = 'Edit Actual Income';
+      if (actualIncomeMonthInput) actualIncomeMonthInput.value = existing.month;
+      if (actualIncomeGrossInput) actualIncomeGrossInput.value = existing.gross_income;
+      if (actualIncomeSuperInput) actualIncomeSuperInput.value = existing.superannuation;
+      if (actualIncomeTaxInput) actualIncomeTaxInput.value = existing.tax;
+      if (actualIncomeNetInput) actualIncomeNetInput.value = existing.net_income;
+      if (btnDeleteActualIncome) btnDeleteActualIncome.style.display = 'inline-flex';
+    } else {
+      state.editingActualIncomeId = null;
+      if (actualIncomeTitle) actualIncomeTitle.textContent = 'Add Actual Income';
+      if (actualIncomeMonthInput) actualIncomeMonthInput.value = monthStr;
+      if (actualIncomeGrossInput) actualIncomeGrossInput.value = '';
+      if (actualIncomeSuperInput) actualIncomeSuperInput.value = '';
+      if (actualIncomeTaxInput) actualIncomeTaxInput.value = '';
+      if (actualIncomeNetInput) actualIncomeNetInput.value = '';
+      if (btnDeleteActualIncome) btnDeleteActualIncome.style.display = 'none';
+    }
+
+    showModal(actualIncomeModal);
+  }
+
+  function closeActualIncomeModal() {
+    if (!actualIncomeModal) return;
+    hideModal(actualIncomeModal);
+    state.editingActualIncomeId = null;
+  }
+
+  async function saveActualIncome() {
+    if (!actualIncomeMonthInput || !actualIncomeGrossInput || !actualIncomeSuperInput ||
+        !actualIncomeTaxInput || !actualIncomeNetInput) return;
+
+    const payload = {
+      id: state.editingActualIncomeId || undefined,
+      month: actualIncomeMonthInput.value,
+      gross_income: Number(actualIncomeGrossInput.value) || 0,
+      superannuation: Number(actualIncomeSuperInput.value) || 0,
+      tax: Number(actualIncomeTaxInput.value) || 0,
+      net_income: Number(actualIncomeNetInput.value) || 0
+    };
+
+    // Optimistic update
+    const previousList = state.actualIncome.slice();
+    if (state.editingActualIncomeId) {
+      const index = state.actualIncome.findIndex(item => item.id === state.editingActualIncomeId);
+      if (index !== -1) {
+        state.actualIncome[index] = { ...state.actualIncome[index], ...payload };
+      }
+    } else {
+      const tempId = 'temp_' + Date.now();
+      state.actualIncome.push({ ...payload, id: tempId, created_at: '', updated_at: '' });
+    }
+    refreshActualIncomeMap();
+    saveCache();
+    renderIncomeSummary();
+    closeActualIncomeModal();
+    setStatus('Saving actual income...', 'warn');
+
+    google.script.run
+      .withSuccessHandler((response) => {
+        if (response && response.success && response.actualIncome) {
+          const updated = response.actualIncome;
+          const index = state.actualIncome.findIndex(item =>
+            item.id === state.editingActualIncomeId || item.id === updated.id || item.id.startsWith('temp_')
+          );
+          if (index !== -1) {
+            state.actualIncome[index] = updated;
+          } else {
+            state.actualIncome.push(updated);
+          }
+          refreshActualIncomeMap();
+          saveCache();
+          renderIncomeSummary();
+          setStatus('Actual income saved', 'success');
+        } else {
+          state.actualIncome = previousList;
+          refreshActualIncomeMap();
+          saveCache();
+          renderIncomeSummary();
+          setStatus('Actual income save failed', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.actualIncome = previousList;
+        refreshActualIncomeMap();
+        saveCache();
+        renderIncomeSummary();
+        setStatus('Actual income save failed', 'error');
+      })
+      .api_upsertActualIncome(payload);
+  }
+
+  async function deleteActualIncome() {
+    if (!state.editingActualIncomeId) return;
+    const confirmed = await customConfirm('Delete this actual income entry?', { danger: true });
+    if (!confirmed) return;
+
+    const previousList = state.actualIncome.slice();
+    state.actualIncome = state.actualIncome.filter(item => item.id !== state.editingActualIncomeId);
+    refreshActualIncomeMap();
+    saveCache();
+    renderIncomeSummary();
+    closeActualIncomeModal();
+    setStatus('Deleting actual income...', 'warn');
+
+    google.script.run
+      .withSuccessHandler(() => {
+        setStatus('Actual income deleted', 'success');
+      })
+      .withFailureHandler(() => {
+        state.actualIncome = previousList;
+        refreshActualIncomeMap();
+        saveCache();
+        renderIncomeSummary();
+        setStatus('Failed to delete actual income', 'error');
+      })
+      .api_deleteActualIncome(state.editingActualIncomeId);
+  }
+
+  function refreshActualIncomeMap() {
+    state.actualIncomeMap = {};
+    state.actualIncome.forEach(item => {
+      state.actualIncomeMap[item.month] = item;
+    });
+  }
+
   function buildIncomeSummary(year, month) {
     const allEntries = entriesForMonth(year, month);
     // Filter to only include entries from hour types that contribute to income
@@ -5709,6 +5900,10 @@
       if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = '--';
       if (incomeTaxableEl) incomeTaxableEl.textContent = '--';
       if (incomeTaxEl) incomeTaxEl.textContent = '--';
+      if (incomeActualGrossValueEl) incomeActualGrossValueEl.textContent = '';
+      if (incomeActualSuperValueEl) incomeActualSuperValueEl.textContent = '';
+      if (incomeActualTaxValueEl) incomeActualTaxValueEl.textContent = '';
+      if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
       return;
     }
     const netValue = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
@@ -5722,29 +5917,117 @@
       if (summary.taxStatus === 'error') return 'Tax unavailable';
       return formatCurrency(summary.tax || 0);
     })();
-    if (incomeNetBadge) incomeNetBadge.textContent = `Net income: ${netDisplay}`;
+
+    // Check for actual income data - show actual if available, otherwise show estimate
+    if (incomeNetBadge) {
+      let displayValue = netDisplay;
+
+      if (getFeatureFlag('enable_actual_income')) {
+        const monthStr = `${state.calendar.year}-${String(state.calendar.month + 1).padStart(2, '0')}`;
+        const actualData = state.actualIncomeMap[monthStr];
+
+        // If we have actual data, show it immediately regardless of tax calculation status
+        if (actualData) {
+          displayValue = formatCurrency(actualData.net_income);
+        }
+      }
+
+      incomeNetBadge.textContent = `Net income: ${displayValue}`;
+    }
     if (incomeNetDetailEl) incomeNetDetailEl.textContent = netDisplay;
     if (incomeInvoiceTotalEl) incomeInvoiceTotalEl.textContent = formatCurrency(summary.invoiceTotal || 0);
     if (incomeCompanyIncomeEl) incomeCompanyIncomeEl.textContent = formatCurrency(summary.companyIncome || 0);
     if (incomeCompanyExpensesEl) incomeCompanyExpensesEl.textContent = formatCurrency(summary.companyExpenses || 0);
-    if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
-    if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
-    if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.style.display = state.companyTrackingEnabled ? 'flex' : 'none';
-    if (!state.companyTrackingEnabled) {
-      if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.style.display = 'none';
-      if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.style.display = 'none';
-      if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.style.display = 'none';
-    }
+    if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.hidden = !state.companyTrackingEnabled;
+    if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.hidden = !state.companyTrackingEnabled;
+    if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.hidden = !state.companyTrackingEnabled;
     if (incomeGrossEl) incomeGrossEl.textContent = formatCurrency(summary.grossIncome);
     if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
     if (incomeSuperLostEl) incomeSuperLostEl.textContent = formatCurrency(summary.superLostDueToDeductions || 0);
     if (incomeSuperLostRow) {
-      incomeSuperLostRow.style.display = summary.superLostDueToDeductions && summary.superLostDueToDeductions > 0.009 ? 'flex' : 'none';
+      const shouldShowSuperLost = summary.superLostDueToDeductions && summary.superLostDueToDeductions > 0.009;
+      incomeSuperLostRow.hidden = !shouldShowSuperLost;
     }
     if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = formatCurrency(summary.extraSuper);
+    if (incomeSuperTotalEl) {
+      const estimatedSuperTotal = (summary.superGuarantee || 0) + (summary.extraSuper || 0);
+      incomeSuperTotalEl.textContent = formatCurrency(estimatedSuperTotal);
+    }
     if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = formatCurrency(summary.otherDeductions);
     if (incomeTaxableEl) incomeTaxableEl.textContent = formatCurrency(summary.taxableIncome);
     if (incomeTaxEl) incomeTaxEl.textContent = taxText;
+
+    // Handle actual income inline comparisons
+    if (getFeatureFlag('enable_actual_income')) {
+      const monthStr = `${state.calendar.year}-${String(state.calendar.month + 1).padStart(2, '0')}`;
+      const actualData = state.actualIncomeMap[monthStr];
+
+      if (actualData) {
+        // Helper function to calculate and format variance display
+        const formatActualWithVariance = (actual, estimated) => {
+          const variance = actual - estimated;
+          const absVariance = Math.abs(variance);
+          if (absVariance < 0.01) {
+            return `Act: ${formatCurrency(actual)}`;
+          }
+          const arrow = variance > 0 ? '↑' : '↓';
+          const color = variance > 0 ? 'var(--success)' : 'var(--danger)';
+          return `Act: ${formatCurrency(actual)} <span style="color:${color}">${arrow} ${formatCurrency(absVariance)}</span>`;
+        };
+
+        // Calculate estimated superannuation (super guarantee + extra super)
+        const estimatedSuper = (summary.superGuarantee || 0) + (summary.extraSuper || 0);
+
+        // For net income, if tax is still calculating, compare against taxable income instead
+        const effectiveNetEstimate = (summary.taxStatus === 'pending' || summary.taxStatus === 'error')
+          ? summary.taxableIncome
+          : netValue;
+
+        // Populate actual gross income
+        if (incomeActualGrossValueEl) {
+          incomeActualGrossValueEl.innerHTML = formatActualWithVariance(actualData.gross_income, summary.grossIncome);
+        }
+
+        // Populate actual superannuation
+        if (incomeActualSuperValueEl) {
+          incomeActualSuperValueEl.innerHTML = formatActualWithVariance(actualData.superannuation, estimatedSuper);
+        }
+
+        // Populate actual tax (only if we have a valid estimated tax)
+        if (incomeActualTaxValueEl) {
+          if (summary.taxStatus === 'pending') {
+            incomeActualTaxValueEl.innerHTML = `Act: ${formatCurrency(actualData.tax)} <span style="color:var(--muted)">(Est pending)</span>`;
+          } else if (summary.taxStatus === 'error') {
+            incomeActualTaxValueEl.innerHTML = `Act: ${formatCurrency(actualData.tax)} <span style="color:var(--muted)">(Est unavailable)</span>`;
+          } else {
+            incomeActualTaxValueEl.innerHTML = formatActualWithVariance(actualData.tax, summary.tax || 0);
+          }
+        }
+
+        // Populate actual net income
+        if (incomeActualNetValueEl) {
+          if (summary.taxStatus === 'pending') {
+            incomeActualNetValueEl.innerHTML = `Act: ${formatCurrency(actualData.net_income)} <span style="color:var(--muted)">(Est pending)</span>`;
+          } else if (summary.taxStatus === 'error') {
+            incomeActualNetValueEl.innerHTML = `Act: ${formatCurrency(actualData.net_income)} <span style="color:var(--muted)">(Est unavailable)</span>`;
+          } else {
+            incomeActualNetValueEl.innerHTML = formatActualWithVariance(actualData.net_income, effectiveNetEstimate);
+          }
+        }
+      } else {
+        // Clear actual values if no data
+        if (incomeActualGrossValueEl) incomeActualGrossValueEl.textContent = '';
+        if (incomeActualSuperValueEl) incomeActualSuperValueEl.textContent = '';
+        if (incomeActualTaxValueEl) incomeActualTaxValueEl.textContent = '';
+        if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
+      }
+    } else {
+      // Clear actual values if feature flag is disabled
+      if (incomeActualGrossValueEl) incomeActualGrossValueEl.textContent = '';
+      if (incomeActualSuperValueEl) incomeActualSuperValueEl.textContent = '';
+      if (incomeActualTaxValueEl) incomeActualTaxValueEl.textContent = '';
+      if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
+    }
   }
   function handleTaxSuccess(requestId, taxValue) {
     if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
@@ -6985,6 +7268,19 @@
       .withFailureHandler(() => setStatus('Deductions sync failed', 'error'))
       .api_getDeductions();
     google.script.run
+      .withSuccessHandler((actualIncome) => {
+        console.log('[ActualIncome] Loaded from server:', actualIncome);
+        state.actualIncome = actualIncome || [];
+        refreshActualIncomeMap();
+        console.log('[ActualIncome] Map:', state.actualIncomeMap);
+        saveCache();
+        renderIncomeSummary();
+      })
+      .withFailureHandler((error) => {
+        console.error('[ActualIncome] Failed to load:', error);
+      })
+      .api_getActualIncome();
+    google.script.run
       .withSuccessHandler((submissions) => {
         state.basSubmissions = submissions || [];
         saveCache();
@@ -7931,6 +8227,8 @@
         const modal = e.target.closest('.ts-modal');
         if (modal === deductionFormModal) {
           closeDeductionForm();
+        } else if (modal === actualIncomeModal) {
+          closeActualIncomeModal();
         } else {
           hideModal(modal);
         }
@@ -7943,6 +8241,8 @@
         if (e.target === modal) {
           if (modal === deductionFormModal) {
             closeDeductionForm();
+          } else if (modal === actualIncomeModal) {
+            closeActualIncomeModal();
           } else {
             hideModal(modal);
           }

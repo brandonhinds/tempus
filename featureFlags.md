@@ -19,6 +19,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `enable_colorblind_themes` | Disabled | Adds colorblind-friendly theme options to the settings dropdown and warns about problematic hour type colors. |
 | `custom_theme` | Disabled | Enables a custom theme where you can configure your own colors. The theme dropdown will be locked to "Custom" when enabled, and a configure button allows setting background, primary, text, and success colors. The app automatically generates complementary shades for the entire interface. |
 | `suggest_end_time` | Disabled | Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours. Uses the minimum_end_time setting to suggest a punch-out time that results in a total matching the rounding increment. |
+| `enable_actual_income` | Disabled | Enables tracking of actual income received, allowing comparison between estimated and actual earnings. Adds a button to input gross income, superannuation, tax, and net income for each month. The income badge displays both estimated and actual values with a variance indicator. |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.
