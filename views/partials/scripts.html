@@ -5290,6 +5290,12 @@ function updateDeductionFormVisibility() {
   const incomeActualSuperValueEl = document.getElementById('income-actual-super-value');
   const incomeActualTaxValueEl = document.getElementById('income-actual-tax-value');
   const incomeActualNetValueEl = document.getElementById('income-actual-net-value');
+  const btnCompanyExpensesDetails = document.getElementById('btn-company-expenses-details');
+  const btnDeductionsDetails = document.getElementById('btn-deductions-details');
+  const modalMonthlyDeductions = document.getElementById('modal-monthly-deductions');
+  const monthlyDeductionsTitle = document.getElementById('monthly-deductions-title');
+  const monthlyDeductionsContent = document.getElementById('monthly-deductions-content');
+  const btnCloseMonthlyDeductions = document.getElementById('btn-close-monthly-deductions');
   let incomeBreakdownExpanded = false;
   if (incomeToggleBtn) {
     incomeToggleBtn.addEventListener('click', () => {
@@ -8420,6 +8426,107 @@ function updateDeductionFormVisibility() {
     if (modal) modal.style.display = 'none';
   }
 
+  function showMonthlyDeductionsModal(type) {
+    if (!modalMonthlyDeductions || !monthlyDeductionsContent || !monthlyDeductionsTitle) return;
+
+    // Get current calendar date
+    const calendarDate = state.calendar && state.calendar.currentDate
+      ? new Date(state.calendar.currentDate)
+      : new Date();
+    const year = calendarDate.getFullYear();
+    const month = calendarDate.getMonth();
+
+    // Set modal title
+    const monthName = MONTH_ABBREVIATIONS[month];
+    const typeLabel = type === 'company' ? 'Company Expenses' : 'Pre-tax Deductions';
+    monthlyDeductionsTitle.textContent = `${typeLabel} - ${monthName} ${year}`;
+
+    // Calculate deductions for the month
+    const monthStart = startOfDay(new Date(year, month, 1));
+    const monthEnd = startOfDay(new Date(year, month + 1, 0));
+
+    const deductionsList = [];
+    if (Array.isArray(state.deductions) && state.deductions.length) {
+      state.deductions.forEach((deduction) => {
+        if (!deduction || deduction.active === false) return;
+
+        // Filter by type
+        const isCompany = deduction.company_expense === true;
+        if (type === 'company' && !isCompany) return;
+        if (type === 'personal' && isCompany) return;
+
+        // Skip extra super for personal deductions (it's shown separately)
+        if (type === 'personal' && deduction.deduction_type === 'extra_super') return;
+
+        const occurrences = getDeductionOccurrencesBetween(deduction, monthStart, monthEnd);
+        if (!occurrences.length) return;
+
+        let netAmount = deduction.amount_value;
+        if (type === 'company' && deduction.gst_inclusive) {
+          netAmount = deduction.amount_value / (1 + GST_RATE);
+        }
+
+        const totalAmount = netAmount * occurrences.length;
+
+        deductionsList.push({
+          name: deduction.name,
+          amount: netAmount,
+          occurrences: occurrences.length,
+          totalAmount: totalAmount,
+          frequency: deduction.frequency,
+          gst_inclusive: deduction.gst_inclusive && type === 'company',
+          category_id: deduction.category_id || ''
+        });
+      });
+    }
+
+    // Sort by total amount descending
+    deductionsList.sort((a, b) => b.totalAmount - a.totalAmount);
+
+    // Render content
+    if (!deductionsList.length) {
+      monthlyDeductionsContent.innerHTML = `
+        <div class="ts-note">No ${typeLabel.toLowerCase()} found for this month.</div>
+      `;
+    } else {
+      const categoriesEnabled = isDeductionCategoriesEnabled();
+      let html = '<div class="ts-list" style="margin:0;">';
+
+      deductionsList.forEach((item) => {
+        const categoryMeta = categoriesEnabled ? getDeductionCategoryMeta(item.category_id) : null;
+        const categoryBadge = categoriesEnabled && categoryMeta
+          ? `<span class="ts-badge" style="background-color:${categoryMeta.color}20; color:${categoryMeta.color}; font-size:10px; padding:2px 6px;">${categoryMeta.name}</span>`
+          : '';
+
+        html += `
+          <div class="ts-item" style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="flex:1;">
+              <div style="font-weight:600;">${item.name}</div>
+              <div class="ts-note" style="margin-top:4px;">
+                ${formatCurrency(item.amount)}${item.gst_inclusive ? ' (incl. GST)' : ''} × ${item.occurrences} occurrence${item.occurrences > 1 ? 's' : ''}
+                ${categoryBadge ? ' ' + categoryBadge : ''}
+              </div>
+            </div>
+            <div style="font-weight:600; font-size:16px;">${formatCurrency(item.totalAmount)}</div>
+          </div>
+        `;
+      });
+
+      const total = deductionsList.reduce((sum, item) => sum + item.totalAmount, 0);
+      html += `
+        <div class="ts-item" style="display:flex; justify-content:space-between; align-items:center; border-top:2px solid var(--border); padding-top:12px; margin-top:8px;">
+          <div style="font-weight:600; font-size:16px;">Total</div>
+          <div style="font-weight:600; font-size:18px;">${formatCurrency(total)}</div>
+        </div>
+      `;
+      html += '</div>';
+
+      monthlyDeductionsContent.innerHTML = html;
+    }
+
+    showModal(modalMonthlyDeductions);
+  }
+
   // Custom confirm dialog replacement
   function customConfirm(message, options) {
     return new Promise((resolve) => {
@@ -9325,6 +9432,18 @@ function updateDeductionFormVisibility() {
     const closeMyobHelperBtn = document.getElementById('btn-close-myob-helper');
     if (closeMyobHelperBtn && myobHelperModal) {
       closeMyobHelperBtn.addEventListener('click', () => hideModal(myobHelperModal));
+    }
+
+    if (btnCloseMonthlyDeductions && modalMonthlyDeductions) {
+      btnCloseMonthlyDeductions.addEventListener('click', () => hideModal(modalMonthlyDeductions));
+    }
+
+    if (btnCompanyExpensesDetails) {
+      btnCompanyExpensesDetails.addEventListener('click', () => showMonthlyDeductionsModal('company'));
+    }
+
+    if (btnDeductionsDetails) {
+      btnDeductionsDetails.addEventListener('click', () => showMonthlyDeductionsModal('personal'));
     }
 
     const saveDefaultBtn = document.getElementById('btn-save-default');

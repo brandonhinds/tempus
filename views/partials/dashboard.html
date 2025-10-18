@@ -121,7 +121,7 @@
       </div>
       <div class="ts-income-row" id="income-company-expenses-row" hidden>
         <span class="ts-income-row-label">Company expenses</span>
-        <span class="ts-income-row-actual"></span>
+        <span class="ts-income-row-actual"><button class="ghost small" id="btn-company-expenses-details" style="font-size:11px; padding:2px 8px;">Click for details</button></span>
         <span class="ts-income-row-est" id="income-company-expenses">--</span>
       </div>
       <div class="ts-income-row">
@@ -146,7 +146,7 @@
       </div>
       <div class="ts-income-row">
         <span class="ts-income-row-label">Pre-tax deductions</span>
-        <span class="ts-income-row-actual"></span>
+        <span class="ts-income-row-actual"><button class="ghost small" id="btn-deductions-details" style="font-size:11px; padding:2px 8px;">Click for details</button></span>
         <span class="ts-income-row-est" id="income-other-deductions">--</span>
       </div>
       <div class="ts-income-row" id="income-super-lost-row" hidden>
@@ -261,6 +261,22 @@
     </div>
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-close-myob-helper">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Monthly Deductions Details Modal -->
+<div class="ts-modal" id="modal-monthly-deductions" style="display:none;">
+  <div class="ts-modal-content" style="max-width:720px;">
+    <div class="ts-modal-header">
+      <h3 id="monthly-deductions-title">Monthly Deductions</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div id="monthly-deductions-content"></div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-close-monthly-deductions">Close</button>
     </div>
   </div>
 </div>
