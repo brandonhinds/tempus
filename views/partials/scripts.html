@@ -21,11 +21,16 @@
   const deductionsEmptyEl = document.getElementById('deductions-empty');
   const deductionCompanyDisabledNote = document.getElementById('deduction-company-disabled-note');
   const btnAddDeduction = document.getElementById('btn-add-deduction');
-  const deductionCategoryReadonly = document.getElementById('deduction-category-readonly');
+  const btnManageDeductionCategories = document.getElementById('btn-manage-deduction-categories');
+  const deductionCategoryCollapseControls = document.getElementById('deduction-category-collapse-controls');
+  const btnExpandAllDeductionCategories = document.getElementById('btn-expand-all-deduction-categories');
+  const btnCollapseAllDeductionCategories = document.getElementById('btn-collapse-all-deduction-categories');
   const deductionFormModal = document.getElementById('modal-deduction-form');
   const deductionFormTitle = document.getElementById('deduction-form-title');
   const deductionNameInput = document.getElementById('deduction-name');
   const deductionCategorySelect = document.getElementById('deduction-category');
+  const deductionCategoryColumn = document.getElementById('deduction-category-column');
+  const deductionCategoryEmptyNote = document.getElementById('deduction-category-empty-note');
   const deductionTypeSelect = document.getElementById('deduction-type');
   const deductionAmountInput = document.getElementById('deduction-amount');
   const deductionPercentInput = document.getElementById('deduction-percent');
@@ -35,6 +40,8 @@
   const deductionPercentWrapper = document.getElementById('deduction-percent-wrapper');
   const deductionGstWrapper = document.getElementById('deduction-gst-wrapper');
   const deductionGstToggle = document.getElementById('deduction-gst');
+  const deductionCompanyWrapper = document.getElementById('deduction-company-wrapper');
+  const deductionCompanyToggle = document.getElementById('deduction-company-expense');
   const deductionCompanyGstNote = document.getElementById('deduction-company-gst-note');
   const deductionFrequencySelect = document.getElementById('deduction-frequency');
   const deductionStartDateInput = document.getElementById('deduction-start-date');
@@ -44,6 +51,19 @@
   const deductionOccurrencePreview = document.getElementById('deduction-occurrence-preview');
   const btnCancelDeduction = document.getElementById('btn-cancel-deduction');
   const btnSaveDeduction = document.getElementById('btn-save-deduction');
+  const modalDeductionCategories = document.getElementById('modal-deduction-categories');
+  const deductionCategoryListWrapper = document.getElementById('deduction-category-list-wrapper');
+  const deductionCategoryList = document.getElementById('deduction-category-list');
+  const deductionCategoryEmptyState = document.getElementById('deduction-category-empty-state');
+  const deductionCategoryFormWrapper = document.getElementById('deduction-category-form-wrapper');
+  const deductionCategoryNameInput = document.getElementById('deduction-category-name');
+  const deductionCategoryColorInput = document.getElementById('deduction-category-color');
+  const deductionCategoryListFooter = document.getElementById('deduction-category-list-footer');
+  const deductionCategoryFormFooter = document.getElementById('deduction-category-form-footer');
+  const btnAddDeductionCategory = document.getElementById('btn-add-deduction-category');
+  const btnCloseDeductionCategories = document.getElementById('btn-close-deduction-categories');
+  const btnCancelDeductionCategory = document.getElementById('btn-cancel-deduction-category');
+  const btnSaveDeductionCategory = document.getElementById('btn-save-deduction-category');
   const basFySelect = document.getElementById('bas-fy-select');
   const basTableBody = document.getElementById('bas-table-body');
   const basQuarterlyNote = document.getElementById('bas-quarterly-note');
@@ -58,6 +78,9 @@
     hourTypes: [],
     hourTypeMap: {},
     deductions: [],
+    deductionCategories: [],
+    deductionCategoryMap: {},
+    deductionCategoryCollapse: {},
     actualIncome: [],
     actualIncomeMap: {},
     editingActualIncomeId: null,
@@ -90,6 +113,8 @@
     annualYearType: 'financial',
     annualCurrentYear: null,
     annualFilteredContracts: [],
+    annualCategoryFilters: [],
+    annualCategoryExpansion: {},
     annualData: null,
     annualCharts: {
       income: null,
@@ -106,6 +131,15 @@
     editingId: null,
     original: null
   };
+
+  const deductionCategoryFormState = {
+    mode: 'list',
+    editingId: null
+  };
+
+  let loadingDeductionCategories = false;
+  let deductionCategoryDeleteId = null;
+  let deductionCategorySavePending = false;
 
   const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'bas', 'annual-views', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
@@ -270,17 +304,57 @@
   }
   if (deductionTypeSelect) deductionTypeSelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionCategorySelect) deductionCategorySelect.addEventListener('change', () => {
-    updateDeductionCompanyOptions();
     updateDeductionFormVisibility();
   });
   if (deductionAmountModeSelect) deductionAmountModeSelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionFrequencySelect) deductionFrequencySelect.addEventListener('change', updateDeductionFormVisibility);
+  if (deductionCompanyToggle) deductionCompanyToggle.addEventListener('change', updateDeductionFormVisibility);
   if (deductionStartDateInput) deductionStartDateInput.addEventListener('change', updateDeductionOccurrencePreview);
   if (deductionEndDateInput) deductionEndDateInput.addEventListener('change', updateDeductionOccurrencePreview);
   if (basFySelect) {
     basFySelect.addEventListener('change', () => {
       state.basCurrentFy = Number(basFySelect.value);
       renderBasReporting();
+    });
+  }
+  if (btnManageDeductionCategories) {
+    btnManageDeductionCategories.addEventListener('click', (event) => {
+      event.preventDefault();
+      loadDeductionCategories();
+      openDeductionCategoryModal();
+    });
+  }
+  if (btnCloseDeductionCategories) {
+    btnCloseDeductionCategories.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeDeductionCategoryModal();
+    });
+  }
+  if (btnAddDeductionCategory) {
+    btnAddDeductionCategory.addEventListener('click', (event) => {
+      event.preventDefault();
+      showDeductionCategoryForm('create', null);
+    });
+  }
+  if (btnCancelDeductionCategory) {
+    btnCancelDeductionCategory.addEventListener('click', (event) => {
+      event.preventDefault();
+      hideDeductionCategoryForm();
+    });
+  }
+  if (btnSaveDeductionCategory) {
+    btnSaveDeductionCategory.addEventListener('click', handleSaveDeductionCategory);
+  }
+  if (btnExpandAllDeductionCategories) {
+    btnExpandAllDeductionCategories.addEventListener('click', (event) => {
+      event.preventDefault();
+      setAllDeductionCategoryCollapse(false);
+    });
+  }
+  if (btnCollapseAllDeductionCategories) {
+    btnCollapseAllDeductionCategories.addEventListener('click', (event) => {
+      event.preventDefault();
+      setAllDeductionCategoryCollapse(true);
     });
   }
 
@@ -655,12 +729,28 @@
     return clone;
   };
 
+  const sanitizeDeductionCategory = (category) => {
+    if (!category) return category;
+    const clone = { ...category };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.name = clone.name ? String(clone.name).trim() : '';
+    const color = clone.color ? String(clone.color).trim() : '#6b7280';
+    clone.color = /^#([0-9a-fA-F]{6})$/.test(color) ? color.toLowerCase() : '#6b7280';
+    clone.created_at = clone.created_at || '';
+    clone.updated_at = clone.updated_at || '';
+    return clone;
+  };
+
   const sanitizeDeduction = (deduction) => {
     if (!deduction) return deduction;
     const clone = { ...deduction };
     clone.id = clone.id ? String(clone.id) : '';
     clone.name = clone.name ? String(clone.name).trim() : '';
-    clone.category = clone.category === 'company' ? 'company' : 'personal';
+    clone.category_id = clone.category_id ? String(clone.category_id).trim() : '';
+    if (clone.category_id === 'company' || clone.category_id === 'personal') {
+      clone.category_id = '';
+    }
+    clone.company_expense = Boolean(clone.company_expense === true || clone.company_expense === 'TRUE');
     clone.deduction_type = clone.deduction_type === 'extra_super' ? 'extra_super' : 'standard';
     clone.amount_type = clone.amount_type === 'percent' ? 'percent' : 'flat';
     let amountValue = Number(clone.amount_value);
@@ -669,7 +759,7 @@
       amountValue = amountValue / 100;
     }
     clone.amount_value = amountValue;
-    clone.gst_inclusive = !!clone.gst_inclusive;
+    clone.gst_inclusive = Boolean(clone.gst_inclusive === true || clone.gst_inclusive === 'TRUE');
     clone.gst_amount = Number(clone.gst_amount) || 0;
     clone.frequency = DEDUCTION_FREQUENCIES.includes(clone.frequency) ? clone.frequency : 'once';
     clone.start_date = clone.start_date ? String(clone.start_date) : '';
@@ -804,7 +894,7 @@
       const pct = Math.round((deduction.amount_value * 100) * 100) / 100;
       return `${pct}% of gross income`;
     }
-    const value = deduction.gst_inclusive
+    const value = (deduction.company_expense && deduction.gst_inclusive)
       ? deduction.amount_value / (1 + GST_RATE)
       : deduction.amount_value;
     const rounded = Math.round((Number(value) || 0) * 100) / 100;
@@ -844,7 +934,7 @@
       }
       const totalAmount = netAmount * occurrences.length;
       result.standardTotal += totalAmount;
-      if (deduction.category === 'company') {
+      if (deduction.company_expense) {
         result.companyStandardTotal += totalAmount;
         if (deduction.gst_inclusive) {
           const inclusive = deduction.amount_value;
@@ -1052,6 +1142,14 @@
   const annualContractFilterList = document.getElementById('annual-contract-filter-list');
   const annualFilterSelectAll = document.getElementById('annual-filter-select-all');
   const annualEmpty = document.getElementById('annual-empty');
+  const annualCategorySection = document.getElementById('annual-category-section');
+  const annualCategoryFilterWrapper = document.getElementById('annual-category-filter-wrapper');
+  const annualCategoryFilterList = document.getElementById('annual-category-filter-list');
+  const annualCategoryFilterSelectAll = document.getElementById('annual-category-filter-select-all');
+  const annualCategoryFilterClear = document.getElementById('annual-category-filter-clear');
+  const annualCategoryTableHead = document.getElementById('annual-category-table-head');
+  const annualCategoryTableBody = document.getElementById('annual-category-table-body');
+  const annualCategoryEmpty = document.getElementById('annual-category-empty');
 
   function getThemeColors() {
     const computedStyle = getComputedStyle(document.body);
@@ -1140,12 +1238,12 @@
     // Check if we have any cached annual data at all
     const hasAnyCachedData = state.annualData !== null;
 
-    // Show cached data immediately if available (optimistic UI)
+    // Always show loading state when loading data
+    showAnnualLoadingState();
+
+    // Show cached data underneath if available (optimistic UI)
     if (hasAnyCachedData) {
       renderAnnualData();
-    } else {
-      // Show loading state only on very first load
-      showAnnualLoadingState();
     }
 
     // Then fetch fresh data in background
@@ -1284,6 +1382,294 @@
     });
   }
 
+  function getAnnualCategoryKeys() {
+    if (!state.annualData || !Array.isArray(state.annualData.monthlyData)) return [];
+    const keys = new Set();
+    state.annualData.monthlyData.forEach((month) => {
+      if (!month || !month.categoryBreakdown || !Array.isArray(month.categoryBreakdown.categories)) return;
+      month.categoryBreakdown.categories.forEach((entry) => {
+        if (!entry) return;
+        const id = entry.categoryId != null ? String(entry.categoryId) : '';
+        keys.add(id);
+      });
+    });
+    const result = Array.from(keys);
+    result.sort((a, b) => {
+      const metaA = getDeductionCategoryMeta(a);
+      const metaB = getDeductionCategoryMeta(b);
+      const isUncatA = (a || '') === '';
+      const isUncatB = (b || '') === '';
+      if (isUncatA && !isUncatB) return 1;
+      if (isUncatB && !isUncatA) return -1;
+      return metaA.name.localeCompare(metaB.name);
+    });
+    return result;
+  }
+
+  function ensureAnnualCategoryFilters(keys) {
+    if (!keys.length) {
+      state.annualCategoryFilters = [];
+      state.annualCategoryExpansion = {};
+      return;
+    }
+    const existing = Array.isArray(state.annualCategoryFilters) ? state.annualCategoryFilters.slice() : [];
+    const valid = existing.filter((id) => keys.includes(id));
+    const additions = keys.filter((id) => !valid.includes(id));
+    state.annualCategoryFilters = valid.concat(additions);
+    if (!state.annualCategoryExpansion || typeof state.annualCategoryExpansion !== 'object') {
+      state.annualCategoryExpansion = {};
+    }
+    Object.keys(state.annualCategoryExpansion).forEach((key) => {
+      if (!keys.includes(key)) {
+        delete state.annualCategoryExpansion[key];
+      }
+    });
+  }
+
+  function renderAnnualCategorySection() {
+    if (!annualCategorySection) return;
+    if (!state.annualData || !getFeatureFlag('enable_deduction_categories')) {
+      annualCategorySection.style.display = 'none';
+      if (annualCategoryEmpty) annualCategoryEmpty.style.display = 'none';
+      return;
+    }
+    const keys = getAnnualCategoryKeys();
+    ensureAnnualCategoryFilters(keys);
+    if (!keys.length) {
+      annualCategorySection.style.display = 'none';
+      if (annualCategoryEmpty) annualCategoryEmpty.style.display = 'none';
+      return;
+    }
+    annualCategorySection.style.display = 'block';
+    if (annualCategoryFilterWrapper) {
+      annualCategoryFilterWrapper.style.display = keys.length > 0 ? 'block' : 'none';
+    }
+    renderAnnualCategoryFilters(keys);
+    renderAnnualCategoryTable(keys);
+  }
+
+  function renderAnnualCategoryFilters(keys) {
+    if (!annualCategoryFilterList) return;
+    annualCategoryFilterList.innerHTML = '';
+    if (!keys.length) return;
+
+    keys.forEach((categoryId) => {
+      const meta = getDeductionCategoryMeta(categoryId);
+      const isActive = state.annualCategoryFilters.includes(categoryId);
+      const item = document.createElement('div');
+      item.className = 'ts-calendar-filter-item' + (isActive ? ' active' : '');
+      item.dataset.categoryId = categoryId;
+      item.style.display = 'inline-flex';
+      item.style.alignItems = 'center';
+      item.style.gap = '6px';
+
+      const dot = document.createElement('span');
+      dot.style.display = 'inline-block';
+      dot.style.width = '10px';
+      dot.style.height = '10px';
+      dot.style.borderRadius = '50%';
+      dot.style.backgroundColor = meta.color || '#6b7280';
+      item.appendChild(dot);
+
+      const label = document.createElement('span');
+      label.className = 'ts-calendar-filter-name';
+      label.textContent = meta.name;
+      item.appendChild(label);
+
+      item.addEventListener('click', () => {
+        const index = state.annualCategoryFilters.indexOf(categoryId);
+        if (index !== -1) {
+          state.annualCategoryFilters.splice(index, 1);
+        } else {
+          state.annualCategoryFilters.push(categoryId);
+        }
+        saveCache();
+        renderAnnualCategoryFilters(keys);
+        renderAnnualCategoryTable(keys);
+      });
+
+      annualCategoryFilterList.appendChild(item);
+    });
+  }
+
+  function getMonthlyCategoryEntry(month, categoryId) {
+    if (!month || !month.categoryBreakdown || !Array.isArray(month.categoryBreakdown.categories)) return null;
+    const target = categoryId != null ? String(categoryId) : '';
+    const match = month.categoryBreakdown.categories.find((entry) => {
+      if (!entry) return false;
+      const entryId = entry.categoryId != null ? String(entry.categoryId) : '';
+      return entryId === target;
+    });
+    return match || null;
+  }
+
+  function renderAnnualCategoryTable(keys) {
+    if (!annualCategoryTableHead || !annualCategoryTableBody) return;
+    annualCategoryTableHead.innerHTML = '';
+    annualCategoryTableBody.innerHTML = '';
+
+    if (!state.annualData) return;
+    const visibleCategories = state.annualCategoryFilters.filter((id) => keys.includes(id));
+
+    if (!visibleCategories.length) {
+      if (annualCategoryEmpty) {
+        annualCategoryEmpty.textContent = 'Select at least one category to view the breakdown.';
+        annualCategoryEmpty.style.display = 'block';
+      }
+      return;
+    }
+
+    if (annualCategoryEmpty) {
+      annualCategoryEmpty.style.display = 'none';
+    }
+
+    const headRow = document.createElement('tr');
+    const monthTh = document.createElement('th');
+    monthTh.textContent = 'Month';
+    monthTh.style.textAlign = 'left';
+    monthTh.style.padding = '12px';
+    headRow.appendChild(monthTh);
+
+    visibleCategories.forEach((categoryId) => {
+      const th = document.createElement('th');
+      th.style.padding = '12px';
+      th.style.textAlign = 'left';
+      th.style.minWidth = '160px';
+      const headerButton = document.createElement('button');
+      headerButton.type = 'button';
+      headerButton.style.display = 'flex';
+      headerButton.style.alignItems = 'center';
+      headerButton.style.justifyContent = 'space-between';
+      headerButton.style.width = '100%';
+      headerButton.style.gap = '8px';
+      headerButton.style.background = 'none';
+      headerButton.style.border = 'none';
+      headerButton.style.padding = '0';
+      headerButton.style.cursor = 'pointer';
+
+      const left = document.createElement('span');
+      left.style.display = 'inline-flex';
+      left.style.alignItems = 'center';
+      left.style.gap = '8px';
+
+      const meta = getDeductionCategoryMeta(categoryId);
+      const dot = document.createElement('span');
+      dot.style.display = 'inline-block';
+      dot.style.width = '10px';
+      dot.style.height = '10px';
+      dot.style.borderRadius = '50%';
+      dot.style.backgroundColor = meta.color || '#6b7280';
+      left.appendChild(dot);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = meta.name;
+      left.appendChild(nameSpan);
+
+      headerButton.appendChild(left);
+
+      const expanded = !!state.annualCategoryExpansion[categoryId];
+      const arrow = document.createElement('span');
+      arrow.textContent = expanded ? '▼' : '▶';
+      headerButton.appendChild(arrow);
+
+      headerButton.addEventListener('click', () => {
+        state.annualCategoryExpansion[categoryId] = !expanded;
+        saveCache();
+        renderAnnualCategoryTable(keys);
+      });
+
+      th.appendChild(headerButton);
+      headRow.appendChild(th);
+    });
+
+    annualCategoryTableHead.appendChild(headRow);
+
+    const totalsByCategory = {};
+    state.annualData.monthlyData.forEach((month) => {
+      const row = document.createElement('tr');
+      const monthCell = document.createElement('td');
+      monthCell.textContent = month.label;
+      monthCell.style.padding = '10px 12px';
+      monthCell.style.fontWeight = '600';
+      monthCell.style.whiteSpace = 'nowrap';
+      row.appendChild(monthCell);
+
+      visibleCategories.forEach((categoryId) => {
+        const entry = getMonthlyCategoryEntry(month, categoryId);
+        const totalValue = entry ? entry.total : 0;
+        totalsByCategory[categoryId] = (totalsByCategory[categoryId] || 0) + totalValue;
+
+        const cell = document.createElement('td');
+        cell.style.padding = '10px 12px';
+        const expanded = !!state.annualCategoryExpansion[categoryId];
+        cell.style.textAlign = expanded ? 'left' : 'right';
+
+        if (!entry || !entry.total) {
+          cell.textContent = '—';
+          cell.style.color = 'var(--muted)';
+        } else if (expanded) {
+          cell.style.color = '';
+          const totalEl = document.createElement('div');
+          totalEl.style.fontWeight = '600';
+          totalEl.style.marginBottom = '6px';
+          totalEl.textContent = formatCurrency(entry.total);
+          cell.appendChild(totalEl);
+
+          const expandedItems = Array.isArray(entry.deductions) ? entry.deductions : [];
+          expandedItems.forEach((deduction) => {
+            const line = document.createElement('div');
+            line.style.display = 'flex';
+            line.style.justifyContent = 'space-between';
+            line.style.gap = '12px';
+            line.style.fontSize = '13px';
+            const nameSpan = document.createElement('span');
+            nameSpan.style.flex = '1';
+            nameSpan.style.textAlign = 'left';
+            nameSpan.textContent = deduction.name || 'Unnamed deduction';
+            const amountSpan = document.createElement('span');
+            amountSpan.textContent = formatCurrency(deduction.amount);
+            amountSpan.style.textAlign = 'right';
+            line.appendChild(nameSpan);
+            line.appendChild(amountSpan);
+            cell.appendChild(line);
+          });
+        } else {
+          cell.style.color = '';
+          cell.textContent = formatCurrency(entry.total);
+        }
+
+        row.appendChild(cell);
+      });
+
+      annualCategoryTableBody.appendChild(row);
+    });
+
+    const totalRow = document.createElement('tr');
+    totalRow.style.fontWeight = '600';
+    totalRow.style.borderTop = '2px solid var(--border)';
+    const labelCell = document.createElement('td');
+    labelCell.textContent = 'Total';
+    labelCell.style.padding = '12px';
+    totalRow.appendChild(labelCell);
+
+    visibleCategories.forEach((categoryId) => {
+      const totalCell = document.createElement('td');
+      totalCell.style.padding = '12px';
+      totalCell.style.textAlign = state.annualCategoryExpansion[categoryId] ? 'left' : 'right';
+      const totalValue = Math.round((totalsByCategory[categoryId] || 0) * 100) / 100;
+      if (totalValue) {
+        totalCell.style.color = '';
+        totalCell.textContent = formatCurrency(totalValue);
+      } else {
+        totalCell.textContent = '—';
+        totalCell.style.color = 'var(--muted)';
+      }
+      totalRow.appendChild(totalCell);
+    });
+
+    annualCategoryTableBody.appendChild(totalRow);
+  }
+
   function collectAllYears() {
     // Get list of public holiday hour type IDs
     const publicHolidayHourTypeIds = state.hourTypes
@@ -1406,6 +1792,7 @@
 
     // Update tax analysis
     renderAnnualTaxAnalysis();
+    renderAnnualCategorySection();
 
     // Show/hide empty state
     const hasData = data.monthlyData.some(m => m.grossIncome > 0 || m.totalHours > 0);
@@ -2145,33 +2532,28 @@
     });
   }
 
-
-  function updateDeductionCompanyOptions() {
-    if (!deductionCategorySelect) return;
-    const options = Array.from(deductionCategorySelect.options);
-    const companyOption = options.find((opt) => opt.value === 'company');
-    if (!companyOption) return;
-
-    if (state.companyTrackingEnabled) {
-      companyOption.disabled = false;
-      if (deductionCategoryReadonly) deductionCategoryReadonly.style.display = 'none';
-      deductionCategorySelect.style.display = '';
-      deductionCategorySelect.disabled = false;
-    } else {
-      companyOption.disabled = true;
-      if (deductionCategorySelect.value === 'company') {
-        deductionCategorySelect.value = 'personal';
-      }
-      deductionCategorySelect.style.display = 'none';
-      deductionCategorySelect.disabled = true;
-      if (deductionCategoryReadonly) {
-        deductionCategoryReadonly.style.display = 'block';
-        deductionCategoryReadonly.value = 'Salary sacrifice';
-      }
-    }
+  if (annualCategoryFilterSelectAll) {
+    annualCategoryFilterSelectAll.addEventListener('click', (event) => {
+      event.preventDefault();
+      const keys = getAnnualCategoryKeys();
+      state.annualCategoryFilters = keys.slice();
+      saveCache();
+      renderAnnualCategoryFilters(keys);
+      renderAnnualCategoryTable(keys);
+    });
   }
 
-  function renderDeductionsList() {
+  if (annualCategoryFilterClear) {
+    annualCategoryFilterClear.addEventListener('click', (event) => {
+      event.preventDefault();
+      state.annualCategoryFilters = [];
+      saveCache();
+      const keys = getAnnualCategoryKeys();
+      renderAnnualCategoryFilters(keys);
+      renderAnnualCategoryTable(keys);
+    });
+  }
+function renderDeductionsList() {
     if (!deductionsListEl) return;
     const list = Array.isArray(state.deductions) ? [...state.deductions] : [];
     list.sort((a, b) => {
@@ -2182,21 +2564,128 @@
     if (deductionsEmptyEl) {
       deductionsEmptyEl.style.display = hasItems ? 'none' : 'block';
     }
-    deductionsListEl.innerHTML = '';
-    const showReadonlyNote = !state.companyTrackingEnabled && list.some((item) => item.category === 'company');
+
+    const showReadonlyNote = !state.companyTrackingEnabled && list.some((item) => item.company_expense);
     if (deductionCompanyDisabledNote) {
       deductionCompanyDisabledNote.style.display = showReadonlyNote ? 'inline-flex' : 'none';
     }
-    list.forEach((deduction) => {
-      const card = createDeductionCard(deduction);
-      deductionsListEl.appendChild(card);
-    });
+
+    deductionsListEl.innerHTML = '';
+
+    const categoriesEnabled = isDeductionCategoriesEnabled();
+    const hasCustomCategories = categoriesEnabled && state.deductionCategories.length > 0;
+
+    if (hasCustomCategories) {
+      ensureDeductionCategoryCollapseState();
+
+      const groups = {};
+      list.forEach((deduction) => {
+        const key = deduction.category_id && state.deductionCategoryMap[deduction.category_id]
+          ? deduction.category_id
+          : '__uncategorised__';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(deduction);
+      });
+
+      const groupEntries = Object.keys(groups).map((key) => {
+        const items = groups[key].slice().sort((a, b) => {
+          if (a.active !== b.active) return a.active ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        const meta = key === '__uncategorised__'
+          ? { id: '__uncategorised__', name: 'Uncategorised', color: '#6b7280' }
+          : getDeductionCategoryMeta(key);
+        return { id: key, meta, items };
+      });
+
+      groupEntries.sort((a, b) => {
+        if (a.id === '__uncategorised__') return 1;
+        if (b.id === '__uncategorised__') return -1;
+        return a.meta.name.localeCompare(b.meta.name);
+      });
+
+      groupEntries.forEach((group) => {
+        const container = document.createElement('div');
+        container.className = 'ts-deduction-category-group';
+        container.style.marginBottom = '12px';
+
+        const header = document.createElement('div');
+        header.className = 'ts-item';
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.cursor = 'pointer';
+
+        const left = document.createElement('div');
+        left.style.display = 'flex';
+        left.style.alignItems = 'center';
+        left.style.gap = '8px';
+
+        const dot = document.createElement('span');
+        dot.style.display = 'inline-block';
+        dot.style.width = '10px';
+        dot.style.height = '10px';
+        dot.style.borderRadius = '50%';
+        dot.style.backgroundColor = group.meta.color || '#6b7280';
+        left.appendChild(dot);
+
+        const title = document.createElement('span');
+        title.style.fontWeight = '600';
+        title.textContent = group.meta.name;
+        left.appendChild(title);
+
+        const count = document.createElement('span');
+        count.className = 'ts-note';
+        count.textContent = `${group.items.length} item${group.items.length === 1 ? '' : 's'}`;
+        left.appendChild(count);
+
+        header.appendChild(left);
+
+        const arrow = document.createElement('span');
+        const collapsed = !!state.deductionCategoryCollapse[group.id];
+        arrow.textContent = collapsed ? '▶' : '▼';
+        header.appendChild(arrow);
+
+        header.addEventListener('click', () => {
+          const current = !!state.deductionCategoryCollapse[group.id];
+          state.deductionCategoryCollapse[group.id] = !current;
+          saveCache();
+          renderDeductionsList();
+        });
+
+        container.appendChild(header);
+
+        const body = document.createElement('div');
+        body.style.marginTop = '8px';
+        body.style.display = collapsed ? 'none' : 'block';
+
+        group.items.forEach((deduction) => {
+          const card = createDeductionCard(deduction, { hideCategoryBadge: true });
+          body.appendChild(card);
+        });
+
+        container.appendChild(body);
+        deductionsListEl.appendChild(container);
+      });
+    } else {
+      list.forEach((deduction) => {
+        const card = createDeductionCard(deduction, { hideCategoryBadge: false });
+        deductionsListEl.appendChild(card);
+      });
+    }
+
+    if (deductionCategoryCollapseControls) {
+      deductionCategoryCollapseControls.style.display = (hasCustomCategories && hasItems) ? 'flex' : 'none';
+    }
+
+    renderAnnualCategorySection();
   }
 
-  function createDeductionCard(deduction) {
+function createDeductionCard(deduction, options = {}) {
+    const hideCategoryBadge = !!options.hideCategoryBadge;
     const wrapper = document.createElement('div');
     wrapper.className = 'ts-item';
-    if (!deduction.active || (deduction.category === 'company' && !state.companyTrackingEnabled)) {
+    if (!deduction.active || (deduction.company_expense && !state.companyTrackingEnabled)) {
       wrapper.classList.add('ts-deduction-readonly');
     }
 
@@ -2211,10 +2700,19 @@
     title.textContent = deduction.name || 'Untitled deduction';
     header.appendChild(title);
 
-    const categoryBadge = document.createElement('span');
-    categoryBadge.className = 'ts-badge';
-    categoryBadge.textContent = deduction.category === 'company' ? 'Company expense' : 'Salary sacrifice';
-    header.appendChild(categoryBadge);
+    if (!hideCategoryBadge && isDeductionCategoriesEnabled()) {
+      const categoryMeta = getDeductionCategoryMeta(deduction.category_id);
+      const categoryBadge = document.createElement('span');
+      categoryBadge.className = 'ts-badge';
+      categoryBadge.textContent = categoryMeta.name;
+      categoryBadge.style.borderLeft = `4px solid ${categoryMeta.color || '#6b7280'}`;
+      header.appendChild(categoryBadge);
+    }
+
+    const expenseBadge = document.createElement('span');
+    expenseBadge.className = 'ts-badge';
+    expenseBadge.textContent = deduction.company_expense ? 'Company expense' : 'Salary sacrifice';
+    header.appendChild(expenseBadge);
 
     if (deduction.deduction_type === 'extra_super') {
       const typeBadge = document.createElement('span');
@@ -2229,7 +2727,7 @@
     meta.className = 'ts-deduction-meta';
     const amountSpan = document.createElement('span');
     amountSpan.textContent = formatDeductionAmount(deduction);
-    if (deduction.gst_inclusive && deduction.amount_type !== 'percent') {
+    if (deduction.company_expense && deduction.gst_inclusive && deduction.amount_type !== 'percent') {
       amountSpan.textContent += ' (GST excl.)';
       amountSpan.title = `Entered ${formatCurrency(deduction.amount_value)} incl. GST`;
     }
@@ -2282,7 +2780,7 @@
     deleteBtn.textContent = 'Delete';
     deleteBtn.addEventListener('click', () => handleDeleteDeduction(deduction));
 
-    const readOnly = (!deduction.active) || (deduction.category === 'company' && !state.companyTrackingEnabled);
+    const readOnly = (!deduction.active) || (deduction.company_expense && !state.companyTrackingEnabled);
     if (readOnly) {
       editBtn.disabled = true;
       deleteBtn.disabled = true;
@@ -2304,19 +2802,18 @@
     deductionFormState.editingId = null;
     deductionFormState.original = null;
     deductionNameInput.value = '';
-    if (deductionCategorySelect) deductionCategorySelect.value = 'personal';
-    if (deductionCategoryReadonly) deductionCategoryReadonly.value = 'Salary sacrifice';
+    renderDeductionCategoryOptions('');
     if (deductionTypeSelect) deductionTypeSelect.value = 'standard';
     if (deductionAmountInput) deductionAmountInput.value = '';
     if (deductionPercentInput) deductionPercentInput.value = '';
     if (deductionAmountModeSelect) deductionAmountModeSelect.value = 'flat';
     if (deductionGstToggle) deductionGstToggle.checked = false;
+    if (deductionCompanyToggle) deductionCompanyToggle.checked = false;
     if (deductionFrequencySelect) deductionFrequencySelect.value = 'once';
     if (deductionStartDateInput) deductionStartDateInput.value = todayIso();
     if (deductionEndDateInput) deductionEndDateInput.value = '';
     if (deductionNotesInput) deductionNotesInput.value = '';
     if (deductionOccurrencePreview) deductionOccurrencePreview.textContent = '';
-    updateDeductionCompanyOptions();
     updateDeductionFormVisibility();
   }
 
@@ -2329,7 +2826,7 @@
 
   function openDeductionForm(mode, deduction) {
     if (!deductionFormModal) return;
-    if (mode === 'edit' && deduction && deduction.category === 'company' && !state.companyTrackingEnabled) {
+    if (mode === 'edit' && deduction && deduction.company_expense && !state.companyTrackingEnabled) {
       setStatus('Enable company tracking features to edit company deductions.', 'warn');
       return;
     }
@@ -2342,40 +2839,54 @@
     }
     if (mode === 'edit' && deduction) {
       if (deductionNameInput) deductionNameInput.value = deduction.name || '';
-      if (deductionCategorySelect) deductionCategorySelect.value = deduction.category === 'company' ? 'company' : 'personal';
+      renderDeductionCategoryOptions(deduction.category_id || '');
       if (deductionTypeSelect) deductionTypeSelect.value = deduction.deduction_type === 'extra_super' ? 'extra_super' : 'standard';
+      if (deductionCompanyToggle) {
+        deductionCompanyToggle.checked = !!(deduction.company_expense && state.companyTrackingEnabled && deduction.deduction_type !== 'extra_super');
+      }
       const amountMode = deduction.amount_type === 'percent' ? 'percent' : 'flat';
       if (deductionAmountModeSelect) deductionAmountModeSelect.value = amountMode;
       if (amountMode === 'percent') {
         if (deductionPercentInput) {
-          deductionPercentInput.value = Math.round(deduction.amount_value * 10000) / 100;
+          deductionPercentInput.value = Math.round((Number(deduction.amount_value) || 0) * 10000) / 100;
         }
       } else if (deductionAmountInput) {
-        deductionAmountInput.value = Number(deduction.amount_value).toFixed(2);
+        deductionAmountInput.value = Number(deduction.amount_value || 0).toFixed(2);
       }
       if (deductionGstToggle) deductionGstToggle.checked = !!deduction.gst_inclusive;
       if (deductionFrequencySelect) deductionFrequencySelect.value = deduction.frequency || 'once';
       if (deductionStartDateInput) deductionStartDateInput.value = deduction.start_date || '';
       if (deductionEndDateInput) deductionEndDateInput.value = deduction.end_date || '';
       if (deductionNotesInput) deductionNotesInput.value = deduction.notes || '';
+    } else {
+      renderDeductionCategoryOptions('');
     }
-    updateDeductionCompanyOptions();
     updateDeductionFormVisibility();
     updateDeductionOccurrencePreview();
     showModal(deductionFormModal);
     if (deductionNameInput) deductionNameInput.focus();
   }
 
-  function updateDeductionFormVisibility() {
+function updateDeductionFormVisibility() {
     if (!deductionTypeSelect) return;
     const type = deductionTypeSelect.value === 'extra_super' ? 'extra_super' : 'standard';
-    let rawCategory = deductionCategorySelect ? deductionCategorySelect.value : 'personal';
-    if (type === 'extra_super' && rawCategory === 'company') {
-      rawCategory = 'personal';
-      if (deductionCategorySelect) deductionCategorySelect.value = 'personal';
-    }
-    const category = (rawCategory === 'company' && state.companyTrackingEnabled) ? 'company' : 'personal';
     const amountMode = type === 'extra_super' && deductionAmountModeSelect ? deductionAmountModeSelect.value : 'flat';
+    const companyAllowed = state.companyTrackingEnabled;
+    const companyExpense = companyAllowed && deductionCompanyToggle ? deductionCompanyToggle.checked : false;
+
+    if (deductionCompanyWrapper) {
+      deductionCompanyWrapper.style.display = companyAllowed ? 'flex' : 'none';
+    }
+    if (deductionCompanyToggle) {
+      if (!companyAllowed) {
+        deductionCompanyToggle.checked = false;
+      }
+      const shouldDisableCompanyToggle = !companyAllowed || type === 'extra_super';
+      deductionCompanyToggle.disabled = shouldDisableCompanyToggle;
+      if (shouldDisableCompanyToggle && deductionCompanyToggle.checked) {
+        deductionCompanyToggle.checked = false;
+      }
+    }
 
     if (deductionAmountModeWrapper) {
       deductionAmountModeWrapper.style.display = type === 'extra_super' ? 'block' : 'none';
@@ -2389,23 +2900,21 @@
 
     const showGstToggle = type === 'standard';
     if (deductionGstWrapper) {
-      deductionGstWrapper.style.display = showGstToggle ? 'flex' : 'none';
-    }
-    if (deductionCompanyGstNote) {
-      if (showGstToggle) {
-        deductionCompanyGstNote.style.display = 'block';
-        deductionCompanyGstNote.textContent = category === 'company'
-          ? 'GST component is tracked for company deductions and excluded from totals.'
-          : 'If the amount includes GST, the GST portion is excluded before applying the deduction.';
-      } else {
-        deductionCompanyGstNote.style.display = 'none';
-      }
+      deductionGstWrapper.style.display = 'flex';
     }
     if (deductionGstToggle) {
       if (!showGstToggle) {
         deductionGstToggle.checked = false;
       }
       deductionGstToggle.disabled = !showGstToggle;
+    }
+    if (deductionCompanyGstNote) {
+      if (companyExpense && showGstToggle) {
+        deductionCompanyGstNote.style.display = 'block';
+        deductionCompanyGstNote.textContent = 'GST component is tracked automatically when the amount includes GST.';
+      } else {
+        deductionCompanyGstNote.style.display = 'none';
+      }
     }
 
     const restrictToMonthly = type === 'extra_super' && amountMode === 'percent';
@@ -2429,7 +2938,6 @@
       deductionEndDateWrapper.style.display = 'block';
     }
 
-    updateDeductionCompanyOptions();
     updateDeductionOccurrencePreview();
   }
 
@@ -2467,8 +2975,12 @@
       setStatus('Deduction name is required.', 'warn');
       return null;
     }
-    const category = deductionCategorySelect ? deductionCategorySelect.value : 'personal';
     const type = deductionTypeSelect ? deductionTypeSelect.value : 'standard';
+    const categoryId = (isDeductionCategoriesEnabled() && deductionCategorySelect) ? deductionCategorySelect.value : '';
+    let companyExpense = state.companyTrackingEnabled && deductionCompanyToggle ? deductionCompanyToggle.checked : false;
+    if (type === 'extra_super') {
+      companyExpense = false;
+    }
     const amountMode = type === 'extra_super' && deductionAmountModeSelect ? deductionAmountModeSelect.value : 'flat';
     let amountValue;
     if (amountMode === 'percent') {
@@ -2504,11 +3016,12 @@
     const payload = {
       id: deductionFormState.mode === 'edit' ? deductionFormState.editingId : undefined,
       name,
-      category,
+      category_id: categoryId,
+      company_expense: companyExpense,
       deduction_type: type,
       amount_type: amountMode,
       amount_value: amountValue,
-      gst_inclusive: type === 'standard' ? (deductionGstToggle ? deductionGstToggle.checked : false) : false,
+      gst_inclusive: (type === 'standard' && companyExpense) ? (deductionGstToggle ? deductionGstToggle.checked : false) : false,
       frequency,
       start_date: startDateValue,
       end_date: endDateValue,
@@ -2516,7 +3029,7 @@
       active: true
     };
     if (payload.deduction_type === 'extra_super') {
-      payload.category = 'personal';
+      payload.company_expense = false;
       payload.gst_inclusive = false;
     }
     if (type === 'extra_super' && amountMode === 'percent') {
@@ -2534,12 +3047,13 @@
     const base = {
       id,
       name: payload.name,
-      category: payload.category,
+      category_id: payload.category_id || '',
+      company_expense: !!payload.company_expense,
       deduction_type: payload.deduction_type,
       amount_type: payload.amount_type,
       amount_value: payload.amount_type === 'percent' ? amountDecimal : amountDecimal,
       gst_inclusive: !!payload.gst_inclusive,
-      gst_amount: payload.category === 'company' && payload.deduction_type === 'standard' && payload.gst_inclusive
+      gst_amount: payload.company_expense && payload.deduction_type === 'standard' && payload.gst_inclusive
         ? Math.round((Number(payload.amount_value) - (Number(payload.amount_value) / (1 + GST_RATE))) * 100) / 100
         : 0,
       frequency: payload.frequency,
@@ -2572,9 +3086,11 @@
       state.deductions.push(optimisticDeduction);
     }
 
+    state.deductions = dedupeById(state.deductions);
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
+    renderAnnualCategorySection();
     closeDeductionForm();
     setStatus('Saving deduction...', 'warn');
 
@@ -2593,23 +3109,32 @@
           } else {
             state.deductions.push(updated);
           }
+          state.deductions = dedupeById(state.deductions);
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
+          renderAnnualCategorySection();
+          if (state.annualData) {
+            loadAnnualData();
+          }
           setStatus('Deduction saved', 'success');
         } else {
           state.deductions = previousList;
+          state.deductions = dedupeById(state.deductions);
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
+          renderAnnualCategorySection();
           setStatus('Deduction save failed', 'error');
         }
       })
       .withFailureHandler(() => {
         state.deductions = previousList;
+        state.deductions = dedupeById(state.deductions);
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
+        renderAnnualCategorySection();
         setStatus('Deduction save failed', 'error');
       })
       .api_upsertDeduction(serverPayload);
@@ -2619,28 +3144,391 @@
     if (!deduction || !deduction.id) return;
     const confirmed = await customConfirm('Delete this deduction?', { danger: true });
     if (!confirmed) return;
-    if (deduction.category === 'company' && !state.companyTrackingEnabled) {
+    if (deduction.company_expense && !state.companyTrackingEnabled) {
       setStatus('Enable company tracking to modify company deductions.', 'warn');
       return;
     }
     const previousList = state.deductions.slice();
     state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
+    state.deductions = dedupeById(state.deductions);
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
+    renderAnnualCategorySection();
     setStatus('Deleting deduction...', 'warn');
     google.script.run
       .withSuccessHandler(() => {
+        if (state.annualData) {
+          loadAnnualData();
+        }
         setStatus('Deduction deleted', 'success');
       })
       .withFailureHandler(() => {
         state.deductions = previousList;
+        state.deductions = dedupeById(state.deductions);
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
+        renderAnnualCategorySection();
         setStatus('Failed to delete deduction', 'error');
       })
       .api_deleteDeduction(deduction.id);
+  }
+
+  function renderDeductionCategoryList() {
+    if (!deductionCategoryList) return;
+    const categories = [...state.deductionCategories].sort((a, b) => a.name.localeCompare(b.name));
+    deductionCategoryList.innerHTML = '';
+    if (!categories.length) {
+      deductionCategoryDeleteId = null;
+      if (deductionCategoryEmptyState) deductionCategoryEmptyState.style.display = 'block';
+      return;
+    }
+    if (deductionCategoryEmptyState) deductionCategoryEmptyState.style.display = 'none';
+
+    categories.forEach((category) => {
+      const item = document.createElement('div');
+      item.className = 'ts-item';
+      item.style.display = 'flex';
+      item.style.alignItems = 'center';
+      item.style.justifyContent = 'space-between';
+
+      const info = document.createElement('div');
+      info.style.display = 'flex';
+      info.style.alignItems = 'center';
+      info.style.gap = '12px';
+
+      const swatch = document.createElement('span');
+      swatch.style.display = 'inline-block';
+      swatch.style.width = '14px';
+      swatch.style.height = '14px';
+      swatch.style.borderRadius = '3px';
+      swatch.style.backgroundColor = category.color || '#6b7280';
+      info.appendChild(swatch);
+
+      const name = document.createElement('span');
+      name.textContent = category.name || 'Untitled category';
+      info.appendChild(name);
+
+      item.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '8px';
+
+      if (deductionCategoryDeleteId === category.id) {
+        const confirmText = document.createElement('span');
+        confirmText.className = 'ts-note';
+        confirmText.textContent = 'Delete this category?';
+        actions.appendChild(confirmText);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'ghost small';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+          deductionCategoryDeleteId = null;
+          renderDeductionCategoryList();
+        });
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'ghost small danger';
+        confirmBtn.textContent = 'Delete';
+        confirmBtn.addEventListener('click', () => confirmDeleteDeductionCategory(category));
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+      } else {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'ghost small';
+        editBtn.textContent = 'Edit';
+        editBtn.addEventListener('click', () => {
+          showDeductionCategoryForm('edit', category);
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'ghost small danger';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => {
+          deductionCategoryDeleteId = category.id;
+          renderDeductionCategoryList();
+        });
+
+        actions.appendChild(editBtn);
+        actions.appendChild(deleteBtn);
+      }
+
+      item.appendChild(actions);
+
+      deductionCategoryList.appendChild(item);
+    });
+  }
+
+  function openDeductionCategoryModal() {
+    if (!modalDeductionCategories) return;
+    deductionCategoryFormState.mode = 'list';
+    deductionCategoryFormState.editingId = null;
+    if (deductionCategoryFormWrapper) deductionCategoryFormWrapper.style.display = 'none';
+    if (deductionCategoryListWrapper) deductionCategoryListWrapper.style.display = 'block';
+    if (deductionCategoryListFooter) deductionCategoryListFooter.style.display = 'flex';
+    if (deductionCategoryFormFooter) deductionCategoryFormFooter.style.display = 'none';
+    if (btnAddDeductionCategory) btnAddDeductionCategory.style.display = 'inline-flex';
+    renderDeductionCategoryList();
+    showModal(modalDeductionCategories);
+  }
+
+  function closeDeductionCategoryModal() {
+    if (modalDeductionCategories) hideModal(modalDeductionCategories);
+    hideDeductionCategoryForm();
+    deductionCategoryDeleteId = null;
+    renderDeductionCategoryList();
+    renderAnnualCategorySection();
+  }
+
+  function showDeductionCategoryForm(mode, category) {
+    deductionCategoryFormState.mode = mode;
+    deductionCategoryFormState.editingId = category ? category.id : null;
+    deductionCategoryDeleteId = null;
+    if (deductionCategoryNameInput) deductionCategoryNameInput.value = category ? category.name : '';
+    if (deductionCategoryColorInput) deductionCategoryColorInput.value = category ? category.color : '#6b7280';
+    if (deductionCategoryFormWrapper) deductionCategoryFormWrapper.style.display = 'block';
+    if (deductionCategoryListWrapper) deductionCategoryListWrapper.style.display = 'none';
+    if (deductionCategoryListFooter) deductionCategoryListFooter.style.display = 'none';
+    if (deductionCategoryFormFooter) deductionCategoryFormFooter.style.display = 'flex';
+    if (btnAddDeductionCategory) btnAddDeductionCategory.style.display = 'none';
+    if (deductionCategoryNameInput) deductionCategoryNameInput.focus();
+  }
+
+  function hideDeductionCategoryForm() {
+    deductionCategoryFormState.mode = 'list';
+    deductionCategoryFormState.editingId = null;
+    if (deductionCategoryNameInput) deductionCategoryNameInput.value = '';
+    if (deductionCategoryColorInput) deductionCategoryColorInput.value = '#6b7280';
+    if (deductionCategoryFormWrapper) deductionCategoryFormWrapper.style.display = 'none';
+    if (deductionCategoryListWrapper) deductionCategoryListWrapper.style.display = 'block';
+    if (deductionCategoryListFooter) deductionCategoryListFooter.style.display = 'flex';
+    if (deductionCategoryFormFooter) deductionCategoryFormFooter.style.display = 'none';
+    if (btnAddDeductionCategory) btnAddDeductionCategory.style.display = 'inline-flex';
+    deductionCategorySavePending = false;
+    if (btnSaveDeductionCategory) {
+      btnSaveDeductionCategory.disabled = false;
+      btnSaveDeductionCategory.textContent = 'Save category';
+    }
+  }
+
+  function handleSaveDeductionCategory(event) {
+    if (event) event.preventDefault();
+    if (!deductionCategoryNameInput || !deductionCategoryColorInput) return;
+    const name = deductionCategoryNameInput.value.trim();
+    if (!name) {
+      setStatus('Category name is required.', 'warn');
+      return;
+    }
+    const color = deductionCategoryColorInput.value || '#6b7280';
+    const payload = {
+      id: deductionCategoryFormState.mode === 'edit' ? deductionCategoryFormState.editingId : undefined,
+      name,
+      color
+    };
+    if (deductionCategorySavePending) return;
+    deductionCategorySavePending = true;
+    if (btnSaveDeductionCategory) {
+      btnSaveDeductionCategory.disabled = true;
+      btnSaveDeductionCategory.textContent = 'Saving...';
+    }
+
+    const nowIso = new Date().toISOString();
+    const isEdit = deductionCategoryFormState.mode === 'edit' && deductionCategoryFormState.editingId;
+    const previousCategories = state.deductionCategories.slice();
+    const previousMap = { ...state.deductionCategoryMap };
+    const previousFilters = state.annualCategoryFilters.slice();
+    const previousExpansion = { ...state.annualCategoryExpansion };
+
+    const tempId = isEdit ? payload.id : `temp_category_${Date.now()}`;
+    const optimisticCategory = sanitizeDeductionCategory({
+      id: tempId,
+      name,
+      color,
+      created_at: nowIso,
+      updated_at: nowIso
+    });
+
+    if (isEdit) {
+      const index = state.deductionCategories.findIndex((item) => item.id === payload.id);
+      if (index !== -1) {
+        state.deductionCategories.splice(index, 1, optimisticCategory);
+      } else {
+        state.deductionCategories.push(optimisticCategory);
+      }
+    } else {
+      state.deductionCategories.push(optimisticCategory);
+    }
+
+    state.deductionCategories = dedupeById(state.deductionCategories);
+    updateDeductionCategoryMap();
+    ensureDeductionCategoryCollapseState();
+    renderDeductionCategoryOptions(optimisticCategory.id);
+    renderDeductionCategoryList();
+    renderDeductionsList();
+    renderAnnualCategorySection();
+    saveCache();
+    setStatus('Saving category...', 'warn');
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        deductionCategorySavePending = false;
+        if (btnSaveDeductionCategory) {
+          btnSaveDeductionCategory.disabled = false;
+          btnSaveDeductionCategory.textContent = 'Save category';
+        }
+        if (res && res.success && res.category) {
+          const updated = sanitizeDeductionCategory(res.category);
+          const tempIndex = state.deductionCategories.findIndex((item) => item.id === optimisticCategory.id);
+          if (tempIndex !== -1) {
+            state.deductionCategories.splice(tempIndex, 1, updated);
+          } else {
+            const existingIndex = state.deductionCategories.findIndex((item) => item.id === updated.id);
+            if (existingIndex !== -1) {
+              state.deductionCategories.splice(existingIndex, 1, updated);
+            } else {
+              state.deductionCategories.push(updated);
+            }
+          }
+          state.deductionCategories = dedupeById(state.deductionCategories);
+          updateDeductionCategoryMap();
+          ensureDeductionCategoryCollapseState();
+          renderDeductionCategoryOptions(updated.id);
+          renderDeductionCategoryList();
+          renderDeductionsList();
+          renderAnnualCategorySection();
+          saveCache();
+          setStatus('Category saved', 'success');
+          hideDeductionCategoryForm();
+          deductionCategoryDeleteId = null;
+        } else {
+          state.deductionCategories = previousCategories;
+          state.deductionCategoryMap = previousMap;
+          state.annualCategoryFilters = previousFilters;
+          state.annualCategoryExpansion = previousExpansion;
+          ensureDeductionCategoryCollapseState();
+          renderDeductionCategoryOptions(payload.id || '');
+          renderDeductionCategoryList();
+          renderDeductionsList();
+          renderAnnualCategorySection();
+          saveCache();
+          setStatus('Failed to save category', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        deductionCategorySavePending = false;
+        if (btnSaveDeductionCategory) {
+          btnSaveDeductionCategory.disabled = false;
+          btnSaveDeductionCategory.textContent = 'Save category';
+        }
+        state.deductionCategories = previousCategories;
+        state.deductionCategoryMap = previousMap;
+        state.annualCategoryFilters = previousFilters;
+        state.annualCategoryExpansion = previousExpansion;
+        ensureDeductionCategoryCollapseState();
+        renderDeductionCategoryOptions(payload.id || '');
+        renderDeductionCategoryList();
+        renderDeductionsList();
+        renderAnnualCategorySection();
+        saveCache();
+        setStatus('Failed to save category', 'error');
+      })
+      .api_upsertDeductionCategory(payload);
+  }
+
+  function confirmDeleteDeductionCategory(category) {
+    if (!category || !category.id) return;
+    deductionCategoryDeleteId = null;
+    const previousCategories = state.deductionCategories.slice();
+    const previousMap = { ...state.deductionCategoryMap };
+    const previousFilters = state.annualCategoryFilters.slice();
+    const previousExpansion = { ...state.annualCategoryExpansion };
+    const previousDeductions = state.deductions.map((item) => ({ ...item }));
+
+    state.deductionCategories = state.deductionCategories.filter((item) => item.id !== category.id);
+    state.deductions.forEach((deduction) => {
+      if (deduction.category_id === category.id) {
+        deduction.category_id = '';
+      }
+    });
+    state.deductions = dedupeById(state.deductions);
+    state.annualCategoryFilters = state.annualCategoryFilters.filter((id) => id !== category.id);
+    delete state.annualCategoryExpansion[category.id];
+
+    updateDeductionCategoryMap();
+    ensureDeductionCategoryCollapseState();
+    renderDeductionCategoryOptions('');
+    renderDeductionCategoryList();
+    renderDeductionsList();
+    renderAnnualCategorySection();
+    renderIncomeSummary();
+    saveCache();
+    setStatus('Deleting category...', 'warn');
+
+    google.script.run
+      .withSuccessHandler(() => {
+        setStatus('Category deleted', 'success');
+        renderAnnualCategorySection();
+      })
+      .withFailureHandler(() => {
+        state.deductionCategories = previousCategories;
+        state.deductionCategoryMap = previousMap;
+        state.annualCategoryFilters = previousFilters;
+        state.annualCategoryExpansion = previousExpansion;
+        state.deductions = dedupeById(previousDeductions.map((item) => ({ ...item })));
+        updateDeductionCategoryMap();
+        ensureDeductionCategoryCollapseState();
+        renderDeductionCategoryOptions('');
+        renderDeductionCategoryList();
+        renderDeductionsList();
+        renderAnnualCategorySection();
+        renderIncomeSummary();
+        saveCache();
+        setStatus('Failed to delete category', 'error');
+      })
+      .api_deleteDeductionCategory(category.id);
+  }
+
+  function loadDeductionCategories() {
+    if (!isDeductionCategoriesEnabled()) {
+      state.deductionCategories = [];
+      state.annualCategoryFilters = [];
+      state.annualCategoryExpansion = {};
+      deductionCategoryDeleteId = null;
+      updateDeductionCategoryMap();
+      ensureDeductionCategoryCollapseState();
+      renderDeductionCategoryOptions('');
+      renderDeductionCategoryList();
+      renderDeductionsList();
+      renderAnnualCategorySection();
+      saveCache();
+      return;
+    }
+    renderDeductionCategoryOptions(deductionCategorySelect ? deductionCategorySelect.value : '');
+    if (loadingDeductionCategories) return;
+    loadingDeductionCategories = true;
+    google.script.run
+      .withSuccessHandler((categories) => {
+        loadingDeductionCategories = false;
+        deductionCategoryDeleteId = null;
+        state.deductionCategories = Array.isArray(categories) ? categories.map(sanitizeDeductionCategory) : [];
+        updateDeductionCategoryMap();
+        ensureDeductionCategoryCollapseState();
+        const currentSelection = deductionCategorySelect ? deductionCategorySelect.value : '';
+        renderDeductionCategoryOptions(currentSelection);
+        renderDeductionCategoryList();
+        renderDeductionsList();
+        renderAnnualCategorySection();
+        saveCache();
+      })
+      .withFailureHandler(() => {
+        loadingDeductionCategories = false;
+        setStatus('Failed to load categories', 'error');
+      })
+      .api_getDeductionCategories();
   }
 
   const DEFAULT_FEATURE_FLAGS = {
@@ -2693,6 +3581,11 @@
       name: 'Enable Company Tracking Features',
       description: 'Unlocks company-focused fields such as company deduction categories and BAS reporting.',
       order: 200
+    },
+    enable_deduction_categories: {
+      name: 'Deduction categories',
+      description: 'Adds category management for deductions and groups them on the deductions page and reports.',
+      order: 202
     },
     enable_company_quarterly_bas: {
       name: 'Enable Company BAS quarterly reporting',
@@ -2960,6 +3853,109 @@
     }, {});
   }
 
+  function updateDeductionCategoryMap() {
+    const map = {};
+    state.deductionCategories.forEach((category) => {
+      if (!category || !category.id) return;
+      map[category.id] = category;
+    });
+    state.deductionCategoryMap = map;
+  }
+
+  function getDeductionCategoryMeta(categoryId) {
+    if (!categoryId) {
+      return { id: '', name: 'Uncategorised', color: '#6b7280' };
+    }
+    return state.deductionCategoryMap[categoryId] || {
+      id: categoryId,
+      name: 'Unknown category',
+      color: '#6b7280'
+    };
+  }
+
+  function renderDeductionCategoryOptions(selectedId) {
+    if (!deductionCategorySelect) return;
+    const enabled = isDeductionCategoriesEnabled();
+    const priorValue = selectedId !== undefined ? selectedId : deductionCategorySelect.value;
+
+    deductionCategorySelect.innerHTML = '';
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Uncategorised';
+    deductionCategorySelect.appendChild(defaultOption);
+
+    if (enabled) {
+      const sorted = [...state.deductionCategories].sort((a, b) => a.name.localeCompare(b.name));
+      sorted.forEach((category) => {
+        if (!category.id) return;
+        const option = document.createElement('option');
+        option.value = category.id;
+        option.textContent = category.name || 'Untitled category';
+        deductionCategorySelect.appendChild(option);
+      });
+    }
+
+    if (priorValue && (priorValue === '' || state.deductionCategoryMap[priorValue])) {
+      deductionCategorySelect.value = priorValue;
+    } else {
+      deductionCategorySelect.value = '';
+    }
+
+    deductionCategorySelect.disabled = !enabled;
+
+    if (deductionCategoryEmptyNote) {
+      deductionCategoryEmptyNote.style.display = enabled && state.deductionCategories.length === 0 ? 'block' : 'none';
+    }
+    if (deductionCategoryColumn) {
+      deductionCategoryColumn.style.display = enabled ? 'block' : 'none';
+    }
+
+    const nameCol = deductionNameInput ? deductionNameInput.closest('.ts-col') : null;
+    const typeCol = deductionTypeSelect ? deductionTypeSelect.closest('.ts-col') : null;
+    if (nameCol && typeCol) {
+      if (enabled) {
+        nameCol.style.flex = '';
+        nameCol.style.maxWidth = '';
+        typeCol.style.flex = '';
+        typeCol.style.maxWidth = '220px';
+      } else {
+        nameCol.style.flex = '1';
+        nameCol.style.maxWidth = '';
+        typeCol.style.flex = '1';
+        typeCol.style.maxWidth = '';
+      }
+    }
+  }
+
+  function ensureDeductionCategoryCollapseState() {
+    if (!state.deductionCategoryCollapse) state.deductionCategoryCollapse = {};
+    const collapse = state.deductionCategoryCollapse;
+    const validIds = state.deductionCategories.map((category) => category.id);
+    validIds.forEach((id) => {
+      if (!collapse.hasOwnProperty(id)) {
+        collapse[id] = true;
+      }
+    });
+    if (!collapse.hasOwnProperty('__uncategorised__')) {
+      collapse.__uncategorised__ = true;
+    }
+    Object.keys(collapse).forEach((key) => {
+      if (key === '__uncategorised__') return;
+      if (!validIds.includes(key)) {
+        delete collapse[key];
+      }
+    });
+  }
+
+  function setAllDeductionCategoryCollapse(collapsed) {
+    ensureDeductionCategoryCollapseState();
+    Object.keys(state.deductionCategoryCollapse).forEach((key) => {
+      state.deductionCategoryCollapse[key] = collapsed;
+    });
+    saveCache();
+    renderDeductionsList();
+  }
+
   const contractIsValid = (contract, dateIso) => {
     if (!contract || !dateIso) return false;
     if (contract.start_date && contract.start_date > dateIso) return false;
@@ -2986,6 +3982,19 @@
     return `<span class="ts-badge warn">No contract</span>`;
   };
 
+  function dedupeById(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const result = [];
+    list.forEach((item) => {
+      if (!item || !item.id) return;
+      if (seen.has(item.id)) return;
+      seen.add(item.id);
+      result.push(item);
+    });
+    return result;
+  }
+
   function loadCache() {
     try {
       const raw = localStorage.getItem(state.cacheKey);
@@ -2995,13 +4004,23 @@
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.hourTypes = Array.isArray(obj.hourTypes) ? obj.hourTypes.map(sanitizeHourType) : [];
-      state.deductions = Array.isArray(obj.deductions) ? obj.deductions.map(sanitizeDeduction) : [];
+      state.deductions = Array.isArray(obj.deductions) ? dedupeById(obj.deductions.map(sanitizeDeduction)) : [];
+      state.deductionCategories = Array.isArray(obj.deductionCategories) ? obj.deductionCategories.map(sanitizeDeductionCategory) : [];
+      state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
+        ? { ...obj.deductionCategoryCollapse }
+        : {};
       if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
       state.publicHolidays = Array.isArray(obj.publicHolidays) ? obj.publicHolidays : [];
       state.actualIncome = Array.isArray(obj.actualIncome) ? obj.actualIncome : [];
+      state.annualCategoryFilters = Array.isArray(obj.annualCategoryFilters) ? obj.annualCategoryFilters.slice() : [];
+      state.annualCategoryExpansion = obj.annualCategoryExpansion && typeof obj.annualCategoryExpansion === 'object'
+        ? { ...obj.annualCategoryExpansion }
+        : {};
       updatePublicHolidayMap();
       refreshActualIncomeMap();
+      updateDeductionCategoryMap();
+      ensureDeductionCategoryCollapseState();
 
       // Set initial tab based on today's entry type
       const today = todayIso();
@@ -3025,6 +4044,10 @@
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
         deductions: state.deductions.map(sanitizeDeduction),
+        deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
+        deductionCategoryCollapse: state.deductionCategoryCollapse,
+        annualCategoryFilters: state.annualCategoryFilters,
+        annualCategoryExpansion: state.annualCategoryExpansion,
         featureFlags: normalizeFeatureFlags(state.featureFlags),
         basCurrentFy: state.basCurrentFy,
         publicHolidays: state.publicHolidays,
@@ -5176,8 +6199,23 @@
 
     const companyFlag = state.featureFlags.enable_company_tracking_features || DEFAULT_FEATURE_FLAGS.enable_company_tracking_features || { enabled: false };
     state.companyTrackingEnabled = !!companyFlag.enabled;
-    updateDeductionCompanyOptions();
     updateDeductionFormVisibility();
+
+    const categoryFlag = state.featureFlags.enable_deduction_categories || DEFAULT_FEATURE_FLAGS.enable_deduction_categories || { enabled: false };
+    if (btnManageDeductionCategories) {
+      btnManageDeductionCategories.style.display = categoryFlag.enabled ? 'inline-flex' : 'none';
+    }
+    if (categoryFlag.enabled) {
+      loadDeductionCategories();
+    } else {
+      state.deductionCategories = [];
+      state.deductionCategoryCollapse = { __uncategorised__: true };
+      updateDeductionCategoryMap();
+      renderDeductionCategoryOptions('');
+      renderDeductionCategoryList();
+      saveCache();
+    }
+
     renderDeductionsList();
     renderIncomeSummary();
 
@@ -6575,9 +7613,13 @@
   }
 
   function getFeatureFlag(flagKey) {
-    const flag = state.featureFlags[flagKey] || DEFAULT_FEATURE_FLAGS[flagKey];
-    return flag ? flag.enabled : false;
-  }
+  const flag = state.featureFlags[flagKey] || DEFAULT_FEATURE_FLAGS[flagKey];
+  return flag ? flag.enabled : false;
+}
+
+  function isDeductionCategoriesEnabled() {
+  return !!getFeatureFlag('enable_deduction_categories');
+}
   function renderCalendar() {
     ensureCalendarState();
 
@@ -7255,15 +8297,34 @@
         renderFeatureFlags();
         applyFeatureFlags();
         loadPublicHolidays();
+
+        // Load deduction categories if feature is enabled
+        if (isDeductionCategoriesEnabled()) {
+          google.script.run
+            .withSuccessHandler((categories) => {
+              state.deductionCategories = (categories || []).map(sanitizeDeductionCategory);
+              updateDeductionCategoryMap();
+              ensureDeductionCategoryCollapseState();
+              saveCache();
+              renderDeductionCategoryOptions('');
+              renderDeductionsList();
+              renderAnnualCategorySection();
+            })
+            .withFailureHandler(() => {
+              console.error('Failed to load deduction categories');
+            })
+            .api_getDeductionCategories();
+        }
       })
       .withFailureHandler(() => {})
       .api_getFeatureFlags();
     google.script.run
       .withSuccessHandler((deductions) => {
-        state.deductions = (deductions || []).map(sanitizeDeduction);
+        state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
+        renderAnnualCategorySection();
       })
       .withFailureHandler(() => setStatus('Deductions sync failed', 'error'))
       .api_getDeductions();
@@ -8994,10 +10055,14 @@
   document.addEventListener('click', (event) => {
     if (event.target.classList.contains('ts-modal-close')) {
       const modal = event.target.closest('.ts-modal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.style.display = 'none';
+        if (modal === modalDeductionCategories) hideDeductionCategoryForm();
+      }
     }
     if (event.target.classList.contains('ts-modal')) {
       event.target.style.display = 'none';
+      if (event.target === modalDeductionCategories) hideDeductionCategoryForm();
     }
   });
 

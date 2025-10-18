@@ -18,6 +18,7 @@
 - Keep inline comments short and intent-focused; explain non-obvious decisions rather than restating code.
 - Configurable UI toggles must use the `.ts-toggle` switch styling; do not introduce plain checkboxes for binary settings.
 - Layout containers: stick with the 1280px-capped `.ts-container`; reach for `.ts-container--fluid` only in rare cases where a page (e.g., BAS reporting) genuinely needs the extra width.
+- When presenting destructive actions inside modals, confirmations must be handled inline within the modal content (e.g., swap the button row for confirm/cancel). Opening another modal on top of a modal is not allowed.
 
 ## Testing Guidelines
 - No automated suite exists. Verify manually in the deployed preview: create, edit, and delete entries, and confirm cached UI state stays in sync after page reloads.

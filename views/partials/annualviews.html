@@ -178,6 +178,28 @@
     </div>
   </div>
 
+  <div id="annual-category-section" style="margin-bottom:24px; display:none;">
+    <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Expense Categories</h4>
+    <p class="ts-note" style="margin:0 0 12px 0;">Company expenses are shown excluding GST. Use the filters below to focus on specific categories.</p>
+    <div class="ts-annual-filter-panel" id="annual-category-filter-wrapper" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:12px; flex-wrap:wrap;">
+        <span style="font-size:13px; font-weight:600;">Filter categories</span>
+        <div style="display:flex; gap:8px;">
+          <button class="ghost small" id="annual-category-filter-select-all">Select all</button>
+          <button class="ghost small" id="annual-category-filter-clear">Clear</button>
+        </div>
+      </div>
+      <div class="ts-annual-filter-list" id="annual-category-filter-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+    </div>
+    <div style="overflow-x:auto; background:var(--bg); border:1px solid var(--border); border-radius:12px;">
+      <table id="annual-category-table" style="width:100%; border-collapse:collapse; min-width:480px;">
+        <thead id="annual-category-table-head"></thead>
+        <tbody id="annual-category-table-body"></tbody>
+      </table>
+    </div>
+    <div class="ts-note" id="annual-category-empty" style="display:none; margin-top:12px;">No categories to display.</div>
+  </div>
+
   <!-- Charts Grid -->
   <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(400px, 1fr)); gap:20px; margin-bottom:24px;">
     <!-- Income Distribution Pie Chart -->

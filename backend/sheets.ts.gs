@@ -26,10 +26,11 @@ function getOrCreateSheet(name) {
         'created_at'
       ]]);
     } else if (name === 'deductions') {
-      sh.getRange(1,1,1,15).setValues([[
+      sh.getRange(1,1,1,16).setValues([[
         'id',
         'name',
-        'category',
+        'category_id',
+        'company_expense',
         'deduction_type',
         'amount_type',
         'amount_value',
@@ -40,6 +41,14 @@ function getOrCreateSheet(name) {
         'end_date',
         'notes',
         'active',
+        'created_at',
+        'updated_at'
+      ]]);
+    } else if (name === 'deduction_categories') {
+      sh.getRange(1,1,1,5).setValues([[
+        'id',
+        'name',
+        'color',
         'created_at',
         'updated_at'
       ]]);
@@ -62,6 +71,10 @@ function getOrCreateSheet(name) {
         'updated_at'
       ]]);
     }
+  }
+  if (name === 'deduction_categories') {
+    sh.getRange('A:C').setNumberFormat('@');
+    sh.getRange('D:E').setNumberFormat('@');
   }
   if (name === 'timesheet_entries') {
     const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id'];
@@ -207,16 +220,16 @@ function getOrCreateSheet(name) {
   }
   if (name === 'deductions') {
     sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:C').setNumberFormat('@');
-    sh.getRange('D:E').setNumberFormat('@');
-    sh.getRange('F:F').setNumberFormat('0.00');
-    sh.getRange('G:G').setNumberFormat('@');
-    sh.getRange('H:H').setNumberFormat('0.00');
-    sh.getRange('I:I').setNumberFormat('@');
-    sh.getRange('J:K').setNumberFormat('@');
-    sh.getRange('L:L').setNumberFormat('@');
+    sh.getRange('B:D').setNumberFormat('@');
+    sh.getRange('E:F').setNumberFormat('@');
+    sh.getRange('G:G').setNumberFormat('0.00');
+    sh.getRange('H:H').setNumberFormat('@');
+    sh.getRange('I:I').setNumberFormat('0.00');
+    sh.getRange('J:J').setNumberFormat('@');
+    sh.getRange('K:L').setNumberFormat('@');
     sh.getRange('M:M').setNumberFormat('@');
-    sh.getRange('N:O').setNumberFormat('@');
+    sh.getRange('N:N').setNumberFormat('@');
+    sh.getRange('O:P').setNumberFormat('@');
   }
   if (name === 'bas_submissions') {
     sh.getRange('A:A').setNumberFormat('@'); // id

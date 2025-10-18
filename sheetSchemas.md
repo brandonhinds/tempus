@@ -87,12 +87,13 @@ Stores configured deductions that affect monthly income calculations. Deductions
 | --- | --- | --- | --- |
 | `id` | string (UUID) | Unique identifier generated server-side. | `0d9f9c03-e9fb-4fb6-b8d7-46df2315bd1b` |
 | `name` | string | Human-readable deduction name. | `Novated lease` |
-| `category` | string | Either `personal` or `company`. | `personal` |
+| `category_id` | string | Optional reference to `deduction_categories.id`; blank entries are treated as Uncategorised. | `tools` |
+| `company_expense` | boolean/string | `TRUE`/`FALSE` flag indicating whether the deduction is treated as a company expense (requires company tracking). | `TRUE` |
 | `deduction_type` | string | `standard` or `extra_super`. | `extra_super` |
 | `amount_type` | string | `flat` (currency) or `percent` (for extra super). | `percent` |
 | `amount_value` | number | Flat amount in dollars or percentage (stored as decimal). | `0.02` |
-| `gst_inclusive` | boolean/string | `TRUE`/`FALSE` to indicate whether the entered amount includes GST. Ignored for extra super. | `TRUE` |
-| `gst_amount` | number | GST component recorded for company deductions when inclusive. | `45.45` |
+| `gst_inclusive` | boolean/string | `TRUE`/`FALSE` to indicate whether the entered amount includes GST. Only used for company expenses. | `TRUE` |
+| `gst_amount` | number | GST component recorded for company deductions when inclusive (per occurrence). | `45.45` |
 | `frequency` | string | Recurrence cadence: `once`, `weekly`, `fortnightly`, `monthly`, `quarterly`, `yearly`. | `monthly` |
 | `start_date` | string (ISO date) | First deduction date. | `2025-01-15` |
 | `end_date` | string (ISO date) | Optional final deduction date; blank for indefinite. | `` |
@@ -104,6 +105,17 @@ Stores configured deductions that affect monthly income calculations. Deductions
 ### Suggested improvements
 - Store an attachment reference once file uploads are supported for deductions.
 - Track audit metadata (user, change reason) when collaborative workflows are introduced.
+
+## deduction_categories
+Catalog of reusable deduction categories. When the `enable_deduction_categories` feature flag is enabled, these categories become selectable on the deductions page and power the annual expense breakdown.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `dae8e0c2-51f2-4b1c-9f1f-138f57c97ce0` |
+| `name` | string | Category label shown in the UI. | `Tools & equipment` |
+| `color` | string | Hex color used for badges and reports. | `#3b82f6` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the category was created. | `2025-05-01T02:41:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-05-10T19:24:00Z` |
 
 ## BAS reporting (derived)
 The BAS page renders a financial-year view composed from existing sheets. Data is not persisted; it is calculated on demand from contracts, entries, and deductions.

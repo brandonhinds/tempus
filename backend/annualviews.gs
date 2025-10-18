@@ -269,24 +269,31 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   var otherDeductions = 0;
   var companyExpenses = 0;
   var companyExpensesGst = 0;
+  var categoryTotals = {};
+  var categoryDeductionMap = {};
 
   var periodStart = new Date(year, month, 1);
   var periodEnd = new Date(year, month + 1, 0);
 
   for (var i = 1; i < deductionsData.length; i++) {
     var row = deductionsData[i];
-    var active = row[12] === 'TRUE' || row[12] === true;
+    var active = row[13] === 'TRUE' || row[13] === true;
     if (!active) continue;
 
-    var category = row[2];
-    var deductionType = row[3];
-    var amountType = row[4];
-    var amountValue = Number(row[5]) || 0;
-    var gstInclusive = row[6] === 'TRUE' || row[6] === true;
-    var gstAmount = Number(row[7]) || 0;
-    var frequency = row[8];
-    var startDate = new Date(row[9]);
-    var endDate = row[10] && String(row[10]).trim() !== '' ? new Date(row[10]) : null;
+    var deductionId = row[0] ? String(row[0]) : '';
+    var deductionName = row[1] ? String(row[1]) : '';
+    var categoryId = row[2] ? String(row[2]) : '';
+    var companyExpense = row[3] === 'TRUE' || row[3] === true;
+    var deductionType = row[4];
+    var amountType = row[5];
+    var amountValue = Number(row[6]) || 0;
+    var gstInclusive = row[7] === 'TRUE' || row[7] === true;
+    var gstAmount = Number(row[8]) || 0;
+    var frequency = row[9];
+    var startDate = row[10] ? new Date(row[10]) : null;
+    var endDate = row[11] && String(row[11]).trim() !== '' ? new Date(row[11]) : null;
+
+    if (!startDate) continue;
 
     // Check if deduction applies to this month
     if (startDate > periodEnd) continue;
@@ -294,6 +301,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
     // Calculate occurrences in month
     var occurrences = calculateDeductionOccurrences(frequency, startDate, endDate, periodStart, periodEnd);
+    if (!occurrences) continue;
 
     var monthlyAmount = 0;
     if (amountType === 'percent') {
@@ -304,16 +312,48 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
     if (deductionType === 'extra_super') {
       extraSuper += monthlyAmount;
-    } else if (category === 'company') {
-      if (gstInclusive) {
-        companyExpenses += monthlyAmount / 1.1;
-        companyExpensesGst += gstAmount * occurrences;
-      } else {
-        companyExpenses += monthlyAmount;
-      }
-    } else {
-      otherDeductions += monthlyAmount;
+      continue;
     }
+
+    if (amountType === 'percent') {
+      // Percentage-based standard deductions are not supported; skip for safety.
+      continue;
+    }
+
+    var netAmount = monthlyAmount;
+    if (companyExpense && gstInclusive) {
+      netAmount = monthlyAmount / (1 + GST_RATE);
+      companyExpensesGst += gstAmount * occurrences;
+    }
+
+    if (companyExpense) {
+      companyExpenses += netAmount;
+    } else {
+      otherDeductions += netAmount;
+    }
+
+    if (Math.abs(netAmount) < 0.0000001) {
+      continue;
+    }
+
+    var categoryKey = categoryId || '';
+    if (!categoryTotals.hasOwnProperty(categoryKey)) {
+      categoryTotals[categoryKey] = 0;
+    }
+    categoryTotals[categoryKey] += netAmount;
+
+    if (!categoryDeductionMap[categoryKey]) {
+      categoryDeductionMap[categoryKey] = {};
+    }
+    if (!categoryDeductionMap[categoryKey][deductionId]) {
+      categoryDeductionMap[categoryKey][deductionId] = {
+        deductionId: deductionId,
+        name: deductionName,
+        amount: 0,
+        company_expense: companyExpense
+      };
+    }
+    categoryDeductionMap[categoryKey][deductionId].amount += netAmount;
   }
 
   // Calculate super
@@ -344,6 +384,27 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   // Calculate net income
   var netIncome = Math.max(0, taxableIncome - tax);
 
+  var categoryBreakdown = Object.keys(categoryTotals).map(function(key) {
+    var total = Math.round(categoryTotals[key] * 100) / 100;
+    var deductionList = [];
+    var deductionMap = categoryDeductionMap[key] || {};
+    Object.keys(deductionMap).forEach(function(dId) {
+      var entry = deductionMap[dId];
+      deductionList.push({
+        deductionId: entry.deductionId,
+        name: entry.name,
+        amount: Math.round(entry.amount * 100) / 100,
+        company_expense: entry.company_expense
+      });
+    });
+    deductionList.sort(function(a, b) { return b.amount - a.amount; });
+    return {
+      categoryId: key,
+      total: total,
+      deductions: deductionList
+    };
+  });
+
   return {
     year: year,
     month: month,
@@ -362,7 +423,10 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     companyExpensesGst: companyExpensesGst,
     invoiceTotal: invoiceTotal,
     contractIncome: contractIncome,
-    hourTypeHours: hourTypeHours
+    hourTypeHours: hourTypeHours,
+    categoryBreakdown: {
+      categories: categoryBreakdown
+    }
   };
 }
 
@@ -370,42 +434,51 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
  * Calculate deduction occurrences in a period
  */
 function calculateDeductionOccurrences(frequency, startDate, endDate, periodStart, periodEnd) {
+  if (!startDate) return 0;
   if (frequency === 'once') {
-    if (startDate >= periodStart && startDate <= periodEnd) {
-      return 1;
-    }
-    return 0;
+    return (startDate >= periodStart && startDate <= periodEnd) ? 1 : 0;
+  }
+
+  var current = new Date(startDate.getTime());
+  var upperBound = endDate ? new Date(Math.min(endDate.getTime(), periodEnd.getTime())) : periodEnd;
+  if (current > upperBound) return 0;
+
+  while (current < periodStart) {
+    current = advanceDateByFrequency(current, frequency);
+    if (!current || current > upperBound) return 0;
   }
 
   var occurrences = 0;
-  var current = new Date(Math.max(startDate.getTime(), periodStart.getTime()));
-  var end = endDate ? new Date(Math.min(endDate.getTime(), periodEnd.getTime())) : periodEnd;
-
-  while (current <= end) {
+  while (current && current >= periodStart && current <= upperBound) {
     occurrences++;
-
-    switch (frequency) {
-      case 'weekly':
-        current.setDate(current.getDate() + 7);
-        break;
-      case 'fortnightly':
-        current.setDate(current.getDate() + 14);
-        break;
-      case 'monthly':
-        current.setMonth(current.getMonth() + 1);
-        break;
-      case 'quarterly':
-        current.setMonth(current.getMonth() + 3);
-        break;
-      case 'yearly':
-        current.setFullYear(current.getFullYear() + 1);
-        break;
-      default:
-        return 0;
-    }
+    current = advanceDateByFrequency(current, frequency);
   }
 
   return occurrences;
+}
+
+function advanceDateByFrequency(date, frequency) {
+  var next = new Date(date.getTime());
+  switch (frequency) {
+    case 'weekly':
+      next.setDate(next.getDate() + 7);
+      break;
+    case 'fortnightly':
+      next.setDate(next.getDate() + 14);
+      break;
+    case 'monthly':
+      next.setMonth(next.getMonth() + 1);
+      break;
+    case 'quarterly':
+      next.setMonth(next.getMonth() + 3);
+      break;
+    case 'yearly':
+      next.setFullYear(next.getFullYear() + 1);
+      break;
+    default:
+      return null;
+  }
+  return next;
 }
 
 /**

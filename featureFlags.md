@@ -13,6 +13,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `xero_payroll_helper` | Disabled | Adds a modal that slices the active month into Xero's fixed weekly ranges with cumulative hour totals. |
 | `myob_payroll_helper` | Disabled | Adds a modal that groups the active month into weekly MYOB-ready totals with a monthly cross-check. |
 | `enable_company_tracking_features` | Disabled | Unlocks company-focused fields, including company deduction categories. |
+| `enable_deduction_categories` | Disabled | Adds category management for deductions with colour-coded grouping and annual category breakdowns. |
 | `enable_company_quarterly_bas` | Disabled | Switches BAS reporting to quarterly totals (only available when company tracking is enabled). |
 | `is_sole_trader` | Disabled | Indicates the business is a sole trader rather than a company. Affects PAYG income calculations in BAS reporting (only available when company tracking is enabled). |
 | `enable_public_holidays` | Disabled | Displays Australian public holidays in the calendar view with automatic API sync. |

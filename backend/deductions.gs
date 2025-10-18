@@ -2,7 +2,8 @@ var DEDUCTIONS_SHEET_NAME = 'deductions';
 var DEDUCTIONS_HEADERS = [
   'id',
   'name',
-  'category',
+  'category_id',
+  'company_expense',
   'deduction_type',
   'amount_type',
   'amount_value',
@@ -16,7 +17,7 @@ var DEDUCTIONS_HEADERS = [
   'created_at',
   'updated_at'
 ];
-var DEDUCTIONS_CACHE_KEY = 'deductions_v1';
+var DEDUCTIONS_CACHE_KEY = 'deductions_v2';
 var GST_RATE = 0.1;
 var DEDUCTION_FREQUENCIES = ['once', 'weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'];
 
@@ -27,19 +28,85 @@ function getDeductionsSheet() {
 }
 
 function ensureDeductionsSchema(sh) {
-  var lastColumn = Math.max(sh.getLastColumn(), DEDUCTIONS_HEADERS.length);
-  var headerRange = sh.getRange(1, 1, 1, lastColumn);
+  var expected = DEDUCTIONS_HEADERS;
+  var rowCount = sh.getLastRow();
+  var headerRange = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expected.length));
   var headers = headerRange.getValues()[0];
-  var needsRewrite = false;
-  for (var i = 0; i < DEDUCTIONS_HEADERS.length; i++) {
-    if (headers[i] !== DEDUCTIONS_HEADERS[i]) {
-      needsRewrite = true;
-      break;
+
+  function refreshHeaders() {
+    headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expected.length)).getValues()[0];
+  }
+
+  // Ensure category_id column exists and rename legacy "category" header if present
+  var categoryIdx = headers.indexOf('category_id');
+  if (categoryIdx === -1) {
+    var legacyIdx = headers.indexOf('category');
+    if (legacyIdx !== -1) {
+      sh.getRange(1, legacyIdx + 1).setValue('category_id');
+      categoryIdx = legacyIdx;
+    } else {
+      var nameIdx = headers.indexOf('name');
+      var insertAfter = nameIdx !== -1 ? nameIdx + 1 : 2;
+      sh.insertColumnAfter(insertAfter);
+      sh.getRange(1, insertAfter + 1).setValue('category_id');
+      if (rowCount > 1) {
+        sh.getRange(2, insertAfter + 1, rowCount - 1, 1).setValue('');
+      }
+      categoryIdx = insertAfter;
     }
   }
-  if (needsRewrite) {
-    sh.getRange(1, 1, 1, DEDUCTIONS_HEADERS.length).setValues([DEDUCTIONS_HEADERS]);
+  refreshHeaders();
+
+  // Ensure company_expense column exists (defaults to FALSE)
+  var companyIdx = headers.indexOf('company_expense');
+  if (companyIdx === -1) {
+    var categoryCol = headers.indexOf('category_id');
+    var anchor = categoryCol !== -1 ? categoryCol + 1 : headers.indexOf('name') + 1;
+    if (anchor < 1) anchor = 2;
+    sh.insertColumnAfter(anchor);
+    sh.getRange(1, anchor + 1).setValue('company_expense');
+    if (rowCount > 1) {
+      sh.getRange(2, anchor + 1, rowCount - 1, 1).setValue('FALSE');
+    }
+    companyIdx = anchor;
   }
+  refreshHeaders();
+
+  // Migrate legacy personal/company values into new structure
+  if (rowCount > 1) {
+    var categoryPos = headers.indexOf('category_id');
+    var companyPos = headers.indexOf('company_expense');
+    if (categoryPos !== -1 && companyPos !== -1) {
+      var dataRange = sh.getRange(2, 1, rowCount - 1, Math.max(sh.getLastColumn(), expected.length));
+      var data = dataRange.getValues();
+      var touched = false;
+      for (var r = 0; r < data.length; r++) {
+        var categoryValue = data[r][categoryPos];
+        var companyValue = data[r][companyPos];
+        if (categoryValue === 'company' || categoryValue === 'personal') {
+          var isCompany = categoryValue === 'company';
+          var desiredCompany = isCompany ? 'TRUE' : 'FALSE';
+          if (companyValue !== desiredCompany) {
+            data[r][companyPos] = desiredCompany;
+            touched = true;
+          }
+          if (categoryValue !== '') {
+            data[r][categoryPos] = '';
+            touched = true;
+          }
+        } else if (companyValue === '' || companyValue === null) {
+          data[r][companyPos] = 'FALSE';
+          touched = true;
+        }
+      }
+      if (touched) {
+        dataRange.setValues(data);
+      }
+    }
+  }
+
+  // Finalize header row
+  sh.getRange(1, 1, 1, expected.length).setValues([expected]);
 }
 
 function normalizeDeductionRow(row, headers) {
@@ -52,15 +119,23 @@ function normalizeDeductionRow(row, headers) {
   if (!id) return null;
   var amount = Number(map.amount_value) || 0;
   var gstInclusive = parseBoolean(map.gst_inclusive);
-  var category = (map.category || 'personal').toString().toLowerCase();
+  var categoryId = map.category_id != null ? String(map.category_id).trim() : '';
+  var legacyCategory = map.category != null ? String(map.category).toLowerCase() : '';
+  if (!categoryId && (legacyCategory === 'personal' || legacyCategory === 'company')) {
+    categoryId = '';
+  }
+  var companyExpense = map.company_expense !== undefined
+    ? parseBoolean(map.company_expense)
+    : legacyCategory === 'company';
   var gstAmount = 0;
-  if (category === 'company' && gstInclusive) {
+  if (companyExpense && gstInclusive) {
     gstAmount = Number(map.gst_amount || (amount - amount / (1 + GST_RATE)));
   }
   return {
     id: id,
     name: map.name ? String(map.name) : '',
-    category: category === 'company' ? 'company' : 'personal',
+    category_id: categoryId,
+    company_expense: companyExpense,
     deduction_type: map.deduction_type === 'extra_super' ? 'extra_super' : 'standard',
     amount_type: map.amount_type === 'percent' ? 'percent' : 'flat',
     amount_value: amount,
@@ -104,8 +179,13 @@ function normalizeDeductionPayload(payload, existing) {
   var name = payload.name != null ? String(payload.name).trim() : '';
   if (!name) throw new Error('Deduction name is required.');
 
-  var categoryRaw = payload.category || 'personal';
-  var category = String(categoryRaw).toLowerCase() === 'company' ? 'company' : 'personal';
+  var categoryId = payload.category_id != null ? String(payload.category_id).trim() : '';
+  if (categoryId === 'company' || categoryId === 'personal') {
+    categoryId = '';
+  }
+  var companyExpense = payload.company_expense !== undefined
+    ? parseBoolean(payload.company_expense)
+    : String(payload.category || '').toLowerCase() === 'company';
 
   var deductionType = payload.deduction_type === 'extra_super' ? 'extra_super' : 'standard';
   var amountType = deductionType === 'extra_super' && payload.amount_type === 'percent' ? 'percent' : 'flat';
@@ -128,6 +208,10 @@ function normalizeDeductionPayload(payload, existing) {
 
   var gstInclusive = parseBoolean(payload.gst_inclusive);
   if (deductionType === 'extra_super') {
+    gstInclusive = false;
+    companyExpense = false;
+  }
+  if (!companyExpense) {
     gstInclusive = false;
   }
 
@@ -155,7 +239,8 @@ function normalizeDeductionPayload(payload, existing) {
   return {
     id: existing && existing.id ? existing.id : (payload.id ? String(payload.id) : ''),
     name: name,
-    category: category,
+    category_id: categoryId,
+    company_expense: companyExpense,
     deduction_type: deductionType,
     amount_type: amountType,
     amount_value: amountValue,
@@ -174,7 +259,7 @@ function buildDeductionRow(payload, timestamps) {
     amount = Number(payload.amount_value);
   }
   var gstAmount = 0;
-  if (payload.category === 'company' && payload.deduction_type === 'standard') {
+  if (payload.company_expense && payload.deduction_type === 'standard') {
     if (payload.gst_inclusive) {
       var inclusiveValue = Number(payload.amount_value);
       var ex = inclusiveValue / (1 + GST_RATE);
@@ -187,7 +272,8 @@ function buildDeductionRow(payload, timestamps) {
   return [
     payload.id,
     payload.name,
-    payload.category,
+    payload.category_id || '',
+    payload.company_expense ? 'TRUE' : 'FALSE',
     payload.deduction_type,
     payload.amount_type,
     payload.amount_type === 'percent' ? payload.amount_value : Number(payload.amount_value),
