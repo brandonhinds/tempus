@@ -130,6 +130,9 @@
       hourTypesPie: null,
       totalHoursPie: null,
       totalHoursByTypePie: null
+    },
+    contractCharts: {
+      monthlyHours: null
     }
   };
 
@@ -4019,7 +4022,8 @@ function updateDeductionFormVisibility() {
   const THEME_KEYS = ['dark', 'light', 'og', 'rose', 'sierra117', 'protanopia', 'deuteranopia', 'tritanopia', 'monochrome', 'custom'];
 
   function applyTheme(theme) {
-    const normalized = THEME_KEYS.includes(theme) ? theme : 'dark';
+    const normalizedTheme = (typeof theme === 'string' ? theme.trim().toLowerCase() : '');
+    const normalized = THEME_KEYS.includes(normalizedTheme) ? normalizedTheme : 'dark';
     const body = document.body;
     THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
     body.classList.add('ts-theme-' + normalized);
@@ -4029,6 +4033,14 @@ function updateDeductionFormVisibility() {
     // Apply custom theme if selected
     if (normalized === 'custom') {
       applyCustomTheme();
+    }
+
+    if (contractBurndownEl && state.selectedContractId) {
+      const activeContract = getContractById(state.selectedContractId);
+      if (activeContract) {
+        const usage = computeContractUsage(activeContract);
+        renderContractBurndown(activeContract, usage);
+      }
     }
   }
 
@@ -6185,6 +6197,10 @@ function updateDeductionFormVisibility() {
   function renderContractBurndown(contract, usage) {
     if (!contractBurndownEl) return;
     contractBurndownEl.innerHTML = '';
+    if (state.contractCharts && state.contractCharts.monthlyHours) {
+      state.contractCharts.monthlyHours.destroy();
+      state.contractCharts.monthlyHours = null;
+    }
     const totalHours = Number(contract.total_hours || 0);
     if (!usage) usage = computeContractUsage(contract);
     if (totalHours <= 0) {
@@ -6397,6 +6413,124 @@ function updateDeductionFormVisibility() {
     legend.className = 'contract-burndown-legend';
     legend.innerHTML = `<span><span class="line" style="background:${mutedColor};"></span>Expected remaining</span><span><span class="line" style="background:${primaryColor};"></span>Actual remaining</span>${actualAveragePath ? `<span><span class="line" style="background:transparent; border-bottom:2px dashed ${successColor}; height:0;"></span>Actual average (projection)</span>` : ''}`;
     contractBurndownEl.appendChild(legend);
+
+    const chartLabels = months.map((monthDate) => formatMonthShortYear(monthDate));
+    const monthlyHoursData = months.map((monthDate) => {
+      const key = monthKeyFor(monthDate.getFullYear(), monthDate.getMonth());
+      return Number(usage.monthlyHours[key] || 0);
+    });
+
+    if (chartLabels.length) {
+      const chartWrapper = document.createElement('div');
+      chartWrapper.className = 'contract-monthly-chart';
+      const chartCanvas = document.createElement('canvas');
+      chartWrapper.appendChild(chartCanvas);
+      contractBurndownEl.appendChild(chartWrapper);
+
+      const colors = getThemeColors();
+      const datasets = [
+        {
+          type: 'bar',
+          label: 'Hours logged',
+          data: monthlyHoursData,
+          backgroundColor: colors.primary || '#3b82f6',
+          borderColor: colors.primary || '#3b82f6',
+          borderWidth: 0,
+          borderRadius: 6,
+          maxBarThickness: 42,
+          order: 2
+        }
+      ];
+
+      if (avgBurn > 0) {
+        datasets.push({
+          type: 'line',
+          label: 'Expected monthly average',
+          data: chartLabels.map(() => avgBurn),
+          borderColor: colors.warning || '#facc15',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0,
+          order: 0
+        });
+      }
+
+      if (avgActualMonthlyBurn > 0) {
+        datasets.push({
+          type: 'line',
+          label: 'Actual average to date',
+          data: chartLabels.map(() => avgActualMonthlyBurn),
+          borderColor: colors.success || '#10b981',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0,
+          order: 1
+        });
+      }
+
+      const ctx = chartCanvas.getContext('2d');
+      const textColor = colors.text || '#f5f9ff';
+      const mutedColor = colors.muted || '#94a3b8';
+      const gridColor = colors.border || 'rgba(148,163,184,0.35)';
+
+      if (state.contractCharts.monthlyHours) {
+        state.contractCharts.monthlyHours.destroy();
+      }
+
+      state.contractCharts.monthlyHours = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: chartLabels,
+          datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                color: textColor,
+                usePointStyle: true,
+                padding: 12
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label(context) {
+                  const value = typeof context.parsed === 'number' ? context.parsed : context.parsed.y;
+                  return `${context.dataset.label}: ${formatDecimalHours(value || 0)} hrs`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: {
+                color: mutedColor
+              }
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: gridColor },
+              ticks: {
+                color: mutedColor,
+                callback(value) {
+                  return `${formatDecimalHours(Number(value) || 0)} hrs`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
 
     const table = document.createElement('table');
     table.className = 'contract-burndown-table';
