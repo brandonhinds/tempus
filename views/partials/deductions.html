@@ -157,3 +157,47 @@
     </div>
   </div>
 </div>
+
+<!-- Split Deduction Decision Modal -->
+<div class="ts-modal" id="modal-split-deduction" style="display:none;">
+  <div class="ts-modal-content" style="max-width:600px;">
+    <div class="ts-modal-header">
+      <h3>Edit Recurring Deduction</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-note" style="margin-bottom:16px; padding:12px; background:var(--warning)20; border-left:3px solid var(--warning);">
+        ⚠️ This deduction has occurrences in the past. How would you like to proceed?
+      </div>
+
+      <label style="display:block; margin-bottom:24px; padding:12px; border:2px solid var(--border); border-radius:8px; cursor:pointer;">
+        <input type="radio" name="split-decision" value="split" checked>
+        <div style="margin-left:28px; margin-top:8px;">
+          <strong>Split into past and future (Recommended)</strong>
+          <div class="ts-note" style="margin-top:4px;">
+            • Past: Keeps current settings (preserves history)<br>
+            • Future: Your new settings apply<br>
+            • All adjustments are preserved
+          </div>
+        </div>
+      </label>
+
+      <label style="display:block; margin-bottom:16px; padding:12px; border:2px solid var(--border); border-radius:8px; cursor:pointer;">
+        <input type="radio" name="split-decision" value="override">
+        <div style="margin-left:28px; margin-top:8px;">
+          <strong>Override all occurrences (Advanced)</strong>
+          <div class="ts-note" style="margin-top:4px; color:var(--warning);">
+            ⚠️ Warning: This will:<br>
+            • Change historical data<br>
+            • Delete all occurrence adjustments<br>
+            • Affect past reports
+          </div>
+        </div>
+      </label>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-split">Cancel</button>
+      <button id="btn-confirm-split">Continue</button>
+    </div>
+  </div>
+</div>

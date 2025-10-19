@@ -299,61 +299,70 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     if (startDate > periodEnd) continue;
     if (endDate && endDate < periodStart) continue;
 
-    // Calculate occurrences in month
-    var occurrences = calculateDeductionOccurrences(frequency, startDate, endDate, periodStart, periodEnd);
-    if (!occurrences) continue;
+    // Get occurrences with exceptions applied
+    var occurrencesWithExceptions = getDeductionOccurrencesWithExceptions(
+      deductionId, frequency, startDate, endDate, periodStart, periodEnd
+    );
+    if (!occurrencesWithExceptions || !occurrencesWithExceptions.length) continue;
 
-    var monthlyAmount = 0;
-    if (amountType === 'percent') {
-      monthlyAmount = grossIncome * amountValue * occurrences;
-    } else {
-      monthlyAmount = amountValue * occurrences;
-    }
+    // Process each occurrence individually to handle amount adjustments
+    for (var occIdx = 0; occIdx < occurrencesWithExceptions.length; occIdx++) {
+      var occ = occurrencesWithExceptions[occIdx];
+      var occAmount = occ.amount !== null && occ.amount !== undefined ? occ.amount : amountValue;
 
-    if (deductionType === 'extra_super') {
-      extraSuper += monthlyAmount;
-      continue;
-    }
+      var monthlyAmount = 0;
+      if (amountType === 'percent') {
+        monthlyAmount = grossIncome * occAmount;
+      } else {
+        monthlyAmount = occAmount;
+      }
 
-    if (amountType === 'percent') {
-      // Percentage-based standard deductions are not supported; skip for safety.
-      continue;
-    }
+      if (deductionType === 'extra_super') {
+        extraSuper += monthlyAmount;
+        continue;
+      }
 
-    var netAmount = monthlyAmount;
-    if (companyExpense && gstInclusive) {
-      netAmount = monthlyAmount / (1 + GST_RATE);
-      companyExpensesGst += gstAmount * occurrences;
-    }
+      if (amountType === 'percent') {
+        // Percentage-based standard deductions are not supported; skip for safety.
+        continue;
+      }
 
-    if (companyExpense) {
-      companyExpenses += netAmount;
-    } else {
-      otherDeductions += netAmount;
-    }
+      var netAmount = monthlyAmount;
+      if (companyExpense && gstInclusive) {
+        netAmount = monthlyAmount / (1 + GST_RATE);
+        var gstComponent = monthlyAmount - netAmount;
+        companyExpensesGst += gstComponent;
+      }
 
-    if (Math.abs(netAmount) < 0.0000001) {
-      continue;
-    }
+      if (companyExpense) {
+        companyExpenses += netAmount;
+      } else {
+        otherDeductions += netAmount;
+      }
 
-    var categoryKey = categoryId || '';
-    if (!categoryTotals.hasOwnProperty(categoryKey)) {
-      categoryTotals[categoryKey] = 0;
-    }
-    categoryTotals[categoryKey] += netAmount;
+      if (Math.abs(netAmount) < 0.0000001) {
+        continue;
+      }
 
-    if (!categoryDeductionMap[categoryKey]) {
-      categoryDeductionMap[categoryKey] = {};
-    }
-    if (!categoryDeductionMap[categoryKey][deductionId]) {
-      categoryDeductionMap[categoryKey][deductionId] = {
-        deductionId: deductionId,
-        name: deductionName,
-        amount: 0,
-        company_expense: companyExpense
-      };
-    }
-    categoryDeductionMap[categoryKey][deductionId].amount += netAmount;
+      var categoryKey = categoryId || '';
+      if (!categoryTotals.hasOwnProperty(categoryKey)) {
+        categoryTotals[categoryKey] = 0;
+      }
+      categoryTotals[categoryKey] += netAmount;
+
+      if (!categoryDeductionMap[categoryKey]) {
+        categoryDeductionMap[categoryKey] = {};
+      }
+      if (!categoryDeductionMap[categoryKey][deductionId]) {
+        categoryDeductionMap[categoryKey][deductionId] = {
+          deductionId: deductionId,
+          name: deductionName,
+          amount: 0,
+          company_expense: companyExpense
+        };
+      }
+      categoryDeductionMap[categoryKey][deductionId].amount += netAmount;
+    } // End of occurrence loop
   }
 
   // Calculate super
@@ -455,6 +464,55 @@ function calculateDeductionOccurrences(frequency, startDate, endDate, periodStar
   }
 
   return occurrences;
+}
+
+/**
+ * Generate occurrence dates for a deduction within a period
+ * Returns array of ISO date strings
+ */
+function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd) {
+  var dates = [];
+  if (!startDate) return dates;
+
+  if (frequency === 'once') {
+    if (startDate >= periodStart && startDate <= periodEnd) {
+      dates.push(toIsoDate(startDate));
+    }
+    return dates;
+  }
+
+  var current = new Date(startDate.getTime());
+  var upperBound = endDate ? new Date(Math.min(endDate.getTime(), periodEnd.getTime())) : periodEnd;
+  if (current > upperBound) return dates;
+
+  while (current < periodStart) {
+    current = advanceDateByFrequency(current, frequency);
+    if (!current || current > upperBound) return dates;
+  }
+
+  while (current && current >= periodStart && current <= upperBound) {
+    dates.push(toIsoDate(current));
+    current = advanceDateByFrequency(current, frequency);
+  }
+
+  return dates;
+}
+
+/**
+ * Get deduction occurrences with exceptions applied
+ * Returns array of occurrence objects with amount adjustments
+ */
+function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate, endDate, periodStart, periodEnd) {
+  // Generate base occurrence dates
+  var occurrenceDates = generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd);
+
+  // Load exceptions for this deduction
+  var exceptions = listDeductionExceptionsInternal(deductionId);
+
+  // Apply exceptions
+  var occurrencesWithExceptions = applyExceptionsToOccurrences(occurrenceDates, exceptions, periodStart, periodEnd);
+
+  return occurrencesWithExceptions;
 }
 
 function advanceDateByFrequency(date, frequency) {

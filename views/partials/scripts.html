@@ -64,6 +64,11 @@
   const btnCloseDeductionCategories = document.getElementById('btn-close-deduction-categories');
   const btnCancelDeductionCategory = document.getElementById('btn-cancel-deduction-category');
   const btnSaveDeductionCategory = document.getElementById('btn-save-deduction-category');
+  const modalSplitDeduction = document.getElementById('modal-split-deduction');
+  const btnCancelSplit = document.getElementById('btn-cancel-split');
+  const btnConfirmSplit = document.getElementById('btn-confirm-split');
+  let pendingDeductionPayload = null;
+  let originalDeductionForSplit = null;
   const basFySelect = document.getElementById('bas-fy-select');
   const basTableBody = document.getElementById('bas-table-body');
   const basQuarterlyNote = document.getElementById('bas-quarterly-note');
@@ -81,6 +86,8 @@
     deductionCategories: [],
     deductionCategoryMap: {},
     deductionCategoryCollapse: {},
+    deductionExceptions: [],
+    deductionExceptionsMap: {},
     actualIncome: [],
     actualIncomeMap: {},
     editingActualIncomeId: null,
@@ -357,6 +364,39 @@
       setAllDeductionCategoryCollapse(true);
     });
   }
+  if (btnCancelSplit) {
+    btnCancelSplit.addEventListener('click', (event) => {
+      event.preventDefault();
+      hideModal(modalSplitDeduction);
+      pendingDeductionPayload = null;
+      originalDeductionForSplit = null;
+    });
+  }
+  if (btnConfirmSplit) {
+    btnConfirmSplit.addEventListener('click', (event) => {
+      event.preventDefault();
+      const splitDecisionRadios = document.getElementsByName('split-decision');
+      let selectedDecision = 'split'; // default
+      for (let i = 0; i < splitDecisionRadios.length; i++) {
+        if (splitDecisionRadios[i].checked) {
+          selectedDecision = splitDecisionRadios[i].value;
+          break;
+        }
+      }
+
+      hideModal(modalSplitDeduction);
+
+      if (selectedDecision === 'split') {
+        performSplitDeduction(originalDeductionForSplit, pendingDeductionPayload);
+      } else {
+        performOverrideDeduction(pendingDeductionPayload, originalDeductionForSplit);
+      }
+
+      // Clear state
+      pendingDeductionPayload = null;
+      originalDeductionForSplit = null;
+    });
+  }
 
   // Helpers
 
@@ -458,6 +498,12 @@
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
     return currencyFormatter.format(num);
+  };
+  const formatDate = (value) => {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return DATE_FULL_FORMATTER.format(date);
   };
   const addDays = (date, amount) => {
     const next = new Date(date.getTime());
@@ -771,6 +817,23 @@
     return clone;
   };
 
+  const sanitizeDeductionException = (exception) => {
+    if (!exception) return exception;
+    const clone = { ...exception };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.deduction_id = clone.deduction_id ? String(clone.deduction_id) : '';
+    clone.original_date = clone.original_date ? String(clone.original_date) : '';
+    clone.exception_type = ['skip', 'move', 'adjust_amount'].includes(clone.exception_type)
+      ? clone.exception_type
+      : 'skip';
+    clone.new_date = clone.new_date ? String(clone.new_date) : '';
+    clone.new_amount = Number(clone.new_amount) || 0;
+    clone.notes = clone.notes ? String(clone.notes).trim() : '';
+    clone.created_at = clone.created_at || '';
+    clone.updated_at = clone.updated_at || '';
+    return clone;
+  };
+
   function nextOccurrenceDate(current, frequency) {
     if (!current) return null;
     switch (frequency) {
@@ -889,6 +952,114 @@
     }
   }
 
+  /**
+   * Get exceptions for a specific deduction
+   */
+  function getDeductionExceptions(deductionId) {
+    if (!deductionId) return [];
+    return state.deductionExceptions.filter(ex => ex.deduction_id === deductionId);
+  }
+
+  /**
+   * Apply exceptions to occurrence dates
+   * Returns array of occurrence objects with exception info
+   */
+  function applyExceptionsToOccurrences(occurrenceDates, deductionId, rangeStart, rangeEnd) {
+    const startIso = rangeStart ? isoDate(rangeStart) : null;
+    const endIso = rangeEnd ? isoDate(rangeEnd) : null;
+    const exceptions = getDeductionExceptions(deductionId);
+
+    const result = [];
+    const seenKeys = new Set();
+
+    const addOccurrence = (occ) => {
+      if (!occ || !occ.date) return;
+      if (startIso && occ.date < startIso) return;
+      if (endIso && occ.date > endIso) return;
+      const key = occ.date + '|' + (occ.originalDate || '');
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      result.push(occ);
+    };
+
+    if (Array.isArray(occurrenceDates) && occurrenceDates.length) {
+      const exceptionMap = {};
+      exceptions.forEach((ex) => {
+        if (ex && ex.original_date) {
+          exceptionMap[ex.original_date] = ex;
+        }
+      });
+
+      occurrenceDates.forEach((dateObj) => {
+        const dateStr = isoDate(dateObj);
+        const exception = exceptionMap[dateStr];
+
+        if (exception) {
+          if (exception.exception_type === 'skip') {
+            return;
+          }
+          if (exception.exception_type === 'move' && exception.new_date) {
+            addOccurrence({
+              date: exception.new_date,
+              originalDate: dateStr,
+              amount: null,
+              hasException: true,
+              exceptionType: 'move'
+            });
+            return;
+          }
+          if (exception.exception_type === 'adjust_amount') {
+            addOccurrence({
+              date: dateStr,
+              amount: Number(exception.new_amount) || 0,
+              hasException: true,
+              exceptionType: 'adjust_amount'
+            });
+            return;
+          }
+        }
+
+        addOccurrence({
+          date: dateStr,
+          amount: null,
+          hasException: false,
+          exceptionType: null
+        });
+      });
+    }
+
+    // Include moved occurrences whose original dates were outside the requested range
+    if (Array.isArray(exceptions) && exceptions.length) {
+      exceptions.forEach((ex) => {
+        if (!ex || ex.exception_type !== 'move' || !ex.new_date) return;
+        addOccurrence({
+          date: ex.new_date,
+          originalDate: ex.original_date || null,
+          amount: null,
+          hasException: true,
+          exceptionType: 'move'
+        });
+      });
+    }
+
+    result.sort((a, b) => a.date.localeCompare(b.date));
+    return result;
+  }
+
+  /**
+   * Get deduction occurrences with exceptions applied
+   * Returns array of occurrence objects
+   */
+  function getDeductionOccurrencesWithExceptions(deduction, rangeStart, rangeEnd, limit) {
+    if (!deduction) return [];
+
+    // Get base occurrences
+    const baseOccurrences = getDeductionOccurrencesBetween(deduction, rangeStart, rangeEnd, limit);
+
+    // Apply exceptions
+    return applyExceptionsToOccurrences(baseOccurrences, deduction.id, rangeStart, rangeEnd);
+  }
+
   function formatDeductionAmount(deduction) {
     if (deduction.amount_type === 'percent') {
       const pct = Math.round((deduction.amount_value * 100) * 100) / 100;
@@ -915,35 +1086,43 @@
     const monthEnd = startOfDay(new Date(year, month + 1, 0));
     state.deductions.forEach((deduction) => {
       if (!deduction || deduction.active === false) return;
-      const occurrences = getDeductionOccurrencesBetween(deduction, monthStart, monthEnd);
+      const occurrences = getDeductionOccurrencesWithExceptions(deduction, monthStart, monthEnd);
       if (!occurrences.length) return;
       if (deduction.deduction_type === 'extra_super') {
         if (deduction.amount_type === 'percent') {
           result.extraSuperPercentRate += deduction.amount_value * occurrences.length;
         } else {
-          result.extraSuperFlat += deduction.amount_value * occurrences.length;
+          // Sum up all occurrences, using adjusted amount if present
+          occurrences.forEach(occ => {
+            const amount = occ.amount !== null ? occ.amount : deduction.amount_value;
+            result.extraSuperFlat += amount;
+          });
         }
         return;
       }
       if (deduction.amount_type === 'percent') {
         return;
       }
-      let netAmount = deduction.amount_value;
-      if (deduction.gst_inclusive) {
-        netAmount = deduction.amount_value / (1 + GST_RATE);
-      }
-      const totalAmount = netAmount * occurrences.length;
-      result.standardTotal += totalAmount;
-      if (deduction.company_expense) {
-        result.companyStandardTotal += totalAmount;
+
+      // Process each occurrence individually to handle amount adjustments
+      occurrences.forEach(occ => {
+        const baseAmount = occ.amount !== null ? occ.amount : deduction.amount_value;
+        let netAmount = baseAmount;
         if (deduction.gst_inclusive) {
-          const inclusive = deduction.amount_value;
-          const gstComponent = inclusive - (inclusive / (1 + GST_RATE));
-          result.companyGstTotal += gstComponent * occurrences.length;
+          netAmount = baseAmount / (1 + GST_RATE);
         }
-      } else {
-        result.personalStandardTotal += totalAmount;
-      }
+
+        result.standardTotal += netAmount;
+        if (deduction.company_expense) {
+          result.companyStandardTotal += netAmount;
+          if (deduction.gst_inclusive) {
+            const gstComponent = baseAmount - (baseAmount / (1 + GST_RATE));
+            result.companyGstTotal += gstComponent;
+          }
+        } else {
+          result.personalStandardTotal += netAmount;
+        }
+      });
     });
     return result;
   }
@@ -3067,16 +3246,194 @@ function updateDeductionFormVisibility() {
     return sanitizeDeduction(base);
   }
 
-  function handleSaveDeduction() {
-    const payload = collectDeductionPayload();
-    if (!payload) return;
-    const isEdit = deductionFormState.mode === 'edit' && deductionFormState.editingId;
-    if (isEdit) {
-      payload.id = deductionFormState.editingId;
+  function deductionHasPastOccurrences(deduction) {
+    if (!deduction || !deduction.start_date) return false;
+    const today = startOfDay(new Date());
+    const startDate = parseIsoDate(deduction.start_date);
+    return startDate < today;
+  }
+
+  function findLastPastOccurrence(deduction) {
+    if (!deduction || !deduction.start_date) return null;
+    const today = startOfDay(new Date());
+    const startDate = parseIsoDate(deduction.start_date);
+    const endDate = deduction.end_date ? parseIsoDate(deduction.end_date) : null;
+
+    if (startDate >= today) return null;
+
+    const upperBound = endDate && endDate < today ? endDate : new Date(today.getTime() - 24 * 60 * 60 * 1000); // Yesterday
+
+    if (deduction.frequency === 'once') {
+      return startDate <= upperBound ? isoDate(startDate) : null;
     }
+
+    let current = startOfDay(startDate);
+    let lastPast = null;
+
+    while (current && current <= upperBound) {
+      lastPast = isoDate(current);
+      current = nextOccurrenceDate(current, deduction.frequency);
+      if (!current) break;
+      if (endDate && current > endDate) break;
+    }
+
+    return lastPast;
+  }
+
+  function findNextFutureOccurrence(deduction) {
+    if (!deduction || !deduction.start_date) return null;
+    const today = startOfDay(new Date());
+    const startDate = parseIsoDate(deduction.start_date);
+    const endDate = deduction.end_date ? parseIsoDate(deduction.end_date) : null;
+
+    if (startDate >= today) return isoDate(startDate);
+
+    if (deduction.frequency === 'once') {
+      return null; // One-time deduction in the past has no future occurrence
+    }
+
+    let current = startOfDay(startDate);
+
+    while (current && current < today) {
+      current = nextOccurrenceDate(current, deduction.frequency);
+      if (!current) return null;
+      if (endDate && current > endDate) return null;
+    }
+
+    return current ? isoDate(current) : null;
+  }
+
+  function performSplitDeduction(originalDeduction, newPayload) {
+    const lastPastDate = findLastPastOccurrence(originalDeduction);
+    const nextFutureDate = findNextFutureOccurrence(originalDeduction);
+
+    if (!lastPastDate || !nextFutureDate) {
+      // No split needed, just save normally
+      saveDeductionDirectly(newPayload, originalDeduction);
+      return;
+    }
+
+    // Step 1: Update original deduction with end date = last past occurrence
+    const updatedOriginal = {
+      ...originalDeduction,
+      end_date: lastPastDate
+    };
+
+    // Step 2: Create new deduction with new settings starting from next future occurrence
+    const newDeduction = {
+      ...newPayload,
+      id: undefined, // New UUID will be generated
+      start_date: nextFutureDate
+    };
+
+    // Save both deductions
+    setStatus('Splitting deduction...', 'warn');
+
+    const previousList = state.deductions.slice();
+    const revertOptimisticSplit = () => {
+      state.deductions = previousList.slice();
+      state.deductions = dedupeById(state.deductions);
+      saveCache();
+      renderDeductionsList();
+      renderIncomeSummary();
+      renderAnnualCategorySection();
+    };
+
+    const optimisticOriginal = sanitizeDeduction({ ...updatedOriginal });
+    const optimisticNewId = `temp_split_${Date.now()}`;
+    const optimisticNew = sanitizeDeduction({
+      ...newDeduction,
+      id: optimisticNewId
+    });
+
+    const originalIndex = state.deductions.findIndex((item) => item.id === originalDeduction.id);
+    if (originalIndex !== -1) {
+      state.deductions.splice(originalIndex, 1, optimisticOriginal);
+    } else {
+      state.deductions.push(optimisticOriginal);
+    }
+    state.deductions.push(optimisticNew);
+    state.deductions = dedupeById(state.deductions);
+    saveCache();
+    renderDeductionsList();
+    renderIncomeSummary();
+    renderAnnualCategorySection();
+
+    // First, update the original
+    google.script.run
+      .withSuccessHandler((res1) => {
+        if (res1 && res1.success) {
+          // Then create the new one
+          google.script.run
+            .withSuccessHandler((res2) => {
+              if (res2 && res2.success) {
+                // Reload deductions
+                google.script.run
+                  .withSuccessHandler((deductions) => {
+                    state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+                    saveCache();
+                    renderDeductionsList();
+                    renderIncomeSummary();
+                    renderAnnualCategorySection();
+                    if (state.annualData) {
+                      loadAnnualData();
+                    }
+                    setStatus('Deduction split successfully', 'success');
+                  })
+                  .withFailureHandler(() => {
+                    revertOptimisticSplit();
+                    setStatus('Failed to reload deductions', 'error');
+                  })
+                  .api_getDeductions();
+              } else {
+                revertOptimisticSplit();
+                setStatus('Failed to create future deduction', 'error');
+              }
+            })
+            .withFailureHandler(() => {
+              revertOptimisticSplit();
+              setStatus('Failed to create future deduction', 'error');
+            })
+            .api_upsertDeduction(newDeduction);
+        } else {
+          revertOptimisticSplit();
+          setStatus('Failed to update past deduction', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        revertOptimisticSplit();
+        setStatus('Failed to update past deduction', 'error');
+      })
+      .api_upsertDeduction(updatedOriginal);
+  }
+
+  function performOverrideDeduction(payload, originalDeduction) {
+    // Delete all exceptions for this deduction
+    if (originalDeduction && originalDeduction.id) {
+      google.script.run
+        .withSuccessHandler(() => {
+          // Remove exceptions from local state
+          state.deductionExceptions = state.deductionExceptions.filter(
+            ex => ex.deduction_id !== originalDeduction.id
+          );
+          saveCache();
+
+          // Now save the deduction normally
+          saveDeductionDirectly(payload, originalDeduction);
+        })
+        .withFailureHandler(() => {
+          setStatus('Failed to delete exceptions', 'error');
+        })
+        .api_deleteExceptionsByDeductionId(originalDeduction.id);
+    } else {
+      saveDeductionDirectly(payload, originalDeduction);
+    }
+  }
+
+  function saveDeductionDirectly(payload, existing) {
+    const isEdit = !!existing;
     const previousList = state.deductions.slice();
     const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
-    const existing = existingIndex !== -1 ? state.deductions[existingIndex] : null;
     const optimisticId = isEdit ? payload.id : `temp_${Date.now()}`;
     const optimisticDeduction = buildOptimisticDeduction({ ...payload, id: optimisticId }, existing);
 
@@ -3091,7 +3448,6 @@ function updateDeductionFormVisibility() {
     renderDeductionsList();
     renderIncomeSummary();
     renderAnnualCategorySection();
-    closeDeductionForm();
     setStatus('Saving deduction...', 'warn');
 
     const serverPayload = { ...payload };
@@ -3138,6 +3494,36 @@ function updateDeductionFormVisibility() {
         setStatus('Deduction save failed', 'error');
       })
       .api_upsertDeduction(serverPayload);
+  }
+
+  function handleSaveDeduction() {
+    const payload = collectDeductionPayload();
+    if (!payload) return;
+    const isEdit = deductionFormState.mode === 'edit' && deductionFormState.editingId;
+    if (isEdit) {
+      payload.id = deductionFormState.editingId;
+    }
+    const previousList = state.deductions.slice();
+    const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
+    const existing = existingIndex !== -1 ? state.deductions[existingIndex] : null;
+
+    // Check if we need to show the split dialog
+    if (isEdit && existing && deductionHasPastOccurrences(existing)) {
+      // Store the payload and original for later
+      pendingDeductionPayload = payload;
+      originalDeductionForSplit = existing;
+
+      // Close deduction form
+      closeDeductionForm();
+
+      // Show split decision modal
+      showModal(modalSplitDeduction);
+      return;
+    }
+
+    // No split needed, save normally
+    closeDeductionForm();
+    saveDeductionDirectly(payload, existing);
   }
 
   async function handleDeleteDeduction(deduction) {
@@ -4009,6 +4395,7 @@ function updateDeductionFormVisibility() {
       state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
         ? { ...obj.deductionCategoryCollapse }
         : {};
+      state.deductionExceptions = Array.isArray(obj.deductionExceptions) ? obj.deductionExceptions.map(sanitizeDeductionException) : [];
       if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
       state.featureFlags = normalizeFeatureFlags(obj.featureFlags);
       state.publicHolidays = Array.isArray(obj.publicHolidays) ? obj.publicHolidays : [];
@@ -4046,6 +4433,7 @@ function updateDeductionFormVisibility() {
         deductions: state.deductions.map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
+        deductionExceptions: state.deductionExceptions.map(sanitizeDeductionException),
         annualCategoryFilters: state.annualCategoryFilters,
         annualCategoryExpansion: state.annualCategoryExpansion,
         featureFlags: normalizeFeatureFlags(state.featureFlags),
@@ -5296,6 +5684,19 @@ function updateDeductionFormVisibility() {
   const monthlyDeductionsTitle = document.getElementById('monthly-deductions-title');
   const monthlyDeductionsContent = document.getElementById('monthly-deductions-content');
   const btnCloseMonthlyDeductions = document.getElementById('btn-close-monthly-deductions');
+  const modalAdjustOccurrence = document.getElementById('modal-adjust-occurrence');
+  const adjustDeductionName = document.getElementById('adjust-deduction-name');
+  const adjustOriginalDate = document.getElementById('adjust-original-date');
+  const adjustOriginalAmount = document.getElementById('adjust-original-amount');
+  const adjustNewDate = document.getElementById('adjust-new-date');
+  const adjustNewAmount = document.getElementById('adjust-new-amount');
+  const adjustNotes = document.getElementById('adjust-notes');
+  const btnCancelAdjust = document.getElementById('btn-cancel-adjust');
+  const btnSaveException = document.getElementById('btn-save-exception');
+  const btnDeleteException = document.getElementById('btn-delete-exception');
+  let adjustingDeduction = null;
+  let adjustingOriginalDate = null;
+  let adjustingType = null;
   let incomeBreakdownExpanded = false;
   if (incomeToggleBtn) {
     incomeToggleBtn.addEventListener('click', () => {
@@ -6948,6 +7349,8 @@ function updateDeductionFormVisibility() {
       if (incomeActualSuperValueEl) incomeActualSuperValueEl.textContent = '';
       if (incomeActualTaxValueEl) incomeActualTaxValueEl.textContent = '';
       if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
+      if (btnCompanyExpensesDetails) btnCompanyExpensesDetails.style.display = 'none';
+      if (btnDeductionsDetails) btnDeductionsDetails.style.display = 'none';
       return;
     }
     const netValue = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
@@ -7000,6 +7403,14 @@ function updateDeductionFormVisibility() {
     if (incomeOtherDeductionsEl) incomeOtherDeductionsEl.textContent = formatCurrency(summary.otherDeductions);
     if (incomeTaxableEl) incomeTaxableEl.textContent = formatCurrency(summary.taxableIncome);
     if (incomeTaxEl) incomeTaxEl.textContent = taxText;
+
+    // Show/hide detail buttons based on whether there are expenses
+    if (btnCompanyExpensesDetails) {
+      btnCompanyExpensesDetails.style.display = (summary.companyExpenses > 0.01) ? 'inline-block' : 'none';
+    }
+    if (btnDeductionsDetails) {
+      btnDeductionsDetails.style.display = (summary.otherDeductions > 0.01) ? 'inline-block' : 'none';
+    }
 
     // Handle actual income inline comparisons
     if (getFeatureFlag('enable_actual_income')) {
@@ -8321,6 +8732,18 @@ function updateDeductionFormVisibility() {
             })
             .api_getDeductionCategories();
         }
+
+        // Load deduction exceptions (always loaded, not behind feature flag)
+        google.script.run
+          .withSuccessHandler((exceptions) => {
+            state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
+            saveCache();
+            renderIncomeSummary();
+          })
+          .withFailureHandler(() => {
+            console.error('Failed to load deduction exceptions');
+          })
+          .api_getDeductionExceptions();
       })
       .withFailureHandler(() => {})
       .api_getFeatureFlags();
@@ -8429,12 +8852,12 @@ function updateDeductionFormVisibility() {
   function showMonthlyDeductionsModal(type) {
     if (!modalMonthlyDeductions || !monthlyDeductionsContent || !monthlyDeductionsTitle) return;
 
-    // Get current calendar date
-    const calendarDate = state.calendar && state.calendar.currentDate
-      ? new Date(state.calendar.currentDate)
+    ensureCalendarState();
+    const baseDate = state.calendar
+      ? new Date(state.calendar.year, state.calendar.month, 1)
       : new Date();
-    const year = calendarDate.getFullYear();
-    const month = calendarDate.getMonth();
+    const year = baseDate.getFullYear();
+    const month = baseDate.getMonth();
 
     // Set modal title
     const monthName = MONTH_ABBREVIATIONS[month];
@@ -8458,20 +8881,23 @@ function updateDeductionFormVisibility() {
         // Skip extra super for personal deductions (it's shown separately)
         if (type === 'personal' && deduction.deduction_type === 'extra_super') return;
 
-        const occurrences = getDeductionOccurrencesBetween(deduction, monthStart, monthEnd);
-        if (!occurrences.length) return;
+        const occurrencesWithExceptions = getDeductionOccurrencesWithExceptions(deduction, monthStart, monthEnd);
+        if (!occurrencesWithExceptions.length) return;
 
-        let netAmount = deduction.amount_value;
-        if (type === 'company' && deduction.gst_inclusive) {
-          netAmount = deduction.amount_value / (1 + GST_RATE);
-        }
-
-        const totalAmount = netAmount * occurrences.length;
+        let totalAmount = 0;
+        occurrencesWithExceptions.forEach(occ => {
+          const baseAmount = occ.amount !== null ? occ.amount : deduction.amount_value;
+          let netAmount = baseAmount;
+          if (type === 'company' && deduction.gst_inclusive) {
+            netAmount = baseAmount / (1 + GST_RATE);
+          }
+          totalAmount += netAmount;
+        });
 
         deductionsList.push({
+          deduction: deduction,
           name: deduction.name,
-          amount: netAmount,
-          occurrences: occurrences.length,
+          occurrences: occurrencesWithExceptions,
           totalAmount: totalAmount,
           frequency: deduction.frequency,
           gst_inclusive: deduction.gst_inclusive && type === 'company',
@@ -8498,16 +8924,54 @@ function updateDeductionFormVisibility() {
           ? `<span class="ts-badge" style="background-color:${categoryMeta.color}20; color:${categoryMeta.color}; font-size:10px; padding:2px 6px;">${categoryMeta.name}</span>`
           : '';
 
+        const deductionId = `deduction-${item.deduction.id}`;
+        const expandedClass = state.monthlyDeductionsExpanded && state.monthlyDeductionsExpanded[item.deduction.id] ? 'expanded' : '';
+        const exceptionCount = item.occurrences.filter(occ => occ.hasException).length;
+        const exceptionBadge = exceptionCount > 0
+          ? ` <span class="ts-badge" style="background-color:var(--warning)20; color:var(--warning); font-size:10px; padding:2px 6px;">${exceptionCount} adjustment${exceptionCount > 1 ? 's' : ''}</span>`
+          : '';
+
         html += `
-          <div class="ts-item" style="display:flex; justify-content:space-between; align-items:center;">
-            <div style="flex:1;">
-              <div style="font-weight:600;">${item.name}</div>
-              <div class="ts-note" style="margin-top:4px;">
-                ${formatCurrency(item.amount)}${item.gst_inclusive ? ' (incl. GST)' : ''} × ${item.occurrences} occurrence${item.occurrences > 1 ? 's' : ''}
-                ${categoryBadge ? ' ' + categoryBadge : ''}
+          <div class="ts-item ${expandedClass}" style="display:block;" data-deduction-id="${item.deduction.id}">
+            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" class="deduction-header">
+              <div style="flex:1;">
+                <div style="font-weight:600;">${item.name}${exceptionBadge}</div>
+                <div class="ts-note" style="margin-top:4px;">
+                  ${item.occurrences.length} occurrence${item.occurrences.length > 1 ? 's' : ''}
+                  ${categoryBadge ? ' ' + categoryBadge : ''}
+                </div>
+              </div>
+              <div style="font-weight:600; font-size:16px;">${formatCurrency(item.totalAmount)}</div>
+            </div>
+            <div class="deduction-occurrences" style="display:none; margin-top:12px; padding-left:16px;">
+        `;
+
+        item.occurrences.forEach(occ => {
+          const baseAmount = occ.amount !== null ? occ.amount : item.deduction.amount_value;
+          let netAmount = baseAmount;
+          if (type === 'company' && item.gst_inclusive) {
+            netAmount = baseAmount / (1 + GST_RATE);
+          }
+
+          const exceptionIcon = occ.hasException
+            ? `<span style="color:var(--warning); margin-left:4px;" title="${occ.exceptionType === 'move' ? 'Moved from ' + (occ.originalDate || '') : occ.exceptionType === 'adjust_amount' ? 'Amount adjusted' : 'Exception'}">⚠️</span>`
+            : '';
+
+          html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border);">
+              <div>
+                <span>${formatDate(new Date(occ.date))}${exceptionIcon}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                <span>${formatCurrency(netAmount)}</span>
+                <button class="ghost small adjust-occurrence-btn" data-deduction-id="${item.deduction.id}" data-occurrence-date="${occ.date}" data-original-date="${occ.originalDate || occ.date}">Adjust</button>
               </div>
             </div>
-            <div style="font-weight:600; font-size:16px;">${formatCurrency(item.totalAmount)}</div>
+          `;
+        });
+
+        html += `
+            </div>
           </div>
         `;
       });
@@ -8522,9 +8986,288 @@ function updateDeductionFormVisibility() {
       html += '</div>';
 
       monthlyDeductionsContent.innerHTML = html;
+
+      // Add click handlers for expand/collapse
+      const headers = monthlyDeductionsContent.querySelectorAll('.deduction-header');
+      headers.forEach(header => {
+        header.addEventListener('click', (e) => {
+          const item = e.currentTarget.closest('.ts-item');
+          const deductionId = item.dataset.deductionId;
+          const occurrencesDiv = item.querySelector('.deduction-occurrences');
+
+          if (!state.monthlyDeductionsExpanded) state.monthlyDeductionsExpanded = {};
+
+          if (item.classList.contains('expanded')) {
+            item.classList.remove('expanded');
+            occurrencesDiv.style.display = 'none';
+            state.monthlyDeductionsExpanded[deductionId] = false;
+          } else {
+            item.classList.add('expanded');
+            occurrencesDiv.style.display = 'block';
+            state.monthlyDeductionsExpanded[deductionId] = true;
+          }
+        });
+      });
+
+      // Add click handlers for adjust buttons
+      const adjustBtns = monthlyDeductionsContent.querySelectorAll('.adjust-occurrence-btn');
+      adjustBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Don't trigger expand/collapse
+          const deductionId = btn.dataset.deductionId;
+          const occurrenceDate = btn.dataset.occurrenceDate;
+          const originalDate = btn.dataset.originalDate;
+          const deduction = state.deductions.find(d => d.id === deductionId);
+          if (deduction) {
+            showAdjustOccurrenceModal(deduction, originalDate, type);
+          }
+        });
+      });
     }
 
     showModal(modalMonthlyDeductions);
+  }
+
+  function showAdjustOccurrenceModal(deduction, originalDate, type) {
+    if (!modalAdjustOccurrence || !deduction || !originalDate) return;
+
+    adjustingDeduction = deduction;
+    adjustingOriginalDate = originalDate;
+    adjustingType = type;
+
+    // Find if there's already an exception for this occurrence
+    const existingException = state.deductionExceptions.find(ex =>
+      ex.deduction_id === deduction.id && ex.original_date === originalDate
+    );
+
+    // Calculate the display amount
+    let displayAmount = deduction.amount_value;
+    if (type === 'company' && deduction.gst_inclusive) {
+      displayAmount = deduction.amount_value / (1 + GST_RATE);
+    }
+
+    // Set form values
+    if (adjustDeductionName) adjustDeductionName.textContent = deduction.name;
+    if (adjustOriginalDate) adjustOriginalDate.textContent = formatDate(new Date(originalDate));
+    if (adjustOriginalAmount) adjustOriginalAmount.textContent = formatCurrency(displayAmount);
+
+    // Reset form
+    const adjustSkip = document.getElementById('adjust-skip');
+    if (adjustNotes) adjustNotes.value = '';
+    if (adjustNewDate) adjustNewDate.value = '';
+    if (adjustNewAmount) adjustNewAmount.value = '';
+    if (adjustSkip) adjustSkip.checked = false;
+
+    // If there's an existing exception, pre-fill the form
+    if (existingException) {
+      if (existingException.exception_type === 'skip') {
+        if (adjustSkip) adjustSkip.checked = true;
+      } else {
+        if (existingException.exception_type === 'move' || existingException.exception_type === 'move_and_adjust') {
+          if (adjustNewDate) adjustNewDate.value = existingException.new_date;
+        }
+        if (existingException.exception_type === 'adjust_amount' || existingException.exception_type === 'move_and_adjust') {
+          if (adjustNewAmount) adjustNewAmount.value = existingException.new_amount;
+        }
+      }
+      if (adjustNotes) adjustNotes.value = existingException.notes || '';
+
+      // Show delete button
+      if (btnDeleteException) btnDeleteException.style.display = 'inline-block';
+    } else {
+      // New exception
+      if (btnDeleteException) btnDeleteException.style.display = 'none';
+    }
+
+    showModal(modalAdjustOccurrence);
+  }
+
+  function handleSaveException() {
+    if (!adjustingDeduction || !adjustingOriginalDate) return;
+
+    const adjustSkip = document.getElementById('adjust-skip');
+    const hasSkip = adjustSkip && adjustSkip.checked;
+    const hasNewDate = adjustNewDate && adjustNewDate.value;
+    const hasNewAmount = adjustNewAmount && adjustNewAmount.value;
+
+    // Determine exception type based on what fields are filled
+    let selectedType = 'skip';
+    if (!hasSkip) {
+      if (hasNewDate && hasNewAmount) {
+        selectedType = 'move_and_adjust';
+      } else if (hasNewDate) {
+        selectedType = 'move';
+      } else if (hasNewAmount) {
+        selectedType = 'adjust_amount';
+      } else {
+        setStatus('Please select a date, amount, or check skip', 'warn');
+        return;
+      }
+    }
+
+    const payload = {
+      deduction_id: adjustingDeduction.id,
+      original_date: adjustingOriginalDate,
+      exception_type: selectedType,
+      new_date: '',
+      new_amount: 0,
+      notes: adjustNotes ? adjustNotes.value.trim() : ''
+    };
+
+    // Find existing exception
+    const existingException = state.deductionExceptions.find(ex =>
+      ex.deduction_id === adjustingDeduction.id && ex.original_date === adjustingOriginalDate
+    );
+    if (existingException) {
+      payload.id = existingException.id;
+    }
+
+    // Validate and set values based on type
+    if (selectedType === 'move' || selectedType === 'move_and_adjust') {
+      if (!adjustNewDate || !adjustNewDate.value) {
+        setStatus('Please select a new date', 'warn');
+        return;
+      }
+      payload.new_date = adjustNewDate.value;
+    }
+
+    if (selectedType === 'adjust_amount' || selectedType === 'move_and_adjust') {
+      if (!adjustNewAmount || !adjustNewAmount.value) {
+        setStatus('Please enter a new amount', 'warn');
+        return;
+      }
+      const amount = parseFloat(adjustNewAmount.value);
+      if (isNaN(amount) || amount < 0) {
+        setStatus('Please enter a valid amount', 'warn');
+        return;
+      }
+      payload.new_amount = amount;
+    }
+
+    const previousExceptions = state.deductionExceptions.slice();
+    const optimisticId = payload.id ? String(payload.id) : `temp_exception_${Date.now()}`;
+    const optimisticException = sanitizeDeductionException({
+      id: optimisticId,
+      deduction_id: payload.deduction_id,
+      original_date: payload.original_date,
+      exception_type: payload.exception_type,
+      new_date: payload.new_date || '',
+      new_amount: payload.new_amount || 0,
+      notes: payload.notes || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+
+    const optimisticIndex = state.deductionExceptions.findIndex(ex => ex.id === optimisticException.id);
+    if (optimisticIndex !== -1) {
+      state.deductionExceptions.splice(optimisticIndex, 1, optimisticException);
+    } else {
+      state.deductionExceptions.push(optimisticException);
+    }
+
+    saveCache();
+    renderIncomeSummary();
+    renderAnnualCategorySection();
+    showMonthlyDeductionsModal(adjustingType);
+
+    // Close modal optimistically
+    hideModal(modalAdjustOccurrence);
+    setStatus('Saving adjustment...', 'info');
+
+    const revertOptimistic = () => {
+      state.deductionExceptions = previousExceptions;
+      saveCache();
+      renderIncomeSummary();
+      renderAnnualCategorySection();
+      showMonthlyDeductionsModal(adjustingType);
+    };
+
+    // Save to backend
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success && res.exception) {
+          // Update local state with real data
+          const exception = sanitizeDeductionException(res.exception);
+          const existingIndex = state.deductionExceptions.findIndex(ex => ex.id === optimisticId || ex.id === exception.id);
+          if (existingIndex !== -1) {
+            state.deductionExceptions.splice(existingIndex, 1, exception);
+          } else {
+            state.deductionExceptions.push(exception);
+          }
+
+          saveCache();
+          setStatus('Adjustment saved', 'success');
+
+          // Refresh the monthly deductions modal only if it's still open
+          if (modalMonthlyDeductions && modalMonthlyDeductions.style.display !== 'none') {
+            showMonthlyDeductionsModal(adjustingType);
+          }
+          renderIncomeSummary();
+          renderAnnualCategorySection();
+        } else {
+          revertOptimistic();
+          setStatus('Failed to save adjustment', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        revertOptimistic();
+        setStatus('Failed to save adjustment', 'error');
+      })
+      .api_upsertDeductionException(payload);
+  }
+
+  function handleDeleteException() {
+    if (!adjustingDeduction || !adjustingOriginalDate) return;
+
+    const existingException = state.deductionExceptions.find(ex =>
+      ex.deduction_id === adjustingDeduction.id && ex.original_date === adjustingOriginalDate
+    );
+
+    if (!existingException) {
+      hideModal(modalAdjustOccurrence);
+      return;
+    }
+
+    const previousExceptions = state.deductionExceptions.slice();
+    state.deductionExceptions = state.deductionExceptions.filter(ex => ex.id !== existingException.id);
+    saveCache();
+    renderIncomeSummary();
+    renderAnnualCategorySection();
+    showMonthlyDeductionsModal(adjustingType);
+
+    // Close modal optimistically
+    hideModal(modalAdjustOccurrence);
+    setStatus('Removing adjustment...', 'info');
+
+    const revertDeleteOptimistic = () => {
+      state.deductionExceptions = previousExceptions;
+      saveCache();
+      renderIncomeSummary();
+      renderAnnualCategorySection();
+      showMonthlyDeductionsModal(adjustingType);
+    };
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success) {
+          setStatus('Adjustment removed', 'success');
+
+          // Refresh the monthly deductions modal only if it's still open
+          if (modalMonthlyDeductions && modalMonthlyDeductions.style.display !== 'none') {
+            showMonthlyDeductionsModal(adjustingType);
+          }
+          renderIncomeSummary();
+          renderAnnualCategorySection();
+        } else {
+          revertDeleteOptimistic();
+          setStatus('Failed to remove adjustment', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        revertDeleteOptimistic();
+        setStatus('Failed to remove adjustment', 'error');
+      })
+      .api_deleteDeductionException(existingException.id);
   }
 
   // Custom confirm dialog replacement
@@ -9444,6 +10187,18 @@ function updateDeductionFormVisibility() {
 
     if (btnDeductionsDetails) {
       btnDeductionsDetails.addEventListener('click', () => showMonthlyDeductionsModal('personal'));
+    }
+
+    if (btnCancelAdjust && modalAdjustOccurrence) {
+      btnCancelAdjust.addEventListener('click', () => hideModal(modalAdjustOccurrence));
+    }
+
+    if (btnSaveException) {
+      btnSaveException.addEventListener('click', handleSaveException);
+    }
+
+    if (btnDeleteException) {
+      btnDeleteException.addEventListener('click', handleDeleteException);
     }
 
     const saveDefaultBtn = document.getElementById('btn-save-default');

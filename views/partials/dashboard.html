@@ -281,6 +281,50 @@
   </div>
 </div>
 
+<!-- Adjust Occurrence Modal -->
+<div class="ts-modal" id="modal-adjust-occurrence" style="display:none;">
+  <div class="ts-modal-content" style="max-width:500px;">
+    <div class="ts-modal-header">
+      <h3>Adjust Occurrence</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-note" style="margin-bottom:16px;">
+        <strong id="adjust-deduction-name"></strong><br>
+        Original: <span id="adjust-original-date"></span> - <span id="adjust-original-amount"></span>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label for="adjust-new-date" style="display:block; margin-bottom:4px;">Move to different date (optional)</label>
+        <input type="date" id="adjust-new-date" style="width:100%;">
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label for="adjust-new-amount" style="display:block; margin-bottom:4px;">Adjust amount (optional)</label>
+        <input type="number" id="adjust-new-amount" step="0.01" min="0" style="width:100%;">
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="adjust-skip">
+          <span>Skip this occurrence</span>
+        </label>
+        <div class="ts-note" style="margin-top:4px;">When checked, date and amount fields are ignored</div>
+      </div>
+
+      <div>
+        <label for="adjust-notes" style="display:block; margin-bottom:4px;">Notes (optional)</label>
+        <textarea id="adjust-notes" rows="2" style="width:100%;"></textarea>
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-delete-exception" style="display:none; margin-right:auto;">Remove Adjustment</button>
+      <button class="ghost" id="btn-cancel-adjust">Cancel</button>
+      <button id="btn-save-exception">Save Adjustment</button>
+    </div>
+  </div>
+</div>
+
 <!-- Default Entry Modals -->
 <div class="ts-modal" id="modal-create-default" style="display:none;">
   <div class="ts-modal-content">

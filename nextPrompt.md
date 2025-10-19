@@ -2,6 +2,9 @@
 
 ## In-Progress Changes
 
+- Income Categories:
+    * Fix the expenses not being visible in the income breakdown sections
+
 - BAS fixes:
     * Figure out differences in company vs sole trader mode for BAS. Ensure the sole trader feature flag behaves as expected.
     * Deal with the rounding off the cents (they should be put back into company profit)

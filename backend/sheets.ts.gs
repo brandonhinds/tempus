@@ -52,6 +52,18 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'deduction_occurrence_exceptions') {
+      sh.getRange(1,1,1,8).setValues([[
+        'id',
+        'deduction_id',
+        'original_date',
+        'exception_type',
+        'new_date',
+        'new_amount',
+        'notes',
+        'created_at',
+        'updated_at'
+      ]]);
     } else if (name === 'bas_submissions') {
       sh.getRange(1,1,1,15).setValues([[
         'id',
@@ -75,6 +87,15 @@ function getOrCreateSheet(name) {
   if (name === 'deduction_categories') {
     sh.getRange('A:C').setNumberFormat('@');
     sh.getRange('D:E').setNumberFormat('@');
+  }
+  if (name === 'deduction_occurrence_exceptions') {
+    sh.getRange('A:B').setNumberFormat('@'); // id, deduction_id
+    sh.getRange('C:C').setNumberFormat('@'); // original_date
+    sh.getRange('D:D').setNumberFormat('@'); // exception_type
+    sh.getRange('E:E').setNumberFormat('@'); // new_date
+    sh.getRange('F:F').setNumberFormat('0.00'); // new_amount
+    sh.getRange('G:G').setNumberFormat('@'); // notes
+    sh.getRange('H:I').setNumberFormat('@'); // created_at, updated_at
   }
   if (name === 'timesheet_entries') {
     const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id'];

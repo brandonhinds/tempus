@@ -117,6 +117,33 @@ Catalog of reusable deduction categories. When the `enable_deduction_categories`
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the category was created. | `2025-05-01T02:41:00Z` |
 | `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-05-10T19:24:00Z` |
 
+## deduction_occurrence_exceptions
+Stores adjustments to individual occurrences of recurring deductions. Allows users to skip, move, or adjust the amount of a specific occurrence without modifying the base deduction pattern. Exceptions are applied after calculating base occurrences.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `3b9f9c03-e9fb-4fb6-b8d7-46df2315bd1c` |
+| `deduction_id` | string (UUID) | References the parent deduction. | `0d9f9c03-e9fb-4fb6-b8d7-46df2315bd1b` |
+| `original_date` | string (ISO date) | The calculated occurrence date being adjusted. | `2025-05-15` |
+| `exception_type` | string | Type of adjustment: `skip`, `move`, or `adjust_amount`. | `move` |
+| `new_date` | string (ISO date) | New date for `move` type exceptions. Blank for other types. | `2025-05-18` |
+| `new_amount` | number | Override amount for `adjust_amount` type exceptions. Zero for other types. | `450.00` |
+| `notes` | string | Optional explanation for the adjustment. | `Billing cycle adjustment` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the exception was created. | `2025-05-12T14:30:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-05-12T14:30:00Z` |
+
+### Exception types
+- **skip**: Removes the occurrence entirely from calculations.
+- **move**: Changes the occurrence to a different date (e.g., billing cycle mismatch).
+- **adjust_amount**: Overrides the amount for this specific occurrence only.
+
+### Processing rules
+1. Base occurrences are calculated from the parent deduction's `start_date`, `frequency`, and `end_date`.
+2. Exceptions are loaded and applied to the occurrence list.
+3. Skipped occurrences are removed from the final list.
+4. Moved occurrences appear on `new_date` instead of `original_date`.
+5. Amount-adjusted occurrences use `new_amount` instead of the deduction's `amount_value`.
+
 ## BAS reporting (derived)
 The BAS page renders a financial-year view composed from existing sheets. Data is not persisted; it is calculated on demand from contracts, entries, and deductions.
 
