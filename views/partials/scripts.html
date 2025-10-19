@@ -766,6 +766,7 @@
     clone.contributes_to_income = Boolean(clone.contributes_to_income === 'TRUE' || clone.contributes_to_income === true);
     clone.requires_contract = Boolean(clone.requires_contract === 'TRUE' || clone.requires_contract === true);
     clone.is_default = Boolean(clone.is_default === 'TRUE' || clone.is_default === true);
+    clone.use_for_rate_calculation = Boolean(clone.use_for_rate_calculation === 'TRUE' || clone.use_for_rate_calculation === true);
     clone.auto_populate_public_holidays = Boolean(
       clone.auto_populate_public_holidays === 'TRUE' || clone.auto_populate_public_holidays === true
     );
@@ -1951,7 +1952,9 @@
     // Calculate and display new metrics
     const effectiveTaxRate = totals.grossIncome > 0 ? (totals.tax / totals.grossIncome) * 100 : 0;
     const avgMonthlyIncome = totals.grossIncome / 12;
-    const effectiveHourlyRate = totals.totalHours > 0 ? totals.grossIncome / totals.totalHours : 0;
+    // Use rateCalcHours if available and > 0, otherwise fall back to totalHours
+    const hoursForRate = totals.rateCalcHours > 0 ? totals.rateCalcHours : totals.totalHours;
+    const effectiveHourlyRate = hoursForRate > 0 ? totals.grossIncome / hoursForRate : 0;
 
     if (taxRateEl) taxRateEl.textContent = effectiveTaxRate.toFixed(1) + '%';
     if (avgMonthlyEl) avgMonthlyEl.textContent = formatCurrency(avgMonthlyIncome);
@@ -2060,6 +2063,10 @@
     const labels = monthlyData.map(m => m.label);
     const colors = getThemeColors();
 
+    // Create border arrays - show border for actual income months
+    const borderWidths = monthlyData.map(m => m.hasActualIncome ? 2 : 0);
+    const borderColors = monthlyData.map(m => m.hasActualIncome ? colors.text : 'transparent');
+
     const ctx = canvas.getContext('2d');
     state.annualCharts.income = new Chart(ctx, {
       type: 'bar',
@@ -2070,25 +2077,29 @@
             label: 'Tax',
             data: monthlyData.map(m => m.tax),
             backgroundColor: colors.danger,
-            borderWidth: 0
+            borderWidth: borderWidths,
+            borderColor: borderColors
           },
           {
             label: 'Deductions',
             data: monthlyData.map(m => m.otherDeductions),
             backgroundColor: colors.warning,
-            borderWidth: 0
+            borderWidth: borderWidths,
+            borderColor: borderColors
           },
           {
             label: 'Superannuation',
             data: monthlyData.map(m => m.superGuarantee + m.extraSuper),
             backgroundColor: colors.success,
-            borderWidth: 0
+            borderWidth: borderWidths,
+            borderColor: borderColors
           },
           {
             label: 'Net Income',
             data: monthlyData.map(m => m.netIncome),
             backgroundColor: colors.primary,
-            borderWidth: 0
+            borderWidth: borderWidths,
+            borderColor: borderColors
           }
         ]
       },
@@ -2136,7 +2147,10 @@
               },
               footer: (items) => {
                 const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
-                return '\n  Gross Total: ' + formatCurrency(total);
+                const monthIndex = items[0].dataIndex;
+                const hasActual = monthlyData[monthIndex].hasActualIncome;
+                const dataType = hasActual ? ' (Actual)' : ' (Estimated)';
+                return '\n  Gross Total: ' + formatCurrency(total) + dataType;
               }
             }
           }
@@ -7266,6 +7280,22 @@ function updateDeductionFormVisibility() {
         return acc + (minutes / 60) * rate;
       }, 0);
     }
+    // Calculate hours for the hour type marked for rate calculation
+    let rateCalcHours = 0;
+    let rateCalcHourType = null;
+
+    // Find the hour type marked for rate calculation (works regardless of hour types feature flag)
+    rateCalcHourType = Object.values(state.hourTypeMap).find(ht => ht && ht.use_for_rate_calculation);
+    if (rateCalcHourType) {
+      const matchingEntries = allEntries.filter(entry => {
+        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+        return hourTypeId === rateCalcHourType.id;
+      });
+
+      const rateCalcMinutes = matchingEntries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
+      rateCalcHours = rateCalcMinutes / 60;
+    }
+
     const deductionTotals = computeMonthlyDeductionTotals(year, month);
     const salarySacrifice = deductionTotals.personalStandardTotal;
     const companyExpenses = deductionTotals.companyStandardTotal;
@@ -7315,7 +7345,9 @@ function updateDeductionFormVisibility() {
       taxStatus: taxableIncome > 0 ? 'pending' : 'resolved',
       tax: taxableIncome > 0 ? null : 0,
       netIncome: taxableIncome > 0 ? null : taxableIncome,
-      requestKey
+      requestKey,
+      rateCalcHours,
+      rateCalcHourType
     };
   }
   function applyIncomeBreakdownVisibility() {
@@ -7328,6 +7360,14 @@ function updateDeductionFormVisibility() {
   }
   function updateIncomeSummaryUI(summary) {
     if (!incomeNetBadge && !incomeBreakdownEl) return;
+    const hourlyRateDivider = document.getElementById('hourly-rate-divider');
+    const hourlyRateGrossRow = document.getElementById('hourly-rate-gross-row');
+    const hourlyRateNetRow = document.getElementById('hourly-rate-net-row');
+    const hourlyRateGrossEl = document.getElementById('income-hourly-rate-gross');
+    const hourlyRateNetEl = document.getElementById('income-hourly-rate-net');
+    const hourlyRateGrossLabel = document.getElementById('hourly-rate-gross-label');
+    const hourlyRateNetLabel = document.getElementById('hourly-rate-net-label');
+
     if (!summary) {
       if (incomeNetBadge) incomeNetBadge.textContent = 'Net income: --';
       if (incomeNetDetailEl) incomeNetDetailEl.textContent = '--';
@@ -7351,6 +7391,22 @@ function updateDeductionFormVisibility() {
       if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
       if (btnCompanyExpensesDetails) btnCompanyExpensesDetails.style.display = 'none';
       if (btnDeductionsDetails) btnDeductionsDetails.style.display = 'none';
+      if (hourlyRateDivider) {
+        hourlyRateDivider.hidden = true;
+        hourlyRateDivider.style.display = 'none';
+      }
+      if (hourlyRateGrossRow) {
+        hourlyRateGrossRow.hidden = true;
+        hourlyRateGrossRow.style.display = 'none';
+      }
+      if (hourlyRateNetRow) {
+        hourlyRateNetRow.hidden = true;
+        hourlyRateNetRow.style.display = 'none';
+      }
+      if (hourlyRateGrossEl) hourlyRateGrossEl.textContent = '--';
+      if (hourlyRateNetEl) hourlyRateNetEl.textContent = '--';
+      if (hourlyRateGrossLabel) hourlyRateGrossLabel.textContent = '--';
+      if (hourlyRateNetLabel) hourlyRateNetLabel.textContent = '--';
       return;
     }
     const netValue = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
@@ -7410,6 +7466,57 @@ function updateDeductionFormVisibility() {
     }
     if (btnDeductionsDetails) {
       btnDeductionsDetails.style.display = (summary.otherDeductions > 0.01) ? 'inline-block' : 'none';
+    }
+
+    // Show/hide and populate hourly rate section
+    if (hourlyRateDivider && hourlyRateGrossRow && hourlyRateNetRow) {
+      const rateCalcType = summary.rateCalcHourType;
+      const shouldShowHourlyRate = rateCalcType &&
+                                   rateCalcType.use_for_rate_calculation &&
+                                   !rateCalcType.contributes_to_income &&
+                                   summary.rateCalcHours > 0;
+
+      if (shouldShowHourlyRate) {
+        if (hourlyRateDivider) {
+          hourlyRateDivider.hidden = false;
+          hourlyRateDivider.style.display = '';
+        }
+        if (hourlyRateGrossRow) {
+          hourlyRateGrossRow.hidden = false;
+          hourlyRateGrossRow.style.display = '';
+        }
+        if (hourlyRateNetRow) {
+          hourlyRateNetRow.hidden = false;
+          hourlyRateNetRow.style.display = '';
+        }
+
+        const grossHourlyRate = summary.rateCalcHours > 0 ? summary.grossIncome / summary.rateCalcHours : 0;
+        const netHourlyRateBase = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
+        const netHourlyRate = summary.rateCalcHours > 0 ? netHourlyRateBase / summary.rateCalcHours : 0;
+        const hourlyRateName = rateCalcType ? rateCalcType.name : '--';
+
+        if (hourlyRateGrossEl) hourlyRateGrossEl.textContent = formatCurrency(grossHourlyRate) + '/hr';
+        if (hourlyRateNetEl) hourlyRateNetEl.textContent = formatCurrency(netHourlyRate) + '/hr';
+        if (hourlyRateGrossLabel) hourlyRateGrossLabel.textContent = hourlyRateName;
+        if (hourlyRateNetLabel) hourlyRateNetLabel.textContent = hourlyRateName;
+      } else {
+        if (hourlyRateDivider) {
+          hourlyRateDivider.hidden = true;
+          hourlyRateDivider.style.display = 'none';
+        }
+        if (hourlyRateGrossRow) {
+          hourlyRateGrossRow.hidden = true;
+          hourlyRateGrossRow.style.display = 'none';
+        }
+        if (hourlyRateNetRow) {
+          hourlyRateNetRow.hidden = true;
+          hourlyRateNetRow.style.display = 'none';
+        }
+        if (hourlyRateGrossEl) hourlyRateGrossEl.textContent = '--';
+        if (hourlyRateNetEl) hourlyRateNetEl.textContent = '--';
+        if (hourlyRateGrossLabel) hourlyRateGrossLabel.textContent = '--';
+        if (hourlyRateNetLabel) hourlyRateNetLabel.textContent = '--';
+      }
     }
 
     // Handle actual income inline comparisons
@@ -10292,6 +10399,7 @@ function updateDeductionFormVisibility() {
       const badges = [];
       if (hourType.is_default) badges.push('<span class="ts-hour-type-badge default">Default</span>');
       if (hourType.contributes_to_income) badges.push('<span class="ts-hour-type-badge income">Income</span>');
+      if (hourType.use_for_rate_calculation) badges.push('<span class="ts-hour-type-badge rate-calc">Rate calculation</span>');
       if (hourType.auto_populate_public_holidays) {
         const hoursValue = Number(hourType.auto_populate_hours) || 0;
         const hoursLabel = hoursValue % 1 === 0 ? hoursValue.toFixed(0) : hoursValue.toFixed(2).replace(/0$/, '');
@@ -10450,6 +10558,7 @@ function updateDeductionFormVisibility() {
     const colorInput = document.getElementById('hour-type-color');
     const contributesInput = document.getElementById('hour-type-contributes-income');
     const defaultInput = document.getElementById('hour-type-is-default');
+    const rateCalcInput = document.getElementById('hour-type-use-for-rate-calc');
 
     if (!modal) return;
 
@@ -10463,6 +10572,7 @@ function updateDeductionFormVisibility() {
     colorInput.value = hourType ? hourType.color : generateRandomColor();
     contributesInput.checked = hourType ? hourType.contributes_to_income : false;
     defaultInput.checked = hourType ? hourType.is_default : false;
+    if (rateCalcInput) rateCalcInput.checked = hourType ? hourType.use_for_rate_calculation : false;
 
     if (hourTypeAutoHolidayToggle) {
       hourTypeAutoHolidayToggle.checked = hourType ? !!hourType.auto_populate_public_holidays : false;
@@ -10519,6 +10629,7 @@ function updateDeductionFormVisibility() {
     const colorInput = document.getElementById('hour-type-color');
     const contributesInput = document.getElementById('hour-type-contributes-income');
     const defaultInput = document.getElementById('hour-type-is-default');
+    const rateCalcInput = document.getElementById('hour-type-use-for-rate-calc');
     const saveBtn = document.getElementById('btn-save-hour-type');
 
     const name = nameInput.value.trim();
@@ -10526,6 +10637,7 @@ function updateDeductionFormVisibility() {
     const color = colorInput.value;
     const contributesToIncome = contributesInput.checked;
     const isDefault = defaultInput.checked;
+    const useForRateCalc = rateCalcInput ? rateCalcInput.checked : false;
 
     if (!name || !slug) {
       customAlert('Name and slug are required');
@@ -10557,20 +10669,31 @@ function updateDeductionFormVisibility() {
       color,
       contributes_to_income: contributesToIncome,
       is_default: isDefault,
+      use_for_rate_calculation: useForRateCalc,
       auto_populate_public_holidays: autoPopulateHolidays,
       auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0
     };
 
     if (state.editingHourTypeId) {
-      // Optimistically update the UI if setting as default
-      if (isDefault) {
-        // Unset default on all other hour types
-        state.hourTypes.forEach(ht => {
-          if (ht.id !== state.editingHourTypeId) {
-            ht.is_default = false;
-          }
-        });
-        // Set default on this hour type
+      // Optimistically update the UI if setting as default or use_for_rate_calculation
+      if (isDefault || useForRateCalc) {
+        // Unset default on all other hour types if setting as default
+        if (isDefault) {
+          state.hourTypes.forEach(ht => {
+            if (ht.id !== state.editingHourTypeId) {
+              ht.is_default = false;
+            }
+          });
+        }
+        // Unset use_for_rate_calculation on all other hour types if setting this flag
+        if (useForRateCalc) {
+          state.hourTypes.forEach(ht => {
+            if (ht.id !== state.editingHourTypeId) {
+              ht.use_for_rate_calculation = false;
+            }
+          });
+        }
+        // Update this hour type
         const index = state.hourTypes.findIndex(ht => ht.id === state.editingHourTypeId);
         if (index !== -1) {
           state.hourTypes[index] = {
@@ -10579,7 +10702,8 @@ function updateDeductionFormVisibility() {
             slug,
             color,
             contributes_to_income: contributesToIncome,
-            is_default: true,
+            is_default: isDefault,
+            use_for_rate_calculation: useForRateCalc,
             auto_populate_public_holidays: autoPopulateHolidays,
             auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0
           };

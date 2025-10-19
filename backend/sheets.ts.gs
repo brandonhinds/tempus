@@ -193,6 +193,7 @@ function getOrCreateSheet(name) {
       'contributes_to_income',
       'requires_contract',
       'is_default',
+      'use_for_rate_calculation',
       'auto_populate_public_holidays',
       'auto_populate_hours',
       'created_at'
@@ -230,7 +231,7 @@ function getOrCreateSheet(name) {
       const col = expectedHourTypeHeaders.indexOf(header) + 1;
       sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
     });
-    ['contributes_to_income', 'requires_contract', 'is_default', 'auto_populate_public_holidays'].forEach(function(header) {
+    ['contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays'].forEach(function(header) {
       const col = expectedHourTypeHeaders.indexOf(header) + 1;
       sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
     });

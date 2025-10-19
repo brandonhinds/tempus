@@ -2,9 +2,6 @@
 
 ## In-Progress Changes
 
-- Income Categories:
-    * Fix the expenses not being visible in the income breakdown sections
-
 - BAS fixes:
     * Figure out differences in company vs sole trader mode for BAS. Ensure the sole trader feature flag behaves as expected.
     * Deal with the rounding off the cents (they should be put back into company profit)
@@ -27,7 +24,7 @@
 
 ## Small Changes
 
-- Have actual pay appear on annual views
+- Fix the theme not being honoured sometimes on refresh.
 
 - Add the easter easter egg. Add a Konami Code.
 
@@ -37,8 +34,6 @@
 
 - Make all interactions with the UI optimistic. Examples that currently aren't:
     * Deleting entries
-
-- Add ability to have alternate hours that will calculate effective hourly rate (for Lil's scenario)
 
 - *GEOFF REQUEST* The ability to print/save to PDF the month's timesheet, including any hour types indicated to be included. The work hour's should be obvious (e.g. bold). This view also needs to include a summary of the total number of hours for each type for the month, in a way that can be sent to the client for review.
 

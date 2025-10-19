@@ -44,6 +44,7 @@ function normalizeHourTypeRow(headers, row) {
     contributes_to_income: boolFromSheetCell(cell('contributes_to_income')),
     requires_contract: boolFromSheetCell(cell('requires_contract')),
     is_default: boolFromSheetCell(cell('is_default')),
+    use_for_rate_calculation: boolFromSheetCell(cell('use_for_rate_calculation')),
     auto_populate_public_holidays: boolFromSheetCell(cell('auto_populate_public_holidays')),
     auto_populate_hours: autoHours,
     created_at: cell('created_at')
@@ -78,6 +79,16 @@ function api_createHourType(data) {
     }
   }
 
+  // If this is being set as use_for_rate_calculation, clear other use_for_rate_calculation flags
+  if (data.use_for_rate_calculation) {
+    for (var i = 0; i < rows.length; i++) {
+      var rateCalcIndex = headers.indexOf('use_for_rate_calculation');
+      if (rateCalcIndex !== -1 && (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE')) {
+        sh.getRange(i + 2, rateCalcIndex + 1).setValue('FALSE');
+      }
+    }
+  }
+
   var id = Utilities.getUuid();
   var now = toIsoDateTime(new Date());
 
@@ -103,6 +114,8 @@ function api_createHourType(data) {
         return data.contributes_to_income ? 'TRUE' : 'FALSE';
       case 'is_default':
         return data.is_default ? 'TRUE' : 'FALSE';
+      case 'use_for_rate_calculation':
+        return data.use_for_rate_calculation ? 'TRUE' : 'FALSE';
       case 'auto_populate_public_holidays':
         return autoPopulate;
       case 'auto_populate_hours':
@@ -184,6 +197,18 @@ function api_updateHourType(id, data) {
     }
   }
 
+  // If this is being set as use_for_rate_calculation, clear other use_for_rate_calculation flags
+  if (data.use_for_rate_calculation) {
+    for (var i = 0; i < rows.length; i++) {
+      if (i !== rowIndex) {
+        var rateCalcIndex = headers.indexOf('use_for_rate_calculation');
+        if (rateCalcIndex !== -1 && (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE')) {
+          sh.getRange(i + 2, rateCalcIndex + 1).setValue('FALSE');
+        }
+      }
+    }
+  }
+
   // Update the row
   var updatedRow = currentRow.slice();
   if (data.hasOwnProperty('name')) updatedRow[headers.indexOf('name')] = data.name;
@@ -194,6 +219,10 @@ function api_updateHourType(id, data) {
     updatedRow[headers.indexOf('requires_contract')] = data.contributes_to_income ? 'TRUE' : 'FALSE'; // requires_contract = contributes_to_income
   }
   if (data.hasOwnProperty('is_default')) updatedRow[headers.indexOf('is_default')] = data.is_default ? 'TRUE' : 'FALSE';
+  var rateCalcIdx = headers.indexOf('use_for_rate_calculation');
+  if (rateCalcIdx !== -1 && data.hasOwnProperty('use_for_rate_calculation')) {
+    updatedRow[rateCalcIdx] = data.use_for_rate_calculation ? 'TRUE' : 'FALSE';
+  }
   var autoPopulateIndex = headers.indexOf('auto_populate_public_holidays');
   if (autoPopulateIndex !== -1 && data.hasOwnProperty('auto_populate_public_holidays')) {
     updatedRow[autoPopulateIndex] = data.auto_populate_public_holidays ? 'TRUE' : 'FALSE';
@@ -270,7 +299,20 @@ function ensureWorkHourType() {
   var sh = getOrCreateSheet('hour_types');
   var data = sh.getDataRange().getValues();
   var headers = data[0];
-  
+
+  // Check if any other hour type already has use_for_rate_calculation
+  var hasRateCalcHourType = false;
+  var rateCalcIndex = headers.indexOf('use_for_rate_calculation');
+  if (rateCalcIndex !== -1 && data.length > 1) {
+    var rows = data.slice(1);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE') {
+        hasRateCalcHourType = true;
+        break;
+      }
+    }
+  }
+
   function buildWorkRow(id, now) {
     return headers.map(function(header) {
       switch (header) {
@@ -286,6 +328,8 @@ function ensureWorkHourType() {
         case 'requires_contract':
         case 'is_default':
           return 'TRUE';
+        case 'use_for_rate_calculation':
+          return hasRateCalcHourType ? 'FALSE' : 'TRUE';
         case 'auto_populate_public_holidays':
           return 'FALSE';
         case 'auto_populate_hours':

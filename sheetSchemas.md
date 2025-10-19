@@ -172,12 +172,13 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 | `contributes_to_income` | boolean/string | `TRUE`/`FALSE` indicating if this hour type should be included in income calculations. | `FALSE` |
 | `requires_contract` | boolean/string | `TRUE`/`FALSE` indicating if entries of this type must have a contract selected. | `FALSE` |
 | `is_default` | boolean/string | `TRUE`/`FALSE` indicating if this is the default hour type for new entries. Only one can be default. | `FALSE` |
+| `use_for_rate_calculation` | boolean/string | `TRUE`/`FALSE` indicating if this hour type's hours should be used for hourly rate calculations in annual views and income breakdown. Only one can be marked for rate calculation. | `FALSE` |
 | `auto_populate_public_holidays` | boolean/string | `TRUE`/`FALSE` flag enabling automatic entry creation on weekday public holidays. Requires public holiday feature. | `FALSE` |
 | `auto_populate_hours` | number | Hours (decimal) to record when auto-populating a weekday public holiday. | `7.5` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the hour type was created server-side. | `2025-10-06T10:15:00Z` |
 
 ### Built-in hour types
-- The "Work" hour type (`slug: "work"`) is automatically created and cannot be deleted. It contributes to income, requires a contract, and is the default when the hour_types feature is disabled.
+- The "Work" hour type (`slug: "work"`) is automatically created and cannot be deleted. It contributes to income, requires a contract, is the default when the hour_types feature is disabled, and is used for rate calculation if no other hour type has that flag set.
 
 ### Suggested improvements
 - Validate that only one hour type is marked as default at any time.

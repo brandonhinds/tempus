@@ -407,6 +407,9 @@
   .ts-note { font-size:12px; color: var(--muted); }
   .ts-income-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; grid-template-columns:auto minmax(12ch, max-content) max-content; column-gap:16px; row-gap:8px; align-items:baseline; font-size:14px; }
   .ts-income-breakdown[hidden] { display:none; }
+  .ts-income-divider { grid-column:1 / -1; height:1px; background:var(--border); margin:16px 0 8px; }
+  #hourly-rate-gross-label,
+  #hourly-rate-net-label { font-style: italic; }
   .ts-hour-types-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; gap:8px; }
   .ts-hour-types-breakdown[hidden] { display:none; }
   .ts-expected-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:flex; flex-direction:column; gap:12px; }
@@ -547,6 +550,7 @@
   .ts-hour-type-badge { font-size:10px; background:var(--badge-bg); border:1px solid var(--badge-border); color:var(--badge-text); padding:2px 6px; border-radius:4px; }
   .ts-hour-type-badge.default { background:var(--badge-success-bg); border-color:var(--badge-success-border); color:var(--badge-success-text); }
   .ts-hour-type-badge.income { background:var(--primary-soft-bg); border-color:var(--primary-soft-border); color:var(--primary-soft-text); }
+  .ts-hour-type-badge.rate-calc { background:#f3e8ff; border-color:#c084fc; color:#7c3aed; }
   .ts-hour-type-badge.holiday { background: var(--holiday-bg); border-color: var(--holiday-border); color: var(--holiday-hover); }
   .ts-hour-type-actions { display:flex; gap:8px; }
   .ts-hour-type-item.work .ts-hour-type-actions .danger { display:none; }

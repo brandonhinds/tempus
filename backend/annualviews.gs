@@ -21,6 +21,14 @@ function api_getAnnualSummary(payload) {
     ? getFinancialYearMonths(startYear)
     : getCalendarYearMonths(startYear);
 
+  // Load actual income data
+  var actualIncomeList = listActualIncomeInternal();
+  var actualIncomeMap = {};
+  for (var i = 0; i < actualIncomeList.length; i++) {
+    var item = actualIncomeList[i];
+    actualIncomeMap[item.month] = item;
+  }
+
   var sheet = getOrCreateSheet('timesheet_entries');
   var contractsSheet = getOrCreateSheet('contracts');
   var deductionsSheet = getOrCreateSheet('deductions');
@@ -47,7 +55,8 @@ function api_getAnnualSummary(payload) {
       name: row[1],
       slug: row[2],
       color: row[3],
-      contributes_to_income: row[4] === 'TRUE' || row[4] === true
+      contributes_to_income: row[4] === 'TRUE' || row[4] === true,
+      use_for_rate_calculation: row[7] === 'TRUE' || row[7] === true
     };
   }
 
@@ -73,6 +82,15 @@ function api_getAnnualSummary(payload) {
     });
   }
 
+  // Find the hour type marked for rate calculation
+  var rateCalcHourTypeId = null;
+  for (var htid in hourTypeMap) {
+    if (hourTypeMap[htid] && hourTypeMap[htid].use_for_rate_calculation) {
+      rateCalcHourTypeId = htid;
+      break;
+    }
+  }
+
   // Build monthly summaries
   var monthlyData = [];
   var yearTotals = {
@@ -84,6 +102,7 @@ function api_getAnnualSummary(payload) {
     tax: 0,
     netIncome: 0,
     totalHours: 0,
+    rateCalcHours: 0,
     companyIncome: 0,
     companyExpenses: 0,
     invoiceTotal: 0
@@ -94,7 +113,7 @@ function api_getAnnualSummary(payload) {
 
   for (var m = 0; m < months.length; m++) {
     var month = months[m];
-    var monthSummary = buildMonthlySummaryForAnnual(month.year, month.month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet);
+    var monthSummary = buildMonthlySummaryForAnnual(month.year, month.month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeId);
     monthlyData.push(monthSummary);
 
     // Accumulate year totals
@@ -106,6 +125,7 @@ function api_getAnnualSummary(payload) {
     yearTotals.tax += monthSummary.tax;
     yearTotals.netIncome += monthSummary.netIncome;
     yearTotals.totalHours += monthSummary.totalHours;
+    yearTotals.rateCalcHours += monthSummary.rateCalcHours || 0;
     yearTotals.companyIncome += monthSummary.companyIncome;
     yearTotals.companyExpenses += monthSummary.companyExpenses;
     yearTotals.invoiceTotal += monthSummary.invoiceTotal;
@@ -195,8 +215,10 @@ function api_getAnnualSummary(payload) {
  * @param {Object} contractMap - Contract lookup
  * @param {Object} hourTypeMap - Hour type lookup
  * @param {Object} deductionsSheet - Deductions sheet
+ * @param {Object} actualIncomeMap - Actual income lookup by month (yyyy-MM)
+ * @param {string} rateCalcHourTypeId - Hour type ID to use for rate calculation
  */
-function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet) {
+function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeId) {
   // Filter entries for this month (contract-filtered for income)
   var monthEntries = filteredEntries.filter(function(entry) {
     var entryDate = new Date(entry.date);
@@ -248,6 +270,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
   // Track hour type hours across ALL entries (not filtered by contract)
   var hourTypeHours = {};
+  var rateCalcHours = 0;
   for (var i = 0; i < allMonthEntries.length; i++) {
     var entry = allMonthEntries[i];
     var hourTypeId = entry.hour_type_id || 'work';
@@ -255,6 +278,11 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
       hourTypeHours[hourTypeId] = 0;
     }
     hourTypeHours[hourTypeId] += entry.duration_minutes;
+
+    // Track hours for rate calculation hour type (check ALL entries, not just income-contributing)
+    if (rateCalcHourTypeId && hourTypeId === rateCalcHourTypeId) {
+      rateCalcHours += entry.duration_minutes / 60;
+    }
   }
 
   // Sum up gross income
@@ -414,19 +442,48 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     };
   });
 
+  // Check for actual income data for this month
+  var monthNum = month + 1;
+  var monthKey = year + '-' + (monthNum < 10 ? '0' + monthNum : String(monthNum));
+  var actualIncome = actualIncomeMap && actualIncomeMap[monthKey] ? actualIncomeMap[monthKey] : null;
+
+  // If we have actual income, use it for the relevant fields
+  var finalGrossIncome = actualIncome ? actualIncome.gross_income : grossIncome;
+  var finalSuperannuation = actualIncome ? actualIncome.superannuation : (superGuarantee + extraSuper);
+  var finalTax = actualIncome ? actualIncome.tax : tax;
+  var finalNetIncome = actualIncome ? actualIncome.net_income : netIncome;
+
+  // When using actual income, we need to split super back into guarantee and extra
+  // We can estimate based on the original ratio
+  var finalSuperGuarantee = superGuarantee;
+  var finalExtraSuper = extraSuper;
+  if (actualIncome) {
+    var estimatedTotalSuper = superGuarantee + extraSuper;
+    if (estimatedTotalSuper > 0) {
+      var superGuaranteeRatio = superGuarantee / estimatedTotalSuper;
+      finalSuperGuarantee = actualIncome.superannuation * superGuaranteeRatio;
+      finalExtraSuper = actualIncome.superannuation * (1 - superGuaranteeRatio);
+    } else {
+      // If no estimated super, assume it's all super guarantee
+      finalSuperGuarantee = actualIncome.superannuation;
+      finalExtraSuper = 0;
+    }
+  }
+
   return {
     year: year,
     month: month,
     label: Utilities.formatDate(periodStart, Session.getScriptTimeZone(), 'MMM yyyy'),
-    grossIncome: grossIncome,
-    superGuarantee: superGuarantee,
+    grossIncome: finalGrossIncome,
+    superGuarantee: finalSuperGuarantee,
     superLost: superLost,
-    extraSuper: extraSuper,
+    extraSuper: finalExtraSuper,
     otherDeductions: otherDeductions,
     taxableIncome: taxableIncome,
-    tax: tax,
-    netIncome: netIncome,
+    tax: finalTax,
+    netIncome: finalNetIncome,
     totalHours: totalHours,
+    rateCalcHours: rateCalcHours,
     companyIncome: companyIncome,
     companyExpenses: companyExpenses,
     companyExpensesGst: companyExpensesGst,
@@ -435,7 +492,8 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     hourTypeHours: hourTypeHours,
     categoryBreakdown: {
       categories: categoryBreakdown
-    }
+    },
+    hasActualIncome: actualIncome !== null
   };
 }
 
