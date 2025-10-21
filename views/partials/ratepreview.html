@@ -1,0 +1,132 @@
+<section class="ts-card ts-card--wide" id="page-rate-preview" style="display:none; position:relative;">
+  <div class="ts-toolbar" style="margin-bottom:12px;">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <h3 style="margin:0;">Rate Preview</h3>
+      <p class="ts-note" style="margin:0;">Model how hourly rate changes would have affected your contract earnings.</p>
+    </div>
+  </div>
+
+  <div class="rate-preview-controls">
+    <div class="ts-row" style="margin-top:0; gap:12px; flex-wrap:wrap;">
+      <div class="ts-col" style="min-width:220px; flex:1 1 220px;">
+        <label for="rate-preview-contract">Contract</label>
+        <select id="rate-preview-contract">
+          <option value="">Select a contract...</option>
+        </select>
+      </div>
+      <div class="ts-col rate-preview-input-group" style="min-width:180px; flex:1 1 160px;">
+        <label for="rate-preview-percent">Rate change (%)</label>
+        <input id="rate-preview-percent" type="number" step="0.01" placeholder="e.g. 5" />
+      </div>
+      <div class="ts-col rate-preview-input-group" style="min-width:200px; flex:1 1 180px;">
+        <label for="rate-preview-rate">New hourly rate</label>
+        <input id="rate-preview-rate" type="number" min="0" step="0.01" />
+      </div>
+      <div class="ts-col" style="align-self:flex-end; min-width:120px;">
+        <button class="ghost" id="rate-preview-reset" style="width:100%;">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rate-preview-empty" class="ts-note">Select a contract and enter a rate change to generate a preview.</div>
+
+  <div id="rate-preview-content" style="display:none;">
+    <div class="rate-preview-overview">
+      <div class="rate-preview-summary-grid">
+        <div class="rate-preview-card">
+          <div class="rate-preview-label">Hourly rate</div>
+          <div class="rate-preview-value" id="rate-preview-adjusted-rate">--</div>
+          <div class="rate-preview-subtext">Current: <span id="rate-preview-current-rate">--</span></div>
+          <div class="rate-preview-variance-chip" id="rate-preview-rate-delta">--</div>
+          <div class="rate-preview-subtext" id="rate-preview-hours-label">Hours logged: <span id="rate-preview-total-hours">--</span></div>
+        </div>
+        <div class="rate-preview-card">
+          <div class="rate-preview-label">Earnings to date</div>
+          <div class="rate-preview-value" id="rate-preview-total-earn-scenario">--</div>
+          <div class="rate-preview-subtext">Current: <span id="rate-preview-total-earn-current">--</span></div>
+          <div class="rate-preview-variance-chip" id="rate-preview-total-earn-variance">--</div>
+          <div class="rate-preview-metric-stack">
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Superannuation</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-total-super-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-total-super-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-total-super-current">--</span></div>
+            </div>
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Tax</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-total-tax-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-total-tax-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-total-tax-current">--</span></div>
+            </div>
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Net income</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-total-net-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-total-net-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-total-net-current">--</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="rate-preview-card" id="rate-preview-remaining-card">
+          <div class="rate-preview-label">Total Possible Potential</div>
+          <div class="rate-preview-value" id="rate-preview-remaining-scenario">--</div>
+          <div class="rate-preview-subtext">Current: <span id="rate-preview-remaining-current">--</span></div>
+          <div class="rate-preview-subtext">Total contract hours: <span id="rate-preview-contract-hours">--</span></div>
+          <div class="rate-preview-variance-chip" id="rate-preview-remaining-variance">--</div>
+          <div class="rate-preview-metric-stack">
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Superannuation</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-remaining-super-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-remaining-super-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-remaining-super-current">--</span></div>
+            </div>
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Tax</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-remaining-tax-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-remaining-tax-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-remaining-tax-current">--</span></div>
+            </div>
+            <div class="rate-preview-metric-item">
+              <div class="rate-preview-metric-label">Net income</div>
+              <div class="rate-preview-metric-main">
+                <span id="rate-preview-remaining-net-scenario">--</span>
+                <span class="rate-preview-metric-delta" id="rate-preview-remaining-net-variance">--</span>
+              </div>
+              <div class="rate-preview-metric-subtext">Current: <span id="rate-preview-remaining-net-current">--</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rate-preview-subtext" id="rate-preview-summary-footnote">--</div>
+      <div id="rate-preview-no-entries" class="ts-note" style="display:none;">No time entries recorded for this contract yet.</div>
+
+      <div class="rate-preview-table-wrapper">
+        <table class="rate-preview-monthly-table">
+          <thead>
+            <tr>
+              <th style="min-width:120px;">Month</th>
+              <th style="min-width:100px;">Hours</th>
+              <th style="min-width:160px;">Gross</th>
+              <th style="min-width:160px;">Super</th>
+              <th style="min-width:160px;">Tax</th>
+              <th style="min-width:160px;">Net</th>
+            </tr>
+          </thead>
+          <tbody id="rate-preview-monthly-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="rate-preview-loading" class="rate-preview-loading-overlay">Calculating scenario...</div>
+</section>

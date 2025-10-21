@@ -487,6 +487,34 @@
   .contract-burndown-table th, .contract-burndown-table td { padding:6px 8px; border:1px solid var(--border); text-align:right; }
   .contract-burndown-table th:first-child, .contract-burndown-table td:first-child { text-align:left; }
   .contract-burndown-empty { font-size:12px; color: var(--muted); margin-top:8px; }
+  .rate-preview-controls { margin-bottom:16px; }
+  .rate-preview-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+  .rate-preview-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:6px; }
+  .rate-preview-label { font-size:12px; color: var(--muted); text-transform:uppercase; letter-spacing:0.04em; }
+  .rate-preview-value { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .rate-preview-subtext { font-size:13px; color: var(--muted); }
+  .rate-preview-variance-chip { font-size:13px; font-weight:600; }
+  .rate-preview-metric-positive { color: var(--success); }
+  .rate-preview-metric-negative { color: var(--danger); }
+  .rate-preview-overview { display:flex; flex-direction:column; gap:16px; }
+  .rate-preview-table-wrapper { overflow-x:auto; border:1px solid var(--border); border-radius:12px; background: var(--bg); }
+  .rate-preview-monthly-table { width:100%; border-collapse:collapse; }
+  .rate-preview-monthly-table th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color: var(--muted); padding:12px; border-bottom:1px solid var(--border); }
+  .rate-preview-monthly-table td { padding:10px 12px; border-bottom:1px solid var(--border); font-size:13px; }
+  .rate-preview-monthly-table tbody tr:last-child td { border-bottom:none; }
+  .rate-preview-loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background: var(--bg); opacity:0.7; backdrop-filter:blur(4px); display:none; align-items:center; justify-content:center; z-index:80; border-radius:12px; font-size:14px; color: var(--muted); }
+  .rate-preview-input-group input:disabled { opacity:0.5; cursor:not-allowed; }
+  .rate-preview-metric-stack { border-top:1px solid var(--border); margin-top:12px; padding-top:12px; display:grid; gap:12px; }
+  .rate-preview-metric-item { display:flex; flex-direction:column; gap:4px; }
+  .rate-preview-metric-label { font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.06em; }
+  .rate-preview-metric-main { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .rate-preview-metric-delta { font-size:13px; font-weight:600; }
+  .rate-preview-metric-subtext { font-size:12px; color: var(--muted); }
+  .rate-preview-metric-cell { vertical-align:top; }
+  .rate-preview-metric-cell-main { font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; }
+  .rate-preview-metric-cell-variance { font-size:13px; display:flex; gap:6px; align-items:center; }
+  .rate-preview-metric-cell-sub { font-size:12px; color: var(--muted); }
+  .rate-preview-metric-cell-percent { color: var(--muted); font-size:12px; }
   .ts-calendar { margin-top:20px; }
   .ts-calendar-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
   .ts-calendar-header h3 { margin:0; font-size:18px; }

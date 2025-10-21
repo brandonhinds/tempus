@@ -18,10 +18,6 @@
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
 
-- *GEOFF REQUEST* Enhance company expenses to have categories. It should be possible to add company expenses with the same name, in the event that monthly costs bleed into one another due to the billing cycle. Have a report that can show all company expenses across the year.
-
-- Rate change preview
-
 ## Medium Changes
 
 - Projected monthly hours updates:

@@ -6,17 +6,59 @@
   const pageDeductions = document.getElementById('page-deductions');
   const pageBas = document.getElementById('page-bas');
   const pageAnnualViews = document.getElementById('page-annual-views');
+  const pageRatePreview = document.getElementById('page-rate-preview');
   const pageSettings = document.getElementById('page-settings');
   const navToggle = document.getElementById('nav-toggle');
   const navHomeBtn = document.getElementById('nav-home');
   const navMenu = document.getElementById('nav-menu');
   const navTimeBtn = document.getElementById('nav-time');
   const navContractsBtn = document.getElementById('nav-contracts');
+  const navRatePreviewBtn = document.getElementById('nav-rate-preview');
   const navHourTypesBtn = document.getElementById('nav-hour-types');
   const navDeductionsBtn = document.getElementById('nav-deductions');
   const navBasBtn = document.getElementById('nav-bas');
   const navAnnualViewsBtn = document.getElementById('nav-annual-views');
   const navSettingsBtn = document.getElementById('nav-settings');
+  const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
+  const ratePreviewPercentInput = document.getElementById('rate-preview-percent');
+  const ratePreviewRateInput = document.getElementById('rate-preview-rate');
+  const ratePreviewResetBtn = document.getElementById('rate-preview-reset');
+  const ratePreviewEmpty = document.getElementById('rate-preview-empty');
+  const ratePreviewContent = document.getElementById('rate-preview-content');
+  const ratePreviewLoadingOverlay = document.getElementById('rate-preview-loading');
+  const ratePreviewAdjustedRateEl = document.getElementById('rate-preview-adjusted-rate');
+  const ratePreviewCurrentRateEl = document.getElementById('rate-preview-current-rate');
+  const ratePreviewRateDeltaEl = document.getElementById('rate-preview-rate-delta');
+  const ratePreviewTotalHoursEl = document.getElementById('rate-preview-total-hours');
+  const ratePreviewTotalEarnScenarioEl = document.getElementById('rate-preview-total-earn-scenario');
+  const ratePreviewTotalEarnCurrentEl = document.getElementById('rate-preview-total-earn-current');
+  const ratePreviewTotalEarnVarianceEl = document.getElementById('rate-preview-total-earn-variance');
+  const ratePreviewTotalSuperScenarioEl = document.getElementById('rate-preview-total-super-scenario');
+  const ratePreviewTotalSuperCurrentEl = document.getElementById('rate-preview-total-super-current');
+  const ratePreviewTotalSuperVarianceEl = document.getElementById('rate-preview-total-super-variance');
+  const ratePreviewTotalTaxScenarioEl = document.getElementById('rate-preview-total-tax-scenario');
+  const ratePreviewTotalTaxCurrentEl = document.getElementById('rate-preview-total-tax-current');
+  const ratePreviewTotalTaxVarianceEl = document.getElementById('rate-preview-total-tax-variance');
+  const ratePreviewTotalNetScenarioEl = document.getElementById('rate-preview-total-net-scenario');
+  const ratePreviewTotalNetCurrentEl = document.getElementById('rate-preview-total-net-current');
+  const ratePreviewTotalNetVarianceEl = document.getElementById('rate-preview-total-net-variance');
+  const ratePreviewRemainingCard = document.getElementById('rate-preview-remaining-card');
+  const ratePreviewRemainingScenarioEl = document.getElementById('rate-preview-remaining-scenario');
+  const ratePreviewRemainingCurrentEl = document.getElementById('rate-preview-remaining-current');
+  const ratePreviewRemainingVarianceEl = document.getElementById('rate-preview-remaining-variance');
+  const ratePreviewContractHoursEl = document.getElementById('rate-preview-contract-hours');
+  const ratePreviewRemainingSuperScenarioEl = document.getElementById('rate-preview-remaining-super-scenario');
+  const ratePreviewRemainingSuperCurrentEl = document.getElementById('rate-preview-remaining-super-current');
+  const ratePreviewRemainingSuperVarianceEl = document.getElementById('rate-preview-remaining-super-variance');
+  const ratePreviewRemainingTaxScenarioEl = document.getElementById('rate-preview-remaining-tax-scenario');
+  const ratePreviewRemainingTaxCurrentEl = document.getElementById('rate-preview-remaining-tax-current');
+  const ratePreviewRemainingTaxVarianceEl = document.getElementById('rate-preview-remaining-tax-variance');
+  const ratePreviewRemainingNetScenarioEl = document.getElementById('rate-preview-remaining-net-scenario');
+  const ratePreviewRemainingNetCurrentEl = document.getElementById('rate-preview-remaining-net-current');
+  const ratePreviewRemainingNetVarianceEl = document.getElementById('rate-preview-remaining-net-variance');
+  const ratePreviewSummaryFootnote = document.getElementById('rate-preview-summary-footnote');
+  const ratePreviewNoEntriesNote = document.getElementById('rate-preview-no-entries');
+  const ratePreviewMonthlyBody = document.getElementById('rate-preview-monthly-body');
   const deductionsListEl = document.getElementById('deductions-list');
   const deductionsEmptyEl = document.getElementById('deductions-empty');
   const deductionCompanyDisabledNote = document.getElementById('deduction-company-disabled-note');
@@ -73,6 +115,9 @@
   const basTableBody = document.getElementById('bas-table-body');
   const basQuarterlyNote = document.getElementById('bas-quarterly-note');
   const basEmptyNote = document.getElementById('bas-empty');
+  const RATE_PREVIEW_DEBOUNCE_MS = 350;
+  let ratePreviewDebounceTimer = null;
+  let ratePreviewInputSyncing = false;
 
   const state = {
     cacheKey: 'ts_cache',
@@ -133,6 +178,16 @@
     },
     contractCharts: {
       monthlyHours: null
+    },
+    ratePreview: {
+      selectedContractId: '',
+      data: null,
+      loading: false,
+      requestToken: 0,
+      inputs: {
+        percentChange: null,
+        newRate: null
+      }
     }
   };
 
@@ -151,7 +206,7 @@
   let deductionCategoryDeleteId = null;
   let deductionCategorySavePending = false;
 
-  const PAGE_KEYS = ['time', 'contracts', 'hour-types', 'deductions', 'bas', 'annual-views', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -194,6 +249,7 @@
     const pages = {
       time: pageTime,
       contracts: pageContracts,
+      'rate-preview': pageRatePreview,
       'hour-types': pageHourTypes,
       deductions: pageDeductions,
       bas: pageBas,
@@ -207,6 +263,9 @@
     state.currentPage = normalized;
     if (normalized === 'bas') {
       renderBasReporting();
+    }
+    if (normalized === 'rate-preview') {
+      renderRatePreviewPage();
     }
     if (normalized === 'annual-views') {
       renderAnnualViews();
@@ -289,11 +348,27 @@
 
   if (navTimeBtn) navTimeBtn.onclick = () => { closeNavMenu(); showPage('time'); };
   if (navContractsBtn) navContractsBtn.onclick = () => { closeNavMenu(); showPage('contracts'); };
+  if (navRatePreviewBtn) navRatePreviewBtn.onclick = () => { closeNavMenu(); showPage('rate-preview'); };
   if (navHourTypesBtn) navHourTypesBtn.onclick = () => { closeNavMenu(); showPage('hour-types'); };
   if (navDeductionsBtn) navDeductionsBtn.onclick = () => { closeNavMenu(); showPage('deductions'); };
   if (navBasBtn) navBasBtn.onclick = () => { closeNavMenu(); showPage('bas'); };
   if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
+  if (ratePreviewContractSelect) ratePreviewContractSelect.addEventListener('change', handleRatePreviewContractChange);
+  if (ratePreviewPercentInput) {
+    ratePreviewPercentInput.addEventListener('input', handleRatePreviewPercentInput);
+    ratePreviewPercentInput.addEventListener('blur', handleRatePreviewPercentBlur);
+  }
+  if (ratePreviewRateInput) {
+    ratePreviewRateInput.addEventListener('input', handleRatePreviewRateInput);
+    ratePreviewRateInput.addEventListener('blur', handleRatePreviewRateBlur);
+  }
+  if (ratePreviewResetBtn) {
+    ratePreviewResetBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      resetRatePreviewInputs();
+    });
+  }
   closeNavMenu();
   showPage('time', { skipRemember: true });
 
@@ -498,9 +573,25 @@
     maximumFractionDigits: 2
   });
   const formatCurrency = (value) => {
+    if (value === null || value === undefined || value === '') return '--';
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
     return currencyFormatter.format(num);
+  };
+  const formatSignedCurrency = (value) => {
+    const num = Math.round((Number(value) || 0) * 100) / 100;
+    if (num === 0) return formatCurrency(0);
+    const abs = Math.abs(num);
+    const formattedAbs = currencyFormatter.format(abs);
+    return num > 0 ? `+${formattedAbs}` : `-${formattedAbs}`;
+  };
+  const formatPercentValue = (value, decimals = 2) => {
+    if (!Number.isFinite(value)) return '--';
+    const factor = Math.pow(10, decimals);
+    const rounded = Math.round(Number(value) * factor) / factor;
+    if (rounded === 0) return '0%';
+    const abs = Math.abs(rounded).toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+    return `${rounded > 0 ? '+' : '-'}${abs}%`;
   };
   const formatDate = (value) => {
     if (!value) return '';
@@ -3960,6 +4051,11 @@ function updateDeductionFormVisibility() {
       description: 'Adds a badge that breaks down projected contract hours for the active month.',
       order: 140
     },
+    contract_rate_preview: {
+      name: 'Contract rate preview page',
+      description: 'Adds a dedicated page to model hourly rate changes and see their impact across a contract.',
+      order: 142
+    },
     suggest_end_time: {
       name: 'Suggest End Time',
       description: 'Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours.',
@@ -6553,9 +6649,615 @@ function updateDeductionFormVisibility() {
     contractBurndownEl.appendChild(table);
   }
 
+  function isRatePreviewEnabled() {
+    const flag = state.featureFlags.contract_rate_preview || DEFAULT_FEATURE_FLAGS.contract_rate_preview || { enabled: false };
+    return !!flag.enabled;
+  }
+
+  function normalizeRateValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return 0;
+    return Math.round(num * 100) / 100;
+  }
+
+  function normalizePercentValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return Math.round(num * 100) / 100;
+  }
+
+  function formatPercentInputValue(value) {
+    const normalized = normalizePercentValue(value);
+    if (normalized === null) return '';
+    const abs = Math.abs(normalized).toFixed(2).replace(/\.00$/, '').replace(/(\.\d*?)0+$/, '$1');
+    return normalized < 0 ? `-${abs}` : abs;
+  }
+
+  function resetRatePreviewState() {
+    state.ratePreview.selectedContractId = '';
+    state.ratePreview.data = null;
+    state.ratePreview.loading = false;
+    state.ratePreview.requestToken = 0;
+    state.ratePreview.inputs = { percentChange: null, newRate: null };
+    if (ratePreviewContractSelect) ratePreviewContractSelect.value = '';
+    if (ratePreviewPercentInput) {
+      ratePreviewPercentInput.value = '';
+      ratePreviewPercentInput.disabled = false;
+      ratePreviewPercentInput.placeholder = 'e.g. 5';
+    }
+    if (ratePreviewRateInput) ratePreviewRateInput.value = '';
+    hideRatePreviewLoading();
+    clearRatePreviewContent();
+    updateRatePreviewEmptyState();
+  }
+
+  function clearRatePreviewContent() {
+    if (ratePreviewAdjustedRateEl) ratePreviewAdjustedRateEl.textContent = '--';
+    if (ratePreviewCurrentRateEl) ratePreviewCurrentRateEl.textContent = '--';
+    if (ratePreviewRateDeltaEl) {
+      ratePreviewRateDeltaEl.textContent = '--';
+      applyRatePreviewVariance(ratePreviewRateDeltaEl, null);
+    }
+    if (ratePreviewTotalHoursEl) ratePreviewTotalHoursEl.textContent = '--';
+    if (ratePreviewTotalEarnScenarioEl) ratePreviewTotalEarnScenarioEl.textContent = '--';
+    if (ratePreviewTotalEarnCurrentEl) ratePreviewTotalEarnCurrentEl.textContent = '--';
+    if (ratePreviewTotalEarnVarianceEl) {
+      ratePreviewTotalEarnVarianceEl.textContent = '--';
+      applyRatePreviewVariance(ratePreviewTotalEarnVarianceEl, null);
+    }
+    setRatePreviewMetric(ratePreviewTotalSuperScenarioEl, ratePreviewTotalSuperCurrentEl, ratePreviewTotalSuperVarianceEl, null, null, null, null);
+    setRatePreviewMetric(ratePreviewTotalTaxScenarioEl, ratePreviewTotalTaxCurrentEl, ratePreviewTotalTaxVarianceEl, null, null, null, null, true);
+    setRatePreviewMetric(ratePreviewTotalNetScenarioEl, ratePreviewTotalNetCurrentEl, ratePreviewTotalNetVarianceEl, null, null, null, null);
+    if (ratePreviewRemainingScenarioEl) ratePreviewRemainingScenarioEl.textContent = '--';
+    if (ratePreviewRemainingCurrentEl) ratePreviewRemainingCurrentEl.textContent = '--';
+    if (ratePreviewContractHoursEl) ratePreviewContractHoursEl.textContent = '--';
+    if (ratePreviewRemainingVarianceEl) {
+      ratePreviewRemainingVarianceEl.textContent = '--';
+      applyRatePreviewVariance(ratePreviewRemainingVarianceEl, null);
+    }
+    setRatePreviewMetric(ratePreviewRemainingSuperScenarioEl, ratePreviewRemainingSuperCurrentEl, ratePreviewRemainingSuperVarianceEl, null, null, null, null);
+    setRatePreviewMetric(ratePreviewRemainingTaxScenarioEl, ratePreviewRemainingTaxCurrentEl, ratePreviewRemainingTaxVarianceEl, null, null, null, null, true);
+    setRatePreviewMetric(ratePreviewRemainingNetScenarioEl, ratePreviewRemainingNetCurrentEl, ratePreviewRemainingNetVarianceEl, null, null, null, null);
+    if (ratePreviewRemainingCard) ratePreviewRemainingCard.style.display = 'none';
+    if (ratePreviewSummaryFootnote) ratePreviewSummaryFootnote.textContent = '--';
+    if (ratePreviewNoEntriesNote) ratePreviewNoEntriesNote.style.display = 'none';
+    if (ratePreviewMonthlyBody) ratePreviewMonthlyBody.innerHTML = '';
+    if (ratePreviewContent) ratePreviewContent.style.display = 'none';
+  }
+
+  function updateRatePreviewEmptyState() {
+    if (!ratePreviewEmpty || !ratePreviewContent) return;
+    const contractId = state.ratePreview.selectedContractId;
+    const hasSelection = contractId && state.contractMap[contractId];
+    if (!hasSelection) {
+      ratePreviewEmpty.style.display = 'block';
+      ratePreviewContent.style.display = 'none';
+      return;
+    }
+    ratePreviewEmpty.style.display = 'none';
+    if (state.ratePreview.data) {
+      ratePreviewContent.style.display = 'block';
+    }
+  }
+
+  function renderRatePreviewContractOptions() {
+    if (!ratePreviewContractSelect) return;
+    const selectedId = state.ratePreview.selectedContractId;
+    ratePreviewContractSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a contract...';
+    ratePreviewContractSelect.appendChild(placeholder);
+    state.contracts.forEach((contract) => {
+      if (!contract) return;
+      const option = document.createElement('option');
+      option.value = contract.id;
+      option.textContent = contract.name || 'Untitled contract';
+      ratePreviewContractSelect.appendChild(option);
+    });
+    if (selectedId && state.contractMap[selectedId]) {
+      ratePreviewContractSelect.value = selectedId;
+    } else {
+      ratePreviewContractSelect.value = '';
+      if (selectedId) {
+        state.ratePreview.selectedContractId = '';
+        state.ratePreview.data = null;
+        clearRatePreviewContent();
+      }
+    }
+  }
+
+  function applyRatePreviewVariance(element, value) {
+    if (!element) return;
+    element.classList.remove('rate-preview-metric-positive', 'rate-preview-metric-negative');
+    const num = Number(value);
+    if (!Number.isFinite(num) || num === 0) return;
+    element.classList.add(num > 0 ? 'rate-preview-metric-positive' : 'rate-preview-metric-negative');
+  }
+
+  function setRatePreviewMetric(scenarioEl, currentEl, varianceEl, scenarioValue, currentValue, varianceValue, variancePercent, invertTrend) {
+    if (scenarioEl) {
+      if (scenarioValue === null || scenarioValue === undefined) {
+        scenarioEl.textContent = '--';
+      } else {
+        scenarioEl.textContent = formatCurrency(scenarioValue);
+      }
+    }
+    if (currentEl) {
+      if (currentValue === null || currentValue === undefined) {
+        currentEl.textContent = '--';
+      } else {
+        currentEl.textContent = formatCurrency(currentValue);
+      }
+    }
+    if (varianceEl) {
+      if (varianceValue === null || varianceValue === undefined) {
+        varianceEl.textContent = '--';
+        applyRatePreviewVariance(varianceEl, null);
+      } else {
+        const varianceText = formatSignedCurrency(varianceValue);
+        const percentText = Number.isFinite(Number(variancePercent)) ? ` (${formatPercentValue(variancePercent)})` : '';
+        varianceEl.textContent = varianceText + percentText;
+        const varianceForColor = invertTrend ? -varianceValue : varianceValue;
+        applyRatePreviewVariance(varianceEl, varianceForColor);
+      }
+    }
+  }
+
+  function showRatePreviewLoading(message) {
+    if (!ratePreviewLoadingOverlay || !pageRatePreview) return;
+    pageRatePreview.style.position = pageRatePreview.style.position || 'relative';
+    ratePreviewLoadingOverlay.textContent = message || 'Calculating scenario...';
+    ratePreviewLoadingOverlay.style.display = 'flex';
+  }
+
+  function hideRatePreviewLoading() {
+    if (ratePreviewLoadingOverlay) {
+      ratePreviewLoadingOverlay.style.display = 'none';
+    }
+  }
+
+  function scheduleRatePreviewFetch(immediate) {
+    if (!isRatePreviewEnabled()) return;
+    if (!state.ratePreview.selectedContractId) return;
+    if (ratePreviewDebounceTimer) {
+      clearTimeout(ratePreviewDebounceTimer);
+      ratePreviewDebounceTimer = null;
+    }
+    if (immediate) {
+      fetchRatePreviewData();
+      return;
+    }
+    ratePreviewDebounceTimer = setTimeout(() => {
+      fetchRatePreviewData();
+    }, RATE_PREVIEW_DEBOUNCE_MS);
+  }
+
+  function fetchRatePreviewData() {
+    if (!isRatePreviewEnabled()) return;
+    const contractId = state.ratePreview.selectedContractId;
+    if (!contractId || !state.contractMap[contractId]) {
+      updateRatePreviewEmptyState();
+      return;
+    }
+    const percent = normalizePercentValue(state.ratePreview.inputs.percentChange);
+    const rate = state.ratePreview.inputs.newRate != null ? normalizeRateValue(state.ratePreview.inputs.newRate) : null;
+    const payload = {
+      contractId,
+      percentChange: percent != null ? percent : null,
+      newRate: rate != null ? rate : null
+    };
+    state.ratePreview.loading = true;
+    const requestId = state.ratePreview.requestToken + 1;
+    state.ratePreview.requestToken = requestId;
+    showRatePreviewLoading('Calculating scenario...');
+    setStatus('Calculating rate preview...', 'info');
+    google.script.run
+      .withSuccessHandler((data) => {
+        if (state.ratePreview.requestToken !== requestId) return;
+        state.ratePreview.loading = false;
+        hideRatePreviewLoading();
+        if (data && data.contract && data.contract.id === state.ratePreview.selectedContractId) {
+          state.ratePreview.data = data;
+          applyRatePreviewData(data);
+          setStatus('Ready', 'success');
+        } else {
+          setStatus('Rate preview updated', 'success');
+        }
+      })
+      .withFailureHandler((error) => {
+        if (state.ratePreview.requestToken !== requestId) return;
+        state.ratePreview.loading = false;
+        hideRatePreviewLoading();
+        console.error('Failed to calculate rate preview', error);
+        setStatus('Failed to calculate rate preview', 'error');
+      })
+      .api_getContractRatePreview(payload);
+  }
+
+  function applyRatePreviewData(data) {
+    if (!data) return;
+    const contractId = state.ratePreview.selectedContractId;
+    if (!contractId || !state.contractMap[contractId]) return;
+    const baseRate = normalizeRateValue(data.current && data.current.hourlyRate);
+    if (ratePreviewPercentInput) {
+      if (baseRate === 0) {
+        ratePreviewPercentInput.disabled = true;
+        ratePreviewPercentInput.placeholder = 'Unavailable for $0 rates';
+      } else {
+        ratePreviewPercentInput.disabled = false;
+        ratePreviewPercentInput.placeholder = 'e.g. 5';
+      }
+    }
+    if (ratePreviewAdjustedRateEl) ratePreviewAdjustedRateEl.textContent = `${formatCurrency(normalizeRateValue(data.scenario && data.scenario.hourlyRate))} / hr`;
+    if (ratePreviewCurrentRateEl) ratePreviewCurrentRateEl.textContent = `${formatCurrency(baseRate)} / hr`;
+    if (ratePreviewRateDeltaEl) {
+      const delta = Number(data.variance && data.variance.hourlyRateDelta) || 0;
+      ratePreviewRateDeltaEl.textContent = `${formatSignedCurrency(delta)} / hr`;
+      applyRatePreviewVariance(ratePreviewRateDeltaEl, delta);
+    }
+    if (ratePreviewTotalHoursEl) ratePreviewTotalHoursEl.textContent = `${formatDecimalHours(data.current && data.current.totalHours)} hrs`;
+    if (ratePreviewTotalEarnScenarioEl) ratePreviewTotalEarnScenarioEl.textContent = formatCurrency(data.scenario && data.scenario.totalEarnings);
+    if (ratePreviewTotalEarnCurrentEl) ratePreviewTotalEarnCurrentEl.textContent = formatCurrency(data.current && data.current.totalEarnings);
+    if (ratePreviewTotalEarnVarianceEl) {
+      const totalVariance = Number(data.variance && data.variance.totalEarnings) || 0;
+      const totalVarianceText = formatSignedCurrency(totalVariance);
+      const totalVariancePercent = Number.isFinite(Number(data.variance && data.variance.totalEarningsPercent))
+        ? ` (${formatPercentValue(data.variance.totalEarningsPercent)})`
+        : '';
+      ratePreviewTotalEarnVarianceEl.textContent = totalVarianceText + totalVariancePercent;
+      applyRatePreviewVariance(ratePreviewTotalEarnVarianceEl, totalVariance);
+    }
+    setRatePreviewMetric(
+      ratePreviewTotalSuperScenarioEl,
+      ratePreviewTotalSuperCurrentEl,
+      ratePreviewTotalSuperVarianceEl,
+      data.scenario && data.scenario.super,
+      data.current && data.current.super,
+      data.variance && data.variance.super,
+      data.variance && data.variance.superPercent
+    );
+    setRatePreviewMetric(
+      ratePreviewTotalTaxScenarioEl,
+      ratePreviewTotalTaxCurrentEl,
+      ratePreviewTotalTaxVarianceEl,
+      data.scenario && data.scenario.tax,
+      data.current && data.current.tax,
+      data.variance && data.variance.tax,
+      data.variance && data.variance.taxPercent,
+      true
+    );
+    setRatePreviewMetric(
+      ratePreviewTotalNetScenarioEl,
+      ratePreviewTotalNetCurrentEl,
+      ratePreviewTotalNetVarianceEl,
+      data.scenario && data.scenario.net,
+      data.current && data.current.net,
+      data.variance && data.variance.net,
+      data.variance && data.variance.netPercent
+    );
+    const hasContractCap = Number(data.current && data.current.remainingHours) > 0;
+    if (ratePreviewRemainingCard) {
+      ratePreviewRemainingCard.style.display = hasContractCap ? 'flex' : 'none';
+    }
+    if (hasContractCap) {
+      if (ratePreviewRemainingScenarioEl) ratePreviewRemainingScenarioEl.textContent = formatCurrency(data.scenario && data.scenario.remainingEarnings);
+      if (ratePreviewRemainingCurrentEl) ratePreviewRemainingCurrentEl.textContent = formatCurrency(data.current && data.current.remainingEarnings);
+      if (ratePreviewContractHoursEl) {
+        const hoursValue = Number(data.current && data.current.remainingHours) || 0;
+        ratePreviewContractHoursEl.textContent = `${formatDecimalHours(hoursValue)} hrs`;
+      }
+      if (ratePreviewRemainingVarianceEl) {
+        const remainingVariance = Number(data.variance && data.variance.remainingEarnings) || 0;
+        const remainingVarianceText = formatSignedCurrency(remainingVariance);
+        const remainingVariancePercent = Number.isFinite(Number(data.variance && data.variance.remainingEarningsPercent))
+          ? ` (${formatPercentValue(data.variance.remainingEarningsPercent)})`
+          : '';
+        ratePreviewRemainingVarianceEl.textContent = remainingVarianceText + remainingVariancePercent;
+        applyRatePreviewVariance(ratePreviewRemainingVarianceEl, remainingVariance);
+      }
+      setRatePreviewMetric(
+        ratePreviewRemainingSuperScenarioEl,
+        ratePreviewRemainingSuperCurrentEl,
+        ratePreviewRemainingSuperVarianceEl,
+        data.scenario && data.scenario.remainingSuper,
+        data.current && data.current.remainingSuper,
+        data.variance && data.variance.remainingSuper,
+        data.variance && data.variance.remainingSuperPercent
+      );
+      setRatePreviewMetric(
+        ratePreviewRemainingTaxScenarioEl,
+        ratePreviewRemainingTaxCurrentEl,
+        ratePreviewRemainingTaxVarianceEl,
+        data.scenario && data.scenario.remainingTax,
+        data.current && data.current.remainingTax,
+        data.variance && data.variance.remainingTax,
+        data.variance && data.variance.remainingTaxPercent,
+        true
+      );
+      setRatePreviewMetric(
+        ratePreviewRemainingNetScenarioEl,
+        ratePreviewRemainingNetCurrentEl,
+        ratePreviewRemainingNetVarianceEl,
+        data.scenario && data.scenario.remainingNet,
+        data.current && data.current.remainingNet,
+        data.variance && data.variance.remainingNet,
+        data.variance && data.variance.remainingNetPercent
+      );
+    }
+    if (!hasContractCap) {
+      if (ratePreviewRemainingScenarioEl) ratePreviewRemainingScenarioEl.textContent = formatCurrency(data.scenario && data.scenario.remainingEarnings);
+      if (ratePreviewRemainingCurrentEl) ratePreviewRemainingCurrentEl.textContent = formatCurrency(data.current && data.current.remainingEarnings);
+      if (ratePreviewContractHoursEl) ratePreviewContractHoursEl.textContent = '--';
+      if (ratePreviewRemainingVarianceEl) {
+        ratePreviewRemainingVarianceEl.textContent = '--';
+        applyRatePreviewVariance(ratePreviewRemainingVarianceEl, null);
+      }
+      setRatePreviewMetric(ratePreviewRemainingSuperScenarioEl, ratePreviewRemainingSuperCurrentEl, ratePreviewRemainingSuperVarianceEl, null, null, null, null);
+      setRatePreviewMetric(ratePreviewRemainingTaxScenarioEl, ratePreviewRemainingTaxCurrentEl, ratePreviewRemainingTaxVarianceEl, null, null, null, null, true);
+      setRatePreviewMetric(ratePreviewRemainingNetScenarioEl, ratePreviewRemainingNetCurrentEl, ratePreviewRemainingNetVarianceEl, null, null, null, null);
+    }
+    if (ratePreviewSummaryFootnote) {
+      const entryCount = Number(data.metadata && data.metadata.entryCount) || 0;
+      const monthCount = Number(data.metadata && data.metadata.monthCount) || 0;
+      if (entryCount === 0) {
+        ratePreviewSummaryFootnote.textContent = 'No entries logged yet—future time entries will update this preview automatically.';
+      } else {
+        const entryLabel = entryCount === 1 ? '1 entry' : `${entryCount} entries`;
+        const monthLabel = monthCount === 1 ? '1 month' : `${monthCount} months`;
+        ratePreviewSummaryFootnote.textContent = `Based on ${entryLabel} across ${monthLabel}.`;
+      }
+    }
+    if (ratePreviewNoEntriesNote) {
+      const entryCount = Number(data.metadata && data.metadata.entryCount) || 0;
+      ratePreviewNoEntriesNote.style.display = entryCount === 0 ? 'block' : 'none';
+    }
+    renderRatePreviewMonthlyRows(Array.isArray(data.monthly) ? data.monthly : []);
+    if (ratePreviewContent) ratePreviewContent.style.display = 'block';
+    updateRatePreviewEmptyState();
+    ratePreviewInputSyncing = true;
+    const scenarioRate = normalizeRateValue(data.scenario && data.scenario.hourlyRate);
+    if (ratePreviewRateInput) ratePreviewRateInput.value = scenarioRate.toFixed(2);
+    if (ratePreviewPercentInput) {
+      if (Number.isFinite(Number(data.scenario && data.scenario.percentChange))) {
+        ratePreviewPercentInput.value = formatPercentInputValue(data.scenario.percentChange);
+      } else {
+        ratePreviewPercentInput.value = '';
+      }
+    }
+    ratePreviewInputSyncing = false;
+    state.ratePreview.inputs.newRate = scenarioRate;
+    state.ratePreview.inputs.percentChange = Number.isFinite(Number(data.scenario && data.scenario.percentChange))
+      ? normalizePercentValue(data.scenario.percentChange)
+      : null;
+  }
+
+  function appendRatePreviewMetricCell(rowEl, scenarioValue, currentValue, varianceValue, variancePercent, invertTrend) {
+    const cell = document.createElement('td');
+    cell.className = 'rate-preview-metric-cell';
+    const scenarioDiv = document.createElement('div');
+    scenarioDiv.className = 'rate-preview-metric-cell-main';
+    if (scenarioValue === null || scenarioValue === undefined) {
+      scenarioDiv.textContent = '--';
+    } else {
+      scenarioDiv.textContent = formatCurrency(scenarioValue);
+    }
+    const varianceDiv = document.createElement('div');
+    varianceDiv.className = 'rate-preview-metric-cell-variance';
+    applyRatePreviewVariance(varianceDiv, null);
+    if (varianceValue === null || varianceValue === undefined) {
+      varianceDiv.textContent = '--';
+    } else {
+      varianceDiv.textContent = formatSignedCurrency(varianceValue);
+      const varianceForColor = invertTrend ? -varianceValue : varianceValue;
+      applyRatePreviewVariance(varianceDiv, varianceForColor);
+      if (Number.isFinite(Number(variancePercent))) {
+        const percentSpan = document.createElement('span');
+        percentSpan.className = 'rate-preview-metric-cell-percent';
+        percentSpan.textContent = `(${formatPercentValue(variancePercent)})`;
+        varianceDiv.appendChild(percentSpan);
+      }
+    }
+    const currentDiv = document.createElement('div');
+    currentDiv.className = 'rate-preview-metric-cell-sub';
+    if (currentValue === null || currentValue === undefined) {
+      currentDiv.textContent = 'Current: --';
+    } else {
+      currentDiv.textContent = `Current: ${formatCurrency(currentValue)}`;
+    }
+    cell.append(scenarioDiv, varianceDiv, currentDiv);
+    rowEl.appendChild(cell);
+  }
+
+  function renderRatePreviewMonthlyRows(rows) {
+    if (!ratePreviewMonthlyBody) return;
+    ratePreviewMonthlyBody.innerHTML = '';
+    if (!rows.length) {
+      const emptyRow = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 5;
+      cell.style.textAlign = 'center';
+      cell.textContent = 'No months to display yet.';
+      emptyRow.appendChild(cell);
+      ratePreviewMonthlyBody.appendChild(emptyRow);
+      return;
+    }
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      const monthTd = document.createElement('td');
+      monthTd.textContent = row.label || row.month || '--';
+      const hoursTd = document.createElement('td');
+      hoursTd.textContent = `${formatDecimalHours(row.hours || 0)} hrs`;
+      tr.append(monthTd, hoursTd);
+      appendRatePreviewMetricCell(tr, row.scenarioEarnings, row.currentEarnings, row.variance, row.variancePercent);
+      appendRatePreviewMetricCell(tr, row.scenarioSuper, row.currentSuper, row.superVariance, row.superVariancePercent);
+      appendRatePreviewMetricCell(tr, row.scenarioTax, row.currentTax, row.taxVariance, row.taxVariancePercent, true);
+      appendRatePreviewMetricCell(tr, row.scenarioNet, row.currentNet, row.netVariance, row.netVariancePercent);
+      ratePreviewMonthlyBody.appendChild(tr);
+    });
+  }
+
+  function handleRatePreviewContractChange() {
+    const contractId = ratePreviewContractSelect ? ratePreviewContractSelect.value : '';
+    state.ratePreview.selectedContractId = contractId || '';
+    state.ratePreview.data = null;
+    state.ratePreview.loading = false;
+    state.ratePreview.inputs = { percentChange: null, newRate: null };
+    state.ratePreview.requestToken += 1;
+    hideRatePreviewLoading();
+    clearRatePreviewContent();
+    if (!contractId || !state.contractMap[contractId]) {
+      updateRatePreviewEmptyState();
+      return;
+    }
+    const contract = state.contractMap[contractId];
+    const baseRate = normalizeRateValue(contract.hourly_rate);
+    ratePreviewInputSyncing = true;
+    if (ratePreviewPercentInput) {
+      ratePreviewPercentInput.value = '';
+      ratePreviewPercentInput.disabled = baseRate === 0;
+      ratePreviewPercentInput.placeholder = baseRate === 0 ? 'Unavailable for $0 rates' : 'e.g. 5';
+    }
+    if (ratePreviewRateInput) ratePreviewRateInput.value = baseRate.toFixed(2);
+    ratePreviewInputSyncing = false;
+    state.ratePreview.inputs.newRate = baseRate;
+    state.ratePreview.inputs.percentChange = null;
+    updateRatePreviewEmptyState();
+    scheduleRatePreviewFetch(true);
+  }
+
+  function resetRatePreviewInputs() {
+    const contractId = state.ratePreview.selectedContractId;
+    if (!contractId || !state.contractMap[contractId]) return;
+    const baseRate = normalizeRateValue(state.contractMap[contractId].hourly_rate);
+    state.ratePreview.inputs = { percentChange: null, newRate: baseRate };
+    ratePreviewInputSyncing = true;
+    if (ratePreviewPercentInput) ratePreviewPercentInput.value = '';
+    if (ratePreviewRateInput) ratePreviewRateInput.value = baseRate.toFixed(2);
+    ratePreviewInputSyncing = false;
+    scheduleRatePreviewFetch(true);
+  }
+
+  function handleRatePreviewPercentInput() {
+    if (ratePreviewInputSyncing) return;
+    const contractId = state.ratePreview.selectedContractId;
+    if (!contractId || !state.contractMap[contractId]) return;
+    const contract = state.contractMap[contractId];
+    const baseRate = normalizeRateValue(contract.hourly_rate);
+    if (!ratePreviewPercentInput) return;
+    if (baseRate === 0) {
+      ratePreviewPercentInput.value = '';
+      return;
+    }
+    const raw = ratePreviewPercentInput.value.trim();
+    if (raw === '') {
+      state.ratePreview.inputs.percentChange = null;
+      state.ratePreview.inputs.newRate = baseRate;
+      ratePreviewInputSyncing = true;
+      if (ratePreviewRateInput) ratePreviewRateInput.value = baseRate.toFixed(2);
+      ratePreviewInputSyncing = false;
+      scheduleRatePreviewFetch();
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const percent = normalizePercentValue(parsed);
+    const calculatedRate = Math.max(0, baseRate * (1 + percent / 100));
+    const normalizedRate = normalizeRateValue(calculatedRate);
+    state.ratePreview.inputs.percentChange = percent;
+    state.ratePreview.inputs.newRate = normalizedRate;
+    ratePreviewInputSyncing = true;
+    if (ratePreviewRateInput) ratePreviewRateInput.value = normalizedRate.toFixed(2);
+    ratePreviewInputSyncing = false;
+    scheduleRatePreviewFetch();
+  }
+
+  function handleRatePreviewPercentBlur() {
+    if (!ratePreviewPercentInput) return;
+    const raw = ratePreviewPercentInput.value.trim();
+    if (raw === '') return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      ratePreviewPercentInput.value = '';
+      return;
+    }
+    ratePreviewPercentInput.value = formatPercentInputValue(parsed);
+  }
+
+  function handleRatePreviewRateInput() {
+    if (ratePreviewInputSyncing) return;
+    const contractId = state.ratePreview.selectedContractId;
+    if (!contractId || !state.contractMap[contractId]) return;
+    if (!ratePreviewRateInput) return;
+    const raw = ratePreviewRateInput.value.trim();
+    if (raw === '') {
+      state.ratePreview.inputs.newRate = null;
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const normalizedRate = normalizeRateValue(parsed);
+    state.ratePreview.inputs.newRate = normalizedRate;
+    const contract = state.contractMap[contractId];
+    const baseRate = normalizeRateValue(contract.hourly_rate);
+    ratePreviewInputSyncing = true;
+    if (ratePreviewPercentInput) {
+      if (baseRate === 0) {
+        ratePreviewPercentInput.value = '';
+        state.ratePreview.inputs.percentChange = null;
+      } else {
+        const percent = normalizePercentValue(((normalizedRate - baseRate) / baseRate) * 100);
+        state.ratePreview.inputs.percentChange = percent;
+        ratePreviewPercentInput.value = percent != null ? formatPercentInputValue(percent) : '';
+      }
+    }
+    ratePreviewInputSyncing = false;
+    scheduleRatePreviewFetch();
+  }
+
+  function handleRatePreviewRateBlur() {
+    if (!ratePreviewRateInput) return;
+    const raw = ratePreviewRateInput.value.trim();
+    if (raw === '') return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      ratePreviewRateInput.value = state.ratePreview.inputs.newRate != null
+        ? normalizeRateValue(state.ratePreview.inputs.newRate).toFixed(2)
+        : '';
+      return;
+    }
+    ratePreviewRateInput.value = normalizeRateValue(parsed).toFixed(2);
+  }
+
+  function renderRatePreviewPage(forceRefresh) {
+    if (!isRatePreviewEnabled()) {
+      updateRatePreviewEmptyState();
+      return;
+    }
+    renderRatePreviewContractOptions();
+    if (state.ratePreview.selectedContractId && !state.contractMap[state.ratePreview.selectedContractId]) {
+      state.ratePreview.selectedContractId = '';
+    }
+    if (ratePreviewContractSelect) {
+      ratePreviewContractSelect.value = state.ratePreview.selectedContractId || '';
+    }
+    updateRatePreviewEmptyState();
+    if (forceRefresh && state.ratePreview.selectedContractId) {
+      scheduleRatePreviewFetch(true);
+      return;
+    }
+    if (state.ratePreview.data) {
+      applyRatePreviewData(state.ratePreview.data);
+    }
+  }
+
   function renderContractsUI() {
     renderContractSelectorOptions();
     renderContractDetail();
+    renderRatePreviewContractOptions();
+    if (isRatePreviewEnabled()) {
+      updateRatePreviewEmptyState();
+    }
   }
 
   function handleContractSave() {
@@ -6795,6 +7497,20 @@ function updateDeductionFormVisibility() {
       loadHourTypes();
     }
     updateHourTypeFormVisibility();
+
+    const ratePreviewFlag = state.featureFlags.contract_rate_preview || DEFAULT_FEATURE_FLAGS.contract_rate_preview || { enabled: false };
+    if (navRatePreviewBtn) {
+      navRatePreviewBtn.style.display = ratePreviewFlag.enabled ? 'block' : 'none';
+    }
+    if (ratePreviewFlag.enabled) {
+      renderRatePreviewContractOptions();
+      updateRatePreviewEmptyState();
+    } else {
+      if (state.currentPage === 'rate-preview') {
+        showPage('contracts');
+      }
+      resetRatePreviewState();
+    }
 
     // Show/hide public holidays state setting
     const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
