@@ -12,11 +12,13 @@
 - Add the invoice requirements (all behind feature flags)
     * Already had one attempt at this but it got too big / unwieldy. We need a simpler way to define default fields, line items, and amounts.
 
-- Add a thinkStack employee feature flag, which will do things like include the lost super in the expected pay
-
 - Make buttons / UI element *sexy* like JB's
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
+
+- Make the UI dynamic based on browser width
+
+- Make the sheet (at least some of it) work on mobile
 
 ## Medium Changes
 
@@ -58,6 +60,9 @@
 - Remove the `[Actual Income]` debugging in the console log
 
 - Remove the `Rendering hour types pie chart with data` debugging in the console log of the annual view
+
+- Standardise the names of the feature flags (capitalisation all over the place, phrasing, etc.)
+    * Figure out if the values in the sheet are actually used, outside of the backend name and whether it is enabled or not. I suspect the labels are all from the client code than the backend table.
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.

@@ -4076,6 +4076,11 @@ function updateDeductionFormVisibility() {
       description: 'Enables tracking of actual income received, allowing comparison between estimated and actual earnings with variance indicators.',
       order: 165
     },
+    no_lost_super_to_deductions: {
+      name: 'No Lost Super to Deductions',
+      description: 'Recovers super guarantee lost to pre-tax deductions. Configure recovery method in Settings.',
+      order: 166
+    },
     enable_company_tracking_features: {
       name: 'Enable Company Tracking Features',
       description: 'Unlocks company-focused fields such as company deduction categories and BAS reporting.',
@@ -5886,6 +5891,8 @@ function updateDeductionFormVisibility() {
   const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
   const minimumEndTimeInput = document.getElementById('set-minimum-end-time');
   const minimumEndTimeCol = document.getElementById('minimum-end-time-col');
+  const lostSuperRecoveryModeSelect = document.getElementById('set-lost-super-recovery-mode');
+  const lostSuperRecoveryCol = document.getElementById('lost-super-recovery-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
   const discardSettingsBtn = document.getElementById('btn-discard-settings');
   const contractNameInput = document.getElementById('contract-name');
@@ -7406,6 +7413,25 @@ function updateDeductionFormVisibility() {
           saveCache();
           renderFeatureFlags();
           applyFeatureFlags();
+
+          // If no_lost_super_to_deductions was just enabled and the setting doesn't exist, save default
+          if (featureKey === 'no_lost_super_to_deductions' && enabled && !state.settings.lost_super_recovery_mode) {
+            const defaultMode = 'extra_contribution';
+            state.settings.lost_super_recovery_mode = defaultMode;
+            saveCache();
+            google.script.run
+              .withSuccessHandler(() => {
+                if (lostSuperRecoveryModeSelect) lostSuperRecoveryModeSelect.value = defaultMode;
+                captureSettingsState();
+                renderIncomeSummary();
+              })
+              .withFailureHandler(() => {})
+              .api_updateSettings({ lost_super_recovery_mode: defaultMode });
+          } else if (featureKey === 'no_lost_super_to_deductions') {
+            // Recalculate income summary when this flag changes (and we didn't already queue it above)
+            renderIncomeSummary();
+          }
+
           setStatus('Feature flags updated', 'success');
         } else {
           if (toggleInput) toggleInput.checked = !!currentMeta.enabled;
@@ -7530,6 +7556,12 @@ function updateDeductionFormVisibility() {
     const suggestEndTimeFlag = state.featureFlags.suggest_end_time || DEFAULT_FEATURE_FLAGS.suggest_end_time || { enabled: false };
     if (minimumEndTimeCol) {
       minimumEndTimeCol.style.display = suggestEndTimeFlag.enabled ? 'block' : 'none';
+    }
+
+    // Show/hide lost super recovery mode setting
+    const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions || DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
+    if (lostSuperRecoveryCol) {
+      lostSuperRecoveryCol.style.display = noLostSuperFlag.enabled ? 'block' : 'none';
     }
 
     // Show/hide colorblind theme options
@@ -8166,11 +8198,34 @@ function updateDeductionFormVisibility() {
 
     const extraSuperPercent = Math.max(0, deductionTotals.extraSuperPercentRate) * Math.max(0, grossIncome);
     const extraSuper = deductionTotals.extraSuperFlat + extraSuperPercent;
-    const superBase = Math.max(0, grossIncome - salarySacrifice);
+
+    // Calculate super base and lost super
+    let superBase = Math.max(0, grossIncome - salarySacrifice);
     const idealSuper = Math.max(0, grossIncome * superRate);
-    const superGuarantee = Math.max(0, superBase * superRate);
-    const superLostDueToDeductions = Math.max(0, idealSuper - superGuarantee);
-    const taxableIncome = Math.max(0, grossIncome - extraSuper - salarySacrifice);
+    let superGuarantee = Math.max(0, superBase * superRate);
+    let superLostDueToDeductions = Math.max(0, idealSuper - superGuarantee);
+
+    // Check if "no lost super to deductions" feature is enabled
+    const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions || DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
+    const recoveryMode = state.settings.lost_super_recovery_mode || 'extra_contribution';
+    let recoveredSuper = 0;
+    let recoveredToSuperBase = 0;
+
+    if (noLostSuperFlag.enabled && superLostDueToDeductions > 0) {
+      if (recoveryMode === 'extra_contribution') {
+        // Add lost super as extra contribution
+        recoveredSuper = superLostDueToDeductions;
+        superLostDueToDeductions = 0;
+      } else if (recoveryMode === 'add_to_taxable') {
+        // Add lost super back to super base and taxable income
+        recoveredToSuperBase = superLostDueToDeductions;
+        superBase = Math.max(0, superBase + recoveredToSuperBase);
+        superGuarantee = Math.max(0, superBase * superRate);
+        superLostDueToDeductions = 0;
+      }
+    }
+
+    const taxableIncome = Math.max(0, grossIncome - extraSuper - salarySacrifice + recoveredToSuperBase);
     const requestKey = `${monthKeyFor(year, month)}:${Math.round(taxableIncome * 100)}`;
     return {
       monthKey: monthKeyFor(year, month),
@@ -8187,9 +8242,9 @@ function updateDeductionFormVisibility() {
       grossIncome,
       superRate,
       superGuarantee,
-      extraSuper,
+      extraSuper: extraSuper + recoveredSuper,
       otherDeductions: salarySacrifice,
-      totalSuper: superGuarantee + extraSuper,
+      totalSuper: superGuarantee + extraSuper + recoveredSuper,
       taxableIncome,
       superLostDueToDeductions,
       taxStatus: taxableIncome > 0 ? 'pending' : 'resolved',
@@ -8298,8 +8353,9 @@ function updateDeductionFormVisibility() {
     if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
     if (incomeSuperLostEl) incomeSuperLostEl.textContent = formatCurrency(summary.superLostDueToDeductions || 0);
     if (incomeSuperLostRow) {
-      const shouldShowSuperLost = summary.superLostDueToDeductions && summary.superLostDueToDeductions > 0.009;
-      incomeSuperLostRow.hidden = !shouldShowSuperLost;
+      const noLostSuperEnabled = state.featureFlags.no_lost_super_to_deductions?.enabled || false;
+      const shouldShowSuperLost = !noLostSuperEnabled && summary.superLostDueToDeductions && summary.superLostDueToDeductions > 0.009;
+      incomeSuperLostRow.style.display = shouldShowSuperLost ? '' : 'none';
     }
     if (incomeExtraSuperEl) incomeExtraSuperEl.textContent = formatCurrency(summary.extraSuper);
     if (incomeSuperTotalEl) {
@@ -9490,36 +9546,95 @@ function updateDeductionFormVisibility() {
     };
   }
 
+  // Settings configuration - add new settings here
+  const SETTINGS_CONFIG = {
+    round_to_nearest: {
+      element: () => roundInput,
+      getValue: (el) => parseInt(el.value, 10) || 0,
+      setValue: (el, val) => el.value = val || 0,
+      defaultValue: 0,
+      event: 'input'
+    },
+    theme: {
+      element: () => themeSelect,
+      getValue: (el) => el.value,
+      setValue: (el, val) => el.value = val || 'dark',
+      defaultValue: 'dark',
+      event: 'change'
+    },
+    superannuation_rate: {
+      element: () => superRateInput,
+      getValue: (el) => sanitizeSuperRateInputValue(el.value),
+      setValue: (el, val) => el.value = String(val),
+      defaultValue: () => Math.round(getSuperRateSetting() * 1000) / 10,
+      event: 'input'
+    },
+    payg_instalment_rate: {
+      element: () => paygRateInput,
+      getValue: (el) => parseFloat(el.value) || 2,
+      setValue: (el, val) => el.value = String(val || 2),
+      defaultValue: () => Number(state.settings.payg_instalment_rate) || 2,
+      event: 'input'
+    },
+    public_holiday_state: {
+      element: () => publicHolidayStateSelect,
+      getValue: (el) => el.value,
+      setValue: (el, val) => el.value = val || 'ACT',
+      defaultValue: 'ACT',
+      event: 'change'
+    },
+    minimum_end_time: {
+      element: () => minimumEndTimeInput,
+      getValue: (el) => el.value,
+      setValue: (el, val) => el.value = val || '17:00',
+      defaultValue: '17:00',
+      event: 'input'
+    },
+    lost_super_recovery_mode: {
+      element: () => lostSuperRecoveryModeSelect,
+      getValue: (el) => el.value,
+      setValue: (el, val) => el.value = val || 'extra_contribution',
+      defaultValue: 'extra_contribution',
+      event: 'change'
+    }
+  };
+
   // Settings dirty state tracking
   var settingsInitialState = {};
 
   function captureSettingsState() {
-    settingsInitialState = {
-      round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
-      theme: themeSelect ? themeSelect.value : 'dark',
-      superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
-      payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
-      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT',
-      minimum_end_time: minimumEndTimeInput ? minimumEndTimeInput.value : '17:00'
-    };
+    settingsInitialState = {};
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      if (element) {
+        settingsInitialState[key] = config.getValue(element);
+      } else {
+        const defaultVal = typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
+        settingsInitialState[key] = defaultVal;
+      }
+    });
   }
 
   function checkSettingsDirty() {
-    const current = {
-      round_to_nearest: roundInput ? (parseInt(roundInput.value, 10) || 0) : 0,
-      theme: themeSelect ? themeSelect.value : 'dark',
-      superannuation_rate: superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10,
-      payg_instalment_rate: paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2),
-      public_holiday_state: publicHolidayStateSelect ? publicHolidayStateSelect.value : 'ACT',
-      minimum_end_time: minimumEndTimeInput ? minimumEndTimeInput.value : '17:00'
-    };
+    const current = {};
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      if (element) {
+        current[key] = config.getValue(element);
+      } else {
+        const defaultVal = typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
+        current[key] = defaultVal;
+      }
+    });
 
-    const isDirty = current.round_to_nearest !== settingsInitialState.round_to_nearest ||
-                    current.theme !== settingsInitialState.theme ||
-                    current.superannuation_rate !== settingsInitialState.superannuation_rate ||
-                    current.payg_instalment_rate !== settingsInitialState.payg_instalment_rate ||
-                    current.public_holiday_state !== settingsInitialState.public_holiday_state ||
-                    current.minimum_end_time !== settingsInitialState.minimum_end_time;
+    let isDirty = false;
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      if (current[key] !== settingsInitialState[key]) {
+        isDirty = true;
+      }
+    });
 
     if (saveSettingsBtn) saveSettingsBtn.disabled = !isDirty;
     if (discardSettingsBtn) discardSettingsBtn.style.display = isDirty ? 'inline-flex' : 'none';
@@ -9528,45 +9643,50 @@ function updateDeductionFormVisibility() {
   }
 
   function resetSettingsToInitial() {
-    if (roundInput) roundInput.value = settingsInitialState.round_to_nearest || 0;
-    if (themeSelect) themeSelect.value = settingsInitialState.theme || 'dark';
-    if (superRateInput) superRateInput.value = String(settingsInitialState.superannuation_rate);
-    if (paygRateInput) paygRateInput.value = String(settingsInitialState.payg_instalment_rate || 2);
-    if (publicHolidayStateSelect) publicHolidayStateSelect.value = settingsInitialState.public_holiday_state || 'ACT';
-    if (minimumEndTimeInput) minimumEndTimeInput.value = settingsInitialState.minimum_end_time || '17:00';
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      if (element) {
+        config.setValue(element, settingsInitialState[key]);
+      }
+    });
     applyTheme(settingsInitialState.theme || 'dark');
     checkSettingsDirty();
   }
 
-  // Attach change listeners to settings inputs
-  if (roundInput) roundInput.addEventListener('input', checkSettingsDirty);
-  if (themeSelect) themeSelect.addEventListener('change', checkSettingsDirty);
-  if (superRateInput) superRateInput.addEventListener('input', checkSettingsDirty);
-  if (paygRateInput) paygRateInput.addEventListener('input', checkSettingsDirty);
-  if (publicHolidayStateSelect) publicHolidayStateSelect.addEventListener('change', checkSettingsDirty);
-  if (minimumEndTimeInput) minimumEndTimeInput.addEventListener('input', checkSettingsDirty);
+  // Attach change listeners to all settings inputs
+  Object.keys(SETTINGS_CONFIG).forEach((key) => {
+    const config = SETTINGS_CONFIG[key];
+    const element = config.element();
+    if (element) {
+      element.addEventListener(config.event, checkSettingsDirty);
+    }
+  });
 
   // Settings persistence
   if (saveSettingsBtn) {
     saveSettingsBtn.onclick = function () {
-      const nextTheme = themeSelect ? themeSelect.value : (state.settings.theme || 'dark');
-      const superRatePercent = superRateInput ? sanitizeSuperRateInputValue(superRateInput.value) : Math.round(getSuperRateSetting() * 1000) / 10;
-      const paygRatePercent = paygRateInput ? (parseFloat(paygRateInput.value) || 2) : (Number(state.settings.payg_instalment_rate) || 2);
-      const publicHolidayState = publicHolidayStateSelect ? publicHolidayStateSelect.value : (state.settings.public_holiday_state || 'ACT');
-      const minimumEndTime = minimumEndTimeInput ? minimumEndTimeInput.value : '17:00';
-      const next = {
-        round_to_nearest: parseInt((roundInput && roundInput.value) || '0', 10) || 0,
-        theme: nextTheme,
-        superannuation_rate: superRatePercent,
-        payg_instalment_rate: paygRatePercent,
-        public_holiday_state: publicHolidayState,
-        minimum_end_time: minimumEndTime
-      };
-      applyTheme(nextTheme);
+      const next = {};
+      Object.keys(SETTINGS_CONFIG).forEach((key) => {
+        const config = SETTINGS_CONFIG[key];
+        const element = config.element();
+        if (element) {
+          next[key] = config.getValue(element);
+        } else {
+          const defaultVal = typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
+          next[key] = defaultVal;
+        }
+      });
+
+      applyTheme(next.theme);
       if (superRateInput) superRateInput.value = String(next.superannuation_rate);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
       saveCache();
+      // Clear annual data cache when lost super recovery mode changes to force recalculation
+      if (state.annualData && next.lost_super_recovery_mode && next.lost_super_recovery_mode !== settingsInitialState.lost_super_recovery_mode) {
+        state.annualData = null;
+      }
       renderCalendar();
       setStatus('Saving settings...', 'warn');
       google.script.run
@@ -9574,6 +9694,7 @@ function updateDeductionFormVisibility() {
           setStatus('Settings saved', 'success');
           captureSettingsState();
           checkSettingsDirty();
+          renderIncomeSummary();
         })
         .withFailureHandler(() => setStatus('Settings failed', 'error'))
         .api_updateSettings(next);
@@ -9597,12 +9718,16 @@ function updateDeductionFormVisibility() {
   // Initial load
   function init() {
     loadCache();
-    if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
-    if (paygRateInput) paygRateInput.value = String(Number(state.settings.payg_instalment_rate) || 2);
     renderEntries();
-    if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
-    if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
-    if (minimumEndTimeInput) minimumEndTimeInput.value = state.settings.minimum_end_time || '17:00';
+    // Load settings into UI inputs from cache
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      if (element) {
+        const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
+        config.setValue(element, value);
+      }
+    });
     applyTheme(state.settings.theme || 'dark');
     captureSettingsState();
     checkSettingsDirty();
@@ -9643,11 +9768,15 @@ function updateDeductionFormVisibility() {
         }
 
         saveCache();
-        if (roundInput) roundInput.value = state.settings.round_to_nearest || 0;
-        if (superRateInput) superRateInput.value = String(getSuperRatePercentage());
-        if (paygRateInput) paygRateInput.value = String(Number(state.settings.payg_instalment_rate) || 2);
-        if (publicHolidayStateSelect) publicHolidayStateSelect.value = state.settings.public_holiday_state || 'ACT';
-        if (minimumEndTimeInput) minimumEndTimeInput.value = state.settings.minimum_end_time || '17:00';
+        // Load settings into UI inputs
+        Object.keys(SETTINGS_CONFIG).forEach((key) => {
+          const config = SETTINGS_CONFIG[key];
+          const element = config.element();
+          if (element) {
+            const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
+            config.setValue(element, value);
+          }
+        });
         applyTheme(state.settings.theme || 'dark');
         captureSettingsState();
         checkSettingsDirty();

@@ -29,6 +29,13 @@
           <label>Superannuation rate (%)</label>
           <input type="number" id="set-super-rate" min="0" step="0.1" />
         </div>
+        <div id="lost-super-recovery-col" style="display:none;">
+          <label>Lost Super Recovery Method <span class="ts-info-icon" title="When pre-tax deductions reduce your super base, this determines whether the lost super is recovered as additional super contributions or added back to your taxable income.">i</span></label>
+          <select id="set-lost-super-recovery-mode">
+            <option value="extra_contribution">Add as extra super contribution</option>
+            <option value="add_to_taxable">Add back to taxable income</option>
+          </select>
+        </div>
         <div id="payg-rate-col" style="display:none;">
           <label>PAYG Instalment rate (%)</label>
           <input type="number" id="set-payg-rate" min="0" max="100" step="0.1" />

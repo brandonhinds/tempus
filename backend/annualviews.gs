@@ -393,10 +393,6 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     } // End of occurrence loop
   }
 
-  // Calculate super
-  var superGuarantee = grossIncome * superRate;
-  var superLost = otherDeductions * superRate;
-
   // Calculate company income and invoice total
   var companyIncome = grossIncome;
   var invoiceTotal = companyIncome * 1.1; // Add GST
@@ -404,8 +400,52 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   // Adjust gross income for employee (subtract company expenses)
   var employeeGrossIncome = companyIncome - companyExpenses;
 
-  // Calculate taxable income
-  var taxableIncome = employeeGrossIncome - superGuarantee - superLost - extraSuper - otherDeductions;
+  // Get feature flag and setting for lost super recovery
+  var featureFlagsSheet = getOrCreateSheet('feature_flags');
+  var featureFlagsData = featureFlagsSheet.getDataRange().getValues();
+  var noLostSuperEnabled = false;
+  for (var i = 1; i < featureFlagsData.length; i++) {
+    if (featureFlagsData[i][0] === 'no_lost_super_to_deductions') {
+      noLostSuperEnabled = featureFlagsData[i][3] === 'TRUE' || featureFlagsData[i][3] === true;
+      break;
+    }
+  }
+
+  var recoveryMode = 'extra_contribution'; // default
+  for (var i = 1; i < settingsData.length; i++) {
+    if (settingsData[i][0] === 'lost_super_recovery_mode') {
+      recoveryMode = settingsData[i][1] || 'extra_contribution';
+      break;
+    }
+  }
+
+  // Calculate super
+  var superBase = employeeGrossIncome - otherDeductions;
+  var idealSuper = employeeGrossIncome * superRate;
+  var superGuarantee = superBase * superRate;
+  var superLost = Math.max(0, idealSuper - superGuarantee);
+
+  // Apply lost super recovery if feature is enabled
+  var recoveredSuper = 0;
+  var recoveredToSuperBase = 0;
+
+  if (noLostSuperEnabled && superLost > 0) {
+    if (recoveryMode === 'extra_contribution') {
+      // Add lost super as extra contribution
+      recoveredSuper = superLost;
+      extraSuper += recoveredSuper;
+      superLost = 0;
+    } else if (recoveryMode === 'add_to_taxable') {
+      // Add lost super back to super base
+      recoveredToSuperBase = superLost;
+      superBase = superBase + recoveredToSuperBase;
+      superGuarantee = superBase * superRate;
+      superLost = 0;
+    }
+  }
+
+  // Calculate taxable income (add recovered amount when in add_to_taxable mode)
+  var taxableIncome = employeeGrossIncome - superGuarantee - superLost - extraSuper - otherDeductions + recoveredToSuperBase;
 
   // Estimate tax (using existing tax function)
   var tax = 0;
