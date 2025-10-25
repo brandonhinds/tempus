@@ -627,6 +627,14 @@
     if (Number.isFinite(num) && num >= 0) return Math.round(num * 10) / 10;
     return Math.round(DEFAULT_SUPER_RATE * 1000) / 10;
   };
+  const deriveGrossFromPackage = (packageAmount, superRate) => {
+    const total = Math.max(0, Number(packageAmount) || 0);
+    const rate = Math.max(0, Number(superRate) || 0);
+    if (!Number.isFinite(rate) || rate === 0) return total;
+    const denominator = 1 + rate;
+    if (denominator <= 0) return total;
+    return total / denominator;
+  };
 
   const getRoundInterval = () => {
     const value = Number(state.settings.round_to_nearest);
@@ -8183,18 +8191,12 @@ function updateDeductionFormVisibility() {
     const companyExpenses = deductionTotals.companyStandardTotal;
     const companyExpensesGst = deductionTotals.companyGstTotal;
 
-    let grossIncome;
-    let companyIncome = totalPackage;
-    let invoiceTotal = 0;
-    if (state.companyTrackingEnabled) {
-      invoiceTotal = companyIncome * (1 + GST_RATE);
-      grossIncome = Math.max(0, companyIncome - companyExpenses);
-    } else {
-      const denominator = 1 + superRate;
-      grossIncome = denominator !== 0 ? totalPackage / denominator : totalPackage;
-      companyIncome = 0;
-      invoiceTotal = 0;
-    }
+    const companyIncome = state.companyTrackingEnabled ? totalPackage : 0;
+    const invoiceTotal = state.companyTrackingEnabled ? companyIncome * (1 + GST_RATE) : 0;
+    const employeePackage = state.companyTrackingEnabled
+      ? Math.max(0, companyIncome - companyExpenses)
+      : totalPackage;
+    const grossIncome = deriveGrossFromPackage(employeePackage, superRate);
 
     const extraSuperPercent = Math.max(0, deductionTotals.extraSuperPercentRate) * Math.max(0, grossIncome);
     const extraSuper = deductionTotals.extraSuperFlat + extraSuperPercent;

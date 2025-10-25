@@ -8,6 +8,19 @@ function roundToThree(num) {
   return Math.round(num * 1000) / 1000;
 }
 
+function deriveGrossFromPackage(packageAmount, superRate) {
+  var total = Number(packageAmount);
+  if (!isFinite(total) || total <= 0) return 0;
+  var rate = Number(superRate);
+  if (!isFinite(rate) || rate < 0) {
+    rate = 0;
+  }
+  if (rate === 0) return Math.max(0, total);
+  var denominator = 1 + rate;
+  if (!isFinite(denominator) || denominator <= 0) return Math.max(0, total);
+  return total / denominator;
+}
+
 function parseIsoDateLoose(iso) {
   if (!iso || typeof iso !== 'string') return null;
   var parts = iso.split('-');
@@ -203,25 +216,29 @@ function api_getContractRatePreview(payload) {
   months.forEach(function(monthKey) {
     var hours = aggregation.monthHours[monthKey] || 0;
     var roundedHours = roundToThree(hours);
-    var currentEarnings = roundToTwo(roundedHours * baseRate);
-    var scenarioEarnings = roundToTwo(roundedHours * scenarioRate);
-    var variance = roundToTwo(scenarioEarnings - currentEarnings);
-    var variancePct = currentEarnings !== 0 ? Math.round((variance / currentEarnings) * 10000) / 100 : null;
+    var currentPackage = roundToTwo(roundedHours * baseRate);
+    var scenarioPackage = roundToTwo(roundedHours * scenarioRate);
     var monthIso = monthKey + '-01';
-    var currentSuper = roundToTwo(currentEarnings * superRate);
-    var scenarioSuper = roundToTwo(scenarioEarnings * superRate);
-    var currentTax = calculateMonthlyTax(currentEarnings, monthIso);
-    var scenarioTax = calculateMonthlyTax(scenarioEarnings, monthIso);
-    var currentNet = roundToTwo(Math.max(0, (currentEarnings - currentSuper) - currentTax));
-    var scenarioNet = roundToTwo(Math.max(0, (scenarioEarnings - scenarioSuper) - scenarioTax));
+    var currentGrossRaw = deriveGrossFromPackage(currentPackage, superRate);
+    var scenarioGrossRaw = deriveGrossFromPackage(scenarioPackage, superRate);
+    var currentGross = roundToTwo(currentGrossRaw);
+    var scenarioGross = roundToTwo(scenarioGrossRaw);
+    var variance = roundToTwo(scenarioGross - currentGross);
+    var variancePct = currentGross !== 0 ? Math.round((variance / currentGross) * 10000) / 100 : null;
+    var currentSuper = roundToTwo(currentGross * superRate);
+    var scenarioSuper = roundToTwo(scenarioGross * superRate);
+    var currentTax = calculateMonthlyTax(currentGross, monthIso);
+    var scenarioTax = calculateMonthlyTax(scenarioGross, monthIso);
+    var currentNet = roundToTwo(Math.max(0, currentGross - currentTax));
+    var scenarioNet = roundToTwo(Math.max(0, scenarioGross - scenarioTax));
     var superVariance = roundToTwo(scenarioSuper - currentSuper);
     var taxVariance = roundToTwo(scenarioTax - currentTax);
     var netVariance = roundToTwo(scenarioNet - currentNet);
     var superVariancePct = currentSuper !== 0 ? Math.round((superVariance / currentSuper) * 10000) / 100 : null;
     var taxVariancePct = currentTax !== 0 ? Math.round((taxVariance / currentTax) * 10000) / 100 : null;
     var netVariancePct = currentNet !== 0 ? Math.round((netVariance / currentNet) * 10000) / 100 : null;
-    currentTotal += currentEarnings;
-    scenarioTotal += scenarioEarnings;
+    currentTotal += currentGross;
+    scenarioTotal += scenarioGross;
     currentSuperTotal += currentSuper;
     scenarioSuperTotal += scenarioSuper;
     currentTaxTotal += currentTax;
@@ -232,8 +249,8 @@ function api_getContractRatePreview(payload) {
       month: monthKey,
       label: formatMonthLabel(monthKey),
       hours: roundedHours,
-      currentEarnings: currentEarnings,
-      scenarioEarnings: scenarioEarnings,
+      currentEarnings: currentGross,
+      scenarioEarnings: scenarioGross,
       variance: variance,
       variancePercent: variancePct,
       currentSuper: currentSuper,
@@ -280,6 +297,8 @@ function api_getContractRatePreview(payload) {
   var contractCap = safeNumber(contract.total_hours) || 0;
   if (contractCap < 0) contractCap = 0;
   var potentialHoursRounded = contractCap > 0 ? roundToThree(contractCap) : 0;
+  var potentialPackageCurrent = null;
+  var potentialPackageScenario = null;
   var potentialGrossCurrent = null;
   var potentialGrossScenario = null;
   var potentialGrossVariance = null;
@@ -299,8 +318,10 @@ function api_getContractRatePreview(payload) {
   var todayIso = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
 
   if (contractCap > 0) {
-    potentialGrossCurrent = roundToTwo(contractCap * baseRate);
-    potentialGrossScenario = roundToTwo(contractCap * scenarioRate);
+    potentialPackageCurrent = roundToTwo(contractCap * baseRate);
+    potentialPackageScenario = roundToTwo(contractCap * scenarioRate);
+    potentialGrossCurrent = roundToTwo(deriveGrossFromPackage(potentialPackageCurrent, superRate));
+    potentialGrossScenario = roundToTwo(deriveGrossFromPackage(potentialPackageScenario, superRate));
     potentialGrossVariance = roundToTwo(potentialGrossScenario - potentialGrossCurrent);
     potentialGrossVariancePct = potentialGrossCurrent !== 0
       ? Math.round((potentialGrossVariance / potentialGrossCurrent) * 10000) / 100
@@ -320,8 +341,8 @@ function api_getContractRatePreview(payload) {
       ? Math.round((potentialTaxVariance / potentialTaxCurrent) * 10000) / 100
       : null;
 
-    potentialNetCurrent = roundToTwo(Math.max(0, (potentialGrossCurrent - potentialSuperCurrent) - potentialTaxCurrent));
-    potentialNetScenario = roundToTwo(Math.max(0, (potentialGrossScenario - potentialSuperScenario) - potentialTaxScenario));
+    potentialNetCurrent = roundToTwo(Math.max(0, potentialGrossCurrent - potentialTaxCurrent));
+    potentialNetScenario = roundToTwo(Math.max(0, potentialGrossScenario - potentialTaxScenario));
     potentialNetVariance = roundToTwo(potentialNetScenario - potentialNetCurrent);
     potentialNetVariancePct = potentialNetCurrent !== 0
       ? Math.round((potentialNetVariance / potentialNetCurrent) * 10000) / 100

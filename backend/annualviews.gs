@@ -1,5 +1,18 @@
 /** Annual Views API - Aggregates yearly data for comprehensive reporting */
 
+function deriveGrossIncomeFromPackage(packageAmount, superRate) {
+  var total = Number(packageAmount);
+  if (!isFinite(total) || total <= 0) return 0;
+  var rate = Number(superRate);
+  if (!isFinite(rate) || rate < 0) {
+    rate = 0;
+  }
+  if (rate === 0) return Math.max(0, total);
+  var denominator = 1 + rate;
+  if (!isFinite(denominator) || denominator <= 0) return Math.max(0, total);
+  return total / denominator;
+}
+
 /**
  * Get annual summary data
  * @param {Object} payload - { yearType: 'financial'|'calendar', startYear: 2024, contractIds: [] }
@@ -285,15 +298,16 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     }
   }
 
-  // Sum up gross income
-  var grossIncome = 0;
+  // Sum up total package (hourly rate * hours)
+  var totalPackage = 0;
   for (var cid in contractIncome) {
-    grossIncome += contractIncome[cid];
+    totalPackage += contractIncome[cid];
   }
 
   // Get deductions for this month
   var deductionsData = deductionsSheet.getDataRange().getValues();
-  var extraSuper = 0;
+  var extraSuperFlat = 0;
+  var extraSuperPercentRate = 0;
   var otherDeductions = 0;
   var companyExpenses = 0;
   var companyExpensesGst = 0;
@@ -336,17 +350,15 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     // Process each occurrence individually to handle amount adjustments
     for (var occIdx = 0; occIdx < occurrencesWithExceptions.length; occIdx++) {
       var occ = occurrencesWithExceptions[occIdx];
-      var occAmount = occ.amount !== null && occ.amount !== undefined ? occ.amount : amountValue;
-
-      var monthlyAmount = 0;
-      if (amountType === 'percent') {
-        monthlyAmount = grossIncome * occAmount;
-      } else {
-        monthlyAmount = occAmount;
-      }
+      var occAmountRaw = occ.amount !== null && occ.amount !== undefined ? occ.amount : amountValue;
+      var occAmount = Number(occAmountRaw) || 0;
 
       if (deductionType === 'extra_super') {
-        extraSuper += monthlyAmount;
+        if (amountType === 'percent') {
+          extraSuperPercentRate += occAmount;
+        } else {
+          extraSuperFlat += occAmount;
+        }
         continue;
       }
 
@@ -355,6 +367,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
         continue;
       }
 
+      var monthlyAmount = occAmount;
       var netAmount = monthlyAmount;
       if (companyExpense && gstInclusive) {
         netAmount = monthlyAmount / (1 + GST_RATE);
@@ -394,11 +407,13 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   }
 
   // Calculate company income and invoice total
-  var companyIncome = grossIncome;
+  var companyIncome = totalPackage;
   var invoiceTotal = companyIncome * 1.1; // Add GST
 
-  // Adjust gross income for employee (subtract company expenses)
-  var employeeGrossIncome = companyIncome - companyExpenses;
+  // Derive employee gross income from total package after expenses
+  var employeePackage = Math.max(0, companyIncome - companyExpenses);
+  var grossIncome = deriveGrossIncomeFromPackage(employeePackage, superRate);
+  var extraSuper = extraSuperFlat + Math.max(0, grossIncome) * extraSuperPercentRate;
 
   // Get feature flag and setting for lost super recovery
   var featureFlagsSheet = getOrCreateSheet('feature_flags');
@@ -420,8 +435,8 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   }
 
   // Calculate super
-  var superBase = employeeGrossIncome - otherDeductions;
-  var idealSuper = employeeGrossIncome * superRate;
+  var superBase = grossIncome - otherDeductions;
+  var idealSuper = grossIncome * superRate;
   var superGuarantee = superBase * superRate;
   var superLost = Math.max(0, idealSuper - superGuarantee);
 
@@ -445,13 +460,13 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   }
 
   // Calculate taxable income (add recovered amount when in add_to_taxable mode)
-  var taxableIncome = employeeGrossIncome - superGuarantee - superLost - extraSuper - otherDeductions + recoveredToSuperBase;
+  var taxableIncome = grossIncome - superGuarantee - superLost - extraSuper - otherDeductions + recoveredToSuperBase;
 
   // Estimate tax (using existing tax function)
   var tax = 0;
   if (taxableIncome > 0) {
     try {
-      tax = estimateTax(employeeGrossIncome, periodStart.toISOString());
+      tax = estimateTax(grossIncome, periodStart.toISOString());
     } catch (e) {
       Logger.log('Tax estimation failed: ' + e.message);
       tax = 0;

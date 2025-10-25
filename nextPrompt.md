@@ -20,6 +20,8 @@
 
 - Make the sheet (at least some of it) work on mobile
 
+- Refactor scripts sheet to split up all functions into relevant categories
+
 ## Medium Changes
 
 - Projected monthly hours updates:
@@ -63,6 +65,8 @@
 
 - Standardise the names of the feature flags (capitalisation all over the place, phrasing, etc.)
     * Figure out if the values in the sheet are actually used, outside of the backend name and whether it is enabled or not. I suspect the labels are all from the client code than the backend table.
+
+- Remove the company parts of the income breakdown when company feature flag is disabled
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
