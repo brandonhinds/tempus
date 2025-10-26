@@ -1,0 +1,184 @@
+<section class="ts-card" id="page-invoices" style="display:none; margin-bottom:16px;">
+  <div class="ts-toolbar" style="margin-bottom:12px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+      <div>
+        <h3 style="margin:0;">Invoices</h3>
+        <div class="ts-note" id="invoice-config-note" style="margin-top:4px; display:none;"></div>
+      </div>
+      <button id="btn-invoice-new" class="ts-btn--primary">New invoice</button>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label for="invoice-selector" style="font-size:12px; font-weight:600;">Invoice</label>
+        <select id="invoice-selector" style="min-width:220px;"></select>
+      </div>
+      <div class="ts-calendar-nav" style="display:flex; align-items:center; gap:8px;">
+        <button class="ghost" id="invoice-nav-prev" title="Previous Month">◀</button>
+        <button class="ghost" id="invoice-nav-jump" style="min-width:140px; text-align:center; padding:10px 14px;">--</button>
+        <button class="ghost" id="invoice-nav-next" title="Next Month">▶</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="invoice-detail-empty" class="ts-note">Select an invoice to start editing, or create a new one.</div>
+  <div id="invoice-detail" style="display:none;">
+    <div class="ts-card" style="padding:12px; margin-bottom:16px;">
+      <div class="ts-row" style="gap:12px; margin-bottom:8px;">
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-detail-number">Invoice number</label>
+          <input id="invoice-detail-number" />
+        </div>
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-detail-date">Invoice date</label>
+          <input id="invoice-detail-date" type="date" />
+        </div>
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-detail-status">Status</label>
+          <select id="invoice-detail-status">
+            <option value="draft">Draft</option>
+            <option value="generated">Generated</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <button id="btn-invoice-generate" class="ts-btn--primary">Publish invoice</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-invoice-delete" class="ghost">Delete</button>
+          <button id="btn-invoice-save">Save changes</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ts-card" style="padding:12px; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:12px;">
+        <div>
+          <div style="font-weight:600;">Line items</div>
+          <div class="ts-note" id="invoice-line-summary" style="margin-top:4px;"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-invoice-add-line">Add line</button>
+        </div>
+      </div>
+
+      <div id="invoice-line-form" class="ts-card" style="padding:12px; margin-bottom:12px; display:none;">
+        <div class="ts-row" style="gap:8px; margin-bottom:8px;">
+          <div class="ts-col" style="flex:0 0 140px;">
+            <label for="invoice-line-date">Date</label>
+            <input id="invoice-line-date" type="date" />
+          </div>
+          <div class="ts-col" style="flex:1 1 auto;">
+            <label for="invoice-line-description">Description</label>
+            <input id="invoice-line-description" />
+          </div>
+          <div class="ts-col" style="flex:0 0 180px;">
+            <label for="invoice-line-amount-mode">Amount input method</label>
+            <select id="invoice-line-amount-mode">
+              <option value="hours">Number of Hours</option>
+              <option value="amount">Raw Amount</option>
+            </select>
+          </div>
+        </div>
+        <div class="ts-row" style="gap:8px; margin-bottom:8px;">
+          <div class="ts-col" id="invoice-line-hours-col" style="flex:0 0 140px;">
+            <label for="invoice-line-hours">Hours</label>
+            <input id="invoice-line-hours" type="number" min="0" step="0.25" />
+          </div>
+          <div class="ts-col" id="invoice-line-hour-type-col" style="flex:0 0 180px;">
+            <label for="invoice-line-hour-type">Hour type</label>
+            <select id="invoice-line-hour-type"></select>
+          </div>
+          <div class="ts-col" style="flex:0 0 180px;">
+            <label for="invoice-line-contract">Contract</label>
+            <select id="invoice-line-contract"></select>
+          </div>
+          <div class="ts-col" id="invoice-line-amount-col" style="flex:0 0 160px;">
+            <label for="invoice-line-amount">Amount</label>
+            <input id="invoice-line-amount" type="number" min="0" step="0.01" />
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+          <button id="btn-invoice-line-cancel" class="ghost">Cancel</button>
+          <button id="btn-invoice-line-save">Save line</button>
+        </div>
+      </div>
+
+      <div id="invoice-line-empty" class="ts-note" style="display:none; margin-bottom:8px;">No line items yet.</div>
+      <div id="invoice-line-items" class="ts-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div style="margin-top:12px; display:flex; flex-direction:column; gap:4px;">
+        <div class="ts-total-row" style="display:flex; justify-content:space-between; font-weight:600;">
+          <span>Subtotal</span>
+          <span id="invoice-line-subtotal">$0.00</span>
+        </div>
+        <div class="ts-total-row" style="display:flex; justify-content:space-between;">
+          <span>GST</span>
+          <span id="invoice-line-gst">$0.00</span>
+        </div>
+        <div class="ts-total-row" style="display:flex; justify-content:space-between; font-weight:600;">
+          <span>Total</span>
+          <span id="invoice-line-total">$0.00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ts-card" style="padding:12px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+      <div style="font-weight:600;">Default line items</div>
+      <button id="btn-invoice-default-new" class="ghost" style="font-size:12px;">Add default</button>
+    </div>
+    <div id="invoice-default-empty" class="ts-note" style="display:none;">No defaults yet.</div>
+    <ul id="invoice-default-list" class="ts-list" style="list-style:none; margin:0; padding:0;"></ul>
+
+    <div id="invoice-default-form" style="display:none; margin-top:12px;">
+      <div class="ts-field-group" style="margin-bottom:8px;">
+        <label for="invoice-default-label">Label</label>
+        <input id="invoice-default-label" />
+      </div>
+      <div class="ts-field-group" style="margin-bottom:8px;">
+        <label for="invoice-default-description">Description</label>
+        <textarea id="invoice-default-description" rows="2"></textarea>
+      </div>
+      <div class="ts-row" style="gap:8px; margin-bottom:8px;">
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-default-hours">Hours</label>
+          <input id="invoice-default-hours" type="number" min="0" step="0.25" />
+        </div>
+        <div class="ts-col" id="invoice-default-hour-type-col" style="flex:1 1 0;">
+          <label for="invoice-default-hour-type">Hour type</label>
+          <select id="invoice-default-hour-type"></select>
+        </div>
+      </div>
+      <div class="ts-row" style="gap:8px; margin-bottom:8px;">
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-default-contract">Contract</label>
+          <select id="invoice-default-contract"></select>
+        </div>
+        <div class="ts-col" style="flex:1 1 0;">
+          <label for="invoice-default-amount">Amount</label>
+          <input id="invoice-default-amount" type="number" min="0" step="0.01" />
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btn-invoice-default-cancel" class="ghost">Cancel</button>
+        <button id="btn-invoice-default-save">Save default</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="ts-modal" id="modal-invoice-month-picker" style="display:none;">
+  <div class="ts-modal-content" style="max-width:360px;">
+    <div class="ts-modal-header">
+      <h3>Select Month</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-month-picker-header">
+        <button class="ghost" id="invoice-month-picker-year-prev" title="Previous Year">◀</button>
+        <div class="ts-month-picker-year" id="invoice-month-picker-year-display">2024</div>
+        <button class="ghost" id="invoice-month-picker-year-next" title="Next Year">▶</button>
+      </div>
+      <div class="ts-month-picker-grid" id="invoice-month-picker-grid"></div>
+    </div>
+  </div>
+</div>

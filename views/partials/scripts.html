@@ -8,6 +8,7 @@
   const pageAnnualViews = document.getElementById('page-annual-views');
   const pageRatePreview = document.getElementById('page-rate-preview');
   const pageSettings = document.getElementById('page-settings');
+  const pageInvoices = document.getElementById('page-invoices');
   const navToggle = document.getElementById('nav-toggle');
   const navHomeBtn = document.getElementById('nav-home');
   const navMenu = document.getElementById('nav-menu');
@@ -18,6 +19,7 @@
   const navDeductionsBtn = document.getElementById('nav-deductions');
   const navBasBtn = document.getElementById('nav-bas');
   const navAnnualViewsBtn = document.getElementById('nav-annual-views');
+  const navInvoicesBtn = document.getElementById('nav-invoices');
   const navSettingsBtn = document.getElementById('nav-settings');
   const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
   const ratePreviewPercentInput = document.getElementById('rate-preview-percent');
@@ -59,6 +61,64 @@
   const ratePreviewSummaryFootnote = document.getElementById('rate-preview-summary-footnote');
   const ratePreviewNoEntriesNote = document.getElementById('rate-preview-no-entries');
   const ratePreviewMonthlyBody = document.getElementById('rate-preview-monthly-body');
+  const invoiceConfigNote = document.getElementById('invoice-config-note');
+  const invoiceSelector = document.getElementById('invoice-selector');
+  const btnInvoiceNew = document.getElementById('btn-invoice-new');
+  const invoiceNavPrev = document.getElementById('invoice-nav-prev');
+  const invoiceNavNext = document.getElementById('invoice-nav-next');
+  const invoiceNavJump = document.getElementById('invoice-nav-jump');
+  const invoiceDetailEmpty = document.getElementById('invoice-detail-empty');
+  const invoiceDetail = document.getElementById('invoice-detail');
+  const invoiceDetailNumberInput = document.getElementById('invoice-detail-number');
+  const invoiceDetailDateInput = document.getElementById('invoice-detail-date');
+  const invoiceDetailStatusSelect = document.getElementById('invoice-detail-status');
+  const btnInvoiceDelete = document.getElementById('btn-invoice-delete');
+  const btnInvoiceSave = document.getElementById('btn-invoice-save');
+  const btnInvoiceGenerate = document.getElementById('btn-invoice-generate');
+  const invoiceLineSummary = document.getElementById('invoice-line-summary');
+  const invoiceLineEmpty = document.getElementById('invoice-line-empty');
+  const btnInvoiceAddLine = document.getElementById('btn-invoice-add-line');
+  const invoiceLineForm = document.getElementById('invoice-line-form');
+  const invoiceLineDateInput = document.getElementById('invoice-line-date');
+  const invoiceLineDescriptionInput = document.getElementById('invoice-line-description');
+  const invoiceLineAmountModeSelect = document.getElementById('invoice-line-amount-mode');
+  const invoiceLineHoursInput = document.getElementById('invoice-line-hours');
+  const invoiceLineHoursCol = document.getElementById('invoice-line-hours-col');
+  const invoiceLineHourTypeSelect = document.getElementById('invoice-line-hour-type');
+  const invoiceLineHourTypeCol = document.getElementById('invoice-line-hour-type-col');
+  const invoiceLineAmountInput = document.getElementById('invoice-line-amount');
+  const invoiceLineAmountCol = document.getElementById('invoice-line-amount-col');
+  const invoiceLineContractSelect = document.getElementById('invoice-line-contract');
+  const btnInvoiceLineCancel = document.getElementById('btn-invoice-line-cancel');
+  const btnInvoiceLineSave = document.getElementById('btn-invoice-line-save');
+  const invoiceLineItemsBody = document.getElementById('invoice-line-items');
+  const invoiceLineSubtotal = document.getElementById('invoice-line-subtotal');
+  const invoiceLineGst = document.getElementById('invoice-line-gst');
+  const invoiceLineTotal = document.getElementById('invoice-line-total');
+  const invoiceDefaultList = document.getElementById('invoice-default-list');
+  const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
+  const btnInvoiceDefaultNew = document.getElementById('btn-invoice-default-new');
+  const invoiceDefaultForm = document.getElementById('invoice-default-form');
+  const invoiceDefaultLabelInput = document.getElementById('invoice-default-label');
+  const invoiceDefaultDescriptionInput = document.getElementById('invoice-default-description');
+  const invoiceDefaultHoursInput = document.getElementById('invoice-default-hours');
+  const invoiceDefaultAmountInput = document.getElementById('invoice-default-amount');
+  const invoiceDefaultHourTypeSelect = document.getElementById('invoice-default-hour-type');
+  const invoiceDefaultHourTypeCol = document.getElementById('invoice-default-hour-type-col');
+  const invoiceDefaultContractSelect = document.getElementById('invoice-default-contract');
+  const btnInvoiceDefaultCancel = document.getElementById('btn-invoice-default-cancel');
+  const btnInvoiceDefaultSave = document.getElementById('btn-invoice-default-save');
+  const invoiceTemplateInput = document.getElementById('set-invoice-template');
+  const invoiceOutputFolderInput = document.getElementById('set-invoice-output-folder');
+  const invoiceLineLimitInput = document.getElementById('set-invoice-line-limit');
+  const invoiceTemplateCol = document.getElementById('invoice-template-col');
+  const invoiceOutputFolderCol = document.getElementById('invoice-output-folder-col');
+  const invoiceLineLimitCol = document.getElementById('invoice-line-limit-col');
+  const invoiceMonthPickerModal = document.getElementById('modal-invoice-month-picker');
+  const invoiceMonthPickerYearDisplay = document.getElementById('invoice-month-picker-year-display');
+  const invoiceMonthPickerYearPrev = document.getElementById('invoice-month-picker-year-prev');
+  const invoiceMonthPickerYearNext = document.getElementById('invoice-month-picker-year-next');
+  const invoiceMonthPickerGrid = document.getElementById('invoice-month-picker-grid');
   const deductionsListEl = document.getElementById('deductions-list');
   const deductionsEmptyEl = document.getElementById('deductions-empty');
   const deductionCompanyDisabledNote = document.getElementById('deduction-company-disabled-note');
@@ -168,6 +228,34 @@
     annualCategoryFilters: [],
     annualCategoryExpansion: {},
     annualData: null,
+    invoices: [],
+    invoiceMap: {},
+    invoiceDefaults: [],
+    invoiceDefaultMap: {},
+    invoiceFilters: {
+      year: '',
+      month: ''
+    },
+    invoiceSelectedId: '',
+    invoiceDetail: null,
+    invoiceDetailLoading: false,
+    invoiceListLoading: false,
+    invoiceLineForm: {
+      mode: 'hidden',
+      editingId: null,
+      draft: {},
+      amountMode: 'hours'
+    },
+    invoiceDefaultForm: {
+      mode: 'hidden',
+      editingId: null,
+      draft: {}
+    },
+    invoicePending: {
+      savingInvoice: false,
+      generating: false
+    },
+    invoicesInitialized: false,
     annualCharts: {
       income: null,
       incomePie: null,
@@ -206,7 +294,7 @@
   let deductionCategoryDeleteId = null;
   let deductionCategorySavePending = false;
 
-  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'settings'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -254,6 +342,7 @@
       deductions: pageDeductions,
       bas: pageBas,
       'annual-views': pageAnnualViews,
+      invoices: pageInvoices,
       settings: pageSettings
     };
     Object.keys(pages).forEach((key) => {
@@ -269,6 +358,9 @@
     }
     if (normalized === 'annual-views') {
       renderAnnualViews();
+    }
+    if (normalized === 'invoices') {
+      renderInvoicesPage();
     }
     if (!opts.skipRemember) {
       persistLastPage(normalized);
@@ -353,6 +445,7 @@
   if (navDeductionsBtn) navDeductionsBtn.onclick = () => { closeNavMenu(); showPage('deductions'); };
   if (navBasBtn) navBasBtn.onclick = () => { closeNavMenu(); showPage('bas'); };
   if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
+  if (navInvoicesBtn) navInvoicesBtn.onclick = () => { closeNavMenu(); showPage('invoices'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   if (ratePreviewContractSelect) ratePreviewContractSelect.addEventListener('change', handleRatePreviewContractChange);
   if (ratePreviewPercentInput) {
@@ -387,6 +480,44 @@
       handleSaveDeduction();
     });
   }
+
+  if (btnInvoiceNew) btnInvoiceNew.addEventListener('click', (event) => { event.preventDefault(); startCreateInvoice(); });
+  if (invoiceSelector) invoiceSelector.addEventListener('change', (event) => {
+    const invoiceId = event.target.value;
+    if (invoiceId) {
+      selectInvoice(invoiceId);
+    } else {
+      state.invoiceSelectedId = '';
+      state.invoiceDetail = null;
+      renderInvoiceDetail();
+    }
+  });
+  if (invoiceNavPrev) invoiceNavPrev.addEventListener('click', () => changeInvoiceMonth(-1));
+  if (invoiceNavNext) invoiceNavNext.addEventListener('click', () => changeInvoiceMonth(1));
+  if (invoiceNavJump) invoiceNavJump.addEventListener('click', openInvoiceMonthPicker);
+  if (invoiceMonthPickerYearPrev) invoiceMonthPickerYearPrev.addEventListener('click', () => { invoiceMonthPickerState.year--; renderInvoiceMonthPicker(); });
+  if (invoiceMonthPickerYearNext) invoiceMonthPickerYearNext.addEventListener('click', () => { invoiceMonthPickerState.year++; renderInvoiceMonthPicker(); });
+  if (invoiceMonthPickerModal) {
+    const invoiceMonthPickerClose = invoiceMonthPickerModal.querySelector('.ts-modal-close');
+    if (invoiceMonthPickerClose) {
+      invoiceMonthPickerClose.addEventListener('click', closeInvoiceMonthPicker);
+    }
+    invoiceMonthPickerModal.addEventListener('click', (event) => {
+      if (event.target === invoiceMonthPickerModal) closeInvoiceMonthPicker();
+    });
+  }
+  if (btnInvoiceSave) btnInvoiceSave.addEventListener('click', handleInvoiceSave);
+  if (btnInvoiceDelete) btnInvoiceDelete.addEventListener('click', (event) => { event.preventDefault(); handleInvoiceDelete(); });
+  if (btnInvoiceGenerate) btnInvoiceGenerate.addEventListener('click', handleInvoiceGenerate);
+  if (btnInvoiceAddLine) btnInvoiceAddLine.addEventListener('click', handleInvoiceAddLine);
+  if (btnInvoiceLineSave) btnInvoiceLineSave.addEventListener('click', handleInvoiceLineSave);
+  if (btnInvoiceLineCancel) btnInvoiceLineCancel.addEventListener('click', handleInvoiceLineCancel);
+  if (invoiceLineItemsBody) invoiceLineItemsBody.addEventListener('click', handleInvoiceLineItemAction);
+  if (invoiceLineAmountModeSelect) invoiceLineAmountModeSelect.addEventListener('change', handleInvoiceLineAmountModeChange);
+  if (btnInvoiceDefaultNew) btnInvoiceDefaultNew.addEventListener('click', handleInvoiceDefaultNew);
+  if (btnInvoiceDefaultCancel) btnInvoiceDefaultCancel.addEventListener('click', handleInvoiceDefaultCancel);
+  if (btnInvoiceDefaultSave) btnInvoiceDefaultSave.addEventListener('click', handleInvoiceDefaultSave);
+  if (invoiceDefaultList) invoiceDefaultList.addEventListener('click', handleInvoiceDefaultAction);
   if (deductionTypeSelect) deductionTypeSelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionCategorySelect) deductionCategorySelect.addEventListener('change', () => {
     updateDeductionFormVisibility();
@@ -4064,6 +4195,11 @@ function updateDeductionFormVisibility() {
       description: 'Adds a dedicated page to model hourly rate changes and see their impact across a contract.',
       order: 142
     },
+    enable_invoices: {
+      name: 'Invoices',
+      description: 'Enables invoice management, default line items, and document generation from a Google Docs template.',
+      order: 143
+    },
     suggest_end_time: {
       name: 'Suggest End Time',
       description: 'Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours.',
@@ -7546,6 +7682,22 @@ function updateDeductionFormVisibility() {
       resetRatePreviewState();
     }
 
+    const invoicesFlag = state.featureFlags.enable_invoices || DEFAULT_FEATURE_FLAGS.enable_invoices || { enabled: false };
+    if (navInvoicesBtn) {
+      navInvoicesBtn.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    }
+    if (invoiceTemplateCol) invoiceTemplateCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    if (invoiceOutputFolderCol) invoiceOutputFolderCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    if (invoiceLineLimitCol) invoiceLineLimitCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    if (!invoicesFlag.enabled && state.currentPage === 'invoices') {
+      showPage('time');
+    }
+    if (invoicesFlag.enabled) {
+      initializeInvoicesFeature();
+    } else {
+      resetInvoicesState();
+    }
+
     // Show/hide public holidays state setting
     const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
     if (publicHolidayStateCol) {
@@ -9598,6 +9750,32 @@ function updateDeductionFormVisibility() {
       setValue: (el, val) => el.value = val || 'extra_contribution',
       defaultValue: 'extra_contribution',
       event: 'change'
+    },
+    invoice_template_reference: {
+      element: () => invoiceTemplateInput,
+      getValue: (el) => el.value.trim(),
+      setValue: (el, val) => { el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    invoice_output_folder_path: {
+      element: () => invoiceOutputFolderInput,
+      getValue: (el) => el.value.trim(),
+      setValue: (el, val) => { el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    invoice_line_item_limit: {
+      element: () => invoiceLineLimitInput,
+      getValue: (el) => {
+        const val = el.value.trim();
+        if (val === '') return '';
+        const num = parseInt(val, 10);
+        return Number.isFinite(num) && num > 0 ? num : '';
+      },
+      setValue: (el, val) => { el.value = val != null && val !== '' ? val : ''; },
+      defaultValue: '',
+      event: 'input'
     }
   };
 
@@ -9790,6 +9968,7 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((contracts) => {
         state.contracts = (contracts || []).map(sanitizeContract);
         refreshContractBindings();
+        ensureInvoiceFormOptions();
         saveCache();
         renderCalendar();
       })
@@ -10356,6 +10535,1657 @@ function updateDeductionFormVisibility() {
         setStatus('Failed to remove adjustment', 'error');
       })
       .api_deleteDeductionException(existingException.id);
+  }
+
+  function resetInvoicesState() {
+    state.invoices = [];
+    state.invoiceMap = {};
+    state.invoiceDefaults = [];
+    state.invoiceDefaultMap = {};
+    state.invoiceFilters = { year: '', month: '' };
+    state.invoiceSelectedId = '';
+    state.invoiceDetail = null;
+    state.invoiceDetailLoading = false;
+    state.invoiceListLoading = false;
+    state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    state.invoicePending = { savingInvoice: false, generating: false };
+    state.invoicesInitialized = false;
+    renderInvoicesPage();
+  }
+
+  function initializeInvoicesFeature() {
+    if (!getFeatureFlag('enable_invoices')) return;
+    if (state.invoicesInitialized) {
+      renderInvoicesPage();
+      return;
+    }
+    state.invoicesInitialized = true;
+    ensureInvoiceFiltersInitialized();
+    ensureInvoiceFormOptions();
+    loadInvoiceDefaults();
+    loadInvoicesList();
+    renderInvoicesPage();
+  }
+
+  function refreshInvoices(forceDetail) {
+    if (!getFeatureFlag('enable_invoices')) return;
+    loadInvoiceDefaults();
+    loadInvoicesList(forceDetail);
+  }
+
+  function loadInvoiceDefaults() {
+    if (!getFeatureFlag('enable_invoices')) return;
+    google.script.run
+      .withSuccessHandler((defaults) => {
+        if (!Array.isArray(defaults)) {
+          state.invoiceDefaults = [];
+          state.invoiceDefaultMap = {};
+        } else {
+          state.invoiceDefaults = defaults.slice();
+          state.invoiceDefaultMap = defaults.reduce((acc, item) => {
+            if (item && item.id) acc[item.id] = item;
+            return acc;
+          }, {});
+        }
+        renderInvoiceDefaults();
+      })
+      .withFailureHandler(() => {
+        setStatus('Failed to load invoice defaults', 'error');
+      })
+      .api_listInvoiceDefaultLineItems();
+  }
+
+  function loadInvoicesList(forceDetail) {
+    if (!getFeatureFlag('enable_invoices')) return;
+    state.invoiceListLoading = true;
+    renderInvoiceSelector();
+    google.script.run
+      .withSuccessHandler((invoices) => {
+        const list = Array.isArray(invoices) ? invoices.slice() : [];
+        state.invoices = list;
+        sortInvoices();
+        updateInvoiceMaps();
+        if (state.invoiceSelectedId && !state.invoiceMap[state.invoiceSelectedId]) {
+          state.invoiceSelectedId = '';
+          state.invoiceDetail = null;
+        }
+        state.invoiceListLoading = false;
+        renderInvoiceNavigator();
+        renderInvoiceSelector();
+        if (!state.invoiceSelectedId) {
+          const filtered = getFilteredInvoices();
+          if (filtered.length) {
+            selectInvoice(filtered[0].id, { autoLoad: true });
+          } else {
+            renderInvoiceDetail();
+          }
+        } else if (forceDetail) {
+          loadInvoiceDetail(state.invoiceSelectedId, { force: true });
+        } else {
+          renderInvoiceDetail();
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoiceListLoading = false;
+        setStatus('Failed to load invoices', 'error');
+        renderInvoiceSelector();
+      })
+      .api_listInvoices({});
+  }
+
+  function updateInvoiceMaps() {
+    state.invoiceMap = state.invoices.reduce((acc, invoice) => {
+      if (invoice && invoice.id) acc[invoice.id] = invoice;
+      return acc;
+    }, {});
+  }
+
+  function ensureInvoiceFiltersInitialized() {
+    if (state.invoiceFilters.year) return;
+    const now = new Date();
+    state.invoiceFilters.year = String(now.getFullYear());
+    state.invoiceFilters.month = String(now.getMonth() + 1);
+  }
+
+  const INVOICE_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var invoiceMonthPickerState = { year: null };
+
+  function renderInvoiceNavigator() {
+    if (!invoiceNavJump) return;
+    ensureInvoiceFiltersInitialized();
+    const year = Number(state.invoiceFilters.year);
+    const month = Number(state.invoiceFilters.month);
+    const monthIndex = Math.max(1, Math.min(12, month)) - 1;
+    invoiceNavJump.textContent = `${INVOICE_MONTH_NAMES[monthIndex]} ${year}`;
+  }
+
+  function renderInvoiceSelector() {
+    if (!invoiceSelector) return;
+    ensureInvoiceFiltersInitialized();
+    if (state.invoiceListLoading) {
+      invoiceSelector.innerHTML = '<option>Loading…</option>';
+      invoiceSelector.disabled = true;
+      return;
+    }
+    const filtered = getFilteredInvoices();
+    if (!filtered.length) {
+      invoiceSelector.innerHTML = '<option value=\"\">No invoices this month</option>';
+      invoiceSelector.disabled = true;
+      state.invoiceSelectedId = '';
+      state.invoiceDetail = null;
+      renderInvoiceDetail();
+      invoiceSelector.value = '';
+      return;
+    }
+    invoiceSelector.innerHTML = '';
+    filtered.forEach((invoice) => {
+      const option = document.createElement('option');
+      option.value = invoice.id;
+      const description = invoice.invoice_number || `Invoice ${invoice.sequence || ''}`;
+      const dateLabel = invoice.invoice_date ? ` • ${invoice.invoice_date}` : '';
+      option.textContent = `${description}${dateLabel}`;
+      invoiceSelector.appendChild(option);
+    });
+    const hasSelection = filtered.some((invoice) => invoice.id === state.invoiceSelectedId);
+    if (hasSelection) {
+      invoiceSelector.value = state.invoiceSelectedId;
+    } else {
+      invoiceSelector.value = filtered[0].id;
+      selectInvoice(filtered[0].id, { autoLoad: true });
+    }
+    invoiceSelector.disabled = filtered.length <= 1;
+  }
+
+  function changeInvoiceMonth(offset) {
+    ensureInvoiceFiltersInitialized();
+    let year = Number(state.invoiceFilters.year);
+    let month = Number(state.invoiceFilters.month);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+    }
+    month += offset;
+    while (month < 1) { month += 12; year -= 1; }
+    while (month > 12) { month -= 12; year += 1; }
+    state.invoiceFilters.year = String(year);
+    state.invoiceFilters.month = String(month);
+    state.invoiceSelectedId = '';
+    state.invoiceDetail = null;
+    renderInvoiceNavigator();
+    renderInvoiceSelector();
+    renderInvoiceDetail();
+  }
+
+  function openInvoiceMonthPicker() {
+    if (!invoiceMonthPickerModal) return;
+    ensureInvoiceFiltersInitialized();
+    invoiceMonthPickerState.year = Number(state.invoiceFilters.year);
+    renderInvoiceMonthPicker();
+    invoiceMonthPickerModal.style.display = 'flex';
+  }
+
+  function closeInvoiceMonthPicker() {
+    if (invoiceMonthPickerModal) invoiceMonthPickerModal.style.display = 'none';
+  }
+
+  function renderInvoiceMonthPicker() {
+    if (!invoiceMonthPickerModal || !invoiceMonthPickerGrid) return;
+    invoiceMonthPickerYearDisplay.textContent = invoiceMonthPickerState.year;
+    invoiceMonthPickerGrid.innerHTML = '';
+    for (var i = 0; i < 12; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'month-picker-cell';
+      btn.textContent = INVOICE_MONTH_NAMES[i].slice(0, 3);
+      btn.dataset.month = String(i + 1);
+      const current = new Date();
+      if (invoiceMonthPickerState.year === current.getFullYear() && i === current.getMonth()) {
+        btn.classList.add('current-month');
+      }
+      const activeMonth = Number(state.invoiceFilters.month);
+      const activeYear = Number(state.invoiceFilters.year);
+      if (invoiceMonthPickerState.year === activeYear && (i + 1) === activeMonth) {
+        btn.classList.add('active');
+      }
+      btn.onclick = function() {
+        const selectedMonth = Number(this.dataset.month);
+        state.invoiceFilters.year = String(invoiceMonthPickerState.year);
+        state.invoiceFilters.month = String(selectedMonth);
+        state.invoiceSelectedId = '';
+        state.invoiceDetail = null;
+        renderInvoiceNavigator();
+        renderInvoiceSelector();
+        renderInvoiceDetail();
+        closeInvoiceMonthPicker();
+      };
+      invoiceMonthPickerGrid.appendChild(btn);
+    }
+  }
+
+  function renderInvoicesPage() {
+    if (!pageInvoices) return;
+    if (!getFeatureFlag('enable_invoices')) {
+      pageInvoices.style.display = 'none';
+      return;
+    }
+    updateInvoiceConfigNote();
+    renderInvoiceNavigator();
+    renderInvoiceSelector();
+    renderInvoiceDefaults();
+    renderInvoiceDetail();
+  }
+
+  function updateInvoiceConfigNote() {
+    if (!invoiceConfigNote) return;
+    const templateConfigured = !!(state.settings.invoice_template_doc_id || state.settings.invoice_template_path || state.settings.invoice_template_reference);
+    const folderConfigured = !!(state.settings.invoice_output_folder_id || state.settings.invoice_output_folder_path);
+    if (templateConfigured && folderConfigured) {
+      invoiceConfigNote.style.display = 'none';
+      invoiceConfigNote.textContent = '';
+      return;
+    }
+    const parts = [];
+    if (!templateConfigured) parts.push('set an invoice template path or document ID');
+    if (!folderConfigured) parts.push('choose an output folder path');
+    invoiceConfigNote.style.display = 'block';
+    invoiceConfigNote.innerHTML = `Finish setup in Settings: ${parts.join(' and ')}.`;
+  }
+
+  function renderInvoiceDefaults() {
+    if (!invoiceDefaultList || !invoiceDefaultEmpty) return;
+    invoiceDefaultList.innerHTML = '';
+    if (!state.invoiceDefaults.length) {
+      invoiceDefaultEmpty.style.display = 'block';
+      if (invoiceDefaultForm) invoiceDefaultForm.style.display = state.invoiceDefaultForm.mode === 'create' ? 'block' : 'none';
+      return;
+    }
+    invoiceDefaultEmpty.style.display = 'none';
+    const sortedDefaults = state.invoiceDefaults.slice().sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+    sortedDefaults.forEach((item) => {
+      const card = createInvoiceDefaultCard(item);
+      const wrapper = document.createElement('li');
+      wrapper.style.listStyle = 'none';
+      wrapper.style.margin = '0';
+      wrapper.style.padding = '0';
+      wrapper.style.marginBottom = '8px';
+      wrapper.appendChild(card);
+      invoiceDefaultList.appendChild(wrapper);
+    });
+    if (invoiceDefaultForm) {
+      if (state.invoiceDefaultForm.mode === 'hidden') {
+        invoiceDefaultForm.style.display = 'none';
+      } else {
+        invoiceDefaultForm.style.display = 'block';
+        const draft = state.invoiceDefaultForm.draft || {};
+        if (invoiceDefaultLabelInput) invoiceDefaultLabelInput.value = draft.default_label || '';
+        if (invoiceDefaultDescriptionInput) invoiceDefaultDescriptionInput.value = draft.description || '';
+        if (invoiceDefaultHoursInput) invoiceDefaultHoursInput.value = draft.hours != null ? draft.hours : '';
+        if (invoiceDefaultHourTypeSelect) populateInvoiceHourTypeOptions(invoiceDefaultHourTypeSelect, draft.hour_type_id || '');
+        if (invoiceDefaultContractSelect) populateContractOptions(invoiceDefaultContractSelect, draft.contract_id || '');
+        if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = draft.amount != null ? draft.amount : '';
+      }
+    }
+  }
+
+  function renderInvoiceDetail() {
+    if (!invoiceDetail || !invoiceDetailEmpty) return;
+    console.debug('[Invoices] renderInvoiceDetail', {
+      invoiceSelectedId: state.invoiceSelectedId,
+      detailLoaded: !!state.invoiceDetail,
+      lineItems: state.invoiceDetail && Array.isArray(state.invoiceDetail.lineItems) ? state.invoiceDetail.lineItems.length : 0,
+      hourTypeCount: state.hourTypes ? state.hourTypes.length : 0
+    });
+    if (state.invoiceDetailLoading) {
+      invoiceDetail.style.display = 'none';
+      invoiceDetailEmpty.style.display = 'block';
+      invoiceDetailEmpty.textContent = 'Loading invoice...';
+      return;
+    }
+    if (!state.invoiceDetail || !state.invoiceSelectedId) {
+      invoiceDetail.style.display = 'none';
+      invoiceDetailEmpty.style.display = 'block';
+      invoiceDetailEmpty.textContent = 'Select an invoice to start editing, or create a new one.';
+      return;
+    }
+    invoiceDetailEmpty.style.display = 'none';
+    invoiceDetail.style.display = 'block';
+    const detail = state.invoiceDetail.invoice || {};
+    if (invoiceSelector) {
+      invoiceSelector.value = state.invoiceSelectedId || '';
+      invoiceSelector.disabled = state.invoiceListLoading || getFilteredInvoices().length <= 1;
+    }
+    if (invoiceDetailNumberInput) invoiceDetailNumberInput.value = detail.invoice_number || '';
+    if (invoiceDetailDateInput) invoiceDetailDateInput.value = detail.invoice_date || '';
+    if (invoiceDetailStatusSelect) invoiceDetailStatusSelect.value = detail.status || 'draft';
+    const hasInvoice = !!state.invoiceDetail && !!state.invoiceDetail.invoice;
+    if (btnInvoiceDelete) btnInvoiceDelete.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
+    if (btnInvoiceSave) btnInvoiceSave.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
+    if (btnInvoiceAddLine) btnInvoiceAddLine.disabled = !hasInvoice || state.invoiceDetailLoading;
+    if (btnInvoiceGenerate) {
+      const templateConfigured = !!(state.settings.invoice_template_doc_id || state.settings.invoice_template_path || state.settings.invoice_template_reference);
+      const folderConfigured = !!(state.settings.invoice_output_folder_id || state.settings.invoice_output_folder_path);
+      btnInvoiceGenerate.disabled = !templateConfigured || !folderConfigured || !!state.invoicePending.generating || !hasInvoice;
+    }
+    const summary = state.invoiceDetail.summary || { lineCount: 0, totalHours: 0, totalAmount: 0, gstAmount: 0, totalWithGst: 0 };
+    if (invoiceLineSummary) {
+      const countText = `${summary.lineCount} line${summary.lineCount === 1 ? '' : 's'}`;
+      const hoursText = `${Number(summary.totalHours || 0).toFixed(2)} hrs`;
+      invoiceLineSummary.textContent = `${countText} • ${hoursText} • ${formatCurrency(summary.totalAmount || 0)}`;
+    }
+    const subtotalAmount = Number(summary.totalAmount || 0);
+    const gstAmount = summary.gstAmount != null ? Number(summary.gstAmount) : Math.round(subtotalAmount * GST_RATE * 100) / 100;
+    const totalAmount = summary.totalWithGst != null ? Number(summary.totalWithGst) : Math.round((subtotalAmount + gstAmount) * 100) / 100;
+    if (invoiceLineSubtotal) {
+      invoiceLineSubtotal.textContent = formatCurrency(subtotalAmount);
+    }
+    if (invoiceLineGst) {
+      invoiceLineGst.textContent = formatCurrency(gstAmount);
+    }
+    if (invoiceLineTotal) {
+      invoiceLineTotal.textContent = formatCurrency(totalAmount);
+    }
+    renderInvoiceLineItems();
+    if (invoiceLineForm) {
+      if (state.invoiceLineForm.mode === 'hidden') {
+        invoiceLineForm.style.display = 'none';
+      } else {
+        invoiceLineForm.style.display = 'block';
+        applyInvoiceLineDraftToForm(state.invoiceLineForm.draft || {});
+      }
+    }
+  }
+
+  function renderInvoiceLineItems() {
+    if (!invoiceLineItemsBody) return;
+    invoiceLineItemsBody.innerHTML = '';
+    const items = (state.invoiceDetail && Array.isArray(state.invoiceDetail.lineItems)) ? state.invoiceDetail.lineItems : [];
+    if (invoiceLineEmpty) {
+      invoiceLineEmpty.style.display = items.length ? 'none' : 'block';
+    }
+    if (invoiceLineItemsBody) {
+      invoiceLineItemsBody.style.display = items.length ? 'flex' : 'none';
+    }
+    if (!items.length) return;
+    items.forEach((item) => {
+      const card = createInvoiceLineCard(item);
+      invoiceLineItemsBody.appendChild(card);
+    });
+  }
+
+  function createInvoiceLineCard(item) {
+    const amountValue = formatCurrency(item.amount != null ? item.amount : 0);
+    const hoursValue = Number(item.hours);
+    const hasHours = Number.isFinite(hoursValue) && hoursValue > 0;
+    const infoItems = [
+      { label: 'Amount', value: amountValue, strong: true },
+      { label: 'Date', value: item.line_date || '' },
+      hasHours ? { label: 'Hours', value: `${hoursValue.toFixed(2)} hrs` } : null,
+      item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
+      item.contract_name_snapshot ? { label: 'Contract', value: item.contract_name_snapshot } : null
+    ].filter(Boolean);
+
+    const statusItems = [];
+    if (item.timesheet_entry_id) {
+      statusItems.push({
+        type: 'badge',
+        text: item.entry_modified ? 'Modified' : 'Synced',
+        variant: item.entry_modified ? 'warn' : 'default'
+      });
+    } else {
+      statusItems.push({ type: 'note', text: 'No linked entry' });
+    }
+    if (item.timesheet_entry_id && item.source_default_id) {
+      const source = state.invoiceDefaultMap && state.invoiceDefaultMap[item.source_default_id]
+        ? state.invoiceDefaultMap[item.source_default_id].default_label || 'Saved default'
+        : 'Saved default';
+      statusItems.push({ type: 'note', text: `Seeded from: ${source}` });
+    }
+
+    const actions = [
+      { label: 'Edit', action: 'edit-line', id: item.id },
+      { label: 'Delete', action: 'delete-line', id: item.id },
+      { label: 'Save as default', action: 'default-line', id: item.id }
+    ];
+    if (item.timesheet_entry_id) {
+      actions.push({ label: 'Refresh', action: 'refresh-line', id: item.id });
+    }
+
+    return buildInvoiceCardLayout({
+      title: item.description || '(No description)',
+      infoItems: infoItems,
+      statusItems: statusItems,
+      actions: actions
+    });
+  }
+
+  function buildInvoiceCardLayout(config) {
+    const card = document.createElement('div');
+    card.className = 'ts-item';
+    card.style.padding = '12px';
+    if (config.id) card.dataset.id = config.id;
+
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.alignItems = 'stretch';
+    container.style.gap = '16px';
+    container.style.width = '100%';
+
+    const left = document.createElement('div');
+    left.style.flex = '0 0 220px';
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+    left.style.fontWeight = '600';
+    left.style.lineHeight = '1.4';
+    left.textContent = config.title || '';
+    container.appendChild(left);
+
+    const middle = document.createElement('div');
+    middle.style.flex = '1 1 auto';
+    middle.style.display = 'flex';
+    middle.style.flexDirection = 'column';
+    middle.style.justifyContent = 'center';
+    middle.style.gap = '8px';
+
+    const infoRow = document.createElement('div');
+    infoRow.style.display = 'flex';
+    infoRow.style.flexWrap = 'wrap';
+    infoRow.style.alignItems = 'center';
+    infoRow.style.gap = '16px';
+
+    (config.infoItems || []).forEach((item) => {
+      if (!item || !item.value) return;
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '4px';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'ts-note';
+      labelEl.textContent = item.label;
+      wrap.appendChild(labelEl);
+
+      const valueEl = document.createElement('span');
+      if (item.strong) valueEl.style.fontWeight = '600';
+      valueEl.textContent = item.value;
+      wrap.appendChild(valueEl);
+
+      infoRow.appendChild(wrap);
+    });
+
+    middle.appendChild(infoRow);
+
+    const statusItems = config.statusItems || [];
+    if (statusItems.length) {
+      const statusRow = document.createElement('div');
+      statusRow.style.display = 'flex';
+      statusRow.style.flexWrap = 'wrap';
+      statusRow.style.alignItems = 'center';
+      statusRow.style.gap = '12px';
+
+      statusItems.forEach((status) => {
+        if (!status || !status.text) return;
+        if (status.type === 'badge') {
+          const badge = document.createElement('span');
+          badge.className = status.variant === 'warn' ? 'ts-badge ts-badge--warn' : 'ts-badge';
+          badge.textContent = status.text;
+          statusRow.appendChild(badge);
+        } else {
+          const note = document.createElement('span');
+          note.className = 'ts-note';
+          note.textContent = status.text;
+          statusRow.appendChild(note);
+        }
+      });
+
+      middle.appendChild(statusRow);
+    }
+
+    container.appendChild(middle);
+
+    const rightWrapper = document.createElement('div');
+    rightWrapper.style.display = 'flex';
+    rightWrapper.style.alignItems = 'center';
+    rightWrapper.style.justifyContent = 'flex-end';
+    rightWrapper.style.flex = '0 0 260px';
+
+    const actionsGrid = document.createElement('div');
+    actionsGrid.style.display = 'grid';
+    actionsGrid.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+    actionsGrid.style.gap = '8px';
+    actionsGrid.style.width = '100%';
+    actionsGrid.style.maxWidth = '260px';
+
+    const actions = (config.actions || []).slice();
+    while (actions.length < 4) {
+      actions.push(null);
+    }
+
+    actions.forEach((action) => {
+      if (!action) {
+        const placeholder = document.createElement('span');
+        placeholder.style.display = 'block';
+        placeholder.style.visibility = 'hidden';
+        placeholder.textContent = 'Placeholder';
+        actionsGrid.appendChild(placeholder);
+        return;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost';
+      btn.dataset.action = action.action;
+      if (action.id) btn.dataset.id = action.id;
+      if (action.disabled) btn.disabled = true;
+      if (action.title) btn.title = action.title;
+      btn.textContent = action.label;
+      btn.style.fontSize = '12px';
+      btn.style.minWidth = '120px';
+      btn.style.whiteSpace = 'nowrap';
+      actionsGrid.appendChild(btn);
+    });
+
+    rightWrapper.appendChild(actionsGrid);
+    container.appendChild(rightWrapper);
+
+    card.appendChild(container);
+    return card;
+  }
+
+  function createInvoiceDefaultCard(item) {
+    const amountValue = (item.amount || item.amount === 0) ? formatCurrency(item.amount) : '';
+    const hoursValue = Number(item.hours);
+    const infoItems = [
+      amountValue ? { label: 'Amount', value: amountValue, strong: true } : null,
+      Number.isFinite(hoursValue) && hoursValue > 0 ? { label: 'Hours', value: `${hoursValue.toFixed(2)} hrs` } : null,
+      item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
+      item.contract_name_snapshot ? { label: 'Contract', value: item.contract_name_snapshot } : null
+    ].filter(Boolean);
+
+    const statusItems = [];
+    if (item.description) {
+      statusItems.push({ type: 'note', text: item.description });
+    }
+    statusItems.push({ type: 'note', text: 'Default line item' });
+
+    const canAddToInvoice = !!(state.invoiceDetail && state.invoiceDetail.invoice && !state.invoiceDetailLoading);
+    const defaultActions = [];
+    const addAction = {
+      label: 'Add to invoice',
+      action: 'insert-default',
+      id: item.id,
+      disabled: !canAddToInvoice
+    };
+    if (!canAddToInvoice) {
+      addAction.title = 'Select an invoice to add this default';
+    }
+    defaultActions.push(addAction);
+    defaultActions.push({ label: 'Edit', action: 'edit-default', id: item.id });
+    defaultActions.push({ label: 'Delete', action: 'delete-default', id: item.id });
+
+    return buildInvoiceCardLayout({
+      title: item.default_label || '(untitled)',
+      infoItems,
+      statusItems,
+      actions: defaultActions
+    });
+  }
+
+  function formatInvoiceMonthName(month) {
+    if (!month) return '';
+    const idx = Number(month) - 1;
+    if (idx < 0 || idx >= INVOICE_MONTH_NAMES.length) return '';
+    return INVOICE_MONTH_NAMES[idx];
+  }
+
+  function getFilteredInvoices() {
+    return state.invoices.filter((invoice) => {
+      if (state.invoiceFilters.year && String(invoice.year) !== state.invoiceFilters.year) return false;
+      if (state.invoiceFilters.month && String(invoice.month) !== state.invoiceFilters.month) return false;
+      return true;
+    });
+  }
+
+  function selectInvoice(invoiceId, options) {
+    const opts = options || {};
+    if (!invoiceId) {
+      state.invoiceSelectedId = '';
+      state.invoiceDetail = null;
+      state.invoiceDetailLoading = false;
+      renderInvoiceDetail();
+      return;
+    }
+    if (state.invoiceSelectedId === invoiceId && !opts.force) {
+      renderInvoiceDetail();
+      return;
+    }
+    state.invoiceSelectedId = invoiceId;
+    state.invoiceDetail = null;
+    state.invoiceDetailLoading = true;
+    renderInvoiceDetail();
+    loadInvoiceDetail(invoiceId, opts);
+  }
+
+  function loadInvoiceDetail(invoiceId, options) {
+    if (!invoiceId) return;
+    const opts = options || {};
+    state.invoiceDetailLoading = true;
+    renderInvoiceDetail();
+    google.script.run
+      .withSuccessHandler((detail) => {
+        if (state.invoiceSelectedId !== invoiceId) return;
+        state.invoiceDetailLoading = false;
+        if (detail && detail.invoice) {
+          console.debug('[Invoices] loadInvoiceDetail success', {
+            invoiceId,
+            lineItemCount: Array.isArray(detail.lineItems) ? detail.lineItems.length : 0,
+            defaultsReturned: Array.isArray(detail.defaults) ? detail.defaults.length : 0
+          });
+          state.invoiceDetail = {
+            invoice: detail.invoice,
+            lineItems: Array.isArray(detail.lineItems) ? detail.lineItems.slice() : [],
+            summary: detail.summary || summarizeInvoiceLineItems(detail.lineItems || [])
+          };
+          upsertInvoiceInState(detail.invoice);
+          if (Array.isArray(detail.defaults)) {
+            state.invoiceDefaults = detail.defaults.slice();
+            state.invoiceDefaultMap = detail.defaults.reduce((acc, item) => {
+              if (item && item.id) acc[item.id] = item;
+              return acc;
+            }, {});
+          }
+          renderInvoiceDefaults();
+          ensureInvoiceFormOptions();
+        } else {
+          state.invoiceDetail = null;
+        }
+        renderInvoiceDetail();
+      })
+      .withFailureHandler(() => {
+        if (state.invoiceSelectedId !== invoiceId) return;
+        state.invoiceDetailLoading = false;
+        setStatus('Failed to load invoice', 'error');
+        renderInvoiceDetail();
+      })
+      .api_getInvoice(invoiceId);
+  }
+
+  function upsertInvoiceInState(invoice) {
+    if (!invoice || !invoice.id) return;
+    const idx = state.invoices.findIndex((item) => item.id === invoice.id);
+    if (idx === -1) {
+      state.invoices.push(invoice);
+    } else {
+      state.invoices[idx] = Object.assign({}, state.invoices[idx], invoice);
+    }
+    sortInvoices();
+    updateInvoiceMaps();
+    renderInvoiceNavigator();
+    renderInvoiceSelector();
+  }
+
+  function removeInvoiceFromState(invoiceId) {
+    const idx = state.invoices.findIndex((item) => item.id === invoiceId);
+    if (idx !== -1) {
+      state.invoices.splice(idx, 1);
+      updateInvoiceMaps();
+      renderInvoiceNavigator();
+      renderInvoiceSelector();
+    }
+  }
+
+  function sortInvoices() {
+    state.invoices.sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      if (a.month !== b.month) return b.month - a.month;
+      return (b.sequence || 0) - (a.sequence || 0);
+    });
+  }
+
+  function summarizeInvoiceLineItems(items) {
+    const list = Array.isArray(items) ? items : [];
+    const summary = list.reduce((acc, item) => {
+      const amount = Number(item && item.amount != null ? item.amount : 0);
+      const hours = Number(item && item.hours != null ? item.hours : 0);
+      if (Number.isFinite(amount)) acc.totalAmount += amount;
+      if (Number.isFinite(hours)) acc.totalHours += hours;
+      return acc;
+    }, { totalAmount: 0, totalHours: 0, lineCount: list.length });
+    summary.totalAmount = Math.round(summary.totalAmount * 100) / 100;
+    summary.totalHours = Math.round(summary.totalHours * 1000) / 1000;
+    summary.gstAmount = Math.round(summary.totalAmount * GST_RATE * 100) / 100;
+    summary.totalWithGst = Math.round((summary.totalAmount + summary.gstAmount) * 100) / 100;
+    return summary;
+  }
+
+  function recalculateInvoiceSummary() {
+    if (!state.invoiceDetail) return;
+    const summary = summarizeInvoiceLineItems(state.invoiceDetail.lineItems || []);
+    state.invoiceDetail.summary = summary;
+  }
+
+  function ensureInvoiceFormOptions() {
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
+    console.debug('[Invoices] ensureInvoiceFormOptions', {
+      hourTypesEnabled,
+      hourTypeCount: state.hourTypes ? state.hourTypes.length : 0,
+      invoiceLineSelect: invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.id : null,
+      invoiceDefaultSelect: invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.id : null,
+      currentInvoiceLineValue: invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.value : null,
+      currentDefaultValue: invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : null
+    });
+    if (invoiceLineHourTypeSelect) populateInvoiceHourTypeOptions(invoiceLineHourTypeSelect, state.invoiceLineForm.draft && state.invoiceLineForm.draft.hour_type_id);
+    if (invoiceDefaultHourTypeSelect) populateInvoiceHourTypeOptions(invoiceDefaultHourTypeSelect, state.invoiceDefaultForm.draft && state.invoiceDefaultForm.draft.hour_type_id);
+    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = hourTypesEnabled ? 'block' : 'none';
+    if (invoiceDefaultHourTypeCol) invoiceDefaultHourTypeCol.style.display = hourTypesEnabled ? 'block' : 'none';
+    if (!hourTypesEnabled) {
+      if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = '';
+      if (invoiceDefaultHourTypeSelect) invoiceDefaultHourTypeSelect.value = '';
+    }
+    if (invoiceLineContractSelect) populateContractOptions(invoiceLineContractSelect, state.invoiceLineForm.draft && state.invoiceLineForm.draft.contract_id);
+    if (invoiceDefaultContractSelect) populateContractOptions(invoiceDefaultContractSelect, state.invoiceDefaultForm.draft && state.invoiceDefaultForm.draft.contract_id);
+    updateInvoiceLineAmountModeUI();
+  }
+
+  function populateInvoiceHourTypeOptions(selectEl, selectedId) {
+    if (!selectEl) return;
+    const value = selectedId || '';
+    selectEl.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = 'None';
+    selectEl.appendChild(emptyOpt);
+    const types = state.hourTypes && state.hourTypes.length ? state.hourTypes : [];
+    console.debug('[Invoices] populateHourTypeOptions', {
+      selectId: selectEl.id,
+      typesCount: types.length,
+      selectedId: value
+    });
+    types.forEach((type) => {
+      const opt = document.createElement('option');
+      opt.value = type.id;
+      opt.textContent = type.name;
+      selectEl.appendChild(opt);
+    });
+    selectEl.value = value;
+  }
+
+  function populateContractOptions(selectEl, selectedId) {
+    if (!selectEl) return;
+    const value = selectedId || '';
+    selectEl.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = 'None';
+    selectEl.appendChild(emptyOpt);
+    const contracts = state.contracts && state.contracts.length ? state.contracts : [];
+    contracts.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      selectEl.appendChild(opt);
+    });
+    selectEl.value = value;
+  }
+
+  function getHourTypeName(hourTypeId) {
+    if (!hourTypeId) return '';
+    const existing = state.hourTypeMap && state.hourTypeMap[hourTypeId];
+    if (existing) return existing.name || '';
+    const found = state.hourTypes ? state.hourTypes.find((type) => type.id === hourTypeId) : null;
+    return found ? found.name || '' : '';
+  }
+
+  function getContractName(contractId) {
+    if (!contractId) return '';
+    const existing = state.contractMap && state.contractMap[contractId];
+    if (existing) return existing.name || '';
+    const found = state.contracts ? state.contracts.find((contract) => contract.id === contractId) : null;
+    return found ? found.name || '' : '';
+  }
+
+  function getContractRate(contractId) {
+    if (!contractId) return 0;
+    const existing = state.contractMap && state.contractMap[contractId];
+    if (existing && Number.isFinite(Number(existing.hourly_rate))) {
+      return Number(existing.hourly_rate);
+    }
+    const found = state.contracts ? state.contracts.find((contract) => contract.id === contractId) : null;
+    if (found && Number.isFinite(Number(found.hourly_rate))) {
+      return Number(found.hourly_rate);
+    }
+    return 0;
+  }
+
+  function generateTempId(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function getNextInvoiceSequenceLocal(year, month) {
+    const relevant = state.invoices.filter((invoice) => invoice.year === year && invoice.month === month);
+    const maxSeq = relevant.reduce((max, invoice) => Math.max(max, Number(invoice.sequence || 0)), 0);
+    return maxSeq + 1;
+  }
+
+  function startCreateInvoice() {
+    if (!getFeatureFlag('enable_invoices')) return;
+    ensureInvoiceFiltersInitialized();
+    const now = new Date();
+    const year = Number(state.invoiceFilters.year) || now.getFullYear();
+    const month = Number(state.invoiceFilters.month) || (now.getMonth() + 1);
+    const dateValue = `${year}-${String(month).padStart(2, '0')}-01`;
+    const tempId = generateTempId('invoice');
+    const sequence = getNextInvoiceSequenceLocal(year, month);
+    const invoiceNumber = `INV-${year}${String(month).padStart(2, '0')}-${String(sequence).padStart(3, '0')}`;
+    const draftInvoice = {
+      id: tempId,
+      year: year,
+      month: month,
+      sequence: sequence,
+      invoice_number: invoiceNumber,
+      invoice_date: dateValue,
+      status: 'draft',
+      generated_doc_id: '',
+      generated_doc_url: ''
+    };
+    upsertInvoiceInState(draftInvoice);
+    state.invoiceSelectedId = tempId;
+    state.invoiceDetail = {
+      invoice: draftInvoice,
+      lineItems: [],
+      summary: { lineCount: 0, totalHours: 0, totalAmount: 0, gstAmount: 0, totalWithGst: 0 }
+    };
+    renderInvoicesPage();
+    setStatus('Creating invoice...', 'warn');
+    google.script.run
+      .withSuccessHandler((saved) => {
+        if (!saved || !saved.id) {
+          removeInvoiceFromState(tempId);
+          state.invoiceSelectedId = '';
+          state.invoiceDetail = null;
+          renderInvoicesPage();
+          setStatus('Failed to create invoice', 'error');
+          return;
+        }
+        removeInvoiceFromState(tempId);
+        upsertInvoiceInState(saved);
+        state.invoiceSelectedId = saved.id;
+        state.invoiceDetail = null;
+        renderInvoicesPage();
+        loadInvoiceDetail(saved.id, { force: true });
+        setStatus('Invoice created', 'success');
+      })
+      .withFailureHandler(() => {
+        removeInvoiceFromState(tempId);
+        state.invoiceSelectedId = '';
+        state.invoiceDetail = null;
+        renderInvoicesPage();
+        setStatus('Failed to create invoice', 'error');
+      })
+      .api_upsertInvoice({
+        invoice_date: dateValue,
+        status: 'draft',
+        invoice_number: invoiceNumber
+      });
+  }
+
+  function handleInvoiceSave(event) {
+    if (event) event.preventDefault();
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    const invoice = state.invoiceDetail.invoice;
+    const numberValue = invoiceDetailNumberInput ? invoiceDetailNumberInput.value.trim() : (invoice.invoice_number || '');
+    const dateValue = invoiceDetailDateInput ? invoiceDetailDateInput.value : (invoice.invoice_date || '');
+    if (!dateValue) {
+      setStatus('Invoice date is required.', 'warn');
+      return;
+    }
+    const statusValue = invoiceDetailStatusSelect ? invoiceDetailStatusSelect.value : (invoice.status || 'draft');
+    const year = Number(dateValue.slice(0, 4)) || invoice.year;
+    const month = Number(dateValue.slice(5, 7)) || invoice.month;
+    const previous = Object.assign({}, invoice);
+    const updatedInvoice = Object.assign({}, invoice, {
+      invoice_number: numberValue,
+      invoice_date: dateValue,
+      status: statusValue,
+      year: year,
+      month: month
+    });
+    state.invoiceFilters.year = String(year);
+    state.invoiceFilters.month = String(month);
+    state.invoiceDetail.invoice = updatedInvoice;
+    upsertInvoiceInState(updatedInvoice);
+    state.invoicePending.savingInvoice = true;
+    renderInvoiceDetail();
+    setStatus('Saving invoice...', 'warn');
+    google.script.run
+      .withSuccessHandler((saved) => {
+        state.invoicePending.savingInvoice = false;
+        if (saved && saved.id) {
+          state.invoiceDetail.invoice = saved;
+          upsertInvoiceInState(saved);
+          renderInvoiceDetail();
+          setStatus('Invoice saved', 'success');
+        } else {
+          state.invoiceDetail.invoice = previous;
+          upsertInvoiceInState(previous);
+          renderInvoiceDetail();
+          setStatus('Invoice save failed', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoicePending.savingInvoice = false;
+        state.invoiceDetail.invoice = previous;
+        upsertInvoiceInState(previous);
+        renderInvoiceDetail();
+        setStatus('Invoice save failed', 'error');
+      })
+      .api_upsertInvoice({
+        id: invoice.id,
+        invoice_number: numberValue,
+        invoice_date: dateValue,
+        status: statusValue
+      });
+  }
+
+  async function handleInvoiceDelete() {
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    const invoice = state.invoiceDetail.invoice;
+    const confirmed = await customConfirm('Delete this invoice?', { danger: true, okText: 'Delete' });
+    if (!confirmed) return;
+    const previousInvoices = state.invoices.slice();
+    const previousSelected = state.invoiceSelectedId;
+    const previousDetail = state.invoiceDetail ? JSON.parse(JSON.stringify(state.invoiceDetail)) : null;
+    removeInvoiceFromState(invoice.id);
+    state.invoiceSelectedId = '';
+    state.invoiceDetail = null;
+    renderInvoicesPage();
+    setStatus('Deleting invoice...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success) {
+          setStatus('Invoice deleted', 'success');
+          const filtered = getFilteredInvoices();
+          if (filtered.length) {
+            selectInvoice(filtered[0].id, { autoLoad: true });
+          } else {
+            renderInvoicesPage();
+          }
+        } else {
+          state.invoices = previousInvoices;
+          updateInvoiceMaps();
+          state.invoiceSelectedId = previousSelected;
+          state.invoiceDetail = previousDetail;
+          renderInvoicesPage();
+          setStatus('Failed to delete invoice', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoices = previousInvoices;
+        updateInvoiceMaps();
+        state.invoiceSelectedId = previousSelected;
+        state.invoiceDetail = previousDetail;
+        renderInvoicesPage();
+        setStatus('Failed to delete invoice', 'error');
+      })
+      .api_deleteInvoice(invoice.id, { deleteEntries: false });
+  }
+
+  function handleInvoiceGenerate(event) {
+    if (event) event.preventDefault();
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    const invoice = state.invoiceDetail.invoice;
+    const templateConfigured = !!(state.settings.invoice_template_doc_id || state.settings.invoice_template_path || state.settings.invoice_template_reference);
+    const folderConfigured = !!(state.settings.invoice_output_folder_id || state.settings.invoice_output_folder_path);
+    if (!templateConfigured || !folderConfigured) {
+      setStatus('Configure the invoice template and output folder first.', 'warn');
+      return;
+    }
+    state.invoicePending.generating = true;
+    renderInvoiceDetail();
+    setStatus('Publishing invoice...', 'info');
+    google.script.run
+      .withSuccessHandler((res) => {
+        state.invoicePending.generating = false;
+        if (res && res.success) {
+          setStatus('Invoice published', 'success');
+          loadInvoiceDetail(invoice.id, { force: true });
+        } else {
+          setStatus('Failed to publish invoice', 'error');
+          renderInvoiceDetail();
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoicePending.generating = false;
+        renderInvoiceDetail();
+        setStatus('Failed to publish invoice', 'error');
+      })
+      .api_generateInvoiceDocument({ invoice_id: invoice.id });
+  }
+
+  function openInvoiceLineForm(mode, baseDraft) {
+    if (!state.invoiceDetail) return;
+    const invoiceDate = state.invoiceDetail.invoice ? (state.invoiceDetail.invoice.invoice_date || todayIso()) : todayIso();
+    const draft = Object.assign({
+      id: baseDraft && baseDraft.id,
+      line_date: baseDraft && baseDraft.line_date ? baseDraft.line_date : invoiceDate,
+      description: baseDraft && baseDraft.description ? baseDraft.description : '',
+      hours: baseDraft && baseDraft.hours != null ? baseDraft.hours : '',
+      amount: baseDraft && baseDraft.amount != null ? baseDraft.amount : '',
+      hour_type_id: baseDraft && baseDraft.hour_type_id ? baseDraft.hour_type_id : '',
+      contract_id: baseDraft && baseDraft.contract_id ? baseDraft.contract_id : '',
+      source_default_id: baseDraft && baseDraft.source_default_id ? baseDraft.source_default_id : ''
+    }, {});
+    const amountMode = determineInvoiceLineAmountMode(draft);
+    state.invoiceLineForm = {
+      mode: mode,
+      editingId: mode === 'edit' ? draft.id : null,
+      draft: draft,
+      amountMode: amountMode
+    };
+    ensureInvoiceFormOptions();
+    applyInvoiceLineDraftToForm(draft);
+    if (invoiceLineForm) invoiceLineForm.style.display = 'block';
+  }
+
+  function resetInvoiceLineForm() {
+    state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
+    if (invoiceLineForm) invoiceLineForm.style.display = 'none';
+    updateInvoiceLineAmountModeUI();
+  }
+
+  function handleInvoiceLineAmountModeChange() {
+    const mode = invoiceLineAmountModeSelect ? invoiceLineAmountModeSelect.value : 'hours';
+    if (!state.invoiceLineForm) {
+      state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: mode };
+    } else {
+      state.invoiceLineForm.amountMode = mode;
+      if (!state.invoiceLineForm.draft) {
+        state.invoiceLineForm.draft = {};
+      }
+      if (mode === 'hours') {
+        state.invoiceLineForm.draft.amount = '';
+        if (invoiceLineAmountInput) invoiceLineAmountInput.value = '';
+      } else {
+        state.invoiceLineForm.draft.hours = '';
+        state.invoiceLineForm.draft.hour_type_id = '';
+        if (invoiceLineHoursInput) invoiceLineHoursInput.value = '';
+        if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = '';
+      }
+    }
+    updateInvoiceLineAmountModeUI();
+  }
+
+  function determineInvoiceLineAmountMode(draft) {
+    if (!draft) return 'hours';
+    if (draft.hours != null && draft.hours !== '' && Number(draft.hours) > 0) {
+      return 'hours';
+    }
+    if (draft.amount != null && draft.amount !== '' && Number(draft.amount) > 0) {
+      return 'amount';
+    }
+    return 'hours';
+  }
+
+  function updateInvoiceLineAmountModeUI() {
+    const mode = state.invoiceLineForm && state.invoiceLineForm.amountMode ? state.invoiceLineForm.amountMode : 'hours';
+    if (invoiceLineAmountModeSelect) {
+      invoiceLineAmountModeSelect.value = mode;
+    }
+    const showHours = mode === 'hours';
+    if (invoiceLineHoursCol) {
+      invoiceLineHoursCol.style.visibility = showHours ? 'visible' : 'hidden';
+      invoiceLineHoursCol.style.pointerEvents = showHours ? 'auto' : 'none';
+    }
+    if (invoiceLineHourTypeCol) {
+      invoiceLineHourTypeCol.style.visibility = showHours ? 'visible' : 'hidden';
+      invoiceLineHourTypeCol.style.pointerEvents = showHours ? 'auto' : 'none';
+    }
+    if (invoiceLineHoursInput) {
+      if (!showHours) {
+        invoiceLineHoursInput.value = '';
+      }
+      invoiceLineHoursInput.disabled = !showHours;
+    }
+    if (invoiceLineHourTypeSelect) {
+      if (!showHours) {
+        invoiceLineHourTypeSelect.value = '';
+      }
+      invoiceLineHourTypeSelect.disabled = !showHours;
+    }
+    if (invoiceLineAmountCol) {
+      invoiceLineAmountCol.style.visibility = 'visible';
+    }
+    if (invoiceLineAmountInput) {
+      invoiceLineAmountInput.disabled = showHours;
+      invoiceLineAmountInput.placeholder = showHours ? 'Auto-calculated' : '';
+    }
+  }
+
+  function applyInvoiceLineDraftToForm(draft) {
+    ensureInvoiceFormOptions();
+    if (state.invoiceLineForm) {
+      const inferredMode = state.invoiceLineForm.amountMode || determineInvoiceLineAmountMode(draft);
+      state.invoiceLineForm.amountMode = inferredMode;
+    }
+    updateInvoiceLineAmountModeUI();
+    if (invoiceLineDateInput) invoiceLineDateInput.value = draft.line_date || '';
+    if (invoiceLineDescriptionInput) invoiceLineDescriptionInput.value = draft.description || '';
+    if (invoiceLineHoursInput) invoiceLineHoursInput.value = draft.hours !== undefined && draft.hours !== null ? draft.hours : '';
+    if (invoiceLineAmountInput) invoiceLineAmountInput.value = draft.amount !== undefined && draft.amount !== null ? draft.amount : '';
+    if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = draft.hour_type_id || '';
+    if (invoiceLineContractSelect) invoiceLineContractSelect.value = draft.contract_id || '';
+  }
+
+  function buildInvoiceLineDraftFromForm() {
+    if (!invoiceLineDateInput || !invoiceLineDescriptionInput) return null;
+    const base = state.invoiceLineForm.draft || {};
+    const amountMode = state.invoiceLineForm && state.invoiceLineForm.amountMode ? state.invoiceLineForm.amountMode : 'hours';
+    const lineDate = invoiceLineDateInput.value || '';
+    const description = invoiceLineDescriptionInput.value.trim();
+    const hoursValue = amountMode === 'hours' && invoiceLineHoursInput && invoiceLineHoursInput.value !== '' ? Number(invoiceLineHoursInput.value) : null;
+    const amountProvided = amountMode === 'amount' && invoiceLineAmountInput && invoiceLineAmountInput.value !== '';
+    const amountValue = amountProvided ? Number(invoiceLineAmountInput.value) : null;
+    const hourTypeId = invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.value : '';
+    const contractId = invoiceLineContractSelect ? invoiceLineContractSelect.value : '';
+    return {
+      id: base.id,
+      line_date: lineDate,
+      description: description,
+      hours: hoursValue,
+      amount: amountValue,
+      amountProvided: amountProvided,
+      hour_type_id: hourTypeId,
+      contract_id: contractId,
+      source_default_id: base.source_default_id || ''
+    };
+  }
+
+  function handleInvoiceLineSave(event) {
+    if (event) event.preventDefault();
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    const draft = buildInvoiceLineDraftFromForm();
+    if (!draft) return;
+    if (!draft.description) {
+      setStatus('Line item description is required.', 'warn');
+      return;
+    }
+    if (!draft.contract_id) {
+      setStatus('Select a contract for this line item.', 'warn');
+      return;
+    }
+    const hasHours = draft.hours != null && draft.hours !== '' && Number.isFinite(Number(draft.hours)) && Number(draft.hours) > 0;
+    const amountInputValid = draft.amountProvided && draft.amount != null && !Number.isNaN(Number(draft.amount));
+    if (!hasHours && !amountInputValid) {
+      setStatus('Enter hours to auto-calculate or provide a raw amount.', 'warn');
+      return;
+    }
+    if (draft.amountProvided && (draft.amount == null || Number.isNaN(Number(draft.amount)))) {
+      setStatus('Enter a valid amount.', 'warn');
+      return;
+    }
+    let amount = draft.amountProvided ? Number(draft.amount) : null;
+    const contractRate = getContractRate(draft.contract_id);
+    if (hasHours && !draft.amountProvided) {
+      if (contractRate > 0) {
+        amount = Math.round(Number(draft.hours) * contractRate * 100) / 100;
+      } else {
+        setStatus('Contract rate missing. Enter an amount manually.', 'warn');
+        return;
+      }
+    }
+    draft.hours = hasHours ? Number(draft.hours) : null;
+    if (amount === null || Number.isNaN(amount)) {
+      setStatus('Enter a valid amount for this line item.', 'warn');
+      return;
+    }
+    amount = Math.round(Number(amount) * 100) / 100;
+    const lineItems = state.invoiceDetail.lineItems || [];
+    const payload = {
+      invoice_id: state.invoiceDetail.invoice.id,
+      line_date: draft.line_date || state.invoiceDetail.invoice.invoice_date || todayIso(),
+      description: draft.description,
+      hours: draft.hours != null ? Number(draft.hours) : 0,
+      amount: Number(amount),
+      hour_type_id: draft.hour_type_id || '',
+      contract_id: draft.contract_id || '',
+      source_default_id: draft.source_default_id || ''
+    };
+    payload.amount_provided = draft.amountProvided === true || !hasHours;
+    const isEdit = state.invoiceLineForm.mode === 'edit' && state.invoiceLineForm.editingId;
+    if (isEdit) payload.id = state.invoiceLineForm.editingId;
+    const tempId = isEdit ? state.invoiceLineForm.editingId : generateTempId('invoice-line');
+    const position = isEdit
+      ? (lineItems.find((item) => item.id === state.invoiceLineForm.editingId)?.position || 0)
+      : (lineItems.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0) + 1);
+    payload.position = position;
+
+    const optimisticItem = {
+      id: tempId,
+      invoice_id: state.invoiceDetail.invoice.id,
+      position: position,
+      line_date: payload.line_date,
+      description: payload.description,
+      hours: payload.hours,
+      amount: payload.amount,
+      hour_type_id: payload.hour_type_id,
+      hour_type_name_snapshot: getHourTypeName(payload.hour_type_id),
+      contract_id: payload.contract_id,
+      contract_name_snapshot: getContractName(payload.contract_id),
+      timesheet_entry_id: isEdit ? (lineItems.find((item) => item.id === payload.id)?.timesheet_entry_id || '') : '',
+      entry_modified: false,
+      entry_state: null,
+      source_default_id: payload.source_default_id || ''
+    };
+    if (isEdit) {
+      const previousItem = lineItems.find((item) => item.id === payload.id);
+      const previousSnapshot = previousItem ? Object.assign({}, previousItem) : null;
+      mergeLineItemIntoDetail(optimisticItem);
+      updateInvoiceSummaryAndRender();
+      setStatus('Saving line item...', 'warn');
+      google.script.run
+        .withSuccessHandler((saved) => {
+          if (saved && saved.id) {
+            mergeLineItemIntoDetail(saved);
+            updateInvoiceSummaryAndRender();
+            setStatus('Line item saved', 'success');
+          } else if (previousSnapshot) {
+            mergeLineItemIntoDetail(previousSnapshot);
+            updateInvoiceSummaryAndRender();
+            setStatus('Failed to save line item', 'error');
+          }
+        })
+        .withFailureHandler(() => {
+          if (previousSnapshot) {
+            mergeLineItemIntoDetail(previousSnapshot);
+            updateInvoiceSummaryAndRender();
+          }
+          setStatus('Failed to save line item', 'error');
+        })
+        .api_upsertInvoiceLineItem(payload);
+    } else {
+      mergeLineItemIntoDetail(optimisticItem);
+      updateInvoiceSummaryAndRender();
+      setStatus('Saving line item...', 'warn');
+      google.script.run
+        .withSuccessHandler((saved) => {
+          if (saved && saved.id) {
+            if (tempId && tempId !== saved.id) {
+              removeLineItemFromDetail(tempId);
+            }
+            mergeLineItemIntoDetail(saved);
+            updateInvoiceSummaryAndRender();
+            setStatus('Line item saved', 'success');
+          } else {
+            removeLineItemFromDetail(tempId);
+            updateInvoiceSummaryAndRender();
+            setStatus('Failed to save line item', 'error');
+          }
+        })
+        .withFailureHandler(() => {
+          removeLineItemFromDetail(tempId);
+          updateInvoiceSummaryAndRender();
+          setStatus('Failed to save line item', 'error');
+        })
+        .api_upsertInvoiceLineItem(payload);
+    }
+    resetInvoiceLineForm();
+  }
+
+  function handleInvoiceLineCancel(event) {
+    if (event) event.preventDefault();
+    resetInvoiceLineForm();
+  }
+
+  function handleInvoiceLineItemAction(event) {
+    const button = event.target instanceof HTMLElement ? event.target.closest('button[data-action]') : null;
+    if (!button) return;
+    const action = button.dataset.action;
+    const id = button.dataset.id;
+    if (!action || !id) return;
+    if (action === 'edit-line') {
+      const lineItem = state.invoiceDetail && state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === id) : null;
+      if (!lineItem) return;
+      openInvoiceLineForm('edit', lineItem);
+    }
+    if (action === 'delete-line') {
+      handleInvoiceLineDelete(id);
+    }
+    if (action === 'default-line') {
+      const lineItem = state.invoiceDetail && state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === id) : null;
+      if (lineItem) startDefaultFromLine(lineItem);
+    }
+    if (action === 'refresh-line') {
+      handleInvoiceLineRefresh(id);
+    }
+  }
+
+  async function handleInvoiceLineDelete(lineId) {
+    if (!state.invoiceDetail) return;
+    const lineItem = state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === lineId) : null;
+    if (!lineItem) return;
+    const confirmed = await customConfirm('Delete this line item?', { danger: true, okText: 'Delete' });
+    if (!confirmed) return;
+    removeLineItemFromDetail(lineId);
+    updateInvoiceSummaryAndRender();
+    setStatus('Deleting line item...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success) {
+          setStatus('Line item deleted', 'success');
+        } else {
+          mergeLineItemIntoDetail(lineItem);
+          updateInvoiceSummaryAndRender();
+          setStatus('Failed to delete line item', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        mergeLineItemIntoDetail(lineItem);
+        updateInvoiceSummaryAndRender();
+        setStatus('Failed to delete line item', 'error');
+      })
+      .api_deleteInvoiceLineItem(lineId, { preserveEntry: false });
+  }
+
+  function handleInvoiceLineRefresh(lineId) {
+    if (!state.invoiceDetail) return;
+    const lineItem = state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === lineId) : null;
+    if (!lineItem) return;
+    setStatus('Refreshing entry status...', 'info');
+    google.script.run
+      .withSuccessHandler((updated) => {
+        if (updated && updated.id) {
+          mergeLineItemIntoDetail(updated);
+          updateInvoiceSummaryAndRender();
+          setStatus('Entry synced', 'success');
+        } else {
+          setStatus('Failed to refresh entry', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        setStatus('Failed to refresh entry', 'error');
+      })
+      .api_refreshInvoiceLineItemEntry(lineId);
+  }
+
+  function startDefaultFromLine(lineItem) {
+    if (!lineItem) return;
+    state.invoiceDefaultForm = {
+      mode: 'create',
+      editingId: null,
+      draft: {
+        default_label: lineItem.description || '',
+        description: lineItem.description || '',
+        hours: lineItem.hours != null ? Number(lineItem.hours) : '',
+        amount: lineItem.amount != null && lineItem.amount !== '' ? Number(lineItem.amount) : '',
+        hour_type_id: lineItem.hour_type_id || '',
+        contract_id: lineItem.contract_id || ''
+      }
+    };
+    ensureInvoiceFormOptions();
+    renderInvoiceDefaults();
+    if (invoiceDefaultForm) {
+      invoiceDefaultForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function mergeLineItemIntoDetail(item) {
+    if (!state.invoiceDetail) return;
+    const list = state.invoiceDetail.lineItems || [];
+    const idx = list.findIndex((existing) => existing.id === item.id);
+    if (idx === -1) {
+      list.push(item);
+    } else {
+      list[idx] = Object.assign({}, list[idx], item);
+    }
+    state.invoiceDetail.lineItems = list.slice().sort((a, b) => {
+      const posA = Number(a.position || 0);
+      const posB = Number(b.position || 0);
+      if (posA !== posB) return posA - posB;
+      return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+  }
+
+  function removeLineItemFromDetail(lineId) {
+    if (!state.invoiceDetail) return;
+    state.invoiceDetail.lineItems = (state.invoiceDetail.lineItems || []).filter((item) => item.id !== lineId).sort((a, b) => {
+      const posA = Number(a.position || 0);
+      const posB = Number(b.position || 0);
+      if (posA !== posB) return posA - posB;
+      return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+  }
+
+  function insertDefaultLineIntoInvoice(defaultId) {
+    if (!defaultId) return;
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) {
+      setStatus('Select an invoice before adding a default line.', 'warn');
+      return;
+    }
+    const def = state.invoiceDefaultMap[defaultId];
+    if (!def) {
+      setStatus('Default line not found', 'error');
+      return;
+    }
+    openInvoiceLineForm('create', {
+      line_date: state.invoiceDetail && state.invoiceDetail.invoice ? (state.invoiceDetail.invoice.invoice_date || todayIso()) : todayIso(),
+      description: def.description || '',
+      hours: def.hours != null ? def.hours : '',
+      amount: def.amount != null && def.amount !== '' ? def.amount : '',
+      hour_type_id: def.hour_type_id || '',
+      contract_id: def.contract_id || '',
+      source_default_id: def.id
+    });
+  }
+
+  function handleInvoiceDefaultNew(event) {
+    if (event) event.preventDefault();
+    state.invoiceDefaultForm = {
+      mode: 'create',
+      editingId: null,
+      draft: {
+        default_label: '',
+        description: '',
+        hours: '',
+        amount: '',
+        hour_type_id: '',
+        contract_id: ''
+      }
+    };
+    ensureInvoiceFormOptions();
+    renderInvoiceDefaults();
+  }
+
+  function handleInvoiceDefaultCancel(event) {
+    if (event) event.preventDefault();
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    renderInvoiceDefaults();
+  }
+
+  function handleInvoiceDefaultSave(event) {
+    if (event) event.preventDefault();
+    if (!invoiceDefaultLabelInput) return;
+    const label = invoiceDefaultLabelInput.value.trim();
+    if (!label) {
+      setStatus('Default label is required.', 'warn');
+      return;
+    }
+    const description = invoiceDefaultDescriptionInput ? invoiceDefaultDescriptionInput.value : '';
+    const hoursValue = invoiceDefaultHoursInput && invoiceDefaultHoursInput.value !== '' ? Number(invoiceDefaultHoursInput.value) : null;
+    const amountValue = invoiceDefaultAmountInput && invoiceDefaultAmountInput.value !== '' ? Number(invoiceDefaultAmountInput.value) : null;
+    const hourTypeId = invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : '';
+    const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
+    if (!contractId) {
+      setStatus('Select a contract for this default line.', 'warn');
+      return;
+    }
+    const hasHours = hoursValue != null && Number.isFinite(hoursValue) && hoursValue > 0;
+    const hasAmount = amountValue != null && Number.isFinite(amountValue);
+    if (!hasHours && !hasAmount) {
+      setStatus('Enter hours to auto-calculate or provide a raw amount.', 'warn');
+      return;
+    }
+    let amount = amountValue;
+    const contractRate = getContractRate(contractId);
+    if (!hasAmount && hasHours) {
+      if (contractRate > 0) {
+        amount = Math.round(Number(hoursValue) * contractRate * 100) / 100;
+      } else {
+        setStatus('Contract rate missing. Enter an amount manually.', 'warn');
+        return;
+      }
+    }
+    if (amount == null || Number.isNaN(amount)) {
+      setStatus('Enter a valid amount for this default.', 'warn');
+      return;
+    }
+    amount = Math.round(Number(amount) * 100) / 100;
+    const payload = {
+      default_label: label,
+      description: description,
+      hours: hasHours ? Number(hoursValue) : '',
+      amount: Number(amount),
+      hour_type_id: hourTypeId || '',
+      contract_id: contractId || ''
+    };
+    const isEdit = state.invoiceDefaultForm.mode === 'edit' && state.invoiceDefaultForm.editingId;
+    if (isEdit) payload.id = state.invoiceDefaultForm.editingId;
+    const tempId = isEdit ? payload.id : generateTempId('invoice-default');
+    const optimistic = Object.assign({}, payload, {
+      id: tempId,
+      hours: payload.hours === '' ? 0 : payload.hours,
+      amount: payload.amount
+    });
+    if (!isEdit) {
+      optimistic.position = state.invoiceDefaults.length + 1;
+    }
+    const previousDefaults = state.invoiceDefaults.slice();
+    const previousDefaultForm = JSON.parse(JSON.stringify(state.invoiceDefaultForm));
+    if (isEdit) {
+      const idx = state.invoiceDefaults.findIndex((item) => item.id === payload.id);
+      if (idx !== -1) state.invoiceDefaults[idx] = Object.assign({}, state.invoiceDefaults[idx], optimistic);
+    } else {
+      state.invoiceDefaults.push(optimistic);
+    }
+    state.invoiceDefaultMap[optimistic.id] = optimistic;
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    renderInvoiceDefaults();
+    setStatus('Saving default line...', 'warn');
+    google.script.run
+      .withSuccessHandler((saved) => {
+        if (saved && saved.id) {
+          state.invoiceDefaults = previousDefaults.filter((item) => item.id !== tempId && item.id !== saved.id).concat([saved]);
+          state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+          state.invoiceDefaultMap = state.invoiceDefaults.reduce((acc, item) => {
+            acc[item.id] = item;
+            return acc;
+          }, {});
+          state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+          renderInvoiceDefaults();
+          setStatus('Default saved', 'success');
+          loadInvoiceDefaults();
+        } else {
+          state.invoiceDefaults = previousDefaults;
+          state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
+            acc[item.id] = item;
+            return acc;
+          }, {});
+          state.invoiceDefaultForm = previousDefaultForm;
+          renderInvoiceDefaults();
+          setStatus('Failed to save default', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoiceDefaults = previousDefaults;
+        state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+        state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
+          acc[item.id] = item;
+          return acc;
+        }, {});
+        state.invoiceDefaultForm = previousDefaultForm;
+        renderInvoiceDefaults();
+        setStatus('Failed to save default', 'error');
+      })
+      .api_upsertInvoiceDefaultLineItem(payload);
+  }
+
+  function handleInvoiceDefaultAction(event) {
+    const button = event.target instanceof HTMLElement ? event.target.closest('button[data-action]') : null;
+    if (!button) return;
+    const action = button.dataset.action;
+    const id = button.dataset.id;
+    if (!action || !id) return;
+    if (action === 'edit-default') {
+      const def = state.invoiceDefaultMap[id];
+      if (!def) return;
+      state.invoiceDefaultForm = {
+        mode: 'edit',
+        editingId: id,
+        draft: {
+          id: id,
+          default_label: def.default_label || '',
+          description: def.description || '',
+          hours: def.hours != null ? def.hours : '',
+          amount: def.amount != null ? def.amount : '',
+          hour_type_id: def.hour_type_id || '',
+          contract_id: def.contract_id || ''
+        }
+      };
+      ensureInvoiceFormOptions();
+      renderInvoiceDefaults();
+    }
+    if (action === 'insert-default') {
+      insertDefaultLineIntoInvoice(id);
+    }
+    if (action === 'delete-default') {
+      deleteInvoiceDefault(id);
+    }
+  }
+
+  async function deleteInvoiceDefault(id) {
+    const def = state.invoiceDefaultMap[id];
+    if (!def) return;
+    const confirmed = await customConfirm(`Delete the "${def.default_label || 'default'}" line?`, { danger: true, okText: 'Delete' });
+    if (!confirmed) return;
+    const previousDefaults = state.invoiceDefaults.slice();
+    state.invoiceDefaults = state.invoiceDefaults.filter((item) => item.id !== id);
+    delete state.invoiceDefaultMap[id];
+    renderInvoiceDefaults();
+    setStatus('Deleting default...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res && res.success) {
+          setStatus('Default deleted', 'success');
+        } else {
+          state.invoiceDefaults = previousDefaults;
+          state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+          state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
+            acc[item.id] = item;
+            return acc;
+          }, {});
+          renderInvoiceDefaults();
+          setStatus('Failed to delete default', 'error');
+        }
+      })
+      .withFailureHandler(() => {
+        state.invoiceDefaults = previousDefaults;
+        state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+          state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
+            acc[item.id] = item;
+            return acc;
+          }, {});
+          renderInvoiceDefaults();
+          setStatus('Failed to delete default', 'error');
+      })
+      .api_deleteInvoiceDefaultLineItem(id);
+  }
+
+  function updateInvoiceSummaryAndRender() {
+    recalculateInvoiceSummary();
+    renderInvoiceDetail();
+  }
+
+  function handleInvoiceAddLine(event) {
+    if (event) event.preventDefault();
+    openInvoiceLineForm('create', {});
   }
 
   // Custom confirm dialog replacement
@@ -11352,6 +13182,20 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((hourTypes) => {
         state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
         updateHourTypeMap();
+        console.debug('[HourTypes] Loaded hour types', {
+          count: state.hourTypes.length,
+          ids: state.hourTypes.map((ht) => ht.id)
+        });
+        ensureInvoiceFormOptions();
+        if (getFeatureFlag('enable_invoices')) {
+          console.debug('[Invoices] Re-render after hour type load', {
+            invoiceSelectedId: state.invoiceSelectedId,
+            hasDetail: !!state.invoiceDetail,
+            defaultsCount: state.invoiceDefaults.length
+          });
+          renderInvoiceDefaults();
+          renderInvoiceDetail();
+        }
         renderHourTypes();
         updateHourTypeFormVisibility();
         renderCalendarFilters();

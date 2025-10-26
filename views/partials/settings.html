@@ -57,6 +57,21 @@
           <label>Suggested Minimum End Time <span class="ts-info-icon" title="Used as your ideal finish time when the Suggest End Time flag is on. The advanced entry view recommends when to clock off based on this value and your round-to-nearest setting.">i</span></label>
           <input type="time" id="set-minimum-end-time" />
         </div>
+        <div id="invoice-template-col" style="display:none;">
+          <label>Invoice template (Doc ID or path)</label>
+          <input type="text" id="set-invoice-template" placeholder="Document ID or path" />
+          <div class="ts-note">Provide the Google Docs template ID or a My Drive path (e.g. Clients/Templates/Invoice).</div>
+        </div>
+        <div id="invoice-output-folder-col" style="display:none;">
+          <label>Invoice output folder path</label>
+          <input type="text" id="set-invoice-output-folder" placeholder="Folder path" />
+          <div class="ts-note">Invoices will be copied into this folder inside My Drive.</div>
+        </div>
+        <div id="invoice-line-limit-col" style="display:none;">
+          <label>Invoice line placeholder limit</label>
+          <input type="number" id="set-invoice-line-limit" min="1" step="1" />
+          <div class="ts-note">Matches the number of {{lineDescription#}} placeholders available in your template.</div>
+        </div>
       </div>
       <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; gap:8px;">
         <button class="ghost" id="btn-discard-settings" style="display:none;">Discard Changes</button>

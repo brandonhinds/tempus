@@ -186,6 +186,65 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 - Consider adding display order for consistent UI presentation.
 - Auto-populated holidays skip hour types requiring a contract to avoid creating invalid entries.
 
+## invoices
+Stores the high-level invoice records for each month. Each invoice is addressable by id and persists the metadata required to generate Google Docs from a user-provided template.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `d0d8b5e6-8d4a-49b2-8dd0-312f8f8f6dd5` |
+| `year` | number | Calendar year associated with the invoice. | `2025` |
+| `month` | number | Calendar month (1–12) associated with the invoice. | `5` |
+| `sequence` | number | Per-month counter used to disambiguate multiple invoices within the same month. | `2` |
+| `invoice_number` | string | Human-readable invoice number entered by the user. | `INV-2025-05-002` |
+| `invoice_date` | string (ISO date) | Date printed on the invoice. | `2025-05-31` |
+| `status` | string | Workflow state (`draft`, `generated`, etc.). | `generated` |
+| `generated_doc_id` | string | Google Docs file ID for the last generated invoice copy. | `1w4rsDf0Md...` |
+| `generated_doc_url` | string | Share URL for the generated invoice. | `https://docs.google.com/document/d/.../edit` |
+| `generated_at` | string (ISO datetime, UTC) | Timestamp the document was last generated. | `2025-05-31T02:15:00Z` |
+| `template_doc_id` | string | Cached Google Docs template ID used during the most recent generation. | `1TmplD0c...` |
+| `template_doc_path` | string | Cached template path provided by the user. | `Clients/Templates/Invoice` |
+| `output_folder_id` | string | Cached folder ID where generated invoices are stored. | `12AbcFolder...` |
+| `output_folder_path` | string | Folder path provided by the user. | `Clients/Invoices/2025` |
+| `notes` | string | Optional free-form notes printed on the invoice. | `Please pay within 14 days.` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the invoice record was created. | `2025-05-01T09:10:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp when the invoice record was last updated. | `2025-05-31T02:15:00Z` |
+
+### Behaviour
+- `sequence` increments automatically per `(year, month)` pair so multiple invoices in the same month remain ordered.
+- Template and output folder fields are replicated to the invoice so regenerations reuse the previously resolved Drive IDs even if the user later adjusts their settings.
+- When the user clicks “Create document” we clone the template, replace placeholders, update `generated_doc_id`, `generated_doc_url`, and `generated_at`, and leave `status` untouched unless the user changes it.
+
+## invoice_line_items
+Persists both invoice-specific line items and shared defaults. Defaults live alongside standard line items with `invoice_id` blank and `is_default` set to `TRUE` so they can be edited with the same tooling.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `6d1cfaf6-33aa-4b6e-9df0-6b391096c23f` |
+| `invoice_id` | string | References the parent invoice. Blank when the row represents a default line item. | `d0d8b5e6-8d4a-49b2-8dd0-312f8f8f6dd5` |
+| `is_default` | boolean/string | `TRUE` for default line definitions, `FALSE` for invoice-specific rows. | `FALSE` |
+| `default_label` | string | Display label used for default line pickers. Blank for normal invoice rows. | `Standard consulting day` |
+| `position` | number | Order index (per invoice or default list). | `3` |
+| `line_date` | string (ISO date) | Date associated with the line item. | `2025-05-30` |
+| `description` | string | Service description shown on the invoice. | `Consulting services` |
+| `hours` | number | Optional hours quantity (decimal). | `7.5` |
+| `hour_type_id` | string | References the hour type applied when creating a linked timesheet entry. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
+| `hour_type_name_snapshot` | string | Cached hour type name for rendering even if the original name changes. | `Work` |
+| `amount` | number | Final amount displayed for the line; auto-calculated from contract × hours when left blank. | `1350` |
+| `contract_id` | string | Required contract id linked to the timesheet entry or billing amount. | `c3fe8b9e-07b4-4625-9b51-62b99a6189e8` |
+| `contract_name_snapshot` | string | Cached contract name for display. | `Acme Retainer` |
+| `timesheet_entry_id` | string | When hours > 0, the associated basic timesheet entry id. Blank for defaults or amount-only lines. | `3f2a7cd5-4d46-4d03-8fbc-2a32d31b33aa` |
+| `entry_snapshot_json` | string (JSON) | Serialized snapshot of the linked timesheet entry (`id`, `date`, `duration_minutes`, `hour_type_id`, `contract_id`). | `{"id":"3f2a7cd5...","date":"2025-05-30","duration_minutes":450,"hour_type_id":"b3e..."}` |
+| `last_synced_at` | string (ISO datetime, UTC) | Timestamp when `entry_snapshot_json` was last refreshed. | `2025-05-30T01:15:00Z` |
+| `source_default_id` | string | References the default line item used to seed this line (if any). | `4c443e86-9bf0-44fe-9a80-4296cea3031f` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the row was created. | `2025-05-30T01:05:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp when the row was last updated. | `2025-05-30T01:15:00Z` |
+
+### Behaviour
+- New invoice rows get their `position` automatically after the highest existing position for the parent invoice; defaults use a global sequence.
+- When `hours` and `hour_type_id` are supplied we create or update a `timesheet_entries` row immediately. The latest entry snapshot is stored so the UI can flag when the entry diverges.
+- Defaults reuse the same schema so inserting a default simply copies the template fields into a new invoice row while keeping a `source_default_id` link for auditing.
+- Line rate placeholders in generated documents are derived on the fly from `amount ÷ hours` rather than stored in the sheet.
+
 ## public_holidays
 Stores fetched public holiday data from the Nager.Date API. This sheet caches holiday information to minimize API calls and allows offline access to previously fetched holidays.
 

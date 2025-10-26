@@ -64,6 +64,48 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'invoices') {
+      sh.getRange(1,1,1,17).setValues([[
+        'id',
+        'year',
+        'month',
+        'sequence',
+        'invoice_number',
+        'invoice_date',
+        'status',
+        'generated_doc_id',
+        'generated_doc_url',
+        'generated_at',
+        'template_doc_id',
+        'template_doc_path',
+        'output_folder_id',
+        'output_folder_path',
+        'notes',
+        'created_at',
+        'updated_at'
+      ]]);
+    } else if (name === 'invoice_line_items') {
+      sh.getRange(1,1,1,19).setValues([[
+        'id',
+        'invoice_id',
+        'is_default',
+        'default_label',
+        'position',
+        'line_date',
+        'description',
+        'hours',
+        'hour_type_id',
+        'hour_type_name_snapshot',
+        'amount',
+        'contract_id',
+        'contract_name_snapshot',
+        'timesheet_entry_id',
+        'entry_snapshot_json',
+        'last_synced_at',
+        'source_default_id',
+        'created_at',
+        'updated_at'
+      ]]);
     } else if (name === 'bas_submissions') {
       sh.getRange(1,1,1,15).setValues([[
         'id',
@@ -153,6 +195,71 @@ function getOrCreateSheet(name) {
     sh.getRange('F:F').setNumberFormat('@');
     sh.getRange('G:G').setNumberFormat('@');
     sh.getRange('H:H').setNumberFormat('@');
+  }
+  if (name === 'invoices') {
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('B:C').setNumberFormat('0');
+    sh.getRange('D:D').setNumberFormat('0');
+    sh.getRange('E:E').setNumberFormat('@');
+    sh.getRange('F:F').setNumberFormat('@');
+    sh.getRange('G:G').setNumberFormat('@');
+    sh.getRange('H:H').setNumberFormat('@');
+    sh.getRange('I:I').setNumberFormat('@');
+    sh.getRange('J:J').setNumberFormat('@');
+    sh.getRange('K:M').setNumberFormat('@');
+    sh.getRange('N:N').setNumberFormat('@');
+    sh.getRange('O:Q').setNumberFormat('@');
+  }
+  if (name === 'invoice_line_items') {
+    const expectedInvoiceLineHeaders = [
+      'id',
+      'invoice_id',
+      'is_default',
+      'default_label',
+      'position',
+      'line_date',
+      'description',
+      'hours',
+      'hour_type_id',
+      'hour_type_name_snapshot',
+      'amount',
+      'contract_id',
+      'contract_name_snapshot',
+      'timesheet_entry_id',
+      'entry_snapshot_json',
+      'last_synced_at',
+      'source_default_id',
+      'created_at',
+      'updated_at'
+    ];
+    const existingLastCol = Math.max(sh.getLastColumn(), expectedInvoiceLineHeaders.length);
+    if (existingLastCol > 0) {
+      const existingHeaders = sh.getRange(1, 1, 1, existingLastCol).getValues()[0];
+      const rateIdx = existingHeaders.indexOf('rate');
+      if (rateIdx !== -1) {
+        sh.deleteColumn(rateIdx + 1);
+      }
+    }
+    sh.getRange(1, 1, 1, expectedInvoiceLineHeaders.length).setValues([expectedInvoiceLineHeaders]);
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('B:B').setNumberFormat('@');
+    sh.getRange('C:C').setNumberFormat('@');
+    sh.getRange('D:D').setNumberFormat('@');
+    sh.getRange('E:E').setNumberFormat('0');
+    sh.getRange('F:F').setNumberFormat('@');
+    sh.getRange('G:G').setNumberFormat('@');
+    sh.getRange('H:H').setNumberFormat('0.00');
+    sh.getRange('I:I').setNumberFormat('@');
+    sh.getRange('J:J').setNumberFormat('@');
+    sh.getRange('K:K').setNumberFormat('0.00');
+    sh.getRange('L:L').setNumberFormat('@');
+    sh.getRange('M:M').setNumberFormat('@');
+    sh.getRange('N:N').setNumberFormat('@');
+    sh.getRange('O:O').setNumberFormat('@');
+    sh.getRange('P:P').setNumberFormat('@');
+    sh.getRange('Q:Q').setNumberFormat('@');
+    sh.getRange('R:R').setNumberFormat('@');
+    sh.getRange('S:S').setNumberFormat('@');
   }
   if (name === 'contracts') {
     sh.getRange('C:D').setNumberFormat('@');
