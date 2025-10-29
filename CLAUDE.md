@@ -70,6 +70,7 @@ The core system supports two modes:
 - Function naming: `api_*` for endpoints, verb-first for utilities (e.g., `cacheSet`, `getOrCreateSheet`)
 - Binary configuration controls must use the shared `.ts-toggle` styling; avoid introducing checkbox UI for toggles.
 - Layout containers: default to the 1280px `.ts-container`; apply `.ts-container--fluid` only when content truly needs to be extra wide (currently just BAS reporting).
+- The BAS screen includes a secondary invoice summary table (when invoices are enabled) that lists every invoice in the selected financial year with line counts, hours, and GST-inclusive totals to support reconciliation.
 - Deletion confirmations inside modals must be implemented inline within that modal's content; never spawn a secondary modal on top of an existing modal for confirmation.
 
 ### Data Handling

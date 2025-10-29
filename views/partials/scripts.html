@@ -78,11 +78,13 @@
   const invoiceLineSummary = document.getElementById('invoice-line-summary');
   const invoiceLineEmpty = document.getElementById('invoice-line-empty');
   const btnInvoiceAddLine = document.getElementById('btn-invoice-add-line');
+  const invoiceLineFormAnchor = document.getElementById('invoice-line-form-anchor');
   const invoiceLineForm = document.getElementById('invoice-line-form');
   const invoiceLineDateInput = document.getElementById('invoice-line-date');
   const invoiceLineDescriptionInput = document.getElementById('invoice-line-description');
   const invoiceLineAmountModeSelect = document.getElementById('invoice-line-amount-mode');
   const invoiceLineHoursInput = document.getElementById('invoice-line-hours');
+  const invoiceLineContractCol = document.getElementById('invoice-line-contract-col');
   const invoiceLineHoursCol = document.getElementById('invoice-line-hours-col');
   const invoiceLineHourTypeSelect = document.getElementById('invoice-line-hour-type');
   const invoiceLineHourTypeCol = document.getElementById('invoice-line-hour-type-col');
@@ -98,13 +100,18 @@
   const invoiceDefaultList = document.getElementById('invoice-default-list');
   const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
   const btnInvoiceDefaultNew = document.getElementById('btn-invoice-default-new');
+  const invoiceDefaultFormAnchor = document.getElementById('invoice-default-form-anchor');
   const invoiceDefaultForm = document.getElementById('invoice-default-form');
   const invoiceDefaultLabelInput = document.getElementById('invoice-default-label');
   const invoiceDefaultDescriptionInput = document.getElementById('invoice-default-description');
+  const invoiceDefaultAmountModeSelect = document.getElementById('invoice-default-amount-mode');
   const invoiceDefaultHoursInput = document.getElementById('invoice-default-hours');
   const invoiceDefaultAmountInput = document.getElementById('invoice-default-amount');
   const invoiceDefaultHourTypeSelect = document.getElementById('invoice-default-hour-type');
   const invoiceDefaultHourTypeCol = document.getElementById('invoice-default-hour-type-col');
+  const invoiceDefaultContractCol = document.getElementById('invoice-default-contract-col');
+  const invoiceDefaultAmountCol = document.getElementById('invoice-default-amount-col');
+  const invoiceDefaultHoursCol = document.getElementById('invoice-default-hours-col');
   const invoiceDefaultContractSelect = document.getElementById('invoice-default-contract');
   const btnInvoiceDefaultCancel = document.getElementById('btn-invoice-default-cancel');
   const btnInvoiceDefaultSave = document.getElementById('btn-invoice-default-save');
@@ -175,6 +182,9 @@
   const basTableBody = document.getElementById('bas-table-body');
   const basQuarterlyNote = document.getElementById('bas-quarterly-note');
   const basEmptyNote = document.getElementById('bas-empty');
+  const basInvoiceSection = document.getElementById('bas-invoice-section');
+  const basInvoiceEmpty = document.getElementById('bas-invoice-empty');
+  const basInvoiceTableBody = document.getElementById('bas-invoice-table-body');
   const RATE_PREVIEW_DEBOUNCE_MS = 350;
   let ratePreviewDebounceTimer = null;
   let ratePreviewInputSyncing = false;
@@ -249,7 +259,8 @@
     invoiceDefaultForm: {
       mode: 'hidden',
       editingId: null,
-      draft: {}
+      draft: {},
+      amountMode: 'hours'
     },
     invoicePending: {
       savingInvoice: false,
@@ -518,6 +529,7 @@
   if (btnInvoiceDefaultCancel) btnInvoiceDefaultCancel.addEventListener('click', handleInvoiceDefaultCancel);
   if (btnInvoiceDefaultSave) btnInvoiceDefaultSave.addEventListener('click', handleInvoiceDefaultSave);
   if (invoiceDefaultList) invoiceDefaultList.addEventListener('click', handleInvoiceDefaultAction);
+  if (invoiceDefaultAmountModeSelect) invoiceDefaultAmountModeSelect.addEventListener('change', handleInvoiceDefaultAmountModeChange);
   if (deductionTypeSelect) deductionTypeSelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionCategorySelect) deductionCategorySelect.addEventListener('change', () => {
     updateDeductionFormVisibility();
@@ -1474,7 +1486,12 @@
       if (basTableBody) basTableBody.innerHTML = '';
       if (basEmptyNote) basEmptyNote.style.display = 'none';
       if (basQuarterlyNote) basQuarterlyNote.style.display = 'none';
+      if (basInvoiceSection) basInvoiceSection.style.display = 'none';
       return;
+    }
+
+    if (getFeatureFlag('enable_invoices') && !state.invoiceListLoading && !state.invoices.length) {
+      loadInvoicesList();
     }
 
     const years = collectFinancialYears();
@@ -1527,6 +1544,97 @@
       // Add click handlers to clickable rows
       attachBasRowClickHandlers();
     }
+
+    renderBasInvoiceTable();
+  }
+
+  function renderBasInvoiceTable() {
+    if (!basInvoiceSection || !basInvoiceTableBody || !basInvoiceEmpty) return;
+    if (!state.companyTrackingEnabled) {
+      basInvoiceSection.style.display = 'none';
+      return;
+    }
+    if (!getFeatureFlag('enable_invoices')) {
+      basInvoiceSection.style.display = 'none';
+      return;
+    }
+    basInvoiceSection.style.display = 'block';
+    if (state.invoiceListLoading && !state.invoices.length) {
+      basInvoiceEmpty.style.display = 'block';
+      basInvoiceEmpty.textContent = 'Loading invoices...';
+      basInvoiceTableBody.innerHTML = '';
+      return;
+    }
+    const fyYear = state.basCurrentFy;
+    if (!fyYear) {
+      basInvoiceEmpty.style.display = 'block';
+      basInvoiceEmpty.textContent = 'Select a financial year to view invoices.';
+      basInvoiceTableBody.innerHTML = '';
+      return;
+    }
+    const start = startOfFinancialYear(fyYear);
+    const end = startOfFinancialYear(fyYear + 1);
+    const invoices = (state.invoices || []).filter((invoice) => {
+      if (!invoice) return false;
+      let dateValue;
+      if (invoice.invoice_date) {
+        dateValue = new Date(invoice.invoice_date);
+      } else {
+        const monthIndex = Number(invoice.month || 1) - 1;
+        dateValue = new Date(invoice.year || fyYear, monthIndex >= 0 ? monthIndex : 0, 1);
+      }
+      if (Number.isNaN(dateValue.getTime())) return false;
+      return dateValue >= start && dateValue < end;
+    }).sort((a, b) => {
+      const dateA = a.invoice_date ? new Date(a.invoice_date) : new Date(a.year || fyYear, Number(a.month || 1) - 1, 1);
+      const dateB = b.invoice_date ? new Date(b.invoice_date) : new Date(b.year || fyYear, Number(b.month || 1) - 1, 1);
+      return dateA - dateB;
+    });
+    if (!invoices.length) {
+      basInvoiceEmpty.style.display = 'block';
+      basInvoiceEmpty.textContent = 'No invoices for this financial year.';
+      basInvoiceTableBody.innerHTML = '';
+      return;
+    }
+    basInvoiceEmpty.style.display = 'none';
+    const rowsHtml = invoices.map((invoice) => {
+      const summary = invoice.summary || {};
+      const lineCount = Number(summary.lineCount || 0);
+      const totalHours = Number(summary.totalHours || 0);
+      const subtotal = summary.totalAmount != null ? Number(summary.totalAmount) : 0;
+      const gstValue = summary.gstAmount != null ? Number(summary.gstAmount) : Math.round(subtotal * GST_RATE * 100) / 100;
+      const totalValue = summary.totalWithGst != null ? Number(summary.totalWithGst) : subtotal + gstValue;
+      let statusLabel = invoice.status || 'draft';
+      statusLabel = statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1);
+      let dateObj = null;
+      if (invoice.invoice_date) {
+        const parsed = new Date(invoice.invoice_date);
+        if (!Number.isNaN(parsed.getTime())) {
+          dateObj = parsed;
+        }
+      }
+      if (!dateObj && invoice.year && invoice.month) {
+        const parsedFallback = new Date(invoice.year, Number(invoice.month) - 1, 1);
+        if (!Number.isNaN(parsedFallback.getTime())) {
+          dateObj = parsedFallback;
+        }
+      }
+      const dateLabel = dateObj ? DATE_FULL_FORMATTER.format(dateObj) : '—';
+      const numberLabel = invoice.invoice_number || (`Invoice ${invoice.sequence || ''}`);
+      return [
+        '<tr>',
+        `<td>${numberLabel}</td>`,
+        `<td>${dateLabel}</td>`,
+        `<td>${statusLabel}</td>`,
+        `<td style="text-align:right;">${lineCount}</td>`,
+        `<td style="text-align:right;">${formatDecimalHours(totalHours)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(subtotal)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(gstValue)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(totalValue)}</td>`,
+        '</tr>'
+      ].join('');
+    }).join('');
+    basInvoiceTableBody.innerHTML = rowsHtml;
   }
 
   function attachBasRowClickHandlers() {
@@ -4675,10 +4783,41 @@ function updateDeductionFormVisibility() {
       state.annualCategoryExpansion = obj.annualCategoryExpansion && typeof obj.annualCategoryExpansion === 'object'
         ? { ...obj.annualCategoryExpansion }
         : {};
+      state.invoices = Array.isArray(obj.invoices) ? obj.invoices.map((invoice) => ({ ...invoice })) : [];
+      updateInvoiceMaps();
+      state.invoiceDefaults = Array.isArray(obj.invoiceDefaults) ? obj.invoiceDefaults.map((item) => ({ ...item })) : [];
+      state.invoiceDefaultMap = state.invoiceDefaults.reduce((acc, item) => {
+        if (item && item.id) acc[item.id] = item;
+        return acc;
+      }, {});
+      if (obj.invoiceFilters && typeof obj.invoiceFilters === 'object') {
+        state.invoiceFilters = {
+          year: obj.invoiceFilters.year != null ? String(obj.invoiceFilters.year) : '',
+          month: obj.invoiceFilters.month != null ? String(obj.invoiceFilters.month) : ''
+        };
+      } else {
+        state.invoiceFilters = { year: '', month: '' };
+      }
+      state.invoiceSelectedId = obj.invoiceSelectedId || '';
+      if (obj.invoiceDetail && obj.invoiceDetail.invoice) {
+        const detailLineItems = Array.isArray(obj.invoiceDetail.lineItems) ? obj.invoiceDetail.lineItems.map((item) => ({ ...item })) : [];
+        const detailSummary = obj.invoiceDetail.summary || summarizeInvoiceLineItems(detailLineItems);
+        state.invoiceDetail = {
+          invoice: { ...obj.invoiceDetail.invoice },
+          lineItems: detailLineItems,
+          summary: detailSummary
+        };
+      } else {
+        state.invoiceDetail = null;
+      }
+      state.invoiceDetailLoading = false;
+      state.invoiceListLoading = false;
+      state.invoicesInitialized = Array.isArray(state.invoices) && state.invoices.length > 0;
       updatePublicHolidayMap();
       refreshActualIncomeMap();
       updateDeductionCategoryMap();
       ensureDeductionCategoryCollapseState();
+      ensureInvoiceFormOptions();
 
       // Set initial tab based on today's entry type
       const today = todayIso();
@@ -4696,6 +4835,19 @@ function updateDeductionFormVisibility() {
   }
   function saveCache() {
     try {
+      const invoicesForCache = Array.isArray(state.invoices) ? state.invoices.map((invoice) => ({ ...invoice })) : [];
+      const invoiceDefaultsForCache = Array.isArray(state.invoiceDefaults) ? state.invoiceDefaults.map((item) => ({ ...item })) : [];
+      const invoiceDetailForCache = (state.invoiceDetail && state.invoiceDetail.invoice)
+        ? {
+            invoice: { ...state.invoiceDetail.invoice },
+            lineItems: Array.isArray(state.invoiceDetail.lineItems) ? state.invoiceDetail.lineItems.map((item) => ({ ...item })) : [],
+            summary: state.invoiceDetail.summary ? { ...state.invoiceDetail.summary } : null
+          }
+        : null;
+      const invoiceFiltersForCache = {
+        year: state.invoiceFilters && state.invoiceFilters.year != null ? String(state.invoiceFilters.year) : '',
+        month: state.invoiceFilters && state.invoiceFilters.month != null ? String(state.invoiceFilters.month) : ''
+      };
       const payload = {
         entries: state.entries.map(sanitizeEntry),
         settings: state.settings,
@@ -4710,7 +4862,12 @@ function updateDeductionFormVisibility() {
         featureFlags: normalizeFeatureFlags(state.featureFlags),
         basCurrentFy: state.basCurrentFy,
         publicHolidays: state.publicHolidays,
-        actualIncome: state.actualIncome
+        actualIncome: state.actualIncome,
+        invoices: invoicesForCache,
+        invoiceDefaults: invoiceDefaultsForCache,
+        invoiceFilters: invoiceFiltersForCache,
+        invoiceSelectedId: state.invoiceSelectedId,
+        invoiceDetail: invoiceDetailForCache
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -10548,10 +10705,12 @@ function updateDeductionFormVisibility() {
     state.invoiceDetailLoading = false;
     state.invoiceListLoading = false;
     state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
-    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
     state.invoicePending = { savingInvoice: false, generating: false };
     state.invoicesInitialized = false;
     renderInvoicesPage();
+    renderBasInvoiceTable();
+    saveCache();
   }
 
   function initializeInvoicesFeature() {
@@ -10589,6 +10748,7 @@ function updateDeductionFormVisibility() {
           }, {});
         }
         renderInvoiceDefaults();
+        saveCache();
       })
       .withFailureHandler(() => {
         setStatus('Failed to load invoice defaults', 'error');
@@ -10625,13 +10785,15 @@ function updateDeductionFormVisibility() {
         } else {
           renderInvoiceDetail();
         }
+        renderBasInvoiceTable();
+        saveCache();
       })
       .withFailureHandler(() => {
         state.invoiceListLoading = false;
         setStatus('Failed to load invoices', 'error');
         renderInvoiceSelector();
       })
-      .api_listInvoices({});
+      .api_listInvoices({ include_summary: true });
   }
 
   function updateInvoiceMaps() {
@@ -10683,8 +10845,7 @@ function updateDeductionFormVisibility() {
       const option = document.createElement('option');
       option.value = invoice.id;
       const description = invoice.invoice_number || `Invoice ${invoice.sequence || ''}`;
-      const dateLabel = invoice.invoice_date ? ` • ${invoice.invoice_date}` : '';
-      option.textContent = `${description}${dateLabel}`;
+      option.textContent = description;
       invoiceSelector.appendChild(option);
     });
     const hasSelection = filtered.some((invoice) => invoice.id === state.invoiceSelectedId);
@@ -10716,6 +10877,7 @@ function updateDeductionFormVisibility() {
     renderInvoiceNavigator();
     renderInvoiceSelector();
     renderInvoiceDetail();
+    saveCache();
   }
 
   function openInvoiceMonthPicker() {
@@ -10758,6 +10920,7 @@ function updateDeductionFormVisibility() {
         renderInvoiceSelector();
         renderInvoiceDetail();
         closeInvoiceMonthPicker();
+        saveCache();
       };
       invoiceMonthPickerGrid.appendChild(btn);
     }
@@ -10797,22 +10960,22 @@ function updateDeductionFormVisibility() {
     invoiceDefaultList.innerHTML = '';
     if (!state.invoiceDefaults.length) {
       invoiceDefaultEmpty.style.display = 'block';
-      if (invoiceDefaultForm) invoiceDefaultForm.style.display = state.invoiceDefaultForm.mode === 'create' ? 'block' : 'none';
-      return;
+    } else {
+      invoiceDefaultEmpty.style.display = 'none';
+      const sortedDefaults = state.invoiceDefaults.slice().sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+      sortedDefaults.forEach((item) => {
+        const card = createInvoiceDefaultCard(item);
+        const wrapper = document.createElement('li');
+        wrapper.style.listStyle = 'none';
+        wrapper.style.margin = '0';
+        wrapper.style.padding = '0';
+        wrapper.style.marginBottom = '8px';
+        wrapper.appendChild(card);
+        invoiceDefaultList.appendChild(wrapper);
+      });
     }
-    invoiceDefaultEmpty.style.display = 'none';
-    const sortedDefaults = state.invoiceDefaults.slice().sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
-    sortedDefaults.forEach((item) => {
-      const card = createInvoiceDefaultCard(item);
-      const wrapper = document.createElement('li');
-      wrapper.style.listStyle = 'none';
-      wrapper.style.margin = '0';
-      wrapper.style.padding = '0';
-      wrapper.style.marginBottom = '8px';
-      wrapper.appendChild(card);
-      invoiceDefaultList.appendChild(wrapper);
-    });
     if (invoiceDefaultForm) {
+      mountInvoiceDefaultFormForMode();
       if (state.invoiceDefaultForm.mode === 'hidden') {
         invoiceDefaultForm.style.display = 'none';
       } else {
@@ -10824,18 +10987,16 @@ function updateDeductionFormVisibility() {
         if (invoiceDefaultHourTypeSelect) populateInvoiceHourTypeOptions(invoiceDefaultHourTypeSelect, draft.hour_type_id || '');
         if (invoiceDefaultContractSelect) populateContractOptions(invoiceDefaultContractSelect, draft.contract_id || '');
         if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = draft.amount != null ? draft.amount : '';
+        if (!state.invoiceDefaultForm.amountMode) {
+          state.invoiceDefaultForm.amountMode = determineInvoiceDefaultAmountMode(draft);
+        }
+        updateInvoiceDefaultAmountModeUI();
       }
     }
   }
 
   function renderInvoiceDetail() {
     if (!invoiceDetail || !invoiceDetailEmpty) return;
-    console.debug('[Invoices] renderInvoiceDetail', {
-      invoiceSelectedId: state.invoiceSelectedId,
-      detailLoaded: !!state.invoiceDetail,
-      lineItems: state.invoiceDetail && Array.isArray(state.invoiceDetail.lineItems) ? state.invoiceDetail.lineItems.length : 0,
-      hourTypeCount: state.hourTypes ? state.hourTypes.length : 0
-    });
     if (state.invoiceDetailLoading) {
       invoiceDetail.style.display = 'none';
       invoiceDetailEmpty.style.display = 'block';
@@ -10887,6 +11048,7 @@ function updateDeductionFormVisibility() {
     }
     renderInvoiceLineItems();
     if (invoiceLineForm) {
+      mountInvoiceLineFormForMode();
       if (state.invoiceLineForm.mode === 'hidden') {
         invoiceLineForm.style.display = 'none';
       } else {
@@ -10921,12 +11083,19 @@ function updateDeductionFormVisibility() {
       { label: 'Amount', value: amountValue, strong: true },
       { label: 'Date', value: item.line_date || '' },
       hasHours ? { label: 'Hours', value: `${hoursValue.toFixed(2)} hrs` } : null,
-      item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
+      hasHours && item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
       item.contract_name_snapshot ? { label: 'Contract', value: item.contract_name_snapshot } : null
     ].filter(Boolean);
 
+    const hasEntry = !!item.timesheet_entry_id;
     const statusItems = [];
-    if (item.timesheet_entry_id) {
+    if (item.entry_pending) {
+      statusItems.push({
+        type: 'badge',
+        text: hasEntry ? 'Entry updating' : 'Entry pending',
+        variant: 'warn'
+      });
+    } else if (hasEntry) {
       statusItems.push({
         type: 'badge',
         text: item.entry_modified ? 'Modified' : 'Synced',
@@ -10935,7 +11104,14 @@ function updateDeductionFormVisibility() {
     } else {
       statusItems.push({ type: 'note', text: 'No linked entry' });
     }
-    if (item.timesheet_entry_id && item.source_default_id) {
+    if ((item.entry_pending || hasEntry)) {
+      const entrySummary = buildInvoiceEntrySummary(item);
+      if (entrySummary) {
+        const text = item.entry_pending ? `${entrySummary} (pending sync)` : entrySummary;
+        statusItems.push({ type: 'note', text: `Linked entry: ${text}` });
+      }
+    }
+    if (hasEntry && item.source_default_id) {
       const source = state.invoiceDefaultMap && state.invoiceDefaultMap[item.source_default_id]
         ? state.invoiceDefaultMap[item.source_default_id].default_label || 'Saved default'
         : 'Saved default';
@@ -10952,6 +11128,8 @@ function updateDeductionFormVisibility() {
     }
 
     return buildInvoiceCardLayout({
+      id: item.id,
+      kind: 'invoice-line',
       title: item.description || '(No description)',
       infoItems: infoItems,
       statusItems: statusItems,
@@ -10964,6 +11142,7 @@ function updateDeductionFormVisibility() {
     card.className = 'ts-item';
     card.style.padding = '12px';
     if (config.id) card.dataset.id = config.id;
+    if (config.kind) card.dataset.kind = config.kind;
 
     const container = document.createElement('div');
     container.style.display = 'flex';
@@ -11091,13 +11270,103 @@ function updateDeductionFormVisibility() {
     return card;
   }
 
+  function getInvoiceLineCard(lineId) {
+    if (!invoiceLineItemsBody || !lineId) return null;
+    return invoiceLineItemsBody.querySelector(`.ts-item[data-kind="invoice-line"][data-id="${lineId}"]`);
+  }
+
+  function clearInvoiceLineEditingCard() {
+    if (!invoiceLineItemsBody) return;
+    const editingCards = invoiceLineItemsBody.querySelectorAll('.ts-item[data-kind="invoice-line"][data-editing="true"]');
+    editingCards.forEach((card) => {
+      card.style.display = '';
+      card.removeAttribute('data-editing');
+    });
+  }
+
+  function mountInvoiceLineFormForMode() {
+    if (!invoiceLineForm) return;
+    clearInvoiceLineEditingCard();
+    if (state.invoiceLineForm.mode === 'edit' && state.invoiceLineForm.editingId) {
+      const card = getInvoiceLineCard(state.invoiceLineForm.editingId);
+      if (card && card.parentNode) {
+        card.dataset.editing = 'true';
+        card.style.display = 'none';
+        card.parentNode.insertBefore(invoiceLineForm, card);
+        invoiceLineForm.style.marginBottom = '8px';
+        return;
+      }
+    }
+    if (invoiceLineFormAnchor) {
+      invoiceLineFormAnchor.appendChild(invoiceLineForm);
+      invoiceLineForm.style.marginBottom = '12px';
+    }
+  }
+
+  function getInvoiceDefaultCard(defaultId) {
+    if (!invoiceDefaultList || !defaultId) return null;
+    return invoiceDefaultList.querySelector(`.ts-item[data-kind="invoice-default"][data-id="${defaultId}"]`);
+  }
+
+  function clearInvoiceDefaultEditingCard() {
+    if (!invoiceDefaultList) return;
+    const editingCards = invoiceDefaultList.querySelectorAll('.ts-item[data-kind="invoice-default"][data-editing="true"]');
+    editingCards.forEach((card) => {
+      card.style.display = '';
+      card.removeAttribute('data-editing');
+    });
+  }
+
+  function mountInvoiceDefaultFormForMode() {
+    if (!invoiceDefaultForm) return;
+    clearInvoiceDefaultEditingCard();
+    if (state.invoiceDefaultForm.mode === 'edit' && state.invoiceDefaultForm.editingId) {
+      const card = getInvoiceDefaultCard(state.invoiceDefaultForm.editingId);
+      if (card && card.parentNode) {
+        card.dataset.editing = 'true';
+        card.style.display = 'none';
+        card.parentNode.insertBefore(invoiceDefaultForm, card);
+        invoiceDefaultForm.style.marginTop = '0';
+        return;
+      }
+    }
+    if (invoiceDefaultFormAnchor) {
+      invoiceDefaultFormAnchor.appendChild(invoiceDefaultForm);
+      invoiceDefaultForm.style.marginTop = '12px';
+    }
+  }
+
+  function buildInvoiceEntrySummary(item) {
+    if (!item) return '';
+    const entrySnapshot = item.entry_state && item.entry_state.snapshot ? item.entry_state.snapshot : null;
+    const date = item.line_date || (entrySnapshot ? entrySnapshot.date : '');
+    let hoursValue = Number(item.hours);
+    if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
+      const minutes = entrySnapshot ? Number(entrySnapshot.duration_minutes) : 0;
+      hoursValue = Number.isFinite(minutes) ? minutes / 60 : 0;
+    }
+    const contractName = item.contract_name_snapshot || getContractName(item.contract_id);
+    let hourTypeName = '';
+    if (Number.isFinite(hoursValue) && hoursValue > 0) {
+      hourTypeName = item.hour_type_name_snapshot || getHourTypeName(item.hour_type_id);
+    }
+    const segments = [];
+    if (date) segments.push(date);
+    if (contractName) segments.push(contractName);
+    if (Number.isFinite(hoursValue) && hoursValue > 0) {
+      segments.push(`${hoursValue.toFixed(2)} hrs`);
+    }
+    if (hourTypeName) segments.push(hourTypeName);
+    return segments.join(' • ');
+  }
+
   function createInvoiceDefaultCard(item) {
     const amountValue = (item.amount || item.amount === 0) ? formatCurrency(item.amount) : '';
     const hoursValue = Number(item.hours);
     const infoItems = [
       amountValue ? { label: 'Amount', value: amountValue, strong: true } : null,
       Number.isFinite(hoursValue) && hoursValue > 0 ? { label: 'Hours', value: `${hoursValue.toFixed(2)} hrs` } : null,
-      item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
+      Number.isFinite(hoursValue) && hoursValue > 0 && item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
       item.contract_name_snapshot ? { label: 'Contract', value: item.contract_name_snapshot } : null
     ].filter(Boolean);
 
@@ -11123,6 +11392,8 @@ function updateDeductionFormVisibility() {
     defaultActions.push({ label: 'Delete', action: 'delete-default', id: item.id });
 
     return buildInvoiceCardLayout({
+      id: item.id,
+      kind: 'invoice-default',
       title: item.default_label || '(untitled)',
       infoItems,
       statusItems,
@@ -11152,6 +11423,7 @@ function updateDeductionFormVisibility() {
       state.invoiceDetail = null;
       state.invoiceDetailLoading = false;
       renderInvoiceDetail();
+      saveCache();
       return;
     }
     if (state.invoiceSelectedId === invoiceId && !opts.force) {
@@ -11175,17 +11447,14 @@ function updateDeductionFormVisibility() {
         if (state.invoiceSelectedId !== invoiceId) return;
         state.invoiceDetailLoading = false;
         if (detail && detail.invoice) {
-          console.debug('[Invoices] loadInvoiceDetail success', {
-            invoiceId,
-            lineItemCount: Array.isArray(detail.lineItems) ? detail.lineItems.length : 0,
-            defaultsReturned: Array.isArray(detail.defaults) ? detail.defaults.length : 0
-          });
+          const summary = detail.summary || summarizeInvoiceLineItems(detail.lineItems || []);
           state.invoiceDetail = {
             invoice: detail.invoice,
             lineItems: Array.isArray(detail.lineItems) ? detail.lineItems.slice() : [],
-            summary: detail.summary || summarizeInvoiceLineItems(detail.lineItems || [])
+            summary: summary
           };
-          upsertInvoiceInState(detail.invoice);
+          const invoiceWithSummary = Object.assign({}, detail.invoice, { summary: summary });
+          upsertInvoiceInState(invoiceWithSummary);
           if (Array.isArray(detail.defaults)) {
             state.invoiceDefaults = detail.defaults.slice();
             state.invoiceDefaultMap = detail.defaults.reduce((acc, item) => {
@@ -11199,6 +11468,8 @@ function updateDeductionFormVisibility() {
           state.invoiceDetail = null;
         }
         renderInvoiceDetail();
+        renderBasInvoiceTable();
+        saveCache();
       })
       .withFailureHandler(() => {
         if (state.invoiceSelectedId !== invoiceId) return;
@@ -11265,18 +11536,9 @@ function updateDeductionFormVisibility() {
 
   function ensureInvoiceFormOptions() {
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
-    console.debug('[Invoices] ensureInvoiceFormOptions', {
-      hourTypesEnabled,
-      hourTypeCount: state.hourTypes ? state.hourTypes.length : 0,
-      invoiceLineSelect: invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.id : null,
-      invoiceDefaultSelect: invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.id : null,
-      currentInvoiceLineValue: invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.value : null,
-      currentDefaultValue: invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : null
-    });
     if (invoiceLineHourTypeSelect) populateInvoiceHourTypeOptions(invoiceLineHourTypeSelect, state.invoiceLineForm.draft && state.invoiceLineForm.draft.hour_type_id);
     if (invoiceDefaultHourTypeSelect) populateInvoiceHourTypeOptions(invoiceDefaultHourTypeSelect, state.invoiceDefaultForm.draft && state.invoiceDefaultForm.draft.hour_type_id);
-    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = hourTypesEnabled ? 'block' : 'none';
-    if (invoiceDefaultHourTypeCol) invoiceDefaultHourTypeCol.style.display = hourTypesEnabled ? 'block' : 'none';
+    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = hourTypesEnabled ? '' : 'none';
     if (!hourTypesEnabled) {
       if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = '';
       if (invoiceDefaultHourTypeSelect) invoiceDefaultHourTypeSelect.value = '';
@@ -11284,6 +11546,7 @@ function updateDeductionFormVisibility() {
     if (invoiceLineContractSelect) populateContractOptions(invoiceLineContractSelect, state.invoiceLineForm.draft && state.invoiceLineForm.draft.contract_id);
     if (invoiceDefaultContractSelect) populateContractOptions(invoiceDefaultContractSelect, state.invoiceDefaultForm.draft && state.invoiceDefaultForm.draft.contract_id);
     updateInvoiceLineAmountModeUI();
+    updateInvoiceDefaultAmountModeUI();
   }
 
   function populateInvoiceHourTypeOptions(selectEl, selectedId) {
@@ -11295,11 +11558,6 @@ function updateDeductionFormVisibility() {
     emptyOpt.textContent = 'None';
     selectEl.appendChild(emptyOpt);
     const types = state.hourTypes && state.hourTypes.length ? state.hourTypes : [];
-    console.debug('[Invoices] populateHourTypeOptions', {
-      selectId: selectEl.id,
-      typesCount: types.length,
-      selectedId: value
-    });
     types.forEach((type) => {
       const opt = document.createElement('option');
       opt.value = type.id;
@@ -11470,6 +11728,7 @@ function updateDeductionFormVisibility() {
           renderInvoiceDetail();
           setStatus('Invoice save failed', 'error');
         }
+        saveCache();
       })
       .withFailureHandler(() => {
         state.invoicePending.savingInvoice = false;
@@ -11477,6 +11736,7 @@ function updateDeductionFormVisibility() {
         upsertInvoiceInState(previous);
         renderInvoiceDetail();
         setStatus('Invoice save failed', 'error');
+        saveCache();
       })
       .api_upsertInvoice({
         id: invoice.id,
@@ -11497,6 +11757,7 @@ function updateDeductionFormVisibility() {
     removeInvoiceFromState(invoice.id);
     state.invoiceSelectedId = '';
     state.invoiceDetail = null;
+    renderBasInvoiceTable();
     renderInvoicesPage();
     setStatus('Deleting invoice...', 'warn');
     google.script.run
@@ -11517,6 +11778,8 @@ function updateDeductionFormVisibility() {
           renderInvoicesPage();
           setStatus('Failed to delete invoice', 'error');
         }
+        renderBasInvoiceTable();
+        saveCache();
       })
       .withFailureHandler(() => {
         state.invoices = previousInvoices;
@@ -11525,6 +11788,8 @@ function updateDeductionFormVisibility() {
         state.invoiceDetail = previousDetail;
         renderInvoicesPage();
         setStatus('Failed to delete invoice', 'error');
+        renderBasInvoiceTable();
+        saveCache();
       })
       .api_deleteInvoice(invoice.id, { deleteEntries: false });
   }
@@ -11582,12 +11847,14 @@ function updateDeductionFormVisibility() {
       amountMode: amountMode
     };
     ensureInvoiceFormOptions();
+    mountInvoiceLineFormForMode();
     applyInvoiceLineDraftToForm(draft);
     if (invoiceLineForm) invoiceLineForm.style.display = 'block';
   }
 
   function resetInvoiceLineForm() {
     state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
+    mountInvoiceLineFormForMode();
     if (invoiceLineForm) invoiceLineForm.style.display = 'none';
     updateInvoiceLineAmountModeUI();
   }
@@ -11627,18 +11894,13 @@ function updateDeductionFormVisibility() {
 
   function updateInvoiceLineAmountModeUI() {
     const mode = state.invoiceLineForm && state.invoiceLineForm.amountMode ? state.invoiceLineForm.amountMode : 'hours';
-    if (invoiceLineAmountModeSelect) {
-      invoiceLineAmountModeSelect.value = mode;
-    }
+    if (invoiceLineAmountModeSelect) invoiceLineAmountModeSelect.value = mode;
     const showHours = mode === 'hours';
-    if (invoiceLineHoursCol) {
-      invoiceLineHoursCol.style.visibility = showHours ? 'visible' : 'hidden';
-      invoiceLineHoursCol.style.pointerEvents = showHours ? 'auto' : 'none';
-    }
-    if (invoiceLineHourTypeCol) {
-      invoiceLineHourTypeCol.style.visibility = showHours ? 'visible' : 'hidden';
-      invoiceLineHourTypeCol.style.pointerEvents = showHours ? 'auto' : 'none';
-    }
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
+    if (invoiceLineContractCol) invoiceLineContractCol.style.display = '';
+    if (invoiceLineAmountCol) invoiceLineAmountCol.style.display = showHours ? 'none' : '';
+    if (invoiceLineHoursCol) invoiceLineHoursCol.style.display = showHours ? '' : 'none';
+    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = showHours && hourTypesEnabled ? '' : 'none';
     if (invoiceLineHoursInput) {
       if (!showHours) {
         invoiceLineHoursInput.value = '';
@@ -11646,17 +11908,78 @@ function updateDeductionFormVisibility() {
       invoiceLineHoursInput.disabled = !showHours;
     }
     if (invoiceLineHourTypeSelect) {
-      if (!showHours) {
+      if (!showHours || !hourTypesEnabled) {
         invoiceLineHourTypeSelect.value = '';
       }
-      invoiceLineHourTypeSelect.disabled = !showHours;
-    }
-    if (invoiceLineAmountCol) {
-      invoiceLineAmountCol.style.visibility = 'visible';
+      invoiceLineHourTypeSelect.disabled = !showHours || !hourTypesEnabled;
     }
     if (invoiceLineAmountInput) {
       invoiceLineAmountInput.disabled = showHours;
-      invoiceLineAmountInput.placeholder = showHours ? 'Auto-calculated' : '';
+      invoiceLineAmountInput.style.display = showHours ? 'none' : 'block';
+      if (showHours) {
+        invoiceLineAmountInput.value = '';
+      }
+    }
+  }
+
+  function determineInvoiceDefaultAmountMode(draft) {
+    if (!draft) return 'hours';
+    if (draft.hours != null && draft.hours !== '' && Number(draft.hours) > 0) {
+      return 'hours';
+    }
+    if (draft.amount != null && draft.amount !== '' && Number(draft.amount) > 0) {
+      return 'amount';
+    }
+    return 'hours';
+  }
+
+  function handleInvoiceDefaultAmountModeChange() {
+    const mode = invoiceDefaultAmountModeSelect ? invoiceDefaultAmountModeSelect.value : 'hours';
+    if (!state.invoiceDefaultForm) {
+      state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: mode };
+    } else {
+      state.invoiceDefaultForm.amountMode = mode;
+      if (!state.invoiceDefaultForm.draft) state.invoiceDefaultForm.draft = {};
+      if (mode === 'hours') {
+        state.invoiceDefaultForm.draft.amount = '';
+        if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = '';
+      } else {
+        state.invoiceDefaultForm.draft.hours = '';
+        state.invoiceDefaultForm.draft.hour_type_id = '';
+        if (invoiceDefaultHoursInput) invoiceDefaultHoursInput.value = '';
+        if (invoiceDefaultHourTypeSelect) invoiceDefaultHourTypeSelect.value = '';
+      }
+    }
+    updateInvoiceDefaultAmountModeUI();
+  }
+
+  function updateInvoiceDefaultAmountModeUI() {
+    const mode = state.invoiceDefaultForm && state.invoiceDefaultForm.amountMode ? state.invoiceDefaultForm.amountMode : 'hours';
+    if (invoiceDefaultAmountModeSelect) invoiceDefaultAmountModeSelect.value = mode;
+    const showHours = mode === 'hours';
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
+    if (invoiceDefaultContractCol) invoiceDefaultContractCol.style.display = '';
+    if (invoiceDefaultAmountCol) invoiceDefaultAmountCol.style.display = showHours ? 'none' : '';
+    if (invoiceDefaultHoursCol) invoiceDefaultHoursCol.style.display = showHours ? '' : 'none';
+    if (invoiceDefaultHourTypeCol) invoiceDefaultHourTypeCol.style.display = showHours && hourTypesEnabled ? '' : 'none';
+    if (invoiceDefaultHoursInput) {
+      if (!showHours) {
+        invoiceDefaultHoursInput.value = '';
+      }
+      invoiceDefaultHoursInput.disabled = !showHours;
+    }
+    if (invoiceDefaultHourTypeSelect) {
+      if (!showHours || !hourTypesEnabled) {
+        invoiceDefaultHourTypeSelect.value = '';
+      }
+      invoiceDefaultHourTypeSelect.disabled = !showHours || !hourTypesEnabled;
+    }
+    if (invoiceDefaultAmountInput) {
+      invoiceDefaultAmountInput.disabled = showHours;
+      invoiceDefaultAmountInput.style.display = showHours ? 'none' : 'block';
+      if (showHours) {
+        invoiceDefaultAmountInput.value = '';
+      }
     }
   }
 
@@ -11670,7 +11993,14 @@ function updateDeductionFormVisibility() {
     if (invoiceLineDateInput) invoiceLineDateInput.value = draft.line_date || '';
     if (invoiceLineDescriptionInput) invoiceLineDescriptionInput.value = draft.description || '';
     if (invoiceLineHoursInput) invoiceLineHoursInput.value = draft.hours !== undefined && draft.hours !== null ? draft.hours : '';
-    if (invoiceLineAmountInput) invoiceLineAmountInput.value = draft.amount !== undefined && draft.amount !== null ? draft.amount : '';
+  if (invoiceLineAmountInput) {
+    const manualMode = state.invoiceLineForm && state.invoiceLineForm.amountMode === 'amount';
+    if (manualMode && draft.amount !== undefined && draft.amount !== null && draft.amount !== '') {
+      invoiceLineAmountInput.value = draft.amount;
+    } else {
+      invoiceLineAmountInput.value = '';
+    }
+  }
     if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = draft.hour_type_id || '';
     if (invoiceLineContractSelect) invoiceLineContractSelect.value = draft.contract_id || '';
   }
@@ -11739,6 +12069,7 @@ function updateDeductionFormVisibility() {
     }
     amount = Math.round(Number(amount) * 100) / 100;
     const lineItems = state.invoiceDetail.lineItems || [];
+    const hourTypeName = draft.hour_type_id ? getHourTypeName(draft.hour_type_id) : '';
     const payload = {
       invoice_id: state.invoiceDetail.invoice.id,
       line_date: draft.line_date || state.invoiceDetail.invoice.invoice_date || todayIso(),
@@ -11746,6 +12077,7 @@ function updateDeductionFormVisibility() {
       hours: draft.hours != null ? Number(draft.hours) : 0,
       amount: Number(amount),
       hour_type_id: draft.hour_type_id || '',
+      hour_type_name_snapshot: hourTypeName,
       contract_id: draft.contract_id || '',
       source_default_id: draft.source_default_id || ''
     };
@@ -11767,13 +12099,15 @@ function updateDeductionFormVisibility() {
       hours: payload.hours,
       amount: payload.amount,
       hour_type_id: payload.hour_type_id,
-      hour_type_name_snapshot: getHourTypeName(payload.hour_type_id),
+      hour_type_name_snapshot: hourTypeName,
       contract_id: payload.contract_id,
       contract_name_snapshot: getContractName(payload.contract_id),
       timesheet_entry_id: isEdit ? (lineItems.find((item) => item.id === payload.id)?.timesheet_entry_id || '') : '',
       entry_modified: false,
       entry_state: null,
-      source_default_id: payload.source_default_id || ''
+      source_default_id: payload.source_default_id || '',
+      amount_provided: payload.amount_provided ? true : false,
+      entry_pending: hasHours
     };
     if (isEdit) {
       const previousItem = lineItems.find((item) => item.id === payload.id);
@@ -11908,17 +12242,25 @@ function updateDeductionFormVisibility() {
 
   function startDefaultFromLine(lineItem) {
     if (!lineItem) return;
+    const draft = {
+      default_label: lineItem.description || '',
+      description: lineItem.description || '',
+      hours: lineItem.hours != null ? Number(lineItem.hours) : '',
+      amount: lineItem.amount != null && lineItem.amount !== '' ? Number(lineItem.amount) : '',
+      hour_type_id: lineItem.hour_type_id || '',
+      contract_id: lineItem.contract_id || ''
+    };
+    const amountMode = determineInvoiceDefaultAmountMode(draft);
+    draft.hours = amountMode === 'hours' ? draft.hours : '';
+    draft.amount = amountMode === 'amount' ? draft.amount : '';
+    if (amountMode !== 'hours') {
+      draft.hour_type_id = '';
+    }
     state.invoiceDefaultForm = {
       mode: 'create',
       editingId: null,
-      draft: {
-        default_label: lineItem.description || '',
-        description: lineItem.description || '',
-        hours: lineItem.hours != null ? Number(lineItem.hours) : '',
-        amount: lineItem.amount != null && lineItem.amount !== '' ? Number(lineItem.amount) : '',
-        hour_type_id: lineItem.hour_type_id || '',
-        contract_id: lineItem.contract_id || ''
-      }
+      draft: draft,
+      amountMode: amountMode
     };
     ensureInvoiceFormOptions();
     renderInvoiceDefaults();
@@ -11932,9 +12274,13 @@ function updateDeductionFormVisibility() {
     const list = state.invoiceDetail.lineItems || [];
     const idx = list.findIndex((existing) => existing.id === item.id);
     if (idx === -1) {
-      list.push(item);
+      list.push(Object.assign({}, item));
     } else {
-      list[idx] = Object.assign({}, list[idx], item);
+      const merged = Object.assign({}, list[idx], item);
+      if (!('entry_pending' in item) && Object.prototype.hasOwnProperty.call(merged, 'entry_pending')) {
+        delete merged.entry_pending;
+      }
+      list[idx] = merged;
     }
     state.invoiceDetail.lineItems = list.slice().sort((a, b) => {
       const posA = Number(a.position || 0);
@@ -11942,6 +12288,19 @@ function updateDeductionFormVisibility() {
       if (posA !== posB) return posA - posB;
       return String(a.created_at || '').localeCompare(String(b.created_at || ''));
     });
+  }
+
+  function syncInvoiceSummaryToList() {
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    const invoiceId = state.invoiceDetail.invoice.id;
+    if (!invoiceId) return;
+    const summary = state.invoiceDetail.summary || summarizeInvoiceLineItems(state.invoiceDetail.lineItems || []);
+    const idx = state.invoices.findIndex((inv) => inv.id === invoiceId);
+    if (idx !== -1) {
+      const updated = Object.assign({}, state.invoices[idx], { summary: summary });
+      state.invoices[idx] = updated;
+      state.invoiceMap[invoiceId] = updated;
+    }
   }
 
   function removeLineItemFromDetail(lineId) {
@@ -11968,9 +12327,9 @@ function updateDeductionFormVisibility() {
     openInvoiceLineForm('create', {
       line_date: state.invoiceDetail && state.invoiceDetail.invoice ? (state.invoiceDetail.invoice.invoice_date || todayIso()) : todayIso(),
       description: def.description || '',
-      hours: def.hours != null ? def.hours : '',
+      hours: def.hours != null && Number(def.hours) > 0 ? Number(def.hours) : '',
       amount: def.amount != null && def.amount !== '' ? def.amount : '',
-      hour_type_id: def.hour_type_id || '',
+      hour_type_id: def.hours != null && Number(def.hours) > 0 ? (def.hour_type_id || '') : '',
       contract_id: def.contract_id || '',
       source_default_id: def.id
     });
@@ -11988,7 +12347,8 @@ function updateDeductionFormVisibility() {
         amount: '',
         hour_type_id: '',
         contract_id: ''
-      }
+      },
+      amountMode: 'hours'
     };
     ensureInvoiceFormOptions();
     renderInvoiceDefaults();
@@ -11996,7 +12356,7 @@ function updateDeductionFormVisibility() {
 
   function handleInvoiceDefaultCancel(event) {
     if (event) event.preventDefault();
-    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
     renderInvoiceDefaults();
   }
 
@@ -12009,41 +12369,52 @@ function updateDeductionFormVisibility() {
       return;
     }
     const description = invoiceDefaultDescriptionInput ? invoiceDefaultDescriptionInput.value : '';
-    const hoursValue = invoiceDefaultHoursInput && invoiceDefaultHoursInput.value !== '' ? Number(invoiceDefaultHoursInput.value) : null;
-    const amountValue = invoiceDefaultAmountInput && invoiceDefaultAmountInput.value !== '' ? Number(invoiceDefaultAmountInput.value) : null;
-    const hourTypeId = invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : '';
+    const amountMode = state.invoiceDefaultForm && state.invoiceDefaultForm.amountMode ? state.invoiceDefaultForm.amountMode : 'hours';
+    const hoursValue = amountMode === 'hours' && invoiceDefaultHoursInput && invoiceDefaultHoursInput.value !== ''
+      ? Number(invoiceDefaultHoursInput.value)
+      : null;
+    const amountValue = amountMode === 'amount' && invoiceDefaultAmountInput && invoiceDefaultAmountInput.value !== ''
+      ? Number(invoiceDefaultAmountInput.value)
+      : null;
+    const hourTypeId = amountMode === 'hours' && invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : '';
+    const hourTypeName = hourTypeId ? getHourTypeName(hourTypeId) : '';
     const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
     if (!contractId) {
       setStatus('Select a contract for this default line.', 'warn');
       return;
     }
-    const hasHours = hoursValue != null && Number.isFinite(hoursValue) && hoursValue > 0;
-    const hasAmount = amountValue != null && Number.isFinite(amountValue);
-    if (!hasHours && !hasAmount) {
-      setStatus('Enter hours to auto-calculate or provide a raw amount.', 'warn');
-      return;
-    }
-    let amount = amountValue;
     const contractRate = getContractRate(contractId);
-    if (!hasAmount && hasHours) {
-      if (contractRate > 0) {
-        amount = Math.round(Number(hoursValue) * contractRate * 100) / 100;
-      } else {
+    let resolvedHours = 0;
+    let amount = null;
+    if (amountMode === 'hours') {
+      if (hoursValue == null || !Number.isFinite(hoursValue) || hoursValue <= 0) {
+        setStatus('Enter hours to auto-calculate the amount.', 'warn');
+        return;
+      }
+      if (!(contractRate > 0)) {
         setStatus('Contract rate missing. Enter an amount manually.', 'warn');
         return;
       }
+      resolvedHours = Number(hoursValue);
+      amount = Math.round(resolvedHours * contractRate * 100) / 100;
+    } else {
+      if (amountValue == null || !Number.isFinite(amountValue) || amountValue <= 0) {
+        setStatus('Enter a valid amount for this default.', 'warn');
+        return;
+      }
+      amount = Math.round(Number(amountValue) * 100) / 100;
     }
     if (amount == null || Number.isNaN(amount)) {
       setStatus('Enter a valid amount for this default.', 'warn');
       return;
     }
-    amount = Math.round(Number(amount) * 100) / 100;
     const payload = {
       default_label: label,
       description: description,
-      hours: hasHours ? Number(hoursValue) : '',
+      hours: amountMode === 'hours' ? resolvedHours : 0,
       amount: Number(amount),
-      hour_type_id: hourTypeId || '',
+      hour_type_id: amountMode === 'hours' ? (hourTypeId || '') : '',
+      hour_type_name_snapshot: amountMode === 'hours' ? hourTypeName : '',
       contract_id: contractId || ''
     };
     const isEdit = state.invoiceDefaultForm.mode === 'edit' && state.invoiceDefaultForm.editingId;
@@ -12066,8 +12437,9 @@ function updateDeductionFormVisibility() {
       state.invoiceDefaults.push(optimistic);
     }
     state.invoiceDefaultMap[optimistic.id] = optimistic;
-    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
     renderInvoiceDefaults();
+    saveCache();
     setStatus('Saving default line...', 'warn');
     google.script.run
       .withSuccessHandler((saved) => {
@@ -12078,9 +12450,10 @@ function updateDeductionFormVisibility() {
             acc[item.id] = item;
             return acc;
           }, {});
-          state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {} };
+          state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
           renderInvoiceDefaults();
           setStatus('Default saved', 'success');
+          saveCache();
           loadInvoiceDefaults();
         } else {
           state.invoiceDefaults = previousDefaults;
@@ -12091,6 +12464,7 @@ function updateDeductionFormVisibility() {
           state.invoiceDefaultForm = previousDefaultForm;
           renderInvoiceDefaults();
           setStatus('Failed to save default', 'error');
+          saveCache();
         }
       })
       .withFailureHandler(() => {
@@ -12103,6 +12477,7 @@ function updateDeductionFormVisibility() {
         state.invoiceDefaultForm = previousDefaultForm;
         renderInvoiceDefaults();
         setStatus('Failed to save default', 'error');
+        saveCache();
       })
       .api_upsertInvoiceDefaultLineItem(payload);
   }
@@ -12116,6 +12491,9 @@ function updateDeductionFormVisibility() {
     if (action === 'edit-default') {
       const def = state.invoiceDefaultMap[id];
       if (!def) return;
+      const amountMode = determineInvoiceDefaultAmountMode(def);
+      const hoursDraft = amountMode === 'hours' && def.hours != null ? def.hours : '';
+      const amountDraft = amountMode === 'amount' && def.amount != null ? def.amount : '';
       state.invoiceDefaultForm = {
         mode: 'edit',
         editingId: id,
@@ -12123,11 +12501,12 @@ function updateDeductionFormVisibility() {
           id: id,
           default_label: def.default_label || '',
           description: def.description || '',
-          hours: def.hours != null ? def.hours : '',
-          amount: def.amount != null ? def.amount : '',
-          hour_type_id: def.hour_type_id || '',
+          hours: hoursDraft,
+          amount: amountDraft,
+          hour_type_id: amountMode === 'hours' ? (def.hour_type_id || '') : '',
           contract_id: def.contract_id || ''
-        }
+        },
+        amountMode: amountMode
       };
       ensureInvoiceFormOptions();
       renderInvoiceDefaults();
@@ -12149,11 +12528,13 @@ function updateDeductionFormVisibility() {
     state.invoiceDefaults = state.invoiceDefaults.filter((item) => item.id !== id);
     delete state.invoiceDefaultMap[id];
     renderInvoiceDefaults();
+    saveCache();
     setStatus('Deleting default...', 'warn');
     google.script.run
       .withSuccessHandler((res) => {
         if (res && res.success) {
           setStatus('Default deleted', 'success');
+          saveCache();
         } else {
           state.invoiceDefaults = previousDefaults;
           state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
@@ -12163,24 +12544,29 @@ function updateDeductionFormVisibility() {
           }, {});
           renderInvoiceDefaults();
           setStatus('Failed to delete default', 'error');
+          saveCache();
         }
       })
       .withFailureHandler(() => {
         state.invoiceDefaults = previousDefaults;
         state.invoiceDefaults.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
-          state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
-            acc[item.id] = item;
-            return acc;
-          }, {});
-          renderInvoiceDefaults();
-          setStatus('Failed to delete default', 'error');
+        state.invoiceDefaultMap = previousDefaults.reduce((acc, item) => {
+          acc[item.id] = item;
+          return acc;
+        }, {});
+        renderInvoiceDefaults();
+        setStatus('Failed to delete default', 'error');
+        saveCache();
       })
       .api_deleteInvoiceDefaultLineItem(id);
   }
 
   function updateInvoiceSummaryAndRender() {
     recalculateInvoiceSummary();
+    syncInvoiceSummaryToList();
     renderInvoiceDetail();
+    renderBasInvoiceTable();
+    saveCache();
   }
 
   function handleInvoiceAddLine(event) {
@@ -13182,17 +13568,8 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((hourTypes) => {
         state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
         updateHourTypeMap();
-        console.debug('[HourTypes] Loaded hour types', {
-          count: state.hourTypes.length,
-          ids: state.hourTypes.map((ht) => ht.id)
-        });
         ensureInvoiceFormOptions();
         if (getFeatureFlag('enable_invoices')) {
-          console.debug('[Invoices] Re-render after hour type load', {
-            invoiceSelectedId: state.invoiceSelectedId,
-            hasDetail: !!state.invoiceDetail,
-            defaultsCount: state.invoiceDefaults.length
-          });
           renderInvoiceDefaults();
           renderInvoiceDetail();
         }

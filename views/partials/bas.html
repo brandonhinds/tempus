@@ -34,4 +34,28 @@
       <tbody id="bas-table-body"></tbody>
     </table>
   </div>
+  <div id="bas-invoice-section" style="margin-top:16px;">
+    <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+      <h4 style="margin:0;">Financial year invoices</h4>
+      <p class="ts-note" style="margin:0;">Quick view of invoices issued during the selected financial year.</p>
+    </div>
+    <div class="ts-note" id="bas-invoice-empty" style="display:none;">No invoices for this financial year.</div>
+    <div class="ts-bas-table-wrapper" style="margin-top:8px;">
+      <table class="ts-table" id="bas-invoice-table" style="width:100%; min-width:720px;">
+        <thead>
+          <tr>
+            <th>Invoice</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th style="text-align:right;">Lines</th>
+            <th style="text-align:right;">Hours</th>
+            <th style="text-align:right;">Subtotal</th>
+            <th style="text-align:right;">GST</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody id="bas-invoice-table-body"></tbody>
+      </table>
+    </div>
+  </div>
 </section>

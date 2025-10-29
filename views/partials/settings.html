@@ -4,73 +4,100 @@
       <h3 style="margin-top:0;">Settings</h3>
       <div class="ts-settings-grid">
         <div>
-          <label>Round to Nearest (minutes)</label>
-          <input type="number" id="set-round" min="0" step="1" />
-        </div>
-        <div>
-          <label>Theme</label>
-          <div style="display: flex; gap: 8px; align-items: stretch;">
-            <select id="set-theme" style="flex: 1;">
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="og">The OG</option>
-              <option value="rose">Rose Gold</option>
-              <option value="sierra117">Sierra 117</option>
-              <option value="protanopia" class="ts-colorblind-theme" style="display:none;">Protanopia Friendly</option>
-              <option value="deuteranopia" class="ts-colorblind-theme" style="display:none;">Deuteranopia Friendly</option>
-              <option value="tritanopia" class="ts-colorblind-theme" style="display:none;">Tritanopia Friendly</option>
-              <option value="monochrome" class="ts-colorblind-theme" style="display:none;">Monochrome</option>
-              <option value="custom" class="ts-custom-theme" style="display:none;">Custom</option>
-            </select>
-            <button type="button" id="btn-configure-theme" class="secondary" style="display:none; white-space: nowrap;">Configure</button>
+          <label for="set-round">Time entries rounding (minutes)</label>
+          <div class="ts-note">Time entries are automatically rounded to intervals of this many minutes (e.g. "15" rounds time entries to quarters of hours). Set to 0 to disable rounding.</div>
+          <div class="ts-settings-field">
+            <input type="number" id="set-round" min="0" step="1" />
           </div>
         </div>
         <div>
-          <label>Superannuation rate (%)</label>
-          <input type="number" id="set-super-rate" min="0" step="0.1" />
+          <label for="set-theme">Theme</label>
+          <div class="ts-note">The colour scheme of Tempus.</div>
+          <div class="ts-settings-field">
+            <div style="display: flex; gap: 8px; align-items: stretch;">
+              <select id="set-theme" style="flex: 1;">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="og">The OG</option>
+                <option value="rose">Rose Gold</option>
+                <option value="sierra117">Sierra 117</option>
+                <option value="protanopia" class="ts-colorblind-theme" style="display:none;">Protanopia Friendly</option>
+                <option value="deuteranopia" class="ts-colorblind-theme" style="display:none;">Deuteranopia Friendly</option>
+                <option value="tritanopia" class="ts-colorblind-theme" style="display:none;">Tritanopia Friendly</option>
+                <option value="monochrome" class="ts-colorblind-theme" style="display:none;">Monochrome</option>
+                <option value="custom" class="ts-custom-theme" style="display:none;">Custom</option>
+              </select>
+              <button type="button" id="btn-configure-theme" class="secondary" style="display:none; white-space: nowrap;">Configure</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label for="set-super-rate">Superannuation rate (%)</label>
+          <div class="ts-note">The government mandated superannuation guarantee percentage. In the future this will be configurable by financial year. At the time of writing this should be set to "12".</div>
+          <div class="ts-settings-field">
+            <input type="number" id="set-super-rate" min="0" step="0.1" />
+          </div>
         </div>
         <div id="lost-super-recovery-col" style="display:none;">
-          <label>Lost Super Recovery Method <span class="ts-info-icon" title="When pre-tax deductions reduce your super base, this determines whether the lost super is recovered as additional super contributions or added back to your taxable income.">i</span></label>
-          <select id="set-lost-super-recovery-mode">
-            <option value="extra_contribution">Add as extra super contribution</option>
-            <option value="add_to_taxable">Add back to taxable income</option>
-          </select>
+          <label for="set-lost-super-recovery-mode">Lost super recovery method <span class="ts-info-icon" title="How the superannuation normally lost to deductions being reclaimed. Options include adding the amount back to superannuation as an extra contribution, or adding it to income so it flows through tax and net income.">i</span></label>
+          <div class="ts-note">How the superannuation normally lost to deductions being reclaimed. Options include adding the amount directly back to superannuation as an extra contribution, or having the money added back as additional income so it gets distributed between superannuation, tax, and net income.</div>
+          <div class="ts-settings-field">
+            <select id="set-lost-super-recovery-mode">
+              <option value="extra_contribution">Add as extra super contribution</option>
+              <option value="add_to_taxable">Add back to taxable income</option>
+            </select>
+          </div>
         </div>
         <div id="payg-rate-col" style="display:none;">
-          <label>PAYG Instalment rate (%)</label>
-          <input type="number" id="set-payg-rate" min="0" max="100" step="0.1" />
+          <label for="set-payg-rate">PAYG instalment rate (%)</label>
+          <div class="ts-note">The PAYG installment rate used to calculate BAS repayments for sole traders. Still need to actually figure out what this means.</div>
+          <div class="ts-settings-field">
+            <input type="number" id="set-payg-rate" min="0" max="100" step="0.1" />
+          </div>
         </div>
         <div id="public-holiday-state-col" style="display:none;">
-          <label>State/Territory</label>
-          <select id="set-public-holiday-state">
-            <option value="ACT">Australian Capital Territory</option>
-            <option value="NSW">New South Wales</option>
-            <option value="NT">Northern Territory</option>
-            <option value="QLD">Queensland</option>
-            <option value="SA">South Australia</option>
-            <option value="TAS">Tasmania</option>
-            <option value="VIC">Victoria</option>
-            <option value="WA">Western Australia</option>
-          </select>
+          <label for="set-public-holiday-state">Public holidays state/territory</label>
+          <div class="ts-note">The Australian state or territory you observe the public holidays for.</div>
+          <div class="ts-settings-field">
+            <select id="set-public-holiday-state">
+              <option value="ACT">Australian Capital Territory</option>
+              <option value="NSW">New South Wales</option>
+              <option value="NT">Northern Territory</option>
+              <option value="QLD">Queensland</option>
+              <option value="SA">South Australia</option>
+              <option value="TAS">Tasmania</option>
+              <option value="VIC">Victoria</option>
+              <option value="WA">Western Australia</option>
+            </select>
+          </div>
         </div>
         <div id="minimum-end-time-col" style="display:none;">
-          <label>Suggested Minimum End Time <span class="ts-info-icon" title="Used as your ideal finish time when the Suggest End Time flag is on. The advanced entry view recommends when to clock off based on this value and your round-to-nearest setting.">i</span></label>
-          <input type="time" id="set-minimum-end-time" />
+          <label for="set-minimum-end-time">Suggested minimum end time <span class="ts-info-icon" title="Uses this time and your rounding preference to recommend when you should finish for the day.">i</span></label>
+          <div class="ts-note">The minimum time of the day you aim to leave at. Uses this value and the time entry rounding to recommend when you should leave for the day to round out your hours.</div>
+          <div class="ts-settings-field">
+            <input type="time" id="set-minimum-end-time" />
+          </div>
         </div>
         <div id="invoice-template-col" style="display:none;">
-          <label>Invoice template (Doc ID or path)</label>
-          <input type="text" id="set-invoice-template" placeholder="Document ID or path" />
-          <div class="ts-note">Provide the Google Docs template ID or a My Drive path (e.g. Clients/Templates/Invoice).</div>
+          <label for="set-invoice-template">Invoice template (Doc ID or path)</label>
+          <div class="ts-note">The Google Docs template (by ID or Drive path) that new invoices copy before populating invoices.</div>
+          <div class="ts-settings-field">
+            <input type="text" id="set-invoice-template" placeholder="Document ID or path" />
+          </div>
         </div>
         <div id="invoice-output-folder-col" style="display:none;">
-          <label>Invoice output folder path</label>
-          <input type="text" id="set-invoice-output-folder" placeholder="Folder path" />
-          <div class="ts-note">Invoices will be copied into this folder inside My Drive.</div>
+          <label for="set-invoice-output-folder">Invoice output folder path</label>
+          <div class="ts-note">Path in Google Drive where generated invoices should be stored.</div>
+          <div class="ts-settings-field">
+            <input type="text" id="set-invoice-output-folder" placeholder="Folder path" />
+          </div>
         </div>
         <div id="invoice-line-limit-col" style="display:none;">
-          <label>Invoice line placeholder limit</label>
-          <input type="number" id="set-invoice-line-limit" min="1" step="1" />
-          <div class="ts-note">Matches the number of {{lineDescription#}} placeholders available in your template.</div>
+          <label for="set-invoice-line-limit">Invoice line placeholder limit</label>
+          <div class="ts-note">The maximum number of invoice lines in your invoice template, which ensures generated invoices don't exceed it.</div>
+          <div class="ts-settings-field">
+            <input type="number" id="set-invoice-line-limit" min="1" step="1" />
+          </div>
         </div>
       </div>
       <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; gap:8px;">

@@ -3,22 +3,18 @@
 ## In-Progress Changes
 
 - Invoice TODOs:
-    * When editing an a line item that uses the hours worked method for input, the amount stays at the previously calculated amount. The UI should always show "Auto-calculated" whenever that mode is used, rather than the amount that was previously calculated.
-    * Have the linked entry part of the card also optimistically update when editing / adding a line item.
-    * Hide the "Hour type" label for line items that use raw amounts.
-    * Move Contract and Amount to the left of the line item card, so that way the hours and hour type fields are on the right side when they disappear. Also have these inputs properly share the space 25% each.
-    * When editing a line item or default line item the edit should happen in place of the entry being edited. At the moment the edited entry is visible as if we were making a new entry, which is confusing.
-    * Ensure default item adds/edits work the same way the line items do.
     * Test the workflow for Publishing an invoice (as yet untested)
-    * Update invoice names to not include the date
     * Check with Lil how she wants the invoice numbers to default to being randomly generated.
-    * Remove all the debug statements
-    * Add a way to view all invoices for the financial year, probably as another table on the BAS reporting screen.
+    * Check image.png to see that the default line does not have the exact same UI, because label, desciption, and input method are on their own rows when they should all share one row.
 
 - BAS fixes:
     * Figure out differences in company vs sole trader mode for BAS. Ensure the sole trader feature flag behaves as expected.
     * Deal with the rounding off the cents (they should be put back into company profit)
     * Provide export/print options for monthly or quarterly lodgements
+
+## Things to Check in Beta
+
+- How are the cents in BAS reporting meant to be handled? Do they just get rounded off and ignored, or do they get rounded off and added somewhere else?
 
 ## Big Changes
 
@@ -87,6 +83,10 @@
 
 - Things that may not be possible:
     * Add colours to hour type drop down (or dots of the colour or something)
+
+## Logo
+
+https://www.design.com/maker/logo/geometric-time-hourglass-237278?text=Tempus&layoutOrientation=auto&colorPalette=grayscale&isVariation=True&searchImpressionId=d5f8f130-bed6-4a24-b02a-ebafdba1e506
 
 ## Invoice Initial Prompt
 

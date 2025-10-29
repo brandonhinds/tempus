@@ -250,6 +250,7 @@ function clearInvoiceCaches() {
 }
 
 function api_listInvoices(filters) {
+  var includeSummary = filters && invoiceParseBoolean(filters.include_summary);
   var invoices = listInvoicesInternal();
   if (filters && filters.year) {
     var yearNum = invoiceParseNumber(filters.year);
@@ -268,7 +269,36 @@ function api_listInvoices(filters) {
     }
     return a.year - b.year;
   });
-  return invoices;
+
+  function cloneInvoice(inv) {
+    var copy = {};
+    for (var key in inv) {
+      if (Object.prototype.hasOwnProperty.call(inv, key)) {
+        copy[key] = inv[key];
+      }
+    }
+    return copy;
+  }
+
+  var cloned = invoices.map(cloneInvoice);
+
+  if (includeSummary) {
+    var allItems = listInvoiceLineItemsInternal().filter(function(item) {
+      return item && item.invoice_id && !item.is_default;
+    });
+    var grouped = allItems.reduce(function(acc, item) {
+      var invoiceId = item.invoice_id;
+      if (!acc[invoiceId]) acc[invoiceId] = [];
+      acc[invoiceId].push(item);
+      return acc;
+    }, {});
+    cloned.forEach(function(inv) {
+      var items = grouped[inv.id] || [];
+      inv.summary = summarizeInvoiceLineItems(items);
+    });
+  }
+
+  return cloned;
 }
 
 function api_getInvoice(id) {
@@ -1275,9 +1305,17 @@ function api_upsertInvoiceLineItem(payload) {
   var amountRaw = payload.amount != null ? payload.amount : (existing ? existing.amount : 0);
   var amount = invoiceParseNumber(amountRaw, 0);
   var amountProvided = invoiceParseBoolean(payload.amount_provided);
-  var hourTypeId = payload.hour_type_id || (existing ? existing.hour_type_id : '');
-  var hourTypeName = payload.hour_type_name_snapshot || (existing ? existing.hour_type_name_snapshot : '');
-  if (!hourTypeName && hourTypeId) {
+  var hourTypeId = payload.hasOwnProperty('hour_type_id') ? payload.hour_type_id : (existing ? existing.hour_type_id : '');
+  hourTypeId = hourTypeId || '';
+  var hourTypeName;
+  if (payload.hasOwnProperty('hour_type_name_snapshot')) {
+    hourTypeName = payload.hour_type_name_snapshot;
+  } else {
+    hourTypeName = existing ? existing.hour_type_name_snapshot : '';
+  }
+  if (!hourTypeId) {
+    hourTypeName = '';
+  } else if (!hourTypeName) {
     hourTypeName = getHourTypeNameById(hourTypeId);
   }
   var contractId = payload.contract_id || (existing ? existing.contract_id : '');
