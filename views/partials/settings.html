@@ -107,6 +107,13 @@
       <div style="margin-top:32px;">
         <h3 style="margin:0 0 12px;">Feature Flags</h3>
         <div class="ts-note">Toggle experimental capabilities without impacting core time tracking.</div>
+        <div class="ts-toolbar" id="feature-flag-collapse-controls" style="display:none; margin:12px 0;">
+          <div class="ts-note" style="margin:0;">Expand or collapse all groups to scan feature toggles quickly.</div>
+          <div style="display:flex; gap:8px;">
+            <button class="ghost small" id="btn-expand-all-feature-flags">Expand all</button>
+            <button class="ghost small" id="btn-collapse-all-feature-flags">Collapse all</button>
+          </div>
+        </div>
         <div id="feature-flags-list" style="margin-top:12px;"></div>
         <div id="clear-cache-wrapper" style="margin-top:16px; display:none;">
           <button class="danger" id="btn-clear-cache">Clear Local Cache</button>

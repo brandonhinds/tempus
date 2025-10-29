@@ -419,10 +419,17 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   var featureFlagsSheet = getOrCreateSheet('feature_flags');
   var featureFlagsData = featureFlagsSheet.getDataRange().getValues();
   var noLostSuperEnabled = false;
-  for (var i = 1; i < featureFlagsData.length; i++) {
-    if (featureFlagsData[i][0] === 'no_lost_super_to_deductions') {
-      noLostSuperEnabled = featureFlagsData[i][3] === 'TRUE' || featureFlagsData[i][3] === true;
-      break;
+  if (featureFlagsData.length > 1) {
+    var flagHeaders = featureFlagsData[0];
+    var featureIdx = flagHeaders.indexOf('feature');
+    var enabledIdx = flagHeaders.indexOf('enabled');
+    for (var i = 1; i < featureFlagsData.length; i++) {
+      var row = featureFlagsData[i];
+      if (featureIdx !== -1 && String(row[featureIdx] || '').trim() === 'no_lost_super_to_deductions') {
+        var rawEnabled = enabledIdx !== -1 ? row[enabledIdx] : row[1];
+        noLostSuperEnabled = rawEnabled === true || String(rawEnabled).toUpperCase() === 'TRUE';
+        break;
+      }
     }
   }
 

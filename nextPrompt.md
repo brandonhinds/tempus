@@ -6,6 +6,10 @@
     * Test the workflow for Publishing an invoice (as yet untested)
     * Check with Lil how she wants the invoice numbers to default to being randomly generated.
     * Check image.png to see that the default line does not have the exact same UI, because label, desciption, and input method are on their own rows when they should all share one row.
+    * Need to allow hour decimals to go up to 4 decimal places (Lil needs at least 3 for invoices)
+    * Allow the 'hours' field to be relabeled via config. To make it as Lil friendly as possible (likely the only consumer of the invoices screen) the hours numbers could be replaced with 'reports', or even the type of assessment (standard, enhanced, early cancellation, late cancellation).
+    * Maybe that is another potential amount entry, where you define a dropdown of possible types of line items, and that type has a number of hours/amount associated with it.
+        * Feature flag this
 
 - BAS fixes:
     * Figure out differences in company vs sole trader mode for BAS. Ensure the sole trader feature flag behaves as expected.
@@ -58,22 +62,13 @@
 	* Company income
 	* Company expenses
 
-- Split up feature flags into categories for better organisation
-
 - Add Koffee link
-
-- Add hover icons for all settings explaining what they do. Alternatively, make them sub-texts.
-
-- Update "State/Territory" to make it clear it is related to the public holidays that are displayed.
 
 - Update the Favicon to something real (especially important because we cannot set the tab title without the pop-up issue)
 
 - Remove the `[Actual Income]` debugging in the console log
 
 - Remove the `Rendering hour types pie chart with data` debugging in the console log of the annual view
-
-- Standardise the names of the feature flags (capitalisation all over the place, phrasing, etc.)
-    * Figure out if the values in the sheet are actually used, outside of the backend name and whether it is enabled or not. I suspect the labels are all from the client code than the backend table.
 
 - Remove the company parts of the income breakdown when company feature flag is disabled
 

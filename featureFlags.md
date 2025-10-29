@@ -1,6 +1,6 @@
 # Feature Flags
 
-This document lists the feature flags supported by the Tempus app. Each flag is also persisted in the `feature_flags` sheet, but this file provides an at-a-glance reference for repository contributors.
+This document lists the feature flags supported by the Tempus app. Each flag is persisted in the `feature_flags` sheet (storing only the identifier and enabled state), but this file provides an at-a-glance reference for repository contributors.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -28,4 +28,4 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.
 - Keep the sheet schema (`sheetSchemas.md`) and this document in sync so backend and frontend expectations remain aligned.
-- Prefer snake_case identifiers for flags; provide a clear human-readable name via the sheet to surface in the UI.
+- Prefer snake_case identifiers for flags; human-readable names and descriptions live in `DEFAULT_FEATURE_FLAGS` inside `views/partials/scripts.html`, so keep that map updated when adding or editing flags.

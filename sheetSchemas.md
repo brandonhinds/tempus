@@ -72,8 +72,8 @@ Feature flags gate optional behaviours. Each row records a single flag and its c
 | --- | --- | --- | --- |
 | `feature` | string | Unique flag identifier. | `remember_last_page` |
 | `enabled` | boolean/string | `TRUE`/`FALSE` indicating whether the flag is active. | `TRUE` |
-| `name` | string | Human-friendly title displayed in the UI. | `Remember last page on refresh` |
-| `description` | string | Additional context rendered under the title. | `When enabled, the app reopens on the most recently viewed page.` |
+
+> UI metadata (flag names, descriptions, ordering) is defined in `DEFAULT_FEATURE_FLAGS` within `views/partials/scripts.html`, ensuring copy is code-controlled.
 
 ### Suggested improvements
 - Add created/updated timestamps if we need historical auditing of flag changes.

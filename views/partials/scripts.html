@@ -201,6 +201,7 @@
     deductionCategories: [],
     deductionCategoryMap: {},
     deductionCategoryCollapse: {},
+    featureFlagCollapse: {},
     deductionExceptions: [],
     deductionExceptionsMap: {},
     actualIncome: [],
@@ -4272,101 +4273,139 @@ function updateDeductionFormVisibility() {
       .api_getDeductionCategories();
   }
 
+  const FEATURE_FLAG_GROUPS = [
+    { id: 'income', title: 'Income', order: 100 },
+    { id: 'time_entries', title: 'Time Entries', order: 200 },
+    { id: 'company', title: 'Company', order: 300 },
+    { id: 'utilities', title: 'Utilities', order: 400 },
+    { id: 'accessibility', title: 'Accessibility', order: 500 }
+  ];
+
+  const FEATURE_FLAG_GROUP_MAP = FEATURE_FLAG_GROUPS.reduce((acc, group) => {
+    acc[group.id] = group;
+    return acc;
+  }, {});
+
   const DEFAULT_FEATURE_FLAGS = {
-    remember_last_page: {
-      name: 'Remember last page on refresh',
-      description: 'When enabled, the app reopens on the most recently viewed page.',
-      order: 100
-    },
-    show_clear_cache: {
-      name: 'Show cache clear button',
-      description: 'Displays a button that lets you clear cached entries and settings from this browser.',
-      order: 110
-    },
-    show_zero_hours: {
-      name: 'Show zero hours on empty days',
-      description: 'When enabled, days without logged time display a 0 instead of being blank.',
-      order: 120
-    },
-    hour_types: {
-      name: 'Hour Types',
-      description: 'Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization.',
-      order: 130
-    },
-    expected_monthly_hours: {
-      name: 'Expected monthly hours insights',
-      description: 'Adds a badge that breaks down projected contract hours for the active month.',
-      order: 140
-    },
-    contract_rate_preview: {
-      name: 'Contract rate preview page',
-      description: 'Adds a dedicated page to model hourly rate changes and see their impact across a contract.',
-      order: 142
-    },
-    enable_invoices: {
-      name: 'Invoices',
-      description: 'Enables invoice management, default line items, and document generation from a Google Docs template.',
-      order: 143
-    },
-    suggest_end_time: {
-      name: 'Suggest End Time',
-      description: 'Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours.',
-      order: 145
-    },
-    xero_payroll_helper: {
-      name: 'Xero payroll helper',
-      description: 'Adds a modal with week-by-week totals formatted for Xero payroll entry.',
-      order: 150
-    },
-    myob_payroll_helper: {
-      name: 'MYOB payroll helper',
-      description: 'Adds a modal with weekly totals formatted for MYOB payroll entry.',
-      order: 160
+    enable_deduction_categories: {
+      name: 'Enable deduction tracking',
+      description: 'Adds category management for deductions and groups them on the deductions page and annual reports.',
+      order: 110,
+      group: 'income'
     },
     enable_actual_income: {
-      name: 'Enable Actual Income Tracking',
-      description: 'Enables tracking of actual income received, allowing comparison between estimated and actual earnings with variance indicators.',
-      order: 165
+      name: 'Enable actual income tracking',
+      description: 'Allows recording actual income so you can compare estimated versus received amounts with variance indicators.',
+      order: 120,
+      group: 'income'
+    },
+    expected_monthly_hours: {
+      name: 'Enable expected monthly hours insights',
+      description: 'Adds a calendar badge that projects contract hours for the month and shows whether you are ahead or behind.',
+      order: 130,
+      group: 'income'
+    },
+    contract_rate_preview: {
+      name: 'Enable contract rate preview page',
+      description: 'Unlocks the rate preview view to model hourly rate changes and see their impact across a contract.',
+      order: 140,
+      group: 'income'
     },
     no_lost_super_to_deductions: {
-      name: 'No Lost Super to Deductions',
-      description: 'Recovers super guarantee lost to pre-tax deductions. Configure recovery method in Settings.',
-      order: 166
+      name: 'Reclaim lost super to deductions',
+      description: 'Recovers super guarantee lost to pre-tax deductions. Configure the recovery method on the Settings tab.',
+      order: 150,
+      group: 'income'
     },
-    enable_company_tracking_features: {
-      name: 'Enable Company Tracking Features',
-      description: 'Unlocks company-focused fields such as company deduction categories and BAS reporting.',
-      order: 200
+    default_inputs: {
+      name: 'Enable default hours for time entries',
+      description: 'Allows saving reusable entry templates that can be applied when adding new time entries.',
+      order: 210,
+      group: 'time_entries'
     },
-    enable_deduction_categories: {
-      name: 'Deduction categories',
-      description: 'Adds category management for deductions and groups them on the deductions page and reports.',
-      order: 202
+    hour_types: {
+      name: 'Enable multiple hour types',
+      description: 'Lets you categorise hours (work, annual, sick, training, etc.) and visualise their impact on income.',
+      order: 220,
+      group: 'time_entries'
     },
-    enable_company_quarterly_bas: {
-      name: 'Enable Company BAS quarterly reporting',
-      description: 'Displays BAS reporting in quarterly totals instead of monthly.',
-      order: 201
-    },
-    is_sole_trader: {
-      name: 'Sole Trader mode',
-      description: 'Indicates the business is a sole trader. Affects PAYG income calculations in BAS reporting.',
-      order: 202
+    suggest_end_time: {
+      name: 'Suggest exact end time',
+      description: 'Uses your rounding rule and preferred finish time to recommend when to clock off for tidy totals.',
+      order: 230,
+      group: 'time_entries'
     },
     enable_public_holidays: {
-      name: 'Australian Public Holidays',
-      description: 'Displays Australian public holidays in the calendar view with automatic API sync.',
-      order: 170
+      name: 'Enable automatic public holiday display',
+      description: 'Automatically overlays Australian public holidays on the calendar view and keeps them in sync.',
+      order: 240,
+      group: 'time_entries'
     },
-    enable_colorblind_themes: {
-      name: 'Enable Colour Blind Themes',
-      description: 'Adds colorblind-friendly theme options to the settings dropdown and warns about problematic hour type colors.',
-      order: 180
+    xero_payroll_helper: {
+      name: 'Enable Xero payroll helper',
+      description: 'Adds a modal that slices the active month into Xero-aligned weekly ranges with cumulative hour totals.',
+      order: 250,
+      group: 'time_entries'
+    },
+    myob_payroll_helper: {
+      name: 'Enable MYOB payroll helper',
+      description: 'Adds a modal that groups the active month into MYOB-ready weekly totals with a monthly cross-check.',
+      order: 260,
+      group: 'time_entries'
+    },
+    enable_company_tracking_features: {
+      name: 'Enable company income tracking',
+      description: 'Unlocks company-focused features including company deductions, BAS reporting, and invoice tooling.',
+      order: 310,
+      group: 'company'
+    },
+    enable_company_quarterly_bas: {
+      name: 'Switch from monthly to quarterly BAS reporting',
+      description: 'Shows BAS reporting in quarterly totals instead of monthly when company income tracking is enabled.',
+      order: 320,
+      group: 'company'
+    },
+    enable_invoices: {
+      name: 'Enable invoices page',
+      description: 'Enables invoice management, default line items, and Google Docs generation using your template.',
+      order: 330,
+      group: 'company'
+    },
+    is_sole_trader: {
+      name: 'Enable sole trader mode',
+      description: 'Indicates the business operates as a sole trader and adjusts PAYG income calculations accordingly.',
+      order: 340,
+      group: 'company'
+    },
+    remember_last_page: {
+      name: 'Remember last page on refresh',
+      description: 'When enabled, the app reopens on the most recently viewed page after a reload.',
+      order: 410,
+      group: 'utilities'
+    },
+    show_zero_hours: {
+      name: 'Show zero hours on days with no time entered',
+      description: 'Displays a 0 for days without logged time instead of leaving them blank on the calendar.',
+      order: 420,
+      group: 'utilities'
+    },
+    show_clear_cache: {
+      name: 'Show clear cache button',
+      description: 'Adds a button to wipe cached entries, settings, and remembered preferences from this browser.',
+      order: 430,
+      group: 'utilities'
     },
     custom_theme: {
-      name: 'Custom Theme',
-      description: 'Enables a custom theme where you can configure your own colors. The theme dropdown will be locked to "Custom" when enabled.',
-      order: 190
+      name: 'Enable custom theme',
+      description: 'Locks the theme selector to Custom and unlocks the colour configuration modal.',
+      order: 510,
+      group: 'accessibility'
+    },
+    enable_colorblind_themes: {
+      name: 'Enable colour blind themes',
+      description: 'Adds colour-blind friendly theme presets and warns about difficult hour type colour combinations.',
+      order: 520,
+      group: 'accessibility'
     }
   };
 
@@ -4576,30 +4615,20 @@ function updateDeductionFormVisibility() {
 
   const normalizeFeatureFlags = (raw) => {
     const out = {};
-    if (raw && typeof raw === 'object') {
-      Object.keys(raw).forEach((key) => {
-        const value = raw[key];
-        const enabled = value && typeof value === 'object' ? !!value.enabled : !!value;
-        const name = value && typeof value === 'object' && value.name ? String(value.name) : '';
-        const description = value && typeof value === 'object' && value.description ? String(value.description) : '';
-        out[key] = {
-          enabled,
-          name,
-          description
-        };
-      });
-    }
-    Object.keys(DEFAULT_FEATURE_FLAGS).forEach((key) => {
-      if (!out[key]) {
-        out[key] = {
-          enabled: false,
-          name: DEFAULT_FEATURE_FLAGS[key].name,
-          description: DEFAULT_FEATURE_FLAGS[key].description
-        };
-      } else {
-        out[key].name = out[key].name || DEFAULT_FEATURE_FLAGS[key].name;
-        out[key].description = out[key].description || DEFAULT_FEATURE_FLAGS[key].description;
-      }
+    const defaults = DEFAULT_FEATURE_FLAGS || {};
+    const rawKeys = raw && typeof raw === 'object' ? Object.keys(raw) : [];
+    const combinedKeys = Array.from(new Set([...Object.keys(defaults), ...rawKeys]));
+    combinedKeys.forEach((key) => {
+      const rawValue = raw && raw[key];
+      const enabled = rawValue && typeof rawValue === 'object'
+        ? !!rawValue.enabled
+        : !!rawValue;
+      const fallback = defaults[key] || { name: key, description: '' };
+      out[key] = {
+        enabled,
+        name: fallback.name || key,
+        description: fallback.description || ''
+      };
     });
     return out;
   };
@@ -4721,6 +4750,35 @@ function updateDeductionFormVisibility() {
     renderDeductionsList();
   }
 
+  function setAllFeatureFlagCollapse(collapsed) {
+    if (!state.featureFlagCollapse || typeof state.featureFlagCollapse !== 'object') {
+      state.featureFlagCollapse = {};
+    }
+    const groupIds = new Set();
+    FEATURE_FLAG_GROUPS.forEach((group) => {
+      if (group && group.id) groupIds.add(group.id);
+    });
+    Object.keys(DEFAULT_FEATURE_FLAGS).forEach((key) => {
+      const cfg = DEFAULT_FEATURE_FLAGS[key];
+      const groupId = (cfg && cfg.group) ? cfg.group : 'other';
+      groupIds.add(groupId);
+    });
+    const rawFlags = state.featureFlags && typeof state.featureFlags === 'object' ? state.featureFlags : {};
+    Object.keys(rawFlags).forEach((key) => {
+      const cfg = DEFAULT_FEATURE_FLAGS[key];
+      const groupId = cfg && cfg.group ? cfg.group : 'other';
+      groupIds.add(groupId);
+    });
+    groupIds.add('other');
+    groupIds.forEach((groupId) => {
+      if (groupId) {
+        state.featureFlagCollapse[groupId] = collapsed;
+      }
+    });
+    saveCache();
+    renderFeatureFlags();
+  }
+
   const contractIsValid = (contract, dateIso) => {
     if (!contract || !dateIso) return false;
     if (contract.start_date && contract.start_date > dateIso) return false;
@@ -4773,6 +4831,9 @@ function updateDeductionFormVisibility() {
       state.deductionCategories = Array.isArray(obj.deductionCategories) ? obj.deductionCategories.map(sanitizeDeductionCategory) : [];
       state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
         ? { ...obj.deductionCategoryCollapse }
+        : {};
+      state.featureFlagCollapse = obj.featureFlagCollapse && typeof obj.featureFlagCollapse === 'object'
+        ? { ...obj.featureFlagCollapse }
         : {};
       state.deductionExceptions = Array.isArray(obj.deductionExceptions) ? obj.deductionExceptions.map(sanitizeDeductionException) : [];
       if (obj.basCurrentFy != null) state.basCurrentFy = Number(obj.basCurrentFy);
@@ -4856,6 +4917,7 @@ function updateDeductionFormVisibility() {
         deductions: state.deductions.map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
+        featureFlagCollapse: state.featureFlagCollapse,
         deductionExceptions: state.deductionExceptions.map(sanitizeDeductionException),
         annualCategoryFilters: state.annualCategoryFilters,
         annualCategoryExpansion: state.annualCategoryExpansion,
@@ -6182,6 +6244,9 @@ function updateDeductionFormVisibility() {
   }
   applyExpectedHoursVisibility();
 
+  const featureFlagCollapseControls = document.getElementById('feature-flag-collapse-controls');
+  const btnExpandAllFeatureFlags = document.getElementById('btn-expand-all-feature-flags');
+  const btnCollapseAllFeatureFlags = document.getElementById('btn-collapse-all-feature-flags');
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
@@ -6196,6 +6261,13 @@ function updateDeductionFormVisibility() {
   const lostSuperRecoveryCol = document.getElementById('lost-super-recovery-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
   const discardSettingsBtn = document.getElementById('btn-discard-settings');
+  if (btnExpandAllFeatureFlags) {
+    btnExpandAllFeatureFlags.addEventListener('click', () => setAllFeatureFlagCollapse(false));
+  }
+  if (btnCollapseAllFeatureFlags) {
+    btnCollapseAllFeatureFlags.addEventListener('click', () => setAllFeatureFlagCollapse(true));
+  }
+
   const contractNameInput = document.getElementById('contract-name');
   const contractStartInput = document.getElementById('contract-start');
   const contractEndInput = document.getElementById('contract-end');
@@ -7644,67 +7716,198 @@ function updateDeductionFormVisibility() {
   function renderFeatureFlags() {
     if (!featureFlagsListEl) return;
     featureFlagsListEl.innerHTML = '';
-    const entries = Object.keys(state.featureFlags)
-      .filter((key) => {
-        if (key === 'enable_company_quarterly_bas' || key === 'is_sole_trader') {
-          return !!state.featureFlags.enable_company_tracking_features?.enabled;
+    if (featureFlagCollapseControls) {
+      featureFlagCollapseControls.style.display = 'none';
+    }
+
+    const formatGroupTitle = (value) => {
+      if (!value) return 'Other';
+      return value.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+    };
+
+    if (!state.featureFlagCollapse || typeof state.featureFlagCollapse !== 'object') {
+      state.featureFlagCollapse = {};
+    }
+
+    const groups = {};
+    const ensureGroup = (groupId) => {
+      if (!groupId) groupId = 'other';
+      if (!groups[groupId]) {
+        const config = FEATURE_FLAG_GROUP_MAP[groupId] || { id: groupId, title: formatGroupTitle(groupId), order: 900 };
+        groups[groupId] = {
+          id: groupId,
+          title: config.title || formatGroupTitle(groupId),
+          order: config.order != null ? config.order : 900,
+          items: []
+        };
+        if (state.featureFlagCollapse[groupId] === undefined) {
+          state.featureFlagCollapse[groupId] = true;
         }
-        return true;
-      })
-      .map((key) => ({
-      key,
-      enabled: !!state.featureFlags[key].enabled,
-      name: state.featureFlags[key].name || key,
-      description: state.featureFlags[key].description || '',
-      order: (DEFAULT_FEATURE_FLAGS[key] && DEFAULT_FEATURE_FLAGS[key].order) || 0
-    })).sort((a, b) => {
-      if (a.order !== b.order) return a.order - b.order;
-      return a.name.localeCompare(b.name);
+      }
+      return groups[groupId];
+    };
+    const processed = new Set();
+    const rawFlags = state.featureFlags && typeof state.featureFlags === 'object' ? state.featureFlags : {};
+
+    const addFlagToGroup = (key, config, stateMeta) => {
+      const shouldHideCompanyDependent = (key === 'enable_company_quarterly_bas' || key === 'is_sole_trader')
+        && !state.companyTrackingEnabled;
+      if (shouldHideCompanyDependent) return;
+
+      const groupId = config.group || 'other';
+      const group = ensureGroup(groupId);
+      const item = {
+        key,
+        enabled: !!(stateMeta && stateMeta.enabled),
+        name: config.name || (stateMeta && stateMeta.name) || key,
+        description: config.description || (stateMeta && stateMeta.description) || '',
+        order: config.order != null ? config.order : 0
+      };
+      group.items.push(item);
+    };
+
+    Object.keys(DEFAULT_FEATURE_FLAGS).forEach((key) => {
+      const config = DEFAULT_FEATURE_FLAGS[key];
+      const stateMeta = rawFlags[key];
+      addFlagToGroup(key, config, stateMeta);
+      processed.add(key);
     });
-    if (!entries.length) {
+
+    Object.keys(rawFlags).forEach((key) => {
+      if (processed.has(key)) return;
+      const stateMeta = rawFlags[key] || {};
+      const fallbackConfig = {
+        name: (stateMeta && stateMeta.name) || key,
+        description: (stateMeta && stateMeta.description) || '',
+        order: 1000,
+        group: 'other'
+      };
+      addFlagToGroup(key, fallbackConfig, stateMeta);
+    });
+
+    const groupList = Object.values(groups).filter((group) => group.items.length > 0);
+    groupList.sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.title.localeCompare(b.title);
+    });
+
+    if (featureFlagCollapseControls) {
+      featureFlagCollapseControls.style.display = groupList.length ? 'flex' : 'none';
+    }
+
+    if (!groupList.length) {
       const empty = document.createElement('div');
       empty.className = 'ts-note';
       empty.textContent = 'No feature flags configured.';
       featureFlagsListEl.appendChild(empty);
       return;
     }
-    entries.forEach((flag) => {
-      const row = document.createElement('div');
-      row.className = 'ts-flag-row';
 
-      const meta = document.createElement('div');
-      meta.className = 'ts-flag-meta';
-      meta.innerHTML = `<div class="ts-flag-title">${flag.name}</div>` + (flag.description ? `<div class="ts-flag-desc">${flag.description}</div>` : '');
+    const toggleGroup = (groupId) => {
+      const current = !!state.featureFlagCollapse[groupId];
+      state.featureFlagCollapse[groupId] = !current;
+      saveCache();
+      renderFeatureFlags();
+    };
 
-      const toggleLabel = document.createElement('label');
-      toggleLabel.className = 'ts-toggle';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = flag.enabled;
-      input.dataset.flag = flag.key;
-      input.setAttribute('aria-label', flag.name);
-      const track = document.createElement('span');
-      track.className = 'ts-toggle-track';
-      const thumb = document.createElement('span');
-      thumb.className = 'ts-toggle-thumb';
-      track.appendChild(thumb);
-      toggleLabel.appendChild(input);
-      toggleLabel.appendChild(track);
-
-      input.addEventListener('change', () => {
-        if (!!state.featureFlags[flag.key]?.enabled === input.checked) return;
-        updateFeatureFlag(flag.key, input.checked);
+    groupList.forEach((group) => {
+      group.items.sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order;
+        return a.name.localeCompare(b.name);
       });
 
-      row.append(meta, toggleLabel);
-      featureFlagsListEl.appendChild(row);
+      const container = document.createElement('div');
+      container.className = 'ts-flag-group';
+
+      const header = document.createElement('div');
+      header.className = 'ts-flag-group-header';
+      header.setAttribute('role', 'button');
+      header.setAttribute('tabindex', '0');
+
+      const collapsed = !!state.featureFlagCollapse[group.id];
+      header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+
+      const titleWrapper = document.createElement('div');
+      titleWrapper.className = 'ts-flag-group-header-title';
+      const title = document.createElement('span');
+      title.textContent = group.title;
+      titleWrapper.appendChild(title);
+
+      const count = document.createElement('span');
+      count.className = 'ts-flag-group-count';
+      count.textContent = `${group.items.length} item${group.items.length === 1 ? '' : 's'}`;
+      titleWrapper.appendChild(count);
+
+      const toggle = document.createElement('span');
+      toggle.className = 'ts-flag-group-toggle';
+      toggle.textContent = collapsed ? '▶' : '▼';
+
+      header.appendChild(titleWrapper);
+      header.appendChild(toggle);
+      header.addEventListener('click', () => toggleGroup(group.id));
+      header.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleGroup(group.id);
+        }
+      });
+
+      container.appendChild(header);
+
+      const bodyId = `feature-flag-group-${group.id}`;
+      header.setAttribute('aria-controls', bodyId);
+
+      const body = document.createElement('div');
+      body.className = 'ts-flag-group-body';
+      body.id = bodyId;
+      body.style.display = collapsed ? 'none' : 'block';
+
+      group.items.forEach((flag) => {
+        const row = document.createElement('div');
+        row.className = 'ts-flag-row';
+
+        const meta = document.createElement('div');
+        meta.className = 'ts-flag-meta';
+        meta.innerHTML = `<div class="ts-flag-title">${flag.name}</div>` + (flag.description ? `<div class="ts-flag-desc">${flag.description}</div>` : '');
+
+        const toggleLabel = document.createElement('label');
+        toggleLabel.className = 'ts-toggle';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = flag.enabled;
+        input.dataset.flag = flag.key;
+        input.setAttribute('aria-label', flag.name);
+        const track = document.createElement('span');
+        track.className = 'ts-toggle-track';
+        const thumb = document.createElement('span');
+        thumb.className = 'ts-toggle-thumb';
+        track.appendChild(thumb);
+        toggleLabel.appendChild(input);
+        toggleLabel.appendChild(track);
+
+        input.addEventListener('change', () => {
+          if (!!state.featureFlags[flag.key]?.enabled === input.checked) return;
+          updateFeatureFlag(flag.key, input.checked);
+        });
+
+        row.append(meta, toggleLabel);
+        body.appendChild(row);
+      });
+
+      container.appendChild(body);
+      featureFlagsListEl.appendChild(container);
     });
   }
 
   function updateFeatureFlag(featureKey, enabled) {
     const toggleInput = featureFlagsListEl ? featureFlagsListEl.querySelector(`input[data-flag="${featureKey}"]`) : null;
     if (toggleInput) toggleInput.disabled = true;
-    const currentMeta = state.featureFlags[featureKey] || DEFAULT_FEATURE_FLAGS[featureKey] || { name: featureKey, description: '' };
+    const defaultMeta = DEFAULT_FEATURE_FLAGS[featureKey];
+    const currentMeta = state.featureFlags[featureKey] || {
+      name: defaultMeta ? defaultMeta.name : featureKey,
+      description: defaultMeta ? defaultMeta.description : '',
+      enabled: false
+    };
     setStatus('Updating feature flags...', 'warn');
     google.script.run
       .withSuccessHandler((res) => {
@@ -7748,9 +7951,7 @@ function updateDeductionFormVisibility() {
       })
       .api_setFeatureFlag({
         feature: featureKey,
-        enabled: enabled,
-        name: currentMeta.name || featureKey,
-        description: currentMeta.description || ''
+        enabled: enabled
       });
   }
 

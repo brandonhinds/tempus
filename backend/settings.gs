@@ -1,5 +1,5 @@
 /** Settings / Projects / Feature Flags API */
-var FEATURE_FLAG_CACHE_KEY = 'feature_flags_v1';
+var FEATURE_FLAG_CACHE_KEY = 'feature_flags_v2';
 function api_getSettings() {
   var key = 'settings';
   var cached = cacheGet(key);
@@ -55,19 +55,11 @@ function api_getFeatureFlags() {
     var headers = values[0];
     var featureIdx = headers.indexOf('feature');
     var enabledIdx = headers.indexOf('enabled');
-    var nameIdx = headers.indexOf('name');
-    var descriptionIdx = headers.indexOf('description');
     values.slice(1).forEach(function(row) {
       var feature = featureIdx === -1 ? '' : String(row[featureIdx] || '').trim();
       if (!feature) return;
       var enabled = enabledIdx === -1 ? false : parseBoolean(row[enabledIdx]);
-      var name = nameIdx === -1 ? '' : String(row[nameIdx] || '').trim();
-      var description = descriptionIdx === -1 ? '' : String(row[descriptionIdx] || '').trim();
-      result[feature] = {
-        enabled: enabled,
-        name: name || feature,
-        description: description
-      };
+      result[feature] = { enabled: enabled };
     });
   }
   cacheSet(FEATURE_FLAG_CACHE_KEY, result);
@@ -83,15 +75,20 @@ function api_setFeatureFlag(payload) {
     throw new Error('Feature identifier is required.');
   }
   var enabled = parseBoolean(payload.enabled);
-  var name = payload.name != null ? String(payload.name) : feature;
-  var description = payload.description != null ? String(payload.description) : '';
   var sh = getOrCreateSheet('feature_flags');
   var values = sh.getDataRange().getValues();
-  var headers = values.length ? values[0] : ['feature','enabled','name','description'];
+  if (!values.length) {
+    sh.getRange(1, 1, 1, 2).setValues([['feature', 'enabled']]);
+    values = sh.getDataRange().getValues();
+  }
+  var headers = values.length ? values[0] : ['feature','enabled'];
+  if (headers.indexOf('feature') === -1 || headers.indexOf('enabled') === -1) {
+    sh.getRange(1, 1, 1, 2).setValues([['feature', 'enabled']]);
+    values = sh.getDataRange().getValues();
+    headers = values[0];
+  }
   var featureIdx = headers.indexOf('feature');
   var enabledIdx = headers.indexOf('enabled');
-  var nameIdx = headers.indexOf('name');
-  var descriptionIdx = headers.indexOf('description');
   var targetRow = -1;
   for (var i = 1; i < values.length; i++) {
     if (featureIdx !== -1 && String(values[i][featureIdx]).trim() === feature) {
@@ -99,13 +96,7 @@ function api_setFeatureFlag(payload) {
       break;
     }
   }
-  var rowValues = headers.map(function(header) {
-    if (header === 'feature') return feature;
-    if (header === 'enabled') return enabled ? 'TRUE' : 'FALSE';
-    if (header === 'name') return name || feature;
-    if (header === 'description') return description;
-    return '';
-  });
+  var rowValues = [feature, enabled ? 'TRUE' : 'FALSE'];
   if (targetRow === -1) {
     sh.appendRow(rowValues);
   } else {
