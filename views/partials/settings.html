@@ -31,13 +31,6 @@
             </div>
           </div>
         </div>
-        <div>
-          <label for="set-super-rate">Superannuation rate (%)</label>
-          <div class="ts-note">The government mandated superannuation guarantee percentage. In the future this will be configurable by financial year. At the time of writing this should be set to "12".</div>
-          <div class="ts-settings-field">
-            <input type="number" id="set-super-rate" min="0" step="0.1" />
-          </div>
-        </div>
         <div id="lost-super-recovery-col" style="display:none;">
           <label for="set-lost-super-recovery-mode">Lost super recovery method <span class="ts-info-icon" title="How the superannuation normally lost to deductions being reclaimed. Options include adding the amount back to superannuation as an extra contribution, or adding it to income so it flows through tax and net income.">i</span></label>
           <div class="ts-note">How the superannuation normally lost to deductions being reclaimed. Options include adding the amount directly back to superannuation as an extra contribution, or having the money added back as additional income so it gets distributed between superannuation, tax, and net income.</div>
@@ -100,9 +93,12 @@
           </div>
         </div>
       </div>
-      <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; gap:8px;">
-        <button class="ghost" id="btn-discard-settings" style="display:none;">Discard Changes</button>
-        <button id="btn-save-settings" disabled>Save Settings</button>
+      <div style="margin-top:8px; text-align:right; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <button type="button" id="btn-super-guarantee-rates" class="secondary" style="white-space: nowrap;">Super Guarantee Percentages</button>
+        <div style="display:flex; gap:8px;">
+          <button class="ghost" id="btn-discard-settings" style="display:none;">Discard Changes</button>
+          <button id="btn-save-settings" disabled>Save Settings</button>
+        </div>
       </div>
       <div style="margin-top:32px;">
         <h3 style="margin:0 0 12px;">Feature Flags</h3>
@@ -161,6 +157,39 @@
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-cancel-custom-theme">Cancel</button>
       <button id="btn-save-custom-theme">Save Theme</button>
+    </div>
+  </div>
+</div>
+
+<!-- Super Guarantee Rates Modal -->
+<div class="ts-modal" id="modal-super-guarantee-rates" style="display:none;">
+  <div class="ts-modal-content" style="max-width:800px;">
+    <div class="ts-modal-header">
+      <h3>Super Guarantee Percentages</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-note" style="margin-bottom: 16px;">
+        Manage superannuation guarantee rates by date range. Rates are sorted by start date with the most recent at the top.
+        <strong>Warning:</strong> Only one rate should have no end date (the current rate).
+      </div>
+      <div style="margin-bottom:12px;">
+        <button type="button" id="btn-add-super-rate" class="secondary">Add Rate</button>
+      </div>
+      <div style="display:grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap:8px; padding:8px; font-weight:600; border-bottom:2px solid var(--border-color);">
+        <span></span>
+        <span>Start Date</span>
+        <span>End Date</span>
+        <span>Percentage (%)</span>
+        <span></span>
+      </div>
+      <div id="super-rates-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <!-- Rates will be rendered here -->
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-super-rates">Cancel</button>
+      <button id="btn-save-super-rates">Save Rates</button>
     </div>
   </div>
 </div>

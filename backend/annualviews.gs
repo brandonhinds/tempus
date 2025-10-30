@@ -244,16 +244,14 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     return entryDate.getFullYear() === year && entryDate.getMonth() === month;
   });
 
+  // Get super guarantee rate for this month (use first day of month)
+  var monthDate = new Date(year, month, 1);
+  var dateStr = monthDate.toISOString().substring(0, 10);
+  var superRate = getSuperGuaranteeRate(dateStr);
+
   // Get settings
   var settingsSheet = getOrCreateSheet('user_settings');
   var settingsData = settingsSheet.getDataRange().getValues();
-  var superRate = 0.12; // default 12%
-  for (var i = 1; i < settingsData.length; i++) {
-    if (settingsData[i][0] === 'superannuation_rate') {
-      superRate = Number(settingsData[i][1]) / 100;
-      break;
-    }
-  }
 
   // Calculate income by contract (using contract-filtered entries)
   var contractIncome = {};

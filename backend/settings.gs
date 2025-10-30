@@ -252,3 +252,102 @@ function api_deleteEntryDefault(type, name) {
 
   return { success: true, defaults: defaults };
 }
+
+/** Super Guarantee Rates API */
+var SUPER_RATES_CACHE_KEY = 'super_guarantee_rates';
+var DEFAULT_SUPER_GUARANTEE_RATES = [
+  { start_date: '2002-07-01', end_date: '2013-06-30', percentage: 9.00 },
+  { start_date: '2013-07-01', end_date: '2014-06-30', percentage: 9.25 },
+  { start_date: '2014-07-01', end_date: '2021-06-30', percentage: 9.50 },
+  { start_date: '2021-07-01', end_date: '2022-06-30', percentage: 10.00 },
+  { start_date: '2022-07-01', end_date: '2023-06-30', percentage: 10.50 },
+  { start_date: '2023-07-01', end_date: '2024-06-30', percentage: 11.00 },
+  { start_date: '2024-07-01', end_date: '2025-06-30', percentage: 11.50 },
+  { start_date: '2025-07-01', end_date: null, percentage: 12.00 }
+];
+
+function api_getSuperGuaranteeRates() {
+  var cached = cacheGet(SUPER_RATES_CACHE_KEY);
+  if (cached) return cached;
+
+  var settings = api_getSettings();
+  var ratesJson = settings.super_guarantee_rates || null;
+
+  var rates;
+  if (!ratesJson) {
+    rates = DEFAULT_SUPER_GUARANTEE_RATES;
+  } else {
+    try {
+      rates = JSON.parse(ratesJson);
+      if (!Array.isArray(rates)) {
+        rates = DEFAULT_SUPER_GUARANTEE_RATES;
+      }
+    } catch (e) {
+      rates = DEFAULT_SUPER_GUARANTEE_RATES;
+    }
+  }
+
+  cacheSet(SUPER_RATES_CACHE_KEY, rates);
+  return rates;
+}
+
+function api_setSuperGuaranteeRates(rates) {
+  if (!Array.isArray(rates)) {
+    throw new Error('Rates must be an array.');
+  }
+
+  // Validate each rate
+  for (var i = 0; i < rates.length; i++) {
+    var rate = rates[i];
+    if (!rate.start_date) {
+      throw new Error('Each rate must have a start_date.');
+    }
+    if (typeof rate.percentage !== 'number' || rate.percentage < 0) {
+      throw new Error('Each rate must have a valid non-negative percentage.');
+    }
+  }
+
+  var settingsUpdate = {};
+  settingsUpdate.super_guarantee_rates = JSON.stringify(rates);
+  api_updateSettings(settingsUpdate);
+
+  cacheClearPrefix(SUPER_RATES_CACHE_KEY);
+  return { success: true, rates: api_getSuperGuaranteeRates() };
+}
+
+function getSuperGuaranteeRate(targetDate) {
+  var rates = api_getSuperGuaranteeRates();
+
+  // Parse target date as yyyy-MM-dd
+  var targetStr = String(targetDate).substring(0, 10);
+
+  var matchingRates = [];
+  for (var i = 0; i < rates.length; i++) {
+    var rate = rates[i];
+    var startDate = String(rate.start_date).substring(0, 10);
+    var endDate = rate.end_date ? String(rate.end_date).substring(0, 10) : null;
+
+    // Check if target date falls within this rate's range
+    if (targetStr >= startDate) {
+      if (endDate === null || targetStr <= endDate) {
+        matchingRates.push(rate);
+      }
+    }
+  }
+
+  if (matchingRates.length === 0) {
+    // No matching rate found, return 12% as fallback
+    return 0.12;
+  }
+
+  // If multiple matches, use the one with the most recent start date
+  if (matchingRates.length > 1) {
+    matchingRates.sort(function(a, b) {
+      return String(b.start_date).localeCompare(String(a.start_date));
+    });
+  }
+
+  var percentage = matchingRates[0].percentage;
+  // Convert percentage to decimal (e.g., 12 -> 0.12)
+  return percentage > 1 ? percentage / 100 : percentage;
+}

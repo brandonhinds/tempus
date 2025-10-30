@@ -766,6 +766,65 @@
     return DEFAULT_SUPER_RATE;
   };
   const getSuperRatePercentage = () => Math.round(getSuperRateSetting() * 1000) / 10;
+
+  // Super Guarantee Rates Cache Functions
+  const cacheSuperGuaranteeRates = (rates) => {
+    try {
+      localStorage.setItem('super_guarantee_rates', JSON.stringify(rates));
+    } catch (e) {
+      console.warn('Failed to cache super guarantee rates:', e);
+    }
+  };
+
+  const getCachedSuperGuaranteeRates = () => {
+    try {
+      const cached = localStorage.getItem('super_guarantee_rates');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Get super guarantee rate for a specific date
+  const getSuperGuaranteeRateForDate = (targetDate) => {
+    const cached = getCachedSuperGuaranteeRates();
+    const rates = cached || [];
+
+    if (rates.length === 0) {
+      // Fallback to old setting or default
+      return getSuperRateSetting();
+    }
+
+    // Parse target date as yyyy-MM-dd
+    const targetStr = String(targetDate).substring(0, 10);
+
+    const matchingRates = [];
+    for (const rate of rates) {
+      const startDate = String(rate.start_date).substring(0, 10);
+      const endDate = rate.end_date ? String(rate.end_date).substring(0, 10) : null;
+
+      // Check if target date falls within this rate's range
+      if (targetStr >= startDate) {
+        if (endDate === null || targetStr <= endDate) {
+          matchingRates.push(rate);
+        }
+      }
+    }
+
+    if (matchingRates.length === 0) {
+      // No matching rate found, return default
+      return DEFAULT_SUPER_RATE;
+    }
+
+    // If multiple matches, use the one with the most recent start date
+    if (matchingRates.length > 1) {
+      matchingRates.sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
+    }
+
+    const percentage = matchingRates[0].percentage;
+    // Convert percentage to decimal (e.g., 12 -> 0.12)
+    return percentage > 1 ? percentage / 100 : percentage;
+  };
   const sanitizeSuperRateInputValue = (value) => {
     const num = Number(value);
     if (Number.isFinite(num) && num >= 0) return Math.round(num * 10) / 10;
@@ -3246,8 +3305,19 @@ function createDeductionCard(deduction, options = {}) {
 
     const expenseBadge = document.createElement('span');
     expenseBadge.className = 'ts-badge';
+    const isUnusedCompanyExpense = deduction.company_expense && !state.companyTrackingEnabled;
     expenseBadge.textContent = deduction.company_expense ? 'Company expense' : 'Salary sacrifice';
     header.appendChild(expenseBadge);
+
+    // Add prominent warning indicator for unused company expenses
+    if (isUnusedCompanyExpense) {
+      const warningBadge = document.createElement('span');
+      warningBadge.className = 'ts-badge';
+      warningBadge.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle;"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg> Not used in calculations';
+      warningBadge.style.cssText = 'background:var(--warning)20; color:var(--warning); border:1px solid var(--warning); font-weight:600;';
+      warningBadge.title = 'Company expense tracking is disabled. This deduction is not included in any income calculations while the "Enable company income tracking" feature flag is disabled.';
+      header.appendChild(warningBadge);
+    }
 
     if (deduction.deduction_type === 'extra_super') {
       const typeBadge = document.createElement('span');
@@ -5735,27 +5805,33 @@ function updateDeductionFormVisibility() {
     const entryId = state.punchDraft.entryId;
     const currentDate = state.punchDraft.date;
 
+    // Optimistic delete: Remove from local state immediately
+    const idx = state.entries.findIndex(e => e.id === entryId);
+    if (idx === -1) return;
+
+    const backup = state.entries[idx];
+    state.entries.splice(idx, 1);
+
+    // Clear punch draft and start fresh
+    state.punchDraft = null;
+    if (punchDate) punchDate.value = currentDate;
+    ensurePunchDraft();
+
+    saveCache();
+    renderEntries();
+    updateTabStates();
     setStatus('Deleting entry...', 'warn');
 
     google.script.run
       .withSuccessHandler(() => {
-        // Remove from local state
-        const idx = state.entries.findIndex(e => e.id === entryId);
-        if (idx > -1) {
-          state.entries.splice(idx, 1);
-        }
-
-        // Clear punch draft and start fresh
-        state.punchDraft = null;
-        if (punchDate) punchDate.value = currentDate;
-        ensurePunchDraft();
-
-        saveCache();
-        renderEntries();
-        updateTabStates();
         setStatus('Entry deleted', 'success');
       })
       .withFailureHandler(() => {
+        // Rollback: restore the entry
+        state.entries.splice(idx, 0, backup);
+        saveCache();
+        renderEntries();
+        updateTabStates();
         setStatus('Delete failed', 'error');
       })
       .api_deleteEntry(entryId);
@@ -6084,26 +6160,32 @@ function updateDeductionFormVisibility() {
       const entryId = state.editingEntryId;
       const currentDate = manualDate ? manualDate.value : todayIso();
 
+      // Optimistic delete: Remove from local state immediately
+      const idx = state.entries.findIndex(e => e.id === entryId);
+      if (idx === -1) return;
+
+      const backup = state.entries[idx];
+      state.entries.splice(idx, 1);
+
+      // Clear editing state and reset form
+      clearManualEditing();
+      setManualDate(currentDate);
+
+      saveCache();
+      renderEntries();
+      updateTabStates();
       setStatus('Deleting entry...', 'warn');
 
       google.script.run
         .withSuccessHandler(() => {
-          // Remove from local state
-          const idx = state.entries.findIndex(e => e.id === entryId);
-          if (idx > -1) {
-            state.entries.splice(idx, 1);
-          }
-
-          // Clear editing state and reset form
-          clearManualEditing();
-          setManualDate(currentDate);
-
-          saveCache();
-          renderEntries();
-          updateTabStates();
           setStatus('Entry deleted', 'success');
         })
         .withFailureHandler(() => {
+          // Rollback: restore the entry
+          state.entries.splice(idx, 0, backup);
+          saveCache();
+          renderEntries();
+          updateTabStates();
           setStatus('Delete failed', 'error');
         })
         .api_deleteEntry(entryId);
@@ -6250,7 +6332,6 @@ function updateDeductionFormVisibility() {
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
-  const superRateInput = document.getElementById('set-super-rate');
   const paygRateInput = document.getElementById('set-payg-rate');
   const paygRateCol = document.getElementById('payg-rate-col');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
@@ -8638,7 +8719,8 @@ function updateDeductionFormVisibility() {
       return hourType ? hourType.contributes_to_income : true; // Default to true for backwards compatibility
     });
     const periodStart = new Date(year, month, 1);
-    const superRate = getSuperRateSetting();
+    const periodStartStr = periodStart.toISOString().substring(0, 10);
+    const superRate = getSuperGuaranteeRateForDate(periodStartStr);
     let totalMinutes = 0;
     let totalHours = 0;
     let totalPackage = 0;
@@ -8698,8 +8780,8 @@ function updateDeductionFormVisibility() {
 
     const deductionTotals = computeMonthlyDeductionTotals(year, month);
     const salarySacrifice = deductionTotals.personalStandardTotal;
-    const companyExpenses = deductionTotals.companyStandardTotal;
-    const companyExpensesGst = deductionTotals.companyGstTotal;
+    const companyExpenses = state.companyTrackingEnabled ? deductionTotals.companyStandardTotal : 0;
+    const companyExpensesGst = state.companyTrackingEnabled ? deductionTotals.companyGstTotal : 0;
 
     const companyIncome = state.companyTrackingEnabled ? totalPackage : 0;
     const invoiceTotal = state.companyTrackingEnabled ? companyIncome * (1 + GST_RATE) : 0;
@@ -8858,9 +8940,18 @@ function updateDeductionFormVisibility() {
     if (incomeInvoiceTotalEl) incomeInvoiceTotalEl.textContent = formatCurrency(summary.invoiceTotal || 0);
     if (incomeCompanyIncomeEl) incomeCompanyIncomeEl.textContent = formatCurrency(summary.companyIncome || 0);
     if (incomeCompanyExpensesEl) incomeCompanyExpensesEl.textContent = formatCurrency(summary.companyExpenses || 0);
-    if (incomeInvoiceTotalRow) incomeInvoiceTotalRow.hidden = !state.companyTrackingEnabled;
-    if (incomeCompanyIncomeRow) incomeCompanyIncomeRow.hidden = !state.companyTrackingEnabled;
-    if (incomeCompanyExpensesRow) incomeCompanyExpensesRow.hidden = !state.companyTrackingEnabled;
+    if (incomeInvoiceTotalRow) {
+      incomeInvoiceTotalRow.hidden = !state.companyTrackingEnabled;
+      incomeInvoiceTotalRow.style.display = state.companyTrackingEnabled ? '' : 'none';
+    }
+    if (incomeCompanyIncomeRow) {
+      incomeCompanyIncomeRow.hidden = !state.companyTrackingEnabled;
+      incomeCompanyIncomeRow.style.display = state.companyTrackingEnabled ? '' : 'none';
+    }
+    if (incomeCompanyExpensesRow) {
+      incomeCompanyExpensesRow.hidden = !state.companyTrackingEnabled;
+      incomeCompanyExpensesRow.style.display = state.companyTrackingEnabled ? '' : 'none';
+    }
     if (incomeGrossEl) incomeGrossEl.textContent = formatCurrency(summary.grossIncome);
     if (incomeSuperGuaranteeEl) incomeSuperGuaranteeEl.textContent = formatCurrency(summary.superGuarantee);
     if (incomeSuperLostEl) incomeSuperLostEl.textContent = formatCurrency(summary.superLostDueToDeductions || 0);
@@ -10074,13 +10165,6 @@ function updateDeductionFormVisibility() {
       defaultValue: 'dark',
       event: 'change'
     },
-    superannuation_rate: {
-      element: () => superRateInput,
-      getValue: (el) => sanitizeSuperRateInputValue(el.value),
-      setValue: (el, val) => el.value = String(val),
-      defaultValue: () => Math.round(getSuperRateSetting() * 1000) / 10,
-      event: 'input'
-    },
     payg_instalment_rate: {
       element: () => paygRateInput,
       getValue: (el) => parseFloat(el.value) || 2,
@@ -10217,7 +10301,6 @@ function updateDeductionFormVisibility() {
       });
 
       applyTheme(next.theme);
-      if (superRateInput) superRateInput.value = String(next.superannuation_rate);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
       saveCache();
@@ -10322,6 +10405,13 @@ function updateDeductionFormVisibility() {
       })
       .withFailureHandler(() => {})
       .api_getSettings();
+    // Load super guarantee rates
+    google.script.run
+      .withSuccessHandler((rates) => {
+        cacheSuperGuaranteeRates(rates);
+      })
+      .withFailureHandler(() => {})
+      .api_getSuperGuaranteeRates();
     google.script.run
       .withSuccessHandler((contracts) => {
         state.contracts = (contracts || []).map(sanitizeContract);
@@ -14364,6 +14454,232 @@ function updateDeductionFormVisibility() {
     const closeBtn = modalCustomTheme.querySelector('.ts-modal-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', hideCustomThemeModal);
+    }
+  }
+
+  // Super Guarantee Rates Modal
+  const btnSuperGuaranteeRates = document.getElementById('btn-super-guarantee-rates');
+  const btnSaveSuperRates = document.getElementById('btn-save-super-rates');
+  const btnCancelSuperRates = document.getElementById('btn-cancel-super-rates');
+  const btnAddSuperRate = document.getElementById('btn-add-super-rate');
+  const modalSuperGuaranteeRates = document.getElementById('modal-super-guarantee-rates');
+  const superRatesList = document.getElementById('super-rates-list');
+
+  let superRatesWorkingCopy = [];
+
+  function loadSuperGuaranteeRates() {
+    google.script.run
+      .withSuccessHandler(function(rates) {
+        superRatesWorkingCopy = JSON.parse(JSON.stringify(rates || []));
+        cacheSuperGuaranteeRates(rates);
+        renderSuperRatesList();
+      })
+      .withFailureHandler(function(error) {
+        showNotification('Failed to load super guarantee rates: ' + error.message, 'danger');
+      })
+      .api_getSuperGuaranteeRates();
+  }
+
+  function detectOverlappingRates(rates) {
+    const overlapping = new Set();
+    for (let i = 0; i < rates.length; i++) {
+      for (let j = i + 1; j < rates.length; j++) {
+        const rate1 = rates[i];
+        const rate2 = rates[j];
+        const start1 = rate1.start_date;
+        const end1 = rate1.end_date || '9999-12-31';
+        const start2 = rate2.start_date;
+        const end2 = rate2.end_date || '9999-12-31';
+
+        // Check if date ranges overlap
+        if (start1 <= end2 && start2 <= end1) {
+          overlapping.add(i);
+          overlapping.add(j);
+        }
+      }
+    }
+    return overlapping;
+  }
+
+  function renderSuperRatesList() {
+    if (!superRatesList) return;
+
+    // Sort by start date descending (most recent first)
+    const sorted = [...superRatesWorkingCopy].sort((a, b) => {
+      return (b.start_date || '').localeCompare(a.start_date || '');
+    });
+
+    const overlapping = detectOverlappingRates(sorted);
+    const noEndDateCount = sorted.filter(r => !r.end_date).length;
+
+    superRatesList.innerHTML = '';
+
+    sorted.forEach((rate, index) => {
+      const hasOverlap = overlapping.has(index);
+      const rateDiv = document.createElement('div');
+      rateDiv.style.cssText = 'display:grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap:8px; align-items:center; padding:8px; border:1px solid var(--border-color); border-radius:4px;';
+
+      // Warning icon
+      const warnIcon = document.createElement('span');
+      if (hasOverlap) {
+        warnIcon.textContent = '⚠️';
+        warnIcon.title = 'This rate overlaps with another rate';
+        warnIcon.style.cursor = 'help';
+      }
+      rateDiv.appendChild(warnIcon);
+
+      // Start date
+      const startInput = document.createElement('input');
+      startInput.type = 'date';
+      startInput.value = rate.start_date || '';
+      startInput.style.cssText = 'padding:4px;';
+      startInput.addEventListener('change', function() {
+        rate.start_date = this.value;
+        renderSuperRatesList(); // Re-render to update overlaps and sorting
+      });
+      rateDiv.appendChild(startInput);
+
+      // End date
+      const endInput = document.createElement('input');
+      endInput.type = 'date';
+      endInput.value = rate.end_date || '';
+      endInput.placeholder = 'No end date';
+      endInput.style.cssText = 'padding:4px;';
+      endInput.addEventListener('change', function() {
+        rate.end_date = this.value || null;
+        renderSuperRatesList(); // Re-render to check if multiple rates have no end date
+      });
+      rateDiv.appendChild(endInput);
+
+      // Percentage
+      const percentInput = document.createElement('input');
+      percentInput.type = 'number';
+      percentInput.value = rate.percentage ? rate.percentage.toFixed(2) : '';
+      percentInput.placeholder = '12.00';
+      percentInput.step = '0.01';
+      percentInput.min = '0';
+      percentInput.style.cssText = 'padding:4px;';
+      percentInput.addEventListener('change', function() {
+        const val = parseFloat(this.value) || 0;
+        rate.percentage = parseFloat(val.toFixed(2));
+        this.value = rate.percentage.toFixed(2);
+      });
+      rateDiv.appendChild(percentInput);
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'ghost';
+      deleteBtn.style.cssText = 'padding:4px 8px; white-space:nowrap;';
+      deleteBtn.addEventListener('click', function() {
+        superRatesWorkingCopy = superRatesWorkingCopy.filter(r => r !== rate);
+        renderSuperRatesList();
+      });
+      rateDiv.appendChild(deleteBtn);
+
+      superRatesList.appendChild(rateDiv);
+    });
+
+    // Show warning if multiple rates have no end date
+    if (noEndDateCount > 1) {
+      const warningDiv = document.createElement('div');
+      warningDiv.style.cssText = 'padding:8px; background:var(--danger-bg); color:var(--danger-text); border-radius:4px; margin-top:8px;';
+      warningDiv.textContent = `⚠️ Warning: ${noEndDateCount} rates have no end date. Only one rate should be open-ended (the current rate).`;
+      superRatesList.appendChild(warningDiv);
+    }
+  }
+
+  function showSuperGuaranteeRatesModal() {
+    if (!modalSuperGuaranteeRates) return;
+
+    // Load rates (from cache first, then server)
+    const cached = getCachedSuperGuaranteeRates();
+    if (cached) {
+      superRatesWorkingCopy = JSON.parse(JSON.stringify(cached));
+      renderSuperRatesList();
+    }
+
+    loadSuperGuaranteeRates();
+    modalSuperGuaranteeRates.style.display = 'flex';
+  }
+
+  function hideSuperGuaranteeRatesModal() {
+    if (modalSuperGuaranteeRates) {
+      modalSuperGuaranteeRates.style.display = 'none';
+    }
+  }
+
+  function saveSuperGuaranteeRates() {
+    // Validate rates
+    for (const rate of superRatesWorkingCopy) {
+      if (!rate.start_date) {
+        showNotification('All rates must have a start date', 'danger');
+        return;
+      }
+      if (typeof rate.percentage !== 'number' || rate.percentage < 0) {
+        showNotification('All rates must have a valid percentage', 'danger');
+        return;
+      }
+    }
+
+    btnSaveSuperRates.disabled = true;
+    btnSaveSuperRates.textContent = 'Saving...';
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        btnSaveSuperRates.disabled = false;
+        btnSaveSuperRates.textContent = 'Save Rates';
+        showNotification('Super guarantee rates saved successfully', 'success');
+        cacheSuperGuaranteeRates(response.rates);
+        hideSuperGuaranteeRatesModal();
+      })
+      .withFailureHandler(function(error) {
+        btnSaveSuperRates.disabled = false;
+        btnSaveSuperRates.textContent = 'Save Rates';
+        showNotification('Failed to save super guarantee rates: ' + error.message, 'danger');
+      })
+      .api_setSuperGuaranteeRates(superRatesWorkingCopy);
+  }
+
+  function addNewSuperRate() {
+    const today = new Date().toISOString().substring(0, 10);
+    const newRate = {
+      start_date: today,
+      end_date: null,
+      percentage: 12.00
+    };
+    superRatesWorkingCopy.push(newRate);
+    renderSuperRatesList();
+  }
+
+  if (btnSuperGuaranteeRates) {
+    btnSuperGuaranteeRates.addEventListener('click', showSuperGuaranteeRatesModal);
+  }
+
+  if (btnAddSuperRate) {
+    btnAddSuperRate.addEventListener('click', addNewSuperRate);
+  }
+
+  if (btnSaveSuperRates) {
+    btnSaveSuperRates.addEventListener('click', saveSuperGuaranteeRates);
+  }
+
+  if (btnCancelSuperRates) {
+    btnCancelSuperRates.addEventListener('click', hideSuperGuaranteeRatesModal);
+  }
+
+  // Close modal when clicking outside
+  if (modalSuperGuaranteeRates) {
+    modalSuperGuaranteeRates.addEventListener('click', function(e) {
+      if (e.target === modalSuperGuaranteeRates) {
+        hideSuperGuaranteeRatesModal();
+      }
+    });
+
+    // Close modal on X button
+    const closeBtnSuper = modalSuperGuaranteeRates.querySelector('.ts-modal-close');
+    if (closeBtnSuper) {
+      closeBtnSuper.addEventListener('click', hideSuperGuaranteeRatesModal);
     }
   }
 

@@ -197,7 +197,6 @@ function api_getContractRatePreview(payload) {
   var baseRate = roundToTwo(Number(contract.hourly_rate || 0));
   var scenarioRate = computeScenarioRate(baseRate, payload);
   var percentChange = normalizePercentChange(baseRate, scenarioRate);
-  var superRate = getSuperRateFromSettings();
 
   var entries = api_getEntries({});
   var aggregation = aggregateContractEntries(contract, entries);
@@ -219,6 +218,8 @@ function api_getContractRatePreview(payload) {
     var currentPackage = roundToTwo(roundedHours * baseRate);
     var scenarioPackage = roundToTwo(roundedHours * scenarioRate);
     var monthIso = monthKey + '-01';
+    // Get super rate for this specific month
+    var superRate = getSuperGuaranteeRate(monthIso);
     var currentGrossRaw = deriveGrossFromPackage(currentPackage, superRate);
     var scenarioGrossRaw = deriveGrossFromPackage(scenarioPackage, superRate);
     var currentGross = roundToTwo(currentGrossRaw);
@@ -318,17 +319,19 @@ function api_getContractRatePreview(payload) {
   var todayIso = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
 
   if (contractCap > 0) {
+    // Get super rate for today for potential calculations
+    var potentialSuperRate = getSuperGuaranteeRate(todayIso);
     potentialPackageCurrent = roundToTwo(contractCap * baseRate);
     potentialPackageScenario = roundToTwo(contractCap * scenarioRate);
-    potentialGrossCurrent = roundToTwo(deriveGrossFromPackage(potentialPackageCurrent, superRate));
-    potentialGrossScenario = roundToTwo(deriveGrossFromPackage(potentialPackageScenario, superRate));
+    potentialGrossCurrent = roundToTwo(deriveGrossFromPackage(potentialPackageCurrent, potentialSuperRate));
+    potentialGrossScenario = roundToTwo(deriveGrossFromPackage(potentialPackageScenario, potentialSuperRate));
     potentialGrossVariance = roundToTwo(potentialGrossScenario - potentialGrossCurrent);
     potentialGrossVariancePct = potentialGrossCurrent !== 0
       ? Math.round((potentialGrossVariance / potentialGrossCurrent) * 10000) / 100
       : null;
 
-    potentialSuperCurrent = roundToTwo(potentialGrossCurrent * superRate);
-    potentialSuperScenario = roundToTwo(potentialGrossScenario * superRate);
+    potentialSuperCurrent = roundToTwo(potentialGrossCurrent * potentialSuperRate);
+    potentialSuperScenario = roundToTwo(potentialGrossScenario * potentialSuperRate);
     potentialSuperVariance = roundToTwo(potentialSuperScenario - potentialSuperCurrent);
     potentialSuperVariancePct = potentialSuperCurrent !== 0
       ? Math.round((potentialSuperVariance / potentialSuperCurrent) * 10000) / 100
