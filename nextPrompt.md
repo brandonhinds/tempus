@@ -48,6 +48,8 @@
 - Fix the theme not being honoured sometimes on refresh.
 
 - Add the easter easter egg. Add a Konami Code.
+    * Add cool neon theme as easter egg?
+    * Can we implement brick breaker using the CSS elements as bricks?
 
 - Implement some sort of loading screen. Can we expand on that cool CSS box?
 
@@ -60,6 +62,14 @@
 - Add Koffee link
 
 - Update the Favicon to something real (especially important because we cannot set the tab title without the pop-up issue)
+
+- Move the punch in/out button down next to Add Entry
+
+- Improve custom theme implementation
+    * Add constraints or auto-generated supporting shades (derived lighter/darker variants) to maintain readability.
+    * Provide preview indicators (contrast checks) when users pick low-contrast palettes.
+
+- Move super, super lost, deductions, and tax back in line with gross/net income on annual sheet
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
