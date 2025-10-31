@@ -2918,11 +2918,8 @@
 
     const hourTypeBreakdown = state.annualData.hourTypeBreakdown;
     if (!hourTypeBreakdown || hourTypeBreakdown.length === 0) {
-      console.log('No hour type breakdown data available', state.annualData);
       return;
     }
-
-    console.log('Rendering hour types pie chart with data:', hourTypeBreakdown);
 
     const labels = hourTypeBreakdown.map(ht => ht.hourTypeName);
     const hours = hourTypeBreakdown.map(ht => ht.hours);
@@ -11003,10 +11000,8 @@ function updateDeductionFormVisibility() {
       .api_getDeductions();
     google.script.run
       .withSuccessHandler((actualIncome) => {
-        console.log('[ActualIncome] Loaded from server:', actualIncome);
         state.actualIncome = actualIncome || [];
         refreshActualIncomeMap();
-        console.log('[ActualIncome] Map:', state.actualIncomeMap);
         saveCache();
         renderIncomeSummary();
       })

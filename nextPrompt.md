@@ -35,14 +35,13 @@
 ## Medium Changes
 
 - Add new light-weight page that loads extremely quickly, that is only used to edit time for that day
+    * Maybe this can be part of the mobile-centric design, as it will be most likely used on mobile devices after work.
 
 - Projected monthly hours updates:
     * The projected variance needs to account for leave/other inputs
         * Project income based on "standard hours" (make standard hours a setting)
     * Add report that shows your hour variance to the current date vs the expected burndown up to that point on the contract screen
     * Add ability to assume a regular number of hours worked for the rest of the month in the monthly insights view
-
-- *GEOFF REQUEST* The ability to print/save to PDF the month's timesheet, including any hour types indicated to be included. The work hour's should be obvious (e.g. bold). This view also needs to include a summary of the total number of hours for each type for the month, in a way that can be sent to the client for review.
 
 ## Small Changes
 
@@ -61,14 +60,6 @@
 - Add Koffee link
 
 - Update the Favicon to something real (especially important because we cannot set the tab title without the pop-up issue)
-
-- Remove the `[Actual Income]` debugging in the console log
-
-- Remove the `Rendering hour types pie chart with data` debugging in the console log of the annual view
-
-- Make settings fields align vertically. They do for the first row, but then none of the others.
-
-- Remove the info icon on suggested minimum end time, now that we have subtext to explain it.
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
