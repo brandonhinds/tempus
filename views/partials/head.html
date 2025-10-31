@@ -13,6 +13,7 @@
     --primary: #3b82f6;
     --primary-600: #2563eb;
     --danger: #ef4444;
+    --warning: #f59e0b;
     --success: #10b981;
     --border: #1e293b;
     --badge-bg: var(--panel);
@@ -51,6 +52,7 @@
     --primary: #2563eb;
     --primary-600: #1d4ed8;
     --danger: #dc2626;
+    --warning: #d97706;
     --success: #059669;
     --border: #d1d5db;
     --badge-bg: #f1f5f9;
@@ -89,6 +91,7 @@
     --primary: #d16b86;
     --primary-600: #c25675;
     --danger: #d94862;
+    --warning: #f0a95c;
     --success: #a85a7d;
     --border: #f2c9d6;
     --badge-bg: #ffe9f0;
@@ -127,6 +130,7 @@
     --primary: #f97316;
     --primary-600: #ea580c;
     --danger: #f05252;
+    --warning: #fbbf24;
     --success: #22d3ee;
     --border: #1b3a5a;
     --badge-bg: #0f2740;
@@ -165,6 +169,7 @@
     --primary: #ff8c00;
     --primary-600: #e67e00;
     --danger: #d32f2f;
+    --warning: #ffa726;
     --success: #4caf50;
     --border: #1a2f18;
     --badge-bg: var(--panel);
@@ -203,6 +208,7 @@
     --primary: #00b4d8;
     --primary-600: #0096c7;
     --danger: #ff6b35;
+    --warning: #ffb703;
     --success: #06d6a0;
     --border: #1e3a52;
     --badge-bg: var(--panel);
@@ -241,6 +247,7 @@
     --primary: #8b5cf6;
     --primary-600: #7c3aed;
     --danger: #fb923c;
+    --warning: #fde047;
     --success: #00b4d8;
     --border: #3d2a57;
     --badge-bg: var(--panel);
@@ -279,6 +286,7 @@
     --primary: #ec4899;
     --primary-600: #db2777;
     --danger: #ef4444;
+    --warning: #f472b6;
     --success: #06d6a0;
     --border: #3d2a3d;
     --badge-bg: var(--panel);
@@ -317,6 +325,7 @@
     --primary: #d4d4d4;
     --primary-600: #b8b8b8;
     --danger: #7a7a7a;
+    --warning: #b3b3b3;
     --success: #c4c4c4;
     --border: #2d2d2d;
     --badge-bg: var(--panel);
@@ -402,7 +411,7 @@
   .ts-toggle input:checked + .ts-toggle-track .ts-toggle-thumb { transform: translateX(18px); }
   .ts-toggle input:disabled + .ts-toggle-track { opacity:0.5; cursor:not-allowed; }
   .ts-toggle input:focus-visible + .ts-toggle-track { outline:2px solid var(--primary); outline-offset:2px; }
-  .ts-muted { color: var(--muted); font-size: 12px; }
+  .ts-muted { color: var(--muted); }
   .ts-toolbar { display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; }
   .ts-tabs { display:flex; gap:8px; margin-bottom:12px; }
   .ts-tab { padding:10px 14px; border:1px solid var(--border); border-radius:10px; background: var(--bg); cursor:pointer; color: var(--muted); }
@@ -411,12 +420,10 @@
   .ts-badge.success { background: var(--badge-success-bg); border-color: var(--badge-success-border); color: var(--badge-success-text); }
   .ts-badge.warn { background: var(--badge-warn-bg); border-color: var(--badge-warn-border); color: var(--badge-warn-text); }
   .ts-badge.error { background: var(--badge-error-bg); border-color: var(--badge-error-border); color: var(--badge-error-text); }
-  .ts-list { display:flex; flex-direction: column; gap:10px; }
+  .ts-badge--warn { background: var(--badge-warn-bg); border-color: var(--badge-warn-border); color: var(--badge-warn-text); }
+  .ts-list { display:flex; flex-direction: column; gap:10px; list-style:none; margin:0; padding:0; }
   .ts-item { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-  .ts-kpi { display:flex; gap:16px; }
-  .ts-kpi .box { flex:1; background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; }
-  .ts-kpi .value { font-size:28px; font-weight:700; }
-  .ts-note { font-size:12px; color: var(--muted); }
+  .ts-note { font-size:12px; color: var(--muted); margin:0; }
   .ts-income-breakdown { margin-top:12px; margin-bottom:12px; border-top:1px solid var(--border); padding-top:12px; display:grid; grid-template-columns:auto minmax(12ch, max-content) max-content; column-gap:16px; row-gap:8px; align-items:baseline; font-size:14px; }
   .ts-income-breakdown[hidden] { display:none; }
   .ts-income-divider { grid-column:1 / -1; height:1px; background:var(--border); margin:16px 0 8px; }
@@ -443,7 +450,6 @@
   .ts-income-row-label { color: var(--muted); white-space:nowrap; }
   .ts-income-row-actual { font-size:12px; color: var(--muted); white-space:nowrap; }
   .ts-income-row-est { font-weight:600; white-space:nowrap; justify-self:start; }
-  .ts-income-row-value { font-weight:600; }
   .ts-income-badge { cursor:pointer; }
   .ts-income-badge[data-expanded="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
   .ts-hour-types-badge { cursor:pointer; }
@@ -460,10 +466,13 @@
   .ts-payroll-week { margin-bottom:20px; }
   .ts-payroll-week-header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
   .ts-payroll-week-header h4 { margin:0; font-size:15px; font-weight:600; }
-  .ts-payroll-week-sub { color: var(--muted); font-size:12px; }
   .ts-payroll-total { font-weight:600; margin-top:12px; }
   .ts-payroll-table .ts-payroll-outside td { color: var(--muted); font-style:italic; }
   .ts-payroll-table th.ts-payroll-outside { color: var(--muted); font-style:italic; }
+  .ts-payroll-table-grid { width:100%; }
+  .ts-payroll-xero,
+  .ts-payroll-myob { margin-bottom:16px; }
+  .ts-myob-table { width:100%; border-collapse:collapse; }
   .ts-deduction-details { flex:1; display:flex; flex-direction:column; gap:6px; }
   .ts-deduction-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .ts-deduction-meta { font-size:12px; color: var(--muted); display:flex; flex-wrap:wrap; gap:16px; }
@@ -551,11 +560,6 @@
   .ts-calendar-holiday-label { font-size:11px; font-weight:400; color: var(--muted); margin-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ts-calendar-total { margin-top:auto; font-size:20px; font-weight:600; color: var(--text); }
   .ts-calendar-total.empty { color: var(--muted); font-weight:500; font-size:16px; }
-  .ts-calendar-detail { margin-top:12px; background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; display:none; }
-  .ts-calendar-detail.active { display:block; }
-  .ts-calendar-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-  .ts-calendar-detail-list { display:flex; flex-direction:column; gap:10px; }
-  .ts-calendar-detail-empty { font-size:12px; color: var(--muted); }
   .ts-logo-button { width:34px; height:34px; border-radius:8px; background: var(--primary); color:#fff; border:none; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
   .ts-logo-button:hover { transform: translateY(-1px); box-shadow:0 6px 14px rgba(15, 23, 42, 0.25); }
   .ts-logo-button:focus-visible { outline:2px solid var(--primary-soft-border); outline-offset:2px; }
@@ -565,9 +569,44 @@
   .ts-nav-menu[hidden] { display:none; }
   .ts-nav-menu button { width:100%; justify-content:flex-start; }
   .ts-warning { color: #f87171; font-size:12px; margin-top:6px; }
-  .ts-colorblind-warning { display:inline-flex; align-items:center; gap:4px; color: #f6ae2d; font-size:12px; margin-top:6px; }
-  .ts-colorblind-warning-icon { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:10px; border:1px solid #f6ae2d; border-radius:50%; color: #f6ae2d; line-height:1; }
-  .ts-hour-type-color-wrapper { display:flex; align-items:center; gap:8px; }
+  .ts-colorblind-warning { display:inline-flex; align-items:center; gap:4px; color: var(--warning); font-size:12px; margin-top:6px; }
+  .ts-colorblind-warning-icon { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:10px; border:1px solid var(--warning); border-radius:50%; color: var(--warning); line-height:1; }
+  .ts-page-header { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+  .ts-page-description { margin:0; color: var(--muted); font-size:13px; }
+  .ts-page-actions { margin-top:24px; }
+  .ts-select-label { display:flex; flex-direction:column; font-size:12px; gap:4px; }
+  .ts-stack { display:flex; flex-direction:column; gap:8px; }
+  .ts-stack--sm { gap:4px; }
+  .ts-btn--primary,
+  button.ts-btn--primary { display:inline-flex; align-items:center; justify-content:center; background: var(--primary); color:#fff; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; transition: transform .05s ease; }
+  .ts-btn--primary:hover { transform: translateY(-1px); }
+  .ts-btn--primary:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+  option.ts-colorblind-theme,
+  option.ts-custom-theme { display:none; }
+  .ts-toolbar-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .ts-flex-between { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .ts-flex-wrap { flex-wrap:wrap; }
+  .ts-field-group { display:flex; flex-direction:column; gap:4px; }
+  .ts-total-row { display:flex; justify-content:space-between; align-items:center; font-size:14px; }
+  .ts-total-row--strong { font-weight:600; }
+  .ts-deduction-category-group { margin-bottom:12px; }
+  .ts-payroll-helper-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .ts-annual-summary-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:24px; }
+  .ts-annual-stat-card { background: linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease; animation: fadeInUp 0.4s ease-out; opacity:0; animation-fill-mode: forwards; }
+  .ts-annual-stat-label { font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600; }
+  .ts-annual-stat-value { font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em; }
+  .ts-annual-filter-panel { background: var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .ts-annual-filter-list { display:flex; flex-wrap:wrap; gap:8px; }
+  .ts-month-picker-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:12px; }
+  .ts-month-picker-year { font-size:18px; font-weight:600; text-align:center; }
+  .ts-month-picker-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .ts-month-picker-cell { background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; cursor:pointer; transition: all 0.15s ease; font-weight:500; font-size:14px; display:flex; align-items:center; justify-content:center; }
+  .ts-month-picker-cell:hover { border-color: var(--primary); transform: translateY(-1px); }
+  .ts-month-picker-cell.active { background: var(--primary-soft-bg); border-color: var(--primary); color: var(--primary-soft-text); }
+  .ts-month-picker-cell.current-month { border-color: var(--muted); opacity:0.7; }
+  .ts-card.ts-card--section { padding:12px; margin-bottom:16px; }
+  .ts-card.ts-card--subsection { padding:12px; margin-bottom:12px; }
+  .ts-card.ts-card--compact { padding:12px; }
   .ts-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:none; align-items:center; justify-content:center; z-index:1000; }
   .ts-modal-content { background:var(--panel); border:1px solid var(--border); border-radius:12px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 50px rgba(0,0,0,0.5); }
   .ts-modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); }
@@ -578,6 +617,7 @@
   .ts-modal-footer { display:flex; justify-content:flex-end; gap:12px; padding:16px 20px; border-top:1px solid var(--border); }
   .ts-default-list { display:flex; flex-direction:column; gap:8px; }
   .ts-edit-defaults-list { display:flex; flex-direction:column; gap:8px; }
+  .ts-default-item { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; transition:background-color 0.2s; }
   .ts-default-item:hover { background:var(--primary-hint-bg) !important; }
   .ts-edit-default-item { transition:background-color 0.2s; }
   .ts-edit-default-item:hover { background:var(--primary-hint-bg); }
@@ -606,7 +646,10 @@
   .ts-calendar-filter-checkbox { width:14px; height:14px; }
   .ts-calendar-filter-color { width:12px; height:12px; border-radius:50%; border:1px solid var(--border); }
   .ts-calendar-filter-name { font-size:13px; }
+  @media (max-width: 1200px) { .ts-annual-summary-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 900px) { .ts-annual-summary-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
+  @media (max-width: 600px) { .ts-annual-summary-grid { grid-template-columns: 1fr; } }
   .ts-annual-stat-card:hover { transform: translateY(-2px); box-shadow:0 4px 16px rgba(0,0,0,0.15); border-color:var(--primary); }
   @keyframes calendarSelect {
     0% {

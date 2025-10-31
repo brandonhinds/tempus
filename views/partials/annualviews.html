@@ -1,21 +1,21 @@
 <section class="ts-card ts-card--wide" id="page-annual-views" style="display:none;">
-  <div class="ts-toolbar" style="margin-bottom:12px;">
-    <div style="display:flex; flex-direction:column; gap:4px;">
+  <div class="ts-toolbar">
+    <div class="ts-stack ts-stack--sm">
       <h3 style="margin:0;">Annual Views</h3>
       <p class="ts-note" style="margin:0;">Comprehensive financial breakdown across the year with income, hours, and tax insights.</p>
     </div>
-    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+    <div class="ts-toolbar-actions">
       <button class="ghost" id="annual-contract-filter-toggle" style="display:none;" title="Filter by contract">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
-      <label class="ts-toggle" style="cursor:pointer;">
+      <label class="ts-toggle">
         <input type="checkbox" id="annual-year-type-toggle" />
         <span class="ts-toggle-track">
           <span class="ts-toggle-thumb"></span>
         </span>
       </label>
-      <span id="annual-year-type-label" style="font-size:13px; color:var(--muted);">Financial Year</span>
-      <label class="ts-select-label" style="display:flex; flex-direction:column; font-size:12px;">
+      <span id="annual-year-type-label" class="ts-muted" style="font-size:13px;">Financial Year</span>
+      <label class="ts-select-label">
         Year
         <select id="annual-year-select" style="min-width:160px;"></select>
       </label>
@@ -23,63 +23,51 @@
   </div>
 
   <!-- Contract Filter Panel -->
-  <div class="ts-annual-filter-panel" id="annual-contract-filter-panel" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+  <div class="ts-annual-filter-panel" id="annual-contract-filter-panel" style="display:none;">
+    <div class="ts-flex-between" style="margin-bottom:8px;">
       <span style="font-size:13px; font-weight:600;">Filter by Contract</span>
       <button class="ghost" id="annual-filter-select-all" style="padding:4px 8px; font-size:12px;">Select All</button>
     </div>
-    <div class="ts-annual-filter-list" id="annual-contract-filter-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+    <div class="ts-annual-filter-list" id="annual-contract-filter-list"></div>
   </div>
 
   <!-- Summary Statistics -->
-  <div class="ts-annual-summary-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:24px;">
+  <div class="ts-annual-summary-grid">
     <!-- Row 1 -->
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Gross Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-gross" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Gross Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-gross">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Superannuation</div>
-      <div class="ts-annual-stat-value" id="annual-stat-super" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Total Superannuation</div>
+      <div class="ts-annual-stat-value" id="annual-stat-super">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Tax</div>
-      <div class="ts-annual-stat-value" id="annual-stat-tax" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Total Tax</div>
+      <div class="ts-annual-stat-value" id="annual-stat-tax">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Net Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-net" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Net Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-net">--</div>
     </div>
     <!-- Row 2 -->
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Total Hours</div>
-      <div class="ts-annual-stat-value" id="annual-stat-hours" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Total Hours</div>
+      <div class="ts-annual-stat-value" id="annual-stat-hours">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Avg Monthly Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-avg-monthly" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Avg Monthly Income</div>
+      <div class="ts-annual-stat-value" id="annual-stat-avg-monthly">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Effective Tax Rate</div>
-      <div class="ts-annual-stat-value" id="annual-stat-tax-rate" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Effective Tax Rate</div>
+      <div class="ts-annual-stat-value" id="annual-stat-tax-rate">--</div>
     </div>
-    <div class="ts-annual-stat-card" style="background:linear-gradient(135deg, var(--bg) 0%, var(--panel) 100%); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s ease;">
-      <div class="ts-annual-stat-label" style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:600;">Effective Hourly Rate</div>
-      <div class="ts-annual-stat-value" id="annual-stat-hourly-rate" style="font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">--</div>
+    <div class="ts-annual-stat-card">
+      <div class="ts-annual-stat-label">Effective Hourly Rate</div>
+      <div class="ts-annual-stat-value" id="annual-stat-hourly-rate">--</div>
     </div>
   </div>
-  <style>
-    @media (max-width: 1200px) {
-      .ts-annual-summary-grid { grid-template-columns: repeat(3, 1fr) !important; }
-    }
-    @media (max-width: 900px) {
-      .ts-annual-summary-grid { grid-template-columns: repeat(2, 1fr) !important; }
-    }
-    @media (max-width: 600px) {
-      .ts-annual-summary-grid { grid-template-columns: 1fr !important; }
-    }
-  </style>
-
   <!-- Detailed Income Breakdown Table -->
   <div style="margin-bottom:24px;">
     <h4 style="margin:0 0 12px 0; font-size:16px;">Income Breakdown</h4>
@@ -182,15 +170,15 @@
   <div id="annual-category-section" style="margin-bottom:24px; display:none;">
     <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Expense Categories</h4>
     <p class="ts-note" style="margin:0 0 12px 0;">Company expenses are shown excluding GST. Use the filters below to focus on specific categories.</p>
-    <div class="ts-annual-filter-panel" id="annual-category-filter-wrapper" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:12px; flex-wrap:wrap;">
+    <div class="ts-annual-filter-panel" id="annual-category-filter-wrapper" style="display:none;">
+      <div class="ts-flex-between ts-flex-wrap" style="margin-bottom:8px;">
         <span style="font-size:13px; font-weight:600;">Filter categories</span>
         <div style="display:flex; gap:8px;">
           <button class="ghost small" id="annual-category-filter-select-all">Select all</button>
           <button class="ghost small" id="annual-category-filter-clear">Clear</button>
         </div>
       </div>
-      <div class="ts-annual-filter-list" id="annual-category-filter-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      <div class="ts-annual-filter-list" id="annual-category-filter-list"></div>
     </div>
     <div style="overflow-x:auto; background:var(--bg); border:1px solid var(--border); border-radius:12px;">
       <table id="annual-category-table" style="width:100%; border-collapse:collapse; min-width:480px;">

@@ -3198,7 +3198,6 @@ function renderDeductionsList() {
       groupEntries.forEach((group) => {
         const container = document.createElement('div');
         container.className = 'ts-deduction-category-group';
-        container.style.marginBottom = '12px';
 
         const header = document.createElement('div');
         header.className = 'ts-item';
@@ -10527,7 +10526,7 @@ function updateDeductionFormVisibility() {
 
     for (var i = 0; i < 12; i++) {
       var btn = document.createElement('button');
-      btn.className = 'month-picker-cell';
+      btn.className = 'ts-month-picker-cell';
       btn.textContent = monthNames[i];
       btn.dataset.month = i;
 
@@ -11713,7 +11712,7 @@ function updateDeductionFormVisibility() {
     invoiceMonthPickerGrid.innerHTML = '';
     for (var i = 0; i < 12; i++) {
       const btn = document.createElement('button');
-      btn.className = 'month-picker-cell';
+      btn.className = 'ts-month-picker-cell';
       btn.textContent = INVOICE_MONTH_NAMES[i].slice(0, 3);
       btn.dataset.month = String(i + 1);
       const current = new Date();
