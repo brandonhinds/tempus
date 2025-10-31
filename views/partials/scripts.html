@@ -6403,6 +6403,7 @@ function updateDeductionFormVisibility() {
   const printViewIncomeList = document.getElementById('print-view-income-list');
   const printViewOtherList = document.getElementById('print-view-other-list');
   const printViewWarning = document.getElementById('print-view-warning');
+  const printViewWarningText = document.getElementById('print-view-warning-text');
   const btnCancelPrintView = document.getElementById('btn-cancel-print-view');
   const btnGeneratePrintView = document.getElementById('btn-generate-print-view');
   const btnUnselectAllOther = document.getElementById('btn-unselect-all-other');
@@ -8870,15 +8871,27 @@ function updateDeductionFormVisibility() {
       }
     }
 
-    // Validate initial selection - check if more than 2 non-income types are selected
+    // Validate initial selection - require exactly 1 income type and max 2 non-income types
+    const selectedIncome = incomeTypes.length; // All are selected by default
     const selectedNonIncome = otherTypes.length; // All are selected by default
-    const exceeds = selectedNonIncome > 2;
+    const invalidIncome = selectedIncome !== 1;
+    const invalidNonIncome = selectedNonIncome > 2;
+    const isInvalid = invalidIncome || invalidNonIncome;
 
     if (printViewWarning) {
-      printViewWarning.style.display = exceeds ? 'block' : 'none';
+      printViewWarning.style.display = isInvalid ? 'block' : 'none';
+      if (printViewWarningText) {
+        if (invalidIncome && invalidNonIncome) {
+          printViewWarningText.textContent = 'Exactly 1 income hour type and maximum 2 non-income hour types allowed.';
+        } else if (invalidIncome) {
+          printViewWarningText.textContent = 'Exactly 1 income hour type must be selected.';
+        } else if (invalidNonIncome) {
+          printViewWarningText.textContent = 'Maximum 2 non-income hour types allowed.';
+        }
+      }
     }
     if (btnGeneratePrintView) {
-      btnGeneratePrintView.disabled = exceeds || printViewSelectedHourTypes.size === 0;
+      btnGeneratePrintView.disabled = isInvalid || printViewSelectedHourTypes.size === 0;
     }
 
     showModal(printViewConfigModal);
@@ -8895,19 +8908,35 @@ function updateDeductionFormVisibility() {
       printViewSelectedHourTypes.delete(hourTypeId);
     }
 
-    // Validate: max 2 non-income types
+    // Validate: exactly 1 income type and max 2 non-income types
+    const selectedIncome = Array.from(printViewSelectedHourTypes).filter(id => {
+      const hourType = state.hourTypeMap[id];
+      return hourType && hourType.contributes_to_income;
+    });
+
     const selectedNonIncome = Array.from(printViewSelectedHourTypes).filter(id => {
       const hourType = state.hourTypeMap[id];
       return hourType && !hourType.contributes_to_income;
     });
 
-    const exceeds = selectedNonIncome.length > 2;
+    const invalidIncome = selectedIncome.length !== 1;
+    const invalidNonIncome = selectedNonIncome.length > 2;
+    const isInvalid = invalidIncome || invalidNonIncome;
 
     if (printViewWarning) {
-      printViewWarning.style.display = exceeds ? 'block' : 'none';
+      printViewWarning.style.display = isInvalid ? 'block' : 'none';
+      if (printViewWarningText) {
+        if (invalidIncome && invalidNonIncome) {
+          printViewWarningText.textContent = 'Exactly 1 income hour type and maximum 2 non-income hour types allowed.';
+        } else if (invalidIncome) {
+          printViewWarningText.textContent = 'Exactly 1 income hour type must be selected.';
+        } else if (invalidNonIncome) {
+          printViewWarningText.textContent = 'Maximum 2 non-income hour types allowed.';
+        }
+      }
     }
     if (btnGeneratePrintView) {
-      btnGeneratePrintView.disabled = exceeds || printViewSelectedHourTypes.size === 0;
+      btnGeneratePrintView.disabled = isInvalid || printViewSelectedHourTypes.size === 0;
     }
   }
 
@@ -8930,10 +8959,23 @@ function updateDeductionFormVisibility() {
       }
     });
 
-    // Update validation state
-    if (printViewWarning) printViewWarning.style.display = 'none';
+    // Update validation state - check if exactly 1 income type is selected
+    const selectedIncome = Array.from(printViewSelectedHourTypes).filter(id => {
+      const hourType = state.hourTypeMap[id];
+      return hourType && hourType.contributes_to_income;
+    });
+
+    const invalidIncome = selectedIncome.length !== 1;
+    const isInvalid = invalidIncome;
+
+    if (printViewWarning) {
+      printViewWarning.style.display = isInvalid ? 'block' : 'none';
+      if (printViewWarningText && invalidIncome) {
+        printViewWarningText.textContent = 'Exactly 1 income hour type must be selected.';
+      }
+    }
     if (btnGeneratePrintView) {
-      btnGeneratePrintView.disabled = printViewSelectedHourTypes.size === 0;
+      btnGeneratePrintView.disabled = isInvalid || printViewSelectedHourTypes.size === 0;
     }
   }
 
@@ -9019,16 +9061,16 @@ function updateDeductionFormVisibility() {
     const firstDayOfWeek = firstDay.getDay(); // 0 = Sunday
     const startOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Convert to Monday = 0
 
-    let calendarHtml = '<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:2px; margin-bottom:20px;">';
+    let calendarHtml = '<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; margin-bottom:24px; border:2px solid #333; border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.1);">';
 
     // Add day headers
     ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(day => {
-      calendarHtml += `<div style="font-weight:600; font-size:11px; padding:4px; text-align:center; border-bottom:1px solid #ccc;">${day}</div>`;
+      calendarHtml += `<div style="font-weight:700; font-size:10px; padding:8px 4px; text-align:center; background:#333; color:#fff; letter-spacing:0.5px;">${day.toUpperCase()}</div>`;
     });
 
     // Add empty cells for offset
     for (let i = 0; i < startOffset; i++) {
-      calendarHtml += '<div style="background:#f5f5f5;"></div>';
+      calendarHtml += '<div style="background:#f8f9fa; border-right:1px solid #dee2e6;"></div>';
     }
 
     // Add days
@@ -9036,8 +9078,8 @@ function updateDeductionFormVisibility() {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const daySummary = dailySummaries[dateStr] || {};
 
-      calendarHtml += '<div style="border:1px solid #ddd; padding:4px; min-height:60px; font-size:10px; display:flex; flex-direction:column;">';
-      calendarHtml += `<div style="font-weight:600; font-size:10px; margin-bottom:4px; color:#999;">${day}</div>`;
+      calendarHtml += '<div style="background:#fff; padding:6px; min-height:70px; font-size:10px; display:flex; flex-direction:column; border-right:1px solid #dee2e6; border-bottom:1px solid #dee2e6; position:relative;">';
+      calendarHtml += `<div style="font-weight:600; font-size:11px; margin-bottom:6px; color:#6c757d;">${day}</div>`;
 
       // Collect income and other hours separately
       const incomeHoursHtml = [];
@@ -9049,12 +9091,12 @@ function updateDeductionFormVisibility() {
           const hours = formatHours(minutes);
           const isIncome = hourType.contributes_to_income;
           if (isIncome) {
-            // Income hours: bold, no label, larger
-            const style = `font-weight:600; font-size:16px; color:#000; background:${hourType.color}22; padding:2px 4px; margin:2px 0; border-radius:3px;`;
+            // Income hours: bold, no label, larger with better styling
+            const style = `font-weight:700; font-size:18px; color:#000; background:${hourType.color}25; padding:4px 8px; margin:2px 0; border-radius:4px; text-align:center;`;
             incomeHoursHtml.push(`<div style="${style}">${hours}</div>`);
           } else {
-            // Other hours: regular weight, with label, smaller
-            const style = 'font-size:9px; color:#666; margin:2px 0;';
+            // Other hours: regular weight, with label, smaller with subtle styling
+            const style = 'font-size:9px; color:#6c757d; margin:2px 0; padding:2px 4px; background:#f8f9fa; border-radius:3px;';
             otherHoursHtml.push(`<div style="${style}">${hours} ${hourType.name}</div>`);
           }
         }
@@ -9085,29 +9127,29 @@ function updateDeductionFormVisibility() {
     // Work table
     if (workTotal > 0) {
       const workHours = formatHours(workTotal);
-      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:20px;">';
-      totalsHtml += '<thead><tr style="border-bottom:2px solid #333;"><th style="text-align:left; padding:8px;">Work</th><th style="text-align:right; padding:8px;">Total Hours</th></tr></thead>';
-      totalsHtml += '<tbody>';
-      totalsHtml += `<tr><td style="padding:6px; font-weight:600;">Total</td><td style="text-align:right; padding:6px; font-weight:600;">${workHours}</td></tr>`;
+      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:24px; border:2px solid #333; border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.1);">';
+      totalsHtml += '<thead><tr style="background:#333; color:#fff;"><th style="text-align:left; padding:12px; font-size:14px; font-weight:700; letter-spacing:0.5px;">WORK</th><th style="text-align:right; padding:12px; font-size:14px; font-weight:700;">TOTAL HOURS</th></tr></thead>';
+      totalsHtml += '<tbody style="background:#fff;">';
+      totalsHtml += `<tr><td style="padding:12px; font-weight:600; font-size:15px;">Total</td><td style="text-align:right; padding:12px; font-weight:700; font-size:16px; color:#000;">${workHours}</td></tr>`;
       totalsHtml += '</tbody></table>';
     }
 
     // Other table with breakdown
     if (otherTotal > 0) {
       const otherHours = formatHours(otherTotal);
-      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:16px;">';
-      totalsHtml += '<thead><tr style="border-bottom:2px solid #333;"><th style="text-align:left; padding:8px;">Other</th><th style="text-align:right; padding:8px;">Total Hours</th></tr></thead>';
-      totalsHtml += '<tbody>';
+      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:16px; border:2px solid #6c757d; border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.1);">';
+      totalsHtml += '<thead><tr style="background:#6c757d; color:#fff;"><th style="text-align:left; padding:12px; font-size:14px; font-weight:700; letter-spacing:0.5px;">OTHER</th><th style="text-align:right; padding:12px; font-size:14px; font-weight:700;">TOTAL HOURS</th></tr></thead>';
+      totalsHtml += '<tbody style="background:#fff;">';
 
       // Individual hour type breakdowns
       Object.keys(otherBreakdown).forEach(hourTypeId => {
         const hourType = state.hourTypeMap[hourTypeId];
         const hours = formatHours(otherBreakdown[hourTypeId]);
-        totalsHtml += `<tr style="border-bottom:1px solid #ddd;"><td style="padding:6px; color:#666;">${hourType.name}</td><td style="text-align:right; padding:6px; color:#666;">${hours}</td></tr>`;
+        totalsHtml += `<tr style="border-bottom:1px solid #dee2e6;"><td style="padding:10px 12px; color:#495057;">${hourType.name}</td><td style="text-align:right; padding:10px 12px; color:#495057; font-variant-numeric:tabular-nums;">${hours}</td></tr>`;
       });
 
       // Other total
-      totalsHtml += `<tr style="border-top:2px solid #333;"><td style="padding:6px; font-weight:600; color:#666;">Total</td><td style="text-align:right; padding:6px; font-weight:600; color:#666;">${otherHours}</td></tr>`;
+      totalsHtml += `<tr style="background:#f8f9fa;"><td style="padding:12px; font-weight:600; font-size:15px;">Total</td><td style="text-align:right; padding:12px; font-weight:700; font-size:16px; color:#495057;">${otherHours}</td></tr>`;
       totalsHtml += '</tbody></table>';
     }
 
@@ -9154,20 +9196,29 @@ function updateDeductionFormVisibility() {
       }
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       font-size: 12px;
-      line-height: 1.4;
-      color: #000;
+      line-height: 1.5;
+      color: #212529;
+      background: #fff;
     }
     h1 {
-      margin: 0 0 16px 0;
-      font-size: 20px;
+      margin: 0 0 24px 0;
+      font-size: 28px;
+      font-weight: 700;
       text-align: center;
+      color: #212529;
+      letter-spacing: -0.5px;
+      padding-bottom: 16px;
+      border-bottom: 3px solid #333;
+    }
+    * {
+      box-sizing: border-box;
     }
   </style>
 </head>
 <body>
-  <h1>Monthly Hours - ${monthName}</h1>
+  <h1>Monthly Hours<br><span style="font-size:20px; font-weight:500; color:#6c757d;">${monthName}</span></h1>
   ${calendarHtml}
   ${totalsHtml}
   <script>
