@@ -4,15 +4,17 @@
       <h3 style="margin:0;">BAS Reporting</h3>
       <p class="ts-note" style="margin:0;">Review invoiced income, company expenses, and payroll figures across the financial year.</p>
     </div>
-    <div style="display:flex; gap:12px; align-items:center;">
-      <label class="ts-select-label">
-        Financial year
-        <select id="bas-fy-select" style="min-width:160px;"></select>
-      </label>
-    </div>
+    <label class="ts-select-label">
+      Financial year
+      <select id="bas-fy-select" style="min-width:160px;"></select>
+    </label>
   </div>
   <div id="bas-quarterly-note" class="ts-note" style="display:none; margin-bottom:12px;">Quarterly totals shown (Q1 = Jul–Sep).</div>
-  <div class="ts-note" id="bas-empty" style="display:none;">No company activity found for the selected year.</div>
+  <div class="ts-empty-state" id="bas-empty" style="display:none;">
+    <div class="ts-empty-state__icon">📊</div>
+    <p class="ts-empty-state__title">No BAS data yet</p>
+    <p class="ts-empty-state__text">When invoices and company activity are tracked, BAS summaries will appear here.</p>
+  </div>
   <div class="ts-bas-table-wrapper">
     <table class="ts-table" id="bas-table" style="width:100%; min-width:880px;">
       <thead>
@@ -39,7 +41,11 @@
       <h4 style="margin:0;">Financial year invoices</h4>
       <p class="ts-note" style="margin:0;">Quick view of invoices issued during the selected financial year.</p>
     </div>
-    <div class="ts-note" id="bas-invoice-empty" style="display:none;">No invoices for this financial year.</div>
+  <div class="ts-empty-state ts-empty-state--inline" id="bas-invoice-empty" style="display:none;">
+    <div class="ts-empty-state__icon">📬</div>
+    <p class="ts-empty-state__title">No invoices found</p>
+    <p class="ts-empty-state__text"><span id="bas-invoice-empty-text">No invoices for this financial year.</span></p>
+  </div>
     <div class="ts-bas-table-wrapper" style="margin-top:8px;">
       <table class="ts-table" id="bas-invoice-table" style="width:100%; min-width:720px;">
         <thead>

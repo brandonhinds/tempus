@@ -1,10 +1,10 @@
 <section class="ts-card" id="page-deductions" style="display:none;">
   <div class="ts-toolbar" style="margin-bottom:12px;">
-    <div style="display:flex; align-items:center; gap:12px;">
+    <div class="ts-gap-md" style="display:flex; align-items:center;">
       <h3 style="margin:0;">Income Deductions</h3>
       <span class="ts-note" id="deduction-company-disabled-note" style="display:none;">Company tracking disabled — company deductions read-only.</span>
     </div>
-    <div style="display:flex; align-items:center; gap:8px;">
+    <div class="ts-gap-sm" style="display:flex; align-items:center;">
       <button class="ghost" id="btn-manage-deduction-categories" style="display:none;">Manage categories</button>
       <button id="btn-add-deduction">Add deduction</button>
     </div>
@@ -12,12 +12,16 @@
   <div class="ts-note" style="margin-bottom:12px;">Configure salary sacrifice items, company deductions, and extra super contributions. Recurring deductions display the next five run dates for confirmation.</div>
   <div class="ts-toolbar" id="deduction-category-collapse-controls" style="display:none; margin-bottom:12px;">
     <div class="ts-note" style="margin:0;">Categories are collapsed by default. Expand to review individual deductions.</div>
-    <div style="display:flex; gap:8px;">
+    <div class="ts-gap-sm" style="display:flex;">
       <button class="ghost small" id="btn-expand-all-deduction-categories">Expand all</button>
       <button class="ghost small" id="btn-collapse-all-deduction-categories">Collapse all</button>
     </div>
   </div>
-  <div id="deductions-empty" class="ts-note" style="display:none;">No deductions configured yet.</div>
+  <div id="deductions-empty" class="ts-empty-state" style="display:none;">
+    <div class="ts-empty-state__icon">📭</div>
+    <p class="ts-empty-state__title">No deductions yet</p>
+    <p class="ts-empty-state__text">Use <strong>Add deduction</strong> to configure salary sacrifice, company expenses, or extra super contributions.</p>
+  </div>
   <div class="ts-list" id="deductions-list"></div>
 </section>
 
@@ -28,28 +32,32 @@
       <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
-      <div class="ts-row" style="margin-top:0;">
-        <div class="ts-col">
+      <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
+        <div class="ts-col-span-6">
           <label for="deduction-name">Name</label>
           <input id="deduction-name" placeholder="e.g. Novated lease" />
         </div>
-        <div class="ts-col" style="max-width:220px;">
+        <div class="ts-col-span-3" style="max-width:220px;">
           <label for="deduction-type">Type</label>
           <select id="deduction-type">
             <option value="standard">Standard deduction</option>
             <option value="extra_super">Extra super contribution</option>
           </select>
         </div>
-        <div class="ts-col" style="max-width:220px;" id="deduction-category-column">
+        <div class="ts-col-span-3" style="max-width:220px;" id="deduction-category-column">
           <label for="deduction-category">Category</label>
           <select id="deduction-category">
             <option value="">Uncategorised</option>
           </select>
-          <div class="ts-note" id="deduction-category-empty-note" style="display:none;">Add categories to organise deductions.</div>
+          <div class="ts-empty-state ts-empty-state--inline" id="deduction-category-empty-note" style="display:none;">
+            <div class="ts-empty-state__icon">🏷️</div>
+            <p class="ts-empty-state__title">No categories yet</p>
+            <p class="ts-empty-state__text">Create categories to organise deductions for reports like BAS and invoices.</p>
+          </div>
         </div>
       </div>
-      <div class="ts-row" style="margin-top:12px;">
-        <div class="ts-col" style="max-width:260px;">
+      <div class="ts-grid ts-grid--gap-md" style="margin-top:12px;">
+        <div class="ts-col-span-4" style="max-width:260px;">
           <div id="deduction-amount-wrapper">
             <label for="deduction-amount">Amount</label>
             <input type="number" id="deduction-amount" min="0" step="0.01" />
@@ -66,14 +74,14 @@
             </select>
           </div>
         </div>
-        <div class="ts-col" id="deduction-gst-wrapper" style="max-width:220px; display:flex; flex-direction:column; align-items:center;">
+        <div class="ts-col-span-4" id="deduction-gst-wrapper" style="max-width:220px; display:flex; flex-direction:column; align-items:center;">
           <label for="deduction-gst" style="margin-bottom:4px;">Amount includes GST</label>
           <label class="ts-toggle">
             <input type="checkbox" id="deduction-gst" />
             <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
           </label>
         </div>
-        <div class="ts-col" id="deduction-company-wrapper" style="max-width:220px; display:none; flex-direction:column; align-items:center;">
+        <div class="ts-col-span-4" id="deduction-company-wrapper" style="max-width:220px; display:none; flex-direction:column; align-items:center;">
           <label for="deduction-company-expense" style="margin-bottom:4px;">Company expense</label>
           <label class="ts-toggle">
             <input type="checkbox" id="deduction-company-expense" />
@@ -82,8 +90,8 @@
         </div>
       </div>
       <div id="deduction-company-gst-note" class="ts-note" style="margin-top:4px; display:none;">GST component is tracked automatically when company expenses are enabled.</div>
-      <div class="ts-row" style="margin-top:12px;">
-        <div class="ts-col" style="max-width:220px;">
+      <div class="ts-grid ts-grid--gap-md" style="margin-top:12px;">
+        <div class="ts-col-span-4" style="max-width:220px;">
           <label for="deduction-frequency">Frequency</label>
           <select id="deduction-frequency">
             <option value="once">One-off</option>
@@ -94,18 +102,18 @@
             <option value="yearly">Yearly</option>
           </select>
         </div>
-        <div class="ts-col" style="max-width:220px;">
+        <div class="ts-col-span-4" style="max-width:220px;">
           <label for="deduction-start-date">Start date</label>
           <input type="date" id="deduction-start-date" />
         </div>
-        <div class="ts-col" style="max-width:220px;" id="deduction-end-date-wrapper">
+        <div class="ts-col-span-4" style="max-width:220px;" id="deduction-end-date-wrapper">
           <label for="deduction-end-date">End date (optional)</label>
           <input type="date" id="deduction-end-date" />
         </div>
       </div>
       <div class="ts-note" id="deduction-occurrence-preview" style="margin-top:8px;">&nbsp;</div>
-      <div class="ts-row" style="margin-top:12px;">
-        <div class="ts-col">
+      <div class="ts-grid ts-grid--gap-md" style="margin-top:12px;">
+        <div class="ts-col-span-12">
           <label for="deduction-notes">Notes (optional)</label>
           <textarea id="deduction-notes" rows="3" placeholder="Add context for this deduction"></textarea>
         </div>
@@ -123,7 +131,7 @@
   <div class="ts-modal-content" style="max-width:640px;">
     <div class="ts-modal-header">
       <h3>Manage deduction categories</h3>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div class="ts-gap-sm" style="display:flex; align-items:center;">
         <button class="ghost small" id="btn-add-deduction-category">Add category</button>
         <button class="ts-modal-close">&times;</button>
       </div>
@@ -132,15 +140,19 @@
       <div id="deduction-category-list-wrapper">
         <div class="ts-note" style="margin-bottom:12px;">Categories appear on the deduction form when the feature flag is enabled. "Uncategorised" is always available.</div>
         <div class="ts-list" id="deduction-category-list"></div>
-        <div class="ts-note" id="deduction-category-empty-state" style="display:none;">No custom categories yet. Add one to start grouping deductions.</div>
+        <div class="ts-empty-state ts-empty-state--inline" id="deduction-category-empty-state" style="display:none;">
+          <div class="ts-empty-state__icon">🗃️</div>
+          <p class="ts-empty-state__title">No custom categories</p>
+          <p class="ts-empty-state__text">Add your first category to group similar deductions together.</p>
+        </div>
       </div>
       <div id="deduction-category-form-wrapper" style="display:none;">
-        <div class="ts-row" style="margin-top:0;">
-          <div class="ts-col">
+        <div class="ts-grid ts-grid--gap-md" style="margin-top:0;">
+          <div class="ts-col-span-8">
             <label for="deduction-category-name">Name</label>
             <input id="deduction-category-name" placeholder="e.g. Tools, Office supplies" />
           </div>
-          <div class="ts-col" style="max-width:160px;">
+          <div class="ts-col-span-4" style="max-width:160px;">
             <label for="deduction-category-color">Color</label>
             <input type="color" id="deduction-category-color" value="#6b7280" />
           </div>

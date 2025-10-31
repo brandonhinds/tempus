@@ -22,13 +22,7 @@
 
 ## Big Changes
 
-- Make buttons / UI element *sexy* like JB's
-
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)
-
-- Make the UI dynamic based on browser width
-
-- Make the sheet (at least some of it) work on mobile
 
 - Refactor scripts sheet to split up all functions into relevant categories
 
@@ -42,6 +36,8 @@
         * Project income based on "standard hours" (make standard hours a setting)
     * Add report that shows your hour variance to the current date vs the expected burndown up to that point on the contract screen
     * Add ability to assume a regular number of hours worked for the rest of the month in the monthly insights view
+
+- Implement phase 10 of UI suggestion improvements.
 
 ## Small Changes
 
@@ -70,6 +66,8 @@
     * Provide preview indicators (contrast checks) when users pick low-contrast palettes.
 
 - Move super, super lost, deductions, and tax back in line with gross/net income on annual sheet
+
+- Fix the settings layout
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.

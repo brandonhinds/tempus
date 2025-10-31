@@ -62,6 +62,7 @@ This note expands each of the proposed improvements so future work can scope, pr
 - **Logotype & iconography:** Convert the existing logo into a clean SVG, finalise a Tempus wordmark/glyph pair, and weave them into the navbar, favicon, and share images.
 - **Visual language:** Establish a lightweight illustration pack (empty states, success, error) that echoes the brand palette without overpowering the UI.
 - **Theme selector presentation:** Surface appearance options with previews or thumbnails to celebrate the expanded theme library.
+- **Update Loading Screen** With the logo in place, the loading screens can be updated to show the animated logo in the centre of the screen, rather than the current, subtle loading text.
 - **Outcomes:** A united visual identity that carries through marketing, web app, and documentation touchpoints once the groundwork is complete.
 
 ---

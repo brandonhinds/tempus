@@ -47,11 +47,11 @@
   const ratePreviewRemainingCard = document.getElementById('rate-preview-remaining-card');
   const ratePreviewRemainingScenarioEl = document.getElementById('rate-preview-remaining-scenario');
   const ratePreviewRemainingCurrentEl = document.getElementById('rate-preview-remaining-current');
-  const ratePreviewRemainingVarianceEl = document.getElementById('rate-preview-remaining-variance');
-  const ratePreviewContractHoursEl = document.getElementById('rate-preview-contract-hours');
-  const ratePreviewRemainingSuperScenarioEl = document.getElementById('rate-preview-remaining-super-scenario');
-  const ratePreviewRemainingSuperCurrentEl = document.getElementById('rate-preview-remaining-super-current');
-  const ratePreviewRemainingSuperVarianceEl = document.getElementById('rate-preview-remaining-super-variance');
+const ratePreviewRemainingVarianceEl = document.getElementById('rate-preview-remaining-variance');
+const ratePreviewContractHoursEl = document.getElementById('rate-preview-contract-hours');
+const ratePreviewRemainingSuperScenarioEl = document.getElementById('rate-preview-remaining-super-scenario');
+const ratePreviewRemainingSuperCurrentEl = document.getElementById('rate-preview-remaining-super-current');
+const ratePreviewRemainingSuperVarianceEl = document.getElementById('rate-preview-remaining-super-variance');
   const ratePreviewRemainingTaxScenarioEl = document.getElementById('rate-preview-remaining-tax-scenario');
   const ratePreviewRemainingTaxCurrentEl = document.getElementById('rate-preview-remaining-tax-current');
   const ratePreviewRemainingTaxVarianceEl = document.getElementById('rate-preview-remaining-tax-variance');
@@ -67,7 +67,8 @@
   const invoiceNavPrev = document.getElementById('invoice-nav-prev');
   const invoiceNavNext = document.getElementById('invoice-nav-next');
   const invoiceNavJump = document.getElementById('invoice-nav-jump');
-  const invoiceDetailEmpty = document.getElementById('invoice-detail-empty');
+const invoiceDetailEmpty = document.getElementById('invoice-detail-empty');
+const invoiceDetailEmptyText = document.getElementById('invoice-detail-empty-text');
   const invoiceDetail = document.getElementById('invoice-detail');
   const invoiceDetailNumberInput = document.getElementById('invoice-detail-number');
   const invoiceDetailDateInput = document.getElementById('invoice-detail-date');
@@ -98,7 +99,7 @@
   const invoiceLineGst = document.getElementById('invoice-line-gst');
   const invoiceLineTotal = document.getElementById('invoice-line-total');
   const invoiceDefaultList = document.getElementById('invoice-default-list');
-  const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
+const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
   const btnInvoiceDefaultNew = document.getElementById('btn-invoice-default-new');
   const invoiceDefaultFormAnchor = document.getElementById('invoice-default-form-anchor');
   const invoiceDefaultForm = document.getElementById('invoice-default-form');
@@ -139,7 +140,7 @@
   const deductionNameInput = document.getElementById('deduction-name');
   const deductionCategorySelect = document.getElementById('deduction-category');
   const deductionCategoryColumn = document.getElementById('deduction-category-column');
-  const deductionCategoryEmptyNote = document.getElementById('deduction-category-empty-note');
+const deductionCategoryEmptyNote = document.getElementById('deduction-category-empty-note');
   const deductionTypeSelect = document.getElementById('deduction-type');
   const deductionAmountInput = document.getElementById('deduction-amount');
   const deductionPercentInput = document.getElementById('deduction-percent');
@@ -184,10 +185,11 @@
   const basEmptyNote = document.getElementById('bas-empty');
   const basInvoiceSection = document.getElementById('bas-invoice-section');
   const basInvoiceEmpty = document.getElementById('bas-invoice-empty');
+  const basInvoiceEmptyText = document.getElementById('bas-invoice-empty-text');
   const basInvoiceTableBody = document.getElementById('bas-invoice-table-body');
   const RATE_PREVIEW_DEBOUNCE_MS = 350;
-  let ratePreviewDebounceTimer = null;
-  let ratePreviewInputSyncing = false;
+let ratePreviewDebounceTimer = null;
+let ratePreviewInputSyncing = false;
 
   const state = {
     cacheKey: 'ts_cache',
@@ -624,16 +626,63 @@
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+  const toastContainer = document.getElementById('ts-toast-container');
+  const TOAST_CLASS_MAP = {
+    success: 'ts-toast--success',
+    warn: 'ts-toast--warn',
+    error: 'ts-toast--error',
+    info: ''
+  };
   const fmt = (minutes) => {
     const total = Number(minutes) || 0;
     const h = Math.floor(total / 60);
     const mm = total % 60;
     return (h > 0 ? h + ':' : '') + String(mm).padStart(2, '0');
   };
-  const setStatus = (text, cls) => {
+  function getStatusPreference() {
+    const selectValue = statusNotificationSelect && typeof statusNotificationSelect.value === 'string'
+      ? statusNotificationSelect.value.trim()
+      : '';
+    if (selectValue) return selectValue;
+    const stateValue = (typeof state !== 'undefined' && state.settings && typeof state.settings.status_notification_mode === 'string')
+      ? state.settings.status_notification_mode
+      : '';
+    if (stateValue) return stateValue;
+    return 'status_bar';
+  }
+
+  function applyStatusDisplay() {
     const el = document.getElementById('status');
-    el.textContent = text;
-    el.className = 'ts-badge ' + (cls || '');
+    if (!el) return;
+    const mode = getStatusPreference();
+    const showStatus = mode === 'status_bar' || mode === 'both';
+    el.style.display = showStatus ? '' : 'none';
+  }
+
+  const setStatus = (text, cls) => {
+    const mode = getStatusPreference();
+    const showStatus = mode === 'status_bar' || mode === 'both';
+    const showToast = mode === 'toast' || mode === 'both';
+    const el = document.getElementById('status');
+    if (el) {
+      el.textContent = text;
+      el.className = 'ts-badge ' + (cls || '');
+      el.style.display = showStatus ? '' : 'none';
+    }
+    if (showToast && toastContainer && text) {
+      const toast = document.createElement('div');
+      toast.className = 'ts-toast';
+      if (cls && TOAST_CLASS_MAP[cls]) {
+        toast.classList.add(TOAST_CLASS_MAP[cls]);
+      }
+      toast.textContent = text;
+      toastContainer.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add('ts-toast--visible'));
+      setTimeout(() => {
+        toast.classList.remove('ts-toast--visible');
+        setTimeout(() => toast.remove(), 200);
+      }, 3200);
+    }
   };
   const isoDate = (date) => {
     const d = new Date(date);
@@ -737,6 +786,24 @@
     const abs = Math.abs(rounded).toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
     return `${rounded > 0 ? '+' : '-'}${abs}%`;
   };
+
+  function resolveInvoiceDate(invoice) {
+    if (!invoice) return null;
+    if (invoice.invoice_date) {
+      const parsed = new Date(invoice.invoice_date);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+    if (invoice.year != null && invoice.month != null) {
+      const parsedFallback = new Date(Number(invoice.year), Number(invoice.month) - 1, 1);
+      if (!Number.isNaN(parsedFallback.getTime())) {
+        return parsedFallback;
+      }
+    }
+    return null;
+  }
+
   const formatDate = (value) => {
     if (!value) return '';
     const date = value instanceof Date ? value : new Date(value);
@@ -1621,80 +1688,78 @@
     basInvoiceSection.style.display = 'block';
     if (state.invoiceListLoading && !state.invoices.length) {
       basInvoiceEmpty.style.display = 'block';
-      basInvoiceEmpty.textContent = 'Loading invoices...';
+      if (basInvoiceEmptyText) basInvoiceEmptyText.textContent = 'Loading invoices...';
       basInvoiceTableBody.innerHTML = '';
       return;
     }
     const fyYear = state.basCurrentFy;
     if (!fyYear) {
       basInvoiceEmpty.style.display = 'block';
-      basInvoiceEmpty.textContent = 'Select a financial year to view invoices.';
+      if (basInvoiceEmptyText) basInvoiceEmptyText.textContent = 'Select a financial year to view invoices.';
       basInvoiceTableBody.innerHTML = '';
       return;
     }
-    const start = startOfFinancialYear(fyYear);
-    const end = startOfFinancialYear(fyYear + 1);
-    const invoices = (state.invoices || []).filter((invoice) => {
-      if (!invoice) return false;
-      let dateValue;
-      if (invoice.invoice_date) {
-        dateValue = new Date(invoice.invoice_date);
-      } else {
-        const monthIndex = Number(invoice.month || 1) - 1;
-        dateValue = new Date(invoice.year || fyYear, monthIndex >= 0 ? monthIndex : 0, 1);
-      }
-      if (Number.isNaN(dateValue.getTime())) return false;
-      return dateValue >= start && dateValue < end;
-    }).sort((a, b) => {
-      const dateA = a.invoice_date ? new Date(a.invoice_date) : new Date(a.year || fyYear, Number(a.month || 1) - 1, 1);
-      const dateB = b.invoice_date ? new Date(b.invoice_date) : new Date(b.year || fyYear, Number(b.month || 1) - 1, 1);
-      return dateA - dateB;
-    });
-    if (!invoices.length) {
+    const invoiceEntries = getInvoicesForFinancialYear(fyYear);
+    if (!invoiceEntries.length) {
       basInvoiceEmpty.style.display = 'block';
-      basInvoiceEmpty.textContent = 'No invoices for this financial year.';
+      if (basInvoiceEmptyText) basInvoiceEmptyText.textContent = 'No invoices for this financial year.';
       basInvoiceTableBody.innerHTML = '';
       return;
     }
     basInvoiceEmpty.style.display = 'none';
-    const rowsHtml = invoices.map((invoice) => {
-      const summary = invoice.summary || {};
-      const lineCount = Number(summary.lineCount || 0);
-      const totalHours = Number(summary.totalHours || 0);
-      const subtotal = summary.totalAmount != null ? Number(summary.totalAmount) : 0;
-      const gstValue = summary.gstAmount != null ? Number(summary.gstAmount) : Math.round(subtotal * GST_RATE * 100) / 100;
-      const totalValue = summary.totalWithGst != null ? Number(summary.totalWithGst) : subtotal + gstValue;
-      let statusLabel = invoice.status || 'draft';
-      statusLabel = statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1);
-      let dateObj = null;
-      if (invoice.invoice_date) {
-        const parsed = new Date(invoice.invoice_date);
-        if (!Number.isNaN(parsed.getTime())) {
-          dateObj = parsed;
-        }
-      }
-      if (!dateObj && invoice.year && invoice.month) {
-        const parsedFallback = new Date(invoice.year, Number(invoice.month) - 1, 1);
-        if (!Number.isNaN(parsedFallback.getTime())) {
-          dateObj = parsedFallback;
-        }
-      }
-      const dateLabel = dateObj ? DATE_FULL_FORMATTER.format(dateObj) : '—';
-      const numberLabel = invoice.invoice_number || (`Invoice ${invoice.sequence || ''}`);
+    const rowsHtml = invoiceEntries.map(({ summary }) => {
       return [
         '<tr>',
-        `<td>${numberLabel}</td>`,
-        `<td>${dateLabel}</td>`,
-        `<td>${statusLabel}</td>`,
-        `<td style="text-align:right;">${lineCount}</td>`,
-        `<td style="text-align:right;">${formatDecimalHours(totalHours)}</td>`,
-        `<td style="text-align:right;">${formatCurrency(subtotal)}</td>`,
-        `<td style="text-align:right;">${formatCurrency(gstValue)}</td>`,
-        `<td style="text-align:right;">${formatCurrency(totalValue)}</td>`,
+        `<td>${summary.numberLabel}</td>`,
+        `<td>${summary.dateLabel}</td>`,
+        `<td>${summary.statusLabel}</td>`,
+        `<td style="text-align:right;">${summary.lineCount}</td>`,
+        `<td style="text-align:right;">${formatDecimalHours(summary.totalHours)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(summary.subtotal)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(summary.gstValue)}</td>`,
+        `<td style="text-align:right;">${formatCurrency(summary.totalValue)}</td>`,
         '</tr>'
       ].join('');
     }).join('');
     basInvoiceTableBody.innerHTML = rowsHtml;
+  }
+
+  function getInvoicesForFinancialYear(fyYear) {
+    if (!Array.isArray(state.invoices) || !fyYear) return [];
+    const start = startOfFinancialYear(fyYear);
+    const end = startOfFinancialYear(fyYear + 1);
+    return state.invoices
+      .map((invoice) => {
+        const date = resolveInvoiceDate(invoice);
+        if (!date || Number.isNaN(date.getTime()) || date < start || date >= end) return null;
+
+        // Build summary inline
+        const summarySource = invoice.summary || summarizeInvoiceLineItems(invoice.lineItems || []);
+        const lineCount = Number(summarySource.lineCount ?? summarySource.totalLines ?? invoice.line_count ?? 0);
+        const totalHours = Number(summarySource.totalHours ?? invoice.total_hours ?? 0);
+        const subtotal = Number(summarySource.totalAmount != null ? summarySource.totalAmount : (invoice.total_amount || 0));
+        const gstValue = Number(summarySource.gstAmount != null ? summarySource.gstAmount : Math.round(subtotal * GST_RATE * 100) / 100);
+        const totalValue = Number(summarySource.totalWithGst != null ? summarySource.totalWithGst : subtotal + gstValue);
+        const statusLabel = (invoice.status || 'draft').replace(/^./, (char) => char.toUpperCase());
+        const dateLabel = date ? DATE_FULL_FORMATTER.format(date) : '—';
+        const baseNumber = invoice.invoice_number || (`Invoice ${invoice.sequence || ''}`).trim();
+        const numberLabel = baseNumber || (invoice.id ? `Invoice ${invoice.id}` : 'Invoice');
+
+        const summary = {
+          numberLabel,
+          dateLabel,
+          statusLabel,
+          lineCount,
+          totalHours,
+          subtotal,
+          gstValue,
+          totalValue
+        };
+
+        return { invoice, summary, date };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.date - b.date);
   }
 
   function attachBasRowClickHandlers() {
@@ -1731,6 +1796,7 @@
   const annualCategoryTableHead = document.getElementById('annual-category-table-head');
   const annualCategoryTableBody = document.getElementById('annual-category-table-body');
   const annualCategoryEmpty = document.getElementById('annual-category-empty');
+  const annualCategoryEmptyText = document.getElementById('annual-category-empty-text');
 
   function getThemeColors() {
     const computedStyle = getComputedStyle(document.body);
@@ -1772,44 +1838,133 @@
     }
   }
 
-  function showAnnualLoadingState() {
-    if (!pageAnnualViews) return;
-
-    // Add loading overlay
-    let overlay = document.getElementById('annual-loading-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'annual-loading-overlay';
-      overlay.style.cssText = `
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: var(--bg);
-        opacity: 0.7;
-        backdrop-filter: blur(4px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-        border-radius: 12px;
-      `;
-      overlay.innerHTML = '<div style="font-size: 14px; color: var(--muted);">Loading data...</div>';
-      pageAnnualViews.style.position = 'relative';
-      pageAnnualViews.appendChild(overlay);
-    }
-    overlay.style.display = 'flex';
+function ensureAnnualLoadingOverlay() {
+  if (!pageAnnualViews) return null;
+  let overlay = document.getElementById('annual-loading-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'annual-loading-overlay';
+    overlay.innerHTML = `
+      <div class="ts-loading-overlay__message">Loading annual data...</div>
+      <div class="ts-loading-overlay__skeletons"></div>
+    `;
+    pageAnnualViews.appendChild(overlay);
   }
+  return overlay;
+}
 
-  function hideAnnualLoadingState() {
+function getAnnualSkeletonTargets() {
+  const targets = [];
+  const statIds = [
+    'annual-stat-gross',
+    'annual-stat-super',
+    'annual-stat-tax',
+    'annual-stat-net',
+    'annual-stat-hours',
+    'annual-stat-avg-monthly',
+    'annual-stat-tax-rate',
+    'annual-stat-hourly-rate'
+  ];
+  const seen = new Set();
+  statIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const card = el.closest('.ts-annual-stat-card');
+    const targetEl = card || el;
+    if (seen.has(targetEl)) return;
+    seen.add(targetEl);
+    targets.push({ el: targetEl, type: 'block' });
+  });
+  const chartIds = [
+    'annual-income-chart',
+    'annual-income-pie-chart',
+    'annual-contract-pie-chart',
+    'annual-total-hours-pie-chart',
+    'annual-total-hours-by-type-pie-chart'
+  ];
+  chartIds.forEach((id) => {
+    const canvas = document.getElementById(id);
+    if (canvas && canvas.parentElement) {
+      targets.push({ el: canvas.parentElement, type: 'block' });
+    }
+  });
+  const taxAnalysis = document.getElementById('annual-tax-analysis');
+  if (taxAnalysis) targets.push({ el: taxAnalysis, type: 'block' });
+  return targets;
+}
+
+function toggleAnnualSkeleton(enabled) {
+  if (!pageAnnualViews) return;
+  const targets = getAnnualSkeletonTargets();
+  const overlay = enabled ? ensureAnnualLoadingOverlay() : document.getElementById('annual-loading-overlay');
+  const skeletonLayer = overlay ? overlay.querySelector('.ts-loading-overlay__skeletons') : null;
+  if (enabled) {
+    if (!overlay || !skeletonLayer) return;
+    overlay.classList.add('is-active');
+    skeletonLayer.innerHTML = '';
+    const baseRect = pageAnnualViews.getBoundingClientRect();
+    targets.forEach((item) => {
+      const { el, type, className } = item;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      if (el.dataset.prevVisibility === undefined) el.dataset.prevVisibility = el.style.visibility || '';
+      el.style.visibility = 'hidden';
+      const skeleton = document.createElement('div');
+      skeleton.className = 'ts-skeleton';
+      if (type === 'text' && className) skeleton.classList.add(className);
+      skeleton.style.position = 'absolute';
+      skeleton.style.top = `${rect.top - baseRect.top}px`;
+      skeleton.style.left = `${rect.left - baseRect.left}px`;
+      skeleton.style.width = `${rect.width}px`;
+      skeleton.style.height = `${rect.height}px`;
+      skeletonLayer.appendChild(skeleton);
+    });
+  } else {
+    if (skeletonLayer) skeletonLayer.innerHTML = '';
+    targets.forEach((item) => {
+      const { el } = item;
+      if (!el) return;
+      if (el.dataset.prevVisibility !== undefined) {
+        el.style.visibility = el.dataset.prevVisibility;
+        delete el.dataset.prevVisibility;
+      } else {
+        el.style.visibility = '';
+      }
+    });
+  }
+}
+
+function showAnnualLoadingState(useSkeleton) {
+  if (!pageAnnualViews) return;
+  const overlay = ensureAnnualLoadingOverlay();
+  if (!overlay) return;
+  const message = overlay.querySelector('.ts-loading-overlay__message');
+  if (message) {
+    message.textContent = useSkeleton ? 'Preparing annual insights...' : 'Loading annual data...';
+  }
+  overlay.classList.add('is-active');
+  overlay.style.display = 'block';
+  const skeletonLayer = overlay.querySelector('.ts-loading-overlay__skeletons');
+  if (skeletonLayer && !useSkeleton) skeletonLayer.innerHTML = '';
+  if (useSkeleton) {
+    toggleAnnualSkeleton(true);
+  } else {
+    toggleAnnualSkeleton(false);
+  }
+}
+
+function hideAnnualLoadingState() {
     const overlay = document.getElementById('annual-loading-overlay');
     if (overlay) {
+      overlay.classList.remove('is-active');
       overlay.style.display = 'none';
+      const skeletonLayer = overlay.querySelector('.ts-loading-overlay__skeletons');
+      if (skeletonLayer) skeletonLayer.innerHTML = '';
     }
   }
 
-  function loadAnnualData() {
+function loadAnnualData() {
     const payload = {
       yearType: state.annualYearType,
       startYear: state.annualCurrentYear,
@@ -1818,13 +1973,15 @@
 
     // Check if we have any cached annual data at all
     const hasAnyCachedData = state.annualData !== null;
+    const useSkeleton = !hasAnyCachedData;
 
     // Always show loading state when loading data
-    showAnnualLoadingState();
+    showAnnualLoadingState(useSkeleton);
 
     // Show cached data underneath if available (optimistic UI)
     if (hasAnyCachedData) {
       renderAnnualData();
+      toggleAnnualSkeleton(false);
     }
 
     // Then fetch fresh data in background
@@ -1835,16 +1992,18 @@
         state.annualData = data;
         saveCache();
         hideAnnualLoadingState();
+        toggleAnnualSkeleton(false);
         renderAnnualData();
         setStatus('Ready', 'success');
       })
       .withFailureHandler((error) => {
         console.error('Failed to load annual data:', error);
         hideAnnualLoadingState();
+        toggleAnnualSkeleton(false);
         setStatus('Error loading annual data', 'error');
       })
       .api_getAnnualSummary(payload);
-  }
+}
 
   function renderAnnualViews() {
     if (!pageAnnualViews) return;
@@ -2094,7 +2253,7 @@
 
     if (!visibleCategories.length) {
       if (annualCategoryEmpty) {
-        annualCategoryEmpty.textContent = 'Select at least one category to view the breakdown.';
+        if (annualCategoryEmptyText) annualCategoryEmptyText.textContent = 'Select at least one category to view the breakdown.';
         annualCategoryEmpty.style.display = 'block';
       }
       return;
@@ -2530,7 +2689,7 @@
               font: { size: 12, weight: '500' },
               padding: 16,
               usePointStyle: true,
-              pointStyle: 'circle'
+              pointStyle: 'roundedRect'
             }
           },
           tooltip: {
@@ -2649,7 +2808,7 @@
               font: { size: 11, weight: '500' },
               padding: 12,
               usePointStyle: true,
-              pointStyle: 'circle'
+              pointStyle: 'roundedRect'
             }
           },
           tooltip: {
@@ -2728,7 +2887,7 @@
               font: { size: 11, weight: '500' },
               padding: 12,
               usePointStyle: true,
-              pointStyle: 'circle'
+              pointStyle: 'roundedRect'
             }
           },
           tooltip: {
@@ -2806,7 +2965,7 @@
               font: { size: 11, weight: '500' },
               padding: 12,
               usePointStyle: true,
-              pointStyle: 'circle'
+              pointStyle: 'roundedRect'
             }
           },
           tooltip: {
@@ -2884,7 +3043,7 @@
               font: { size: 11, weight: '500' },
               padding: 12,
               usePointStyle: true,
-              pointStyle: 'circle'
+              pointStyle: 'roundedRect'
             }
           },
           tooltip: {
@@ -4499,6 +4658,10 @@ function updateDeductionFormVisibility() {
       applyCustomTheme();
     }
 
+    if (state.annualData) {
+      renderAnnualData();
+    }
+
     if (contractBurndownEl && state.selectedContractId) {
       const activeContract = getContractById(state.selectedContractId);
       if (activeContract) {
@@ -4585,6 +4748,12 @@ function updateDeductionFormVisibility() {
     b = hue2rgb(p, q, h - 1/3);
 
     return rgbToHex(Math.round(r * 255), Math.round(g * 255), Math.round(b * 255));
+  }
+
+  function withAlpha(hex, alpha) {
+    var rgb = hexToRgb(hex);
+    if (!rgb) return `rgba(15, 23, 42, ${alpha})`;
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   }
 
   function generateCustomTheme(bgColor, primaryColor, textColor, successColor) {
@@ -6334,6 +6503,7 @@ function updateDeductionFormVisibility() {
   const featureFlagsListEl = document.getElementById('feature-flags-list');
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
+  const statusNotificationSelect = document.getElementById('set-status-notifications');
   const paygRateInput = document.getElementById('set-payg-rate');
   const paygRateCol = document.getElementById('payg-rate-col');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
@@ -6349,6 +6519,9 @@ function updateDeductionFormVisibility() {
   }
   if (btnCollapseAllFeatureFlags) {
     btnCollapseAllFeatureFlags.addEventListener('click', () => setAllFeatureFlagCollapse(true));
+  }
+  if (statusNotificationSelect) {
+    statusNotificationSelect.addEventListener('change', applyStatusDisplay);
   }
 
   const contractNameInput = document.getElementById('contract-name');
@@ -7063,11 +7236,12 @@ function updateDeductionFormVisibility() {
           plugins: {
             legend: {
               position: 'top',
-              labels: {
-                color: textColor,
-                usePointStyle: true,
-                padding: 12
-              }
+            labels: {
+              color: textColor,
+              usePointStyle: true,
+              pointStyle: 'roundedRect',
+              padding: 12
+            }
             },
             tooltip: {
               callbacks: {
@@ -10690,6 +10864,13 @@ function updateDeductionFormVisibility() {
       defaultValue: 'dark',
       event: 'change'
     },
+    status_notification_mode: {
+      element: () => statusNotificationSelect,
+      getValue: (el) => el.value,
+      setValue: (el, val) => { if (el) el.value = val || 'status_bar'; },
+      defaultValue: 'status_bar',
+      event: 'change'
+    },
     payg_instalment_rate: {
       element: () => paygRateInput,
       getValue: (el) => parseFloat(el.value) || 2,
@@ -10829,6 +11010,7 @@ function updateDeductionFormVisibility() {
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
       saveCache();
+      applyStatusDisplay();
       // Clear annual data cache when lost super recovery mode changes to force recalculation
       if (state.annualData && next.lost_super_recovery_mode && next.lost_super_recovery_mode !== settingsInitialState.lost_super_recovery_mode) {
         state.annualData = null;
@@ -10877,6 +11059,7 @@ function updateDeductionFormVisibility() {
     applyTheme(state.settings.theme || 'dark');
     captureSettingsState();
     checkSettingsDirty();
+    applyStatusDisplay();
     renderContractsUI();
     renderDeductionsList();
     hideContractForm();
@@ -10926,6 +11109,7 @@ function updateDeductionFormVisibility() {
         applyTheme(state.settings.theme || 'dark');
         captureSettingsState();
         checkSettingsDirty();
+        applyStatusDisplay();
         renderCalendar();
       })
       .withFailureHandler(() => {})
@@ -11814,13 +11998,13 @@ function updateDeductionFormVisibility() {
     if (state.invoiceDetailLoading) {
       invoiceDetail.style.display = 'none';
       invoiceDetailEmpty.style.display = 'block';
-      invoiceDetailEmpty.textContent = 'Loading invoice...';
+      if (invoiceDetailEmptyText) invoiceDetailEmptyText.textContent = 'Loading invoice...';
       return;
     }
     if (!state.invoiceDetail || !state.invoiceSelectedId) {
       invoiceDetail.style.display = 'none';
       invoiceDetailEmpty.style.display = 'block';
-      invoiceDetailEmpty.textContent = 'Select an invoice to start editing, or create a new one.';
+      if (invoiceDetailEmptyText) invoiceDetailEmptyText.textContent = 'Select an invoice to start editing, or create a new one.';
       return;
     }
     invoiceDetailEmpty.style.display = 'none';

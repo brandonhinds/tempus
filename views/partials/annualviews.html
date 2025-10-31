@@ -4,7 +4,7 @@
       <h3 style="margin:0;">Annual Views</h3>
       <p class="ts-note" style="margin:0;">Comprehensive financial breakdown across the year with income, hours, and tax insights.</p>
     </div>
-    <div class="ts-toolbar-actions">
+    <div class="ts-toolbar-actions ts-gap-md" style="display:flex; align-items:center;">
       <button class="ghost" id="annual-contract-filter-toggle" style="display:none;" title="Filter by contract">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
@@ -186,7 +186,11 @@
         <tbody id="annual-category-table-body"></tbody>
       </table>
     </div>
-    <div class="ts-note" id="annual-category-empty" style="display:none; margin-top:12px;">No categories to display.</div>
+    <div class="ts-empty-state ts-empty-state--inline" id="annual-category-empty" style="display:none; margin-top:12px;">
+      <div class="ts-empty-state__icon">🗂️</div>
+      <p class="ts-empty-state__title">No categories selected</p>
+      <p class="ts-empty-state__text"><span id="annual-category-empty-text">Choose at least one category to see the breakdown.</span></p>
+    </div>
   </div>
 
   <!-- Charts Grid -->
@@ -249,5 +253,9 @@
   </div>
 
   <!-- Empty State -->
-  <div class="ts-note" id="annual-empty" style="display:none; text-align:center; padding:40px;">No data found for the selected year.</div>
+  <div class="ts-empty-state" id="annual-empty" style="display:none;">
+    <div class="ts-empty-state__icon">📅</div>
+    <p class="ts-empty-state__title">No annual data yet</p>
+    <p class="ts-empty-state__text">Try choosing a different year or add entries for this period.</p>
+  </div>
 </section>

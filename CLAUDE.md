@@ -37,6 +37,7 @@ No automated test suite exists. After significant changes:
   - `index.html` - Main web app template
   - `partials/` - Modular HTML components (head, navbar, dashboard, contracts, settings, scripts)
 - `index.html` - Standalone prototype (reference only, don't modify)
+- `nextPrompt.md` is the user's personal scratchpad. Never edit, revert, or overwrite this file.
 
 ### Data Architecture
 The app uses Google Sheets with these main sheets:

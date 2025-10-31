@@ -1,195 +1,365 @@
 <section class="ts-card" id="page-settings">
-  <div class="ts-row">
-    <div class="ts-col">
-      <h3 style="margin-top:0;">Settings</h3>
-      <div class="ts-settings-grid">
-        <div>
-          <label for="set-round">Time entries rounding (minutes)</label>
-          <div class="ts-note">Time entries are automatically rounded to intervals of this many minutes (e.g. "15" rounds time entries to quarters of hours). Set to 0 to disable rounding.</div>
-          <div class="ts-settings-field">
-            <input type="number" id="set-round" min="0" step="1" />
-          </div>
-        </div>
-        <div>
-          <label for="set-theme">Theme</label>
-          <div class="ts-note">The colour scheme of Tempus.</div>
-          <div class="ts-settings-field">
-            <div style="display: flex; gap: 8px; align-items: stretch;">
-              <select id="set-theme" style="flex: 1;">
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-                <option value="og">The OG</option>
-                <option value="rose">Rose Gold</option>
-                <option value="sierra117">Sierra 117</option>
-                <option value="protanopia" class="ts-colorblind-theme" style="display:none;">Protanopia Friendly</option>
-                <option value="deuteranopia" class="ts-colorblind-theme" style="display:none;">Deuteranopia Friendly</option>
-                <option value="tritanopia" class="ts-colorblind-theme" style="display:none;">Tritanopia Friendly</option>
-                <option value="monochrome" class="ts-colorblind-theme" style="display:none;">Monochrome</option>
-                <option value="custom" class="ts-custom-theme" style="display:none;">Custom</option>
-              </select>
-              <button type="button" id="btn-configure-theme" class="secondary" style="display:none; white-space: nowrap;">Configure</button>
-            </div>
-          </div>
-        </div>
-        <div id="lost-super-recovery-col" style="display:none;">
-          <label for="set-lost-super-recovery-mode">Lost super recovery method <span class="ts-info-icon" title="How the superannuation normally lost to deductions being reclaimed. Options include adding the amount back to superannuation as an extra contribution, or adding it to income so it flows through tax and net income.">i</span></label>
-          <div class="ts-note">How the superannuation normally lost to deductions being reclaimed. Options include adding the amount directly back to superannuation as an extra contribution, or having the money added back as additional income so it gets distributed between superannuation, tax, and net income.</div>
-          <div class="ts-settings-field">
-            <select id="set-lost-super-recovery-mode">
-              <option value="extra_contribution">Add as extra super contribution</option>
-              <option value="add_to_taxable">Add back to taxable income</option>
-            </select>
-          </div>
-        </div>
-        <div id="payg-rate-col" style="display:none;">
-          <label for="set-payg-rate">PAYG instalment rate (%)</label>
-          <div class="ts-note">The PAYG installment rate used to calculate BAS repayments for sole traders. Still need to actually figure out what this means.</div>
-          <div class="ts-settings-field">
-            <input type="number" id="set-payg-rate" min="0" max="100" step="0.1" />
-          </div>
-        </div>
-        <div id="public-holiday-state-col" style="display:none;">
-          <label for="set-public-holiday-state">Public holidays state/territory</label>
-          <div class="ts-note">The Australian state or territory you observe the public holidays for.</div>
-          <div class="ts-settings-field">
-            <select id="set-public-holiday-state">
-              <option value="ACT">Australian Capital Territory</option>
-              <option value="NSW">New South Wales</option>
-              <option value="NT">Northern Territory</option>
-              <option value="QLD">Queensland</option>
-              <option value="SA">South Australia</option>
-              <option value="TAS">Tasmania</option>
-              <option value="VIC">Victoria</option>
-              <option value="WA">Western Australia</option>
-            </select>
-          </div>
-        </div>
-        <div id="minimum-end-time-col" style="display:none;">
-          <label for="set-minimum-end-time">Suggested minimum end time</label>
-          <div class="ts-note">The minimum time of the day you aim to leave at. Uses this value and the time entry rounding to recommend when you should leave for the day to round out your hours.</div>
-          <div class="ts-settings-field">
-            <input type="time" id="set-minimum-end-time" />
-          </div>
-        </div>
-        <div id="invoice-template-col" style="display:none;">
-          <label for="set-invoice-template">Invoice template (Doc ID or path)</label>
-          <div class="ts-note">The Google Docs template (by ID or Drive path) that new invoices copy before populating invoices.</div>
-          <div class="ts-settings-field">
-            <input type="text" id="set-invoice-template" placeholder="Document ID or path" />
-          </div>
-        </div>
-        <div id="invoice-output-folder-col" style="display:none;">
-          <label for="set-invoice-output-folder">Invoice output folder path</label>
-          <div class="ts-note">Path in Google Drive where generated invoices should be stored.</div>
-          <div class="ts-settings-field">
-            <input type="text" id="set-invoice-output-folder" placeholder="Folder path" />
-          </div>
-        </div>
-        <div id="invoice-line-limit-col" style="display:none;">
-          <label for="set-invoice-line-limit">Invoice line placeholder limit</label>
-          <div class="ts-note">The maximum number of invoice lines in your invoice template, which ensures generated invoices don't exceed it.</div>
-          <div class="ts-settings-field">
-            <input type="number" id="set-invoice-line-limit" min="1" step="1" />
-          </div>
-        </div>
-      </div>
-      <div style="margin-top:8px; text-align:right; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-        <button type="button" id="btn-super-guarantee-rates" class="secondary" style="white-space: nowrap;">Super Guarantee Percentages</button>
-        <div style="display:flex; gap:8px;">
-          <button class="ghost" id="btn-discard-settings" style="display:none;">Discard Changes</button>
-          <button id="btn-save-settings" disabled>Save Settings</button>
-        </div>
-      </div>
-      <div style="margin-top:32px;">
-        <h3 style="margin:0 0 12px;">Feature Flags</h3>
-        <div class="ts-note">Toggle experimental capabilities without impacting core time tracking.</div>
-        <div class="ts-toolbar" id="feature-flag-collapse-controls" style="display:none; margin:12px 0;">
-          <div class="ts-note" style="margin:0;">Expand or collapse all groups to scan feature toggles quickly.</div>
-          <div style="display:flex; gap:8px;">
-            <button class="ghost small" id="btn-expand-all-feature-flags">Expand all</button>
-            <button class="ghost small" id="btn-collapse-all-feature-flags">Collapse all</button>
-          </div>
-        </div>
-        <div id="feature-flags-list" style="margin-top:12px;"></div>
-        <div id="clear-cache-wrapper" style="margin-top:16px; display:none;">
-          <button class="danger" id="btn-clear-cache">Clear Local Cache</button>
-          <div class="ts-note">Removes cached entries, settings, and remembered pages from this browser.</div>
-        </div>
-      </div>
+ <div class="ts-row">
+  <div class="ts-col">
+   <h3 style="margin-top:0;">
+    Settings
+   </h3>
+   <div class="ts-settings-grid">
+    <div>
+     <label class="ts-settings-label" for="set-round">
+      Time entries rounding (minutes)
+     </label>
+     <div class="ts-note">
+      Time entries are automatically rounded to intervals of this many minutes (e.g. "15" rounds time entries to quarters of hours). Set to 0 to disable rounding.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-round" min="0" step="1" type="number"/>
+     </div>
     </div>
+    <div>
+     <label class="ts-settings-label" for="set-theme">
+      Theme
+     </label>
+     <div class="ts-note">
+      The colour scheme of Tempus.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <div style="display: flex; gap: 8px; align-items: stretch;">
+       <select id="set-theme" style="flex: 1;">
+        <option value="dark">
+         Dark
+        </option>
+        <option value="light">
+         Light
+        </option>
+        <option value="og">
+         The OG
+        </option>
+        <option value="rose">
+         Rose Gold
+        </option>
+        <option value="sierra117">
+         Sierra 117
+        </option>
+        <option class="ts-colorblind-theme" style="display:none;" value="protanopia">
+         Protanopia Friendly
+        </option>
+        <option class="ts-colorblind-theme" style="display:none;" value="deuteranopia">
+         Deuteranopia Friendly
+        </option>
+        <option class="ts-colorblind-theme" style="display:none;" value="tritanopia">
+         Tritanopia Friendly
+        </option>
+        <option class="ts-colorblind-theme" style="display:none;" value="monochrome">
+         Monochrome
+        </option>
+        <option class="ts-custom-theme" style="display:none;" value="custom">
+         Custom
+        </option>
+       </select>
+       <button class="secondary" id="btn-configure-theme" style="display:none; white-space: nowrap;" type="button">
+        Configure
+       </button>
+      </div>
+     </div>
+    </div>
+    <div>
+     <label class="ts-settings-label" for="set-status-notifications">
+      Status notifications
+     </label>
+     <div class="ts-note">
+      How progress, warnings, and errors are reported.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-status-notifications">
+       <option value="status_bar">
+        Status bar only
+       </option>
+       <option value="toast">
+        Toast notifications only
+       </option>
+       <option value="both">
+        Both toast and status bar
+       </option>
+      </select>
+     </div>
+    </div>
+    <div id="lost-super-recovery-col" style="display:none;">
+     <label class="ts-settings-label" for="set-lost-super-recovery-mode">
+      Lost super recovery method
+      <span class="ts-info-icon" title="How the superannuation normally lost to deductions being reclaimed. Options include adding the amount back to superannuation as an extra contribution, or adding it to income so it flows through tax and net income.">
+       i
+      </span>
+     </label>
+     <div class="ts-note">
+      How the superannuation normally lost to deductions being reclaimed. Options include adding the amount directly back to superannuation as an extra contribution, or having the money added back as additional income so it gets distributed between superannuation, tax, and net income.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-lost-super-recovery-mode">
+       <option value="extra_contribution">
+        Add as extra super contribution
+       </option>
+       <option value="add_to_taxable">
+        Add back to taxable income
+       </option>
+      </select>
+     </div>
+    </div>
+    <div id="payg-rate-col" style="display:none;">
+     <label class="ts-settings-label" for="set-payg-rate">
+      PAYG instalment rate (%)
+     </label>
+     <div class="ts-note">
+      Enter the rate from your ATO instalment notice so Tempus can estimate quarterly BAS repayments.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-payg-rate" max="100" min="0" step="0.1" type="number"/>
+     </div>
+    </div>
+    <div id="public-holiday-state-col" style="display:none;">
+     <label class="ts-settings-label" for="set-public-holiday-state">
+      Public holidays state/territory
+     </label>
+     <div class="ts-note">
+      The Australian state or territory you observe the public holidays for.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-public-holiday-state">
+       <option value="ACT">
+        Australian Capital Territory
+       </option>
+       <option value="NSW">
+        New South Wales
+       </option>
+       <option value="NT">
+        Northern Territory
+       </option>
+       <option value="QLD">
+        Queensland
+       </option>
+       <option value="SA">
+        South Australia
+       </option>
+       <option value="TAS">
+        Tasmania
+       </option>
+       <option value="VIC">
+        Victoria
+       </option>
+       <option value="WA">
+        Western Australia
+       </option>
+      </select>
+     </div>
+    </div>
+    <div id="minimum-end-time-col" style="display:none;">
+     <label class="ts-settings-label" for="set-minimum-end-time">
+      Suggested minimum end time
+     </label>
+     <div class="ts-note">
+      The minimum time of the day you aim to leave at. Uses this value and the time entry rounding to recommend when you should leave for the day to round out your hours.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-minimum-end-time" type="time"/>
+     </div>
+    </div>
+    <div id="invoice-template-col" style="display:none;">
+     <label class="ts-settings-label" for="set-invoice-template">
+      Invoice template (Doc ID or path)
+     </label>
+     <div class="ts-note">
+      The Google Docs template (by ID or Drive path) that new invoices copy before populating invoices.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-invoice-template" placeholder="Document ID or path" type="text"/>
+     </div>
+    </div>
+    <div id="invoice-output-folder-col" style="display:none;">
+     <label class="ts-settings-label" for="set-invoice-output-folder">
+      Invoice output folder path
+     </label>
+     <div class="ts-note">
+      Path in Google Drive where generated invoices should be stored.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-invoice-output-folder" placeholder="Folder path" type="text"/>
+     </div>
+    </div>
+    <div id="invoice-line-limit-col" style="display:none;">
+     <label class="ts-settings-label" for="set-invoice-line-limit">
+      Invoice line placeholder limit
+     </label>
+     <div class="ts-note">
+      The maximum number of invoice lines in your invoice template, which ensures generated invoices don't exceed it.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-invoice-line-limit" min="1" step="1" type="number"/>
+     </div>
+    </div>
+   </div>
+   <div style="margin-top:8px; text-align:right; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+    <button class="secondary" id="btn-super-guarantee-rates" style="white-space: nowrap;" type="button">
+     Super Guarantee Percentages
+    </button>
+    <div style="display:flex; gap:8px;">
+     <button class="ghost" id="btn-discard-settings" style="display:none;">
+      Discard Changes
+     </button>
+     <button disabled="" id="btn-save-settings">
+      Save Settings
+     </button>
+    </div>
+   </div>
+   <div style="margin-top:32px;">
+    <h3 style="margin:0 0 12px;">
+     Feature Flags
+    </h3>
+    <div class="ts-note">
+     Toggle experimental capabilities without impacting core time tracking.
+    </div>
+    <div class="ts-toolbar" id="feature-flag-collapse-controls" style="display:none; margin:12px 0;">
+     <div class="ts-note" style="margin:0;">
+      Expand or collapse all groups to scan feature toggles quickly.
+     </div>
+     <div style="display:flex; gap:8px;">
+      <button class="ghost small" id="btn-expand-all-feature-flags">
+       Expand all
+      </button>
+      <button class="ghost small" id="btn-collapse-all-feature-flags">
+       Collapse all
+      </button>
+     </div>
+    </div>
+    <div id="feature-flags-list" style="margin-top:12px;">
+    </div>
+    <div id="clear-cache-wrapper" style="margin-top:16px; display:none;">
+     <button class="danger" id="btn-clear-cache">
+      Clear Local Cache
+     </button>
+     <div class="ts-note">
+      Removes cached entries, settings, and remembered pages from this browser.
+     </div>
+    </div>
+   </div>
   </div>
+ </div>
 </section>
-
 <!-- Custom Theme Configuration Modal -->
 <div class="ts-modal" id="modal-custom-theme" style="display:none;">
-  <div class="ts-modal-content">
-    <div class="ts-modal-header">
-      <h3>Configure Custom Theme</h3>
-      <button class="ts-modal-close">&times;</button>
-    </div>
-    <div class="ts-modal-body">
-      <div class="ts-note" style="margin-bottom: 16px;">Choose your main colors and the theme will automatically generate complementary shades for the entire interface.</div>
-      <div class="ts-row" style="margin-bottom: 16px;">
-        <div class="ts-col">
-          <label>Background Color</label>
-          <input type="color" id="custom-theme-bg" value="#0b1220" />
-          <div class="ts-note">Dark base color for the app background</div>
-        </div>
-        <div class="ts-col">
-          <label>Primary Color</label>
-          <input type="color" id="custom-theme-primary" value="#3b82f6" />
-          <div class="ts-note">Main accent color for buttons and highlights</div>
-        </div>
-      </div>
-      <div class="ts-row">
-        <div class="ts-col">
-          <label>Text Color</label>
-          <input type="color" id="custom-theme-text" value="#e2e8f0" />
-          <div class="ts-note">Main text color for readability</div>
-        </div>
-        <div class="ts-col">
-          <label>Success Color</label>
-          <input type="color" id="custom-theme-success" value="#10b981" />
-          <div class="ts-note">Color for success states and positive indicators</div>
-        </div>
-      </div>
-    </div>
-    <div class="ts-modal-footer">
-      <button class="ghost" id="btn-cancel-custom-theme">Cancel</button>
-      <button id="btn-save-custom-theme">Save Theme</button>
-    </div>
+ <div class="ts-modal-content">
+  <div class="ts-modal-header">
+   <h3>
+    Configure Custom Theme
+   </h3>
+   <button class="ts-modal-close">
+    ×
+   </button>
   </div>
+  <div class="ts-modal-body">
+   <div class="ts-note" style="margin-bottom: 16px;">
+    Choose your main colors and the theme will automatically generate complementary shades for the entire interface.
+   </div>
+   <div class="ts-row" style="margin-bottom: 16px;">
+    <div class="ts-col">
+     <label>
+      Background Color
+     </label>
+     <input id="custom-theme-bg" type="color" value="#0b1220"/>
+     <div class="ts-note">
+      Dark base color for the app background
+     </div>
+    </div>
+    <div class="ts-col">
+     <label>
+      Primary Color
+     </label>
+     <input id="custom-theme-primary" type="color" value="#3b82f6"/>
+     <div class="ts-note">
+      Main accent color for buttons and highlights
+     </div>
+    </div>
+   </div>
+   <div class="ts-row">
+    <div class="ts-col">
+     <label>
+      Text Color
+     </label>
+     <input id="custom-theme-text" type="color" value="#e2e8f0"/>
+     <div class="ts-note">
+      Main text color for readability
+     </div>
+    </div>
+    <div class="ts-col">
+     <label>
+      Success Color
+     </label>
+     <input id="custom-theme-success" type="color" value="#10b981"/>
+     <div class="ts-note">
+      Color for success states and positive indicators
+     </div>
+    </div>
+   </div>
+  </div>
+  <div class="ts-modal-footer">
+   <button class="ghost" id="btn-cancel-custom-theme">
+    Cancel
+   </button>
+   <button id="btn-save-custom-theme">
+    Save Theme
+   </button>
+  </div>
+ </div>
 </div>
-
 <!-- Super Guarantee Rates Modal -->
 <div class="ts-modal" id="modal-super-guarantee-rates" style="display:none;">
-  <div class="ts-modal-content" style="max-width:800px;">
-    <div class="ts-modal-header">
-      <h3>Super Guarantee Percentages</h3>
-      <button class="ts-modal-close">&times;</button>
-    </div>
-    <div class="ts-modal-body">
-      <div class="ts-note" style="margin-bottom: 16px;">
-        Manage superannuation guarantee rates by date range. Rates are sorted by start date with the most recent at the top.
-        <strong>Warning:</strong> Only one rate should have no end date (the current rate).
-      </div>
-      <div style="margin-bottom:12px;">
-        <button type="button" id="btn-add-super-rate" class="secondary">Add Rate</button>
-      </div>
-      <div style="display:grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap:8px; padding:8px; font-weight:600; border-bottom:2px solid var(--border-color);">
-        <span></span>
-        <span>Start Date</span>
-        <span>End Date</span>
-        <span>Percentage (%)</span>
-        <span></span>
-      </div>
-      <div id="super-rates-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <!-- Rates will be rendered here -->
-      </div>
-    </div>
-    <div class="ts-modal-footer">
-      <button class="ghost" id="btn-cancel-super-rates">Cancel</button>
-      <button id="btn-save-super-rates">Save Rates</button>
-    </div>
+ <div class="ts-modal-content" style="max-width:800px;">
+  <div class="ts-modal-header">
+   <h3>
+    Super Guarantee Percentages
+   </h3>
+   <button class="ts-modal-close">
+    ×
+   </button>
   </div>
+  <div class="ts-modal-body">
+   <div class="ts-note" style="margin-bottom: 16px;">
+    Manage superannuation guarantee rates by date range. Rates are sorted by start date with the most recent at the top.
+    <strong>
+     Warning:
+    </strong>
+    Only one rate should have no end date (the current rate).
+   </div>
+   <div style="margin-bottom:12px;">
+    <button class="secondary" id="btn-add-super-rate" type="button">
+     Add Rate
+    </button>
+   </div>
+   <div style="display:grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap:8px; padding:8px; font-weight:600; border-bottom:2px solid var(--border-color);">
+    <span>
+    </span>
+    <span>
+     Start Date
+    </span>
+    <span>
+     End Date
+    </span>
+    <span>
+     Percentage (%)
+    </span>
+    <span>
+    </span>
+   </div>
+   <div id="super-rates-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+    <!-- Rates will be rendered here -->
+   </div>
+  </div>
+  <div class="ts-modal-footer">
+   <button class="ghost" id="btn-cancel-super-rates">
+    Cancel
+   </button>
+   <button id="btn-save-super-rates">
+    Save Rates
+   </button>
+  </div>
+ </div>
 </div>

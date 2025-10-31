@@ -20,7 +20,11 @@
     </div>
   </div>
 
-  <div id="invoice-detail-empty" class="ts-note">Select an invoice to start editing, or create a new one.</div>
+  <div id="invoice-detail-empty" class="ts-empty-state ts-empty-state--inline">
+    <div class="ts-empty-state__icon">🧾</div>
+    <p class="ts-empty-state__title">No invoice selected</p>
+    <p class="ts-empty-state__text"><span id="invoice-detail-empty-text">Choose an invoice from the list or create a new one to begin.</span></p>
+  </div>
   <div id="invoice-detail" style="display:none;">
     <div class="ts-card ts-card--section">
       <div class="ts-row" style="gap:12px; margin-bottom:8px;">
@@ -104,7 +108,11 @@
         </div>
       </div>
 
-      <div id="invoice-line-empty" class="ts-note" style="display:none; margin-bottom:8px;">No line items yet.</div>
+      <div id="invoice-line-empty" class="ts-empty-state ts-empty-state--inline" style="display:none; margin-bottom:8px;">
+        <div class="ts-empty-state__icon">📄</div>
+        <p class="ts-empty-state__title">No line items</p>
+        <p class="ts-empty-state__text">Add your first line to build the invoice summary.</p>
+      </div>
       <div id="invoice-line-items" class="ts-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       <div style="margin-top:12px; display:flex; flex-direction:column; gap:4px;">
         <div class="ts-total-row ts-total-row--strong">
@@ -128,7 +136,11 @@
       <div style="font-weight:600;">Default line items</div>
       <button id="btn-invoice-default-new" class="ghost" style="font-size:12px;">Add default</button>
     </div>
-    <div id="invoice-default-empty" class="ts-note" style="display:none;">No defaults yet.</div>
+    <div id="invoice-default-empty" class="ts-empty-state ts-empty-state--inline" style="display:none;">
+      <div class="ts-empty-state__icon">⭐</div>
+      <p class="ts-empty-state__title">No default line items</p>
+      <p class="ts-empty-state__text">Save frequently used descriptions here so you can add them with one click.</p>
+    </div>
     <ul id="invoice-default-list" class="ts-list"></ul>
 
     <div id="invoice-default-form-anchor">
