@@ -22,9 +22,6 @@
 
 ## Big Changes
 
-- Add the invoice requirements (all behind feature flags)
-    * Already had one attempt at this but it got too big / unwieldy. We need a simpler way to define default fields, line items, and amounts.
-
 - Make buttons / UI element *sexy* like JB's
 
 - Add alternative views to hours, such as weekly and fortnightly (feature flag)

@@ -4423,6 +4423,12 @@ function updateDeductionFormVisibility() {
       order: 260,
       group: 'time_entries'
     },
+    enable_monthly_print_view: {
+      name: 'Enable monthly hours print view',
+      description: 'Adds a printable calendar showing hour breakdowns by type that fits on one A4 page for timesheets or records.',
+      order: 270,
+      group: 'time_entries'
+    },
     enable_company_tracking_features: {
       name: 'Enable company income tracking',
       description: 'Unlocks company-focused features including company deductions, BAS reporting, and invoice tooling.',
@@ -6392,6 +6398,14 @@ function updateDeductionFormVisibility() {
   const btnSaveActualIncome = document.getElementById('btn-save-actual-income');
   const btnCancelActualIncome = document.getElementById('btn-cancel-actual-income');
   const btnDeleteActualIncome = document.getElementById('btn-delete-actual-income');
+  const printMonthlyBtn = document.getElementById('calendar-print-monthly-btn');
+  const printViewConfigModal = document.getElementById('modal-print-view-config');
+  const printViewIncomeList = document.getElementById('print-view-income-list');
+  const printViewOtherList = document.getElementById('print-view-other-list');
+  const printViewWarning = document.getElementById('print-view-warning');
+  const btnCancelPrintView = document.getElementById('btn-cancel-print-view');
+  const btnGeneratePrintView = document.getElementById('btn-generate-print-view');
+  const btnUnselectAllOther = document.getElementById('btn-unselect-all-other');
 
   const DECIMAL_HOURS_FORMATTER = new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 0,
@@ -8274,6 +8288,20 @@ function updateDeductionFormVisibility() {
     btnDeleteActualIncome.addEventListener('click', deleteActualIncome);
   }
 
+  // Monthly Print View Event Listeners
+  if (printMonthlyBtn) {
+    printMonthlyBtn.addEventListener('click', openPrintViewConfigModal);
+  }
+  if (btnCancelPrintView) {
+    btnCancelPrintView.addEventListener('click', closePrintViewConfigModal);
+  }
+  if (btnGeneratePrintView) {
+    btnGeneratePrintView.addEventListener('click', generatePrintView);
+  }
+  if (btnUnselectAllOther) {
+    btnUnselectAllOther.addEventListener('click', unselectAllOtherHourTypes);
+  }
+
   // Entries & KPIs
   function minutesForDate(date) {
     return state.entries
@@ -8566,6 +8594,12 @@ function updateDeductionFormVisibility() {
       actualIncomeBtn.style.display = visible ? 'inline-flex' : 'none';
       actualIncomeBtn.title = 'Add or view actual income for the current month';
     }
+    // Update print monthly button visibility
+    if (printMonthlyBtn) {
+      const visible = getFeatureFlag('enable_monthly_print_view');
+      printMonthlyBtn.style.display = visible ? 'inline-flex' : 'none';
+      printMonthlyBtn.title = 'Generate printable monthly hours view';
+    }
   }
 
   // Actual Income Functions
@@ -8708,6 +8742,450 @@ function updateDeductionFormVisibility() {
     state.actualIncome.forEach(item => {
       state.actualIncomeMap[item.month] = item;
     });
+  }
+
+  // Monthly Print View Functions
+  let printViewSelectedHourTypes = new Set();
+
+  function openPrintViewConfigModal() {
+    if (!printViewConfigModal) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+
+    // Get all entries for the current month
+    const monthEntries = entriesForMonth(year, month);
+
+    if (monthEntries.length === 0) {
+      customAlert('No time entries for this month', 'No entries to print');
+      return;
+    }
+
+    // Get unique hour type IDs from the entries
+    const hourTypeIds = new Set();
+    monthEntries.forEach(entry => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      hourTypeIds.add(hourTypeId);
+    });
+
+    // Separate into income and non-income hour types
+    const incomeTypes = [];
+    const otherTypes = [];
+
+    hourTypeIds.forEach(id => {
+      const hourType = state.hourTypeMap[id];
+      if (hourType) {
+        if (hourType.contributes_to_income) {
+          incomeTypes.push(hourType);
+        } else {
+          otherTypes.push(hourType);
+        }
+      }
+    });
+
+    // Initialize all selected by default
+    printViewSelectedHourTypes.clear();
+    incomeTypes.forEach(ht => printViewSelectedHourTypes.add(ht.id));
+    otherTypes.forEach(ht => printViewSelectedHourTypes.add(ht.id));
+
+    // Helper to create hour type row
+    function createHourTypeRow(hourType, isIncome) {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.padding = '8px';
+      row.style.borderRadius = '6px';
+      row.style.transition = 'background 0.15s ease';
+
+      const leftSide = document.createElement('div');
+      leftSide.style.display = 'flex';
+      leftSide.style.alignItems = 'center';
+      leftSide.style.gap = '8px';
+
+      const colorDot = document.createElement('span');
+      colorDot.style.width = '12px';
+      colorDot.style.height = '12px';
+      colorDot.style.borderRadius = '50%';
+      colorDot.style.backgroundColor = hourType.color || '#6b7280';
+      colorDot.style.flexShrink = '0';
+
+      const name = document.createElement('span');
+      name.textContent = hourType.name;
+
+      leftSide.appendChild(colorDot);
+      leftSide.appendChild(name);
+
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'ts-toggle';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      checkbox.dataset.hourTypeId = hourType.id;
+      checkbox.dataset.isIncome = isIncome ? 'true' : 'false';
+      checkbox.addEventListener('change', updatePrintViewSelection);
+
+      const track = document.createElement('span');
+      track.className = 'ts-toggle-track';
+      const thumb = document.createElement('span');
+      thumb.className = 'ts-toggle-thumb';
+      track.appendChild(thumb);
+
+      toggleLabel.appendChild(checkbox);
+      toggleLabel.appendChild(track);
+
+      row.appendChild(leftSide);
+      row.appendChild(toggleLabel);
+
+      return row;
+    }
+
+    // Render income hour types
+    if (printViewIncomeList) {
+      printViewIncomeList.innerHTML = '';
+      if (incomeTypes.length === 0) {
+        const note = document.createElement('div');
+        note.className = 'ts-note';
+        note.textContent = 'No income-generating hour types in this month';
+        printViewIncomeList.appendChild(note);
+      } else {
+        incomeTypes.forEach(hourType => {
+          printViewIncomeList.appendChild(createHourTypeRow(hourType, true));
+        });
+      }
+    }
+
+    // Render other hour types
+    if (printViewOtherList) {
+      printViewOtherList.innerHTML = '';
+      if (otherTypes.length === 0) {
+        const note = document.createElement('div');
+        note.className = 'ts-note';
+        note.textContent = 'No non-income hour types in this month';
+        printViewOtherList.appendChild(note);
+      } else {
+        otherTypes.forEach(hourType => {
+          printViewOtherList.appendChild(createHourTypeRow(hourType, false));
+        });
+      }
+    }
+
+    // Validate initial selection - check if more than 2 non-income types are selected
+    const selectedNonIncome = otherTypes.length; // All are selected by default
+    const exceeds = selectedNonIncome > 2;
+
+    if (printViewWarning) {
+      printViewWarning.style.display = exceeds ? 'block' : 'none';
+    }
+    if (btnGeneratePrintView) {
+      btnGeneratePrintView.disabled = exceeds || printViewSelectedHourTypes.size === 0;
+    }
+
+    showModal(printViewConfigModal);
+  }
+
+  function updatePrintViewSelection(event) {
+    const checkbox = event.target;
+    const hourTypeId = checkbox.dataset.hourTypeId;
+    const isIncome = checkbox.dataset.isIncome === 'true';
+
+    if (checkbox.checked) {
+      printViewSelectedHourTypes.add(hourTypeId);
+    } else {
+      printViewSelectedHourTypes.delete(hourTypeId);
+    }
+
+    // Validate: max 2 non-income types
+    const selectedNonIncome = Array.from(printViewSelectedHourTypes).filter(id => {
+      const hourType = state.hourTypeMap[id];
+      return hourType && !hourType.contributes_to_income;
+    });
+
+    const exceeds = selectedNonIncome.length > 2;
+
+    if (printViewWarning) {
+      printViewWarning.style.display = exceeds ? 'block' : 'none';
+    }
+    if (btnGeneratePrintView) {
+      btnGeneratePrintView.disabled = exceeds || printViewSelectedHourTypes.size === 0;
+    }
+  }
+
+  function closePrintViewConfigModal() {
+    if (!printViewConfigModal) return;
+    hideModal(printViewConfigModal);
+    printViewSelectedHourTypes.clear();
+  }
+
+  function unselectAllOtherHourTypes() {
+    if (!printViewOtherList) return;
+
+    // Find all checkboxes in the other hour types list and uncheck them
+    const checkboxes = printViewOtherList.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+      if (checkbox.checked) {
+        checkbox.checked = false;
+        const hourTypeId = checkbox.dataset.hourTypeId;
+        printViewSelectedHourTypes.delete(hourTypeId);
+      }
+    });
+
+    // Update validation state
+    if (printViewWarning) printViewWarning.style.display = 'none';
+    if (btnGeneratePrintView) {
+      btnGeneratePrintView.disabled = printViewSelectedHourTypes.size === 0;
+    }
+  }
+
+  function generatePrintView() {
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+
+    if (printViewSelectedHourTypes.size === 0) {
+      return;
+    }
+
+    // Get rounding interval
+    const roundInterval = getRoundInterval();
+
+    // Helper to format hours with rounding
+    function formatHours(minutes) {
+      let displayMinutes = minutes;
+      if (roundInterval > 1 && minutes > 0) {
+        displayMinutes = Math.max(roundInterval, Math.round(minutes / roundInterval) * roundInterval);
+      }
+      return (displayMinutes / 60).toFixed(2);
+    }
+
+    // Get selected hour types
+    const selectedTypes = Array.from(printViewSelectedHourTypes)
+      .map(id => state.hourTypeMap[id])
+      .filter(Boolean)
+      .sort((a, b) => {
+        // Sort income types first
+        if (a.contributes_to_income && !b.contributes_to_income) return -1;
+        if (!a.contributes_to_income && b.contributes_to_income) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    // Get all entries for the month
+    const monthEntries = entriesForMonth(year, month);
+
+    // Build daily summaries
+    const dailySummaries = {};
+    monthEntries.forEach(entry => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      if (!printViewSelectedHourTypes.has(hourTypeId)) return;
+
+      if (!dailySummaries[entry.date]) {
+        dailySummaries[entry.date] = {};
+      }
+      if (!dailySummaries[entry.date][hourTypeId]) {
+        dailySummaries[entry.date][hourTypeId] = 0;
+      }
+      dailySummaries[entry.date][hourTypeId] += entry.duration_minutes || 0;
+    });
+
+    // Calculate monthly totals by category
+    let workTotal = 0;
+    let otherTotal = 0;
+    const otherBreakdown = {};
+
+    Object.values(dailySummaries).forEach(daySummary => {
+      Object.keys(daySummary).forEach(hourTypeId => {
+        const hourType = state.hourTypeMap[hourTypeId];
+        if (hourType) {
+          if (hourType.contributes_to_income) {
+            workTotal += daySummary[hourTypeId];
+          } else {
+            otherTotal += daySummary[hourTypeId];
+            if (!otherBreakdown[hourTypeId]) {
+              otherBreakdown[hourTypeId] = 0;
+            }
+            otherBreakdown[hourTypeId] += daySummary[hourTypeId];
+          }
+        }
+      });
+    });
+
+    // Generate HTML
+    const monthDate = new Date(year, month, 1);
+    const monthName = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    // Build calendar grid
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const firstDayOfWeek = firstDay.getDay(); // 0 = Sunday
+    const startOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Convert to Monday = 0
+
+    let calendarHtml = '<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:2px; margin-bottom:20px;">';
+
+    // Add day headers
+    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(day => {
+      calendarHtml += `<div style="font-weight:600; font-size:11px; padding:4px; text-align:center; border-bottom:1px solid #ccc;">${day}</div>`;
+    });
+
+    // Add empty cells for offset
+    for (let i = 0; i < startOffset; i++) {
+      calendarHtml += '<div style="background:#f5f5f5;"></div>';
+    }
+
+    // Add days
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const daySummary = dailySummaries[dateStr] || {};
+
+      calendarHtml += '<div style="border:1px solid #ddd; padding:4px; min-height:60px; font-size:10px; display:flex; flex-direction:column;">';
+      calendarHtml += `<div style="font-weight:600; font-size:10px; margin-bottom:4px; color:#999;">${day}</div>`;
+
+      // Collect income and other hours separately
+      const incomeHoursHtml = [];
+      const otherHoursHtml = [];
+
+      selectedTypes.forEach(hourType => {
+        const minutes = daySummary[hourType.id] || 0;
+        if (minutes > 0) {
+          const hours = formatHours(minutes);
+          const isIncome = hourType.contributes_to_income;
+          if (isIncome) {
+            // Income hours: bold, no label, larger
+            const style = `font-weight:600; font-size:16px; color:#000; background:${hourType.color}22; padding:2px 4px; margin:2px 0; border-radius:3px;`;
+            incomeHoursHtml.push(`<div style="${style}">${hours}</div>`);
+          } else {
+            // Other hours: regular weight, with label, smaller
+            const style = 'font-size:9px; color:#666; margin:2px 0;';
+            otherHoursHtml.push(`<div style="${style}">${hours} ${hourType.name}</div>`);
+          }
+        }
+      });
+
+      // Add other hours first (between date and income)
+      otherHoursHtml.forEach(html => {
+        calendarHtml += html;
+      });
+
+      // Add income hours at bottom - wrap in div with margin-top:auto to always push to bottom
+      if (incomeHoursHtml.length > 0) {
+        calendarHtml += '<div style="margin-top:auto;">';
+        incomeHoursHtml.forEach(html => {
+          calendarHtml += html;
+        });
+        calendarHtml += '</div>';
+      }
+
+      calendarHtml += '</div>';
+    }
+
+    calendarHtml += '</div>';
+
+    // Build separate tables for Work and Other
+    let totalsHtml = '';
+
+    // Work table
+    if (workTotal > 0) {
+      const workHours = formatHours(workTotal);
+      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:20px;">';
+      totalsHtml += '<thead><tr style="border-bottom:2px solid #333;"><th style="text-align:left; padding:8px;">Work</th><th style="text-align:right; padding:8px;">Total Hours</th></tr></thead>';
+      totalsHtml += '<tbody>';
+      totalsHtml += `<tr><td style="padding:6px; font-weight:600;">Total</td><td style="text-align:right; padding:6px; font-weight:600;">${workHours}</td></tr>`;
+      totalsHtml += '</tbody></table>';
+    }
+
+    // Other table with breakdown
+    if (otherTotal > 0) {
+      const otherHours = formatHours(otherTotal);
+      totalsHtml += '<table style="width:100%; border-collapse:collapse; margin-top:16px;">';
+      totalsHtml += '<thead><tr style="border-bottom:2px solid #333;"><th style="text-align:left; padding:8px;">Other</th><th style="text-align:right; padding:8px;">Total Hours</th></tr></thead>';
+      totalsHtml += '<tbody>';
+
+      // Individual hour type breakdowns
+      Object.keys(otherBreakdown).forEach(hourTypeId => {
+        const hourType = state.hourTypeMap[hourTypeId];
+        const hours = formatHours(otherBreakdown[hourTypeId]);
+        totalsHtml += `<tr style="border-bottom:1px solid #ddd;"><td style="padding:6px; color:#666;">${hourType.name}</td><td style="text-align:right; padding:6px; color:#666;">${hours}</td></tr>`;
+      });
+
+      // Other total
+      totalsHtml += `<tr style="border-top:2px solid #333;"><td style="padding:6px; font-weight:600; color:#666;">Total</td><td style="text-align:right; padding:6px; font-weight:600; color:#666;">${otherHours}</td></tr>`;
+      totalsHtml += '</tbody></table>';
+    }
+
+    // Complete HTML document
+    const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Monthly Hours - ${monthName}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 10mm 15mm;
+    }
+    @media print {
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 210mm;
+        height: 297mm;
+      }
+      body {
+        margin: 0 !important;
+        padding: 10mm 15mm !important;
+      }
+      .no-print {
+        display: none;
+      }
+      /* Try to hide browser headers/footers - browser dependent */
+      @page {
+        margin: 0;
+      }
+      body {
+        padding-top: 10mm;
+        padding-bottom: 10mm;
+      }
+    }
+    @media screen {
+      body {
+        max-width: 210mm;
+        margin: 0 auto;
+        padding: 10mm 15mm;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #000;
+    }
+    h1 {
+      margin: 0 0 16px 0;
+      font-size: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Monthly Hours - ${monthName}</h1>
+  ${calendarHtml}
+  ${totalsHtml}
+  <script>
+    window.onload = function() {
+      window.print();
+    };
+  <\/script>
+</body>
+</html>`;
+
+    // Open in new window
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+    }
+
+    closePrintViewConfigModal();
   }
 
   function buildIncomeSummary(year, month) {
@@ -13735,6 +14213,8 @@ function updateDeductionFormVisibility() {
           closeDeductionForm();
         } else if (modal === actualIncomeModal) {
           closeActualIncomeModal();
+        } else if (modal === printViewConfigModal) {
+          closePrintViewConfigModal();
         } else {
           hideModal(modal);
         }
@@ -13749,6 +14229,8 @@ function updateDeductionFormVisibility() {
             closeDeductionForm();
           } else if (modal === actualIncomeModal) {
             closeActualIncomeModal();
+          } else if (modal === printViewConfigModal) {
+            closePrintViewConfigModal();
           } else {
             hideModal(modal);
           }

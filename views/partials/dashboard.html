@@ -196,9 +196,10 @@
     <div class="ts-calendar-grid" id="calendar-grid"></div>
     <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries.</div>
     <div class="ts-payroll-helper-actions" id="payroll-helper-actions" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-      <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero payroll helper</button>
-      <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB payroll helper</button>
+      <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero Payroll Helper</button>
+      <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB Payroll Helper</button>
       <button class="ghost" id="calendar-actual-income-btn" type="button" style="display:none;">Add Actual Income</button>
+      <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print Monthly Hours</button>
     </div>
   </div>
 </section>
@@ -604,3 +605,40 @@
   opacity: 0.7;
 }
 </style>
+
+<!-- Monthly Print View Modal -->
+<div class="ts-modal" id="modal-print-view-config" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 540px;">
+    <div class="ts-modal-header">
+      <h3>Select Hour Types for Print View</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-note" style="margin-bottom:16px;">
+        Select which hour types to include in the print view. Maximum 2 non-income hour types allowed to ensure the page fits on one A4 sheet.
+      </div>
+      <div id="print-view-income-types" style="margin-bottom:16px;">
+        <h4 style="margin:0 0 8px 0; font-size:13px; font-weight:600; color:var(--muted);">Income-Generating Hours</h4>
+        <div id="print-view-income-list" style="display:flex; flex-direction:column; gap:4px;">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+      <div id="print-view-other-types">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="margin:0; font-size:13px; font-weight:600; color:var(--muted);">Other Hour Types</h4>
+          <button class="ghost" id="btn-unselect-all-other" style="font-size:12px; padding:4px 8px;">Unselect all</button>
+        </div>
+        <div id="print-view-other-list" style="display:flex; flex-direction:column; gap:4px;">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+      <div class="ts-warning" id="print-view-warning" style="display:none; margin-top:12px;">
+        Maximum 2 non-income hour types allowed. Please deselect some items.
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-print-view">Cancel</button>
+      <button id="btn-generate-print-view">Generate Print View</button>
+    </div>
+  </div>
+</div>
