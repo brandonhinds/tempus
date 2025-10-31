@@ -34,11 +34,11 @@ This note expands each of the proposed improvements so future work can scope, pr
 - **Hover/focus treatment:** Introduce uniform hover/focus states for buttons, badges, and list items to reinforce affordances and support accessibility.
 - **Outcomes:** The product feels responsive and modern without overwhelming animations, signalling polish to end users.
 
-## 6. Brand & Identity Assets
-- **Logotype & iconography:** Finalise a Tempus wordmark + glyph, then weave it into the navbar, favicon, share images, and empty states.
+## 6. Empty & Feedback States
 - **Empty states:** Replace plain descriptions with a consistent illustration/emoji set plus actionable guidance (“Add your first contract to see projections”).
-- **Theme selector presentation:** Surface the appearance settings in the nav or settings header, optionally with previews, to emphasise brand personality.
-- **Outcomes:** A united visual identity that carries through marketing, web app, and documentation touchpoints.
+- **Loading & error cues:** Pair existing notes with micro-illustrations or icon badges to reinforce status and make transitions less jarring.
+- **Success confirmations:** Introduce inline celebration elements (e.g., confetti burst, subtle badge flash) for major tasks like invoice generation.
+- **Outcomes:** Users gain clearer direction when data is missing or still loading, while success moments feel intentional.
 
 ## 7. Content & Loading Framing
 - **Skeleton loaders:** Swap out raw `--` placeholders with skeleton blocks/blurs for cards, tables, and charts to provide immediate feedback during fetches.
@@ -57,6 +57,12 @@ This note expands each of the proposed improvements so future work can scope, pr
 - **Chart upgrades:** Use Chart.js options for crisper tooltips, legend badges that match our badge styling, and optional dark/light background toggles per theme.
 - **Print-optimised styling:** Expand the print view modal work—ensure exported/printed documents inherit typography/color improvements so reports match the in-app experience.
 - **Outcomes:** Reporting features feel integrated and enterprise-ready, reinforcing Tempus as a professional tool rather than a personal utility.
+
+## 10. Brand & Identity Assets (Final Phase)
+- **Logotype & iconography:** Convert the existing logo into a clean SVG, finalise a Tempus wordmark/glyph pair, and weave them into the navbar, favicon, and share images.
+- **Visual language:** Establish a lightweight illustration pack (empty states, success, error) that echoes the brand palette without overpowering the UI.
+- **Theme selector presentation:** Surface appearance options with previews or thumbnails to celebrate the expanded theme library.
+- **Outcomes:** A united visual identity that carries through marketing, web app, and documentation touchpoints once the groundwork is complete.
 
 ---
 
