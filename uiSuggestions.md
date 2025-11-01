@@ -68,8 +68,5 @@ This note expands each of the proposed improvements so future work can scope, pr
 ---
 
 ### Next Steps
-1. Prioritise the above themes (e.g. start with typography and spacing tokens before motion).
-2. Convert each section into tickets with design proofs or lightweight prototypes.
-3. Roll changes out incrementally, validating in the Apps Script preview after each cluster to avoid regressions.
 
-This document should remain the central reference for the UI refresh initiative; update it as decisions are made or scope alters.
+Only step 10 is outstanding, and needs the logo to be finalised to action.

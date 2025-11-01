@@ -8369,9 +8369,17 @@ function updateDeductionFormVisibility() {
 
     // Lock theme dropdown to "custom" when custom theme flag is enabled
     if (themeSelect && customThemeFlag.enabled) {
-      themeSelect.value = 'custom';
-      state.settings.theme = 'custom';
-      applyTheme('custom');
+      // Only force theme to custom if not already set, to avoid overwriting user's server-synced theme
+      if (themeSelect.value !== 'custom') {
+        console.log('[Settings] Custom theme flag enabled, forcing theme to custom');
+        themeSelect.value = 'custom';
+        state.settings.theme = 'custom';
+        applyTheme('custom');
+        // Re-capture settings state after this forced change
+        if (settingsServerSynced) {
+          captureSettingsState();
+        }
+      }
     }
   }
 
@@ -10929,6 +10937,7 @@ function updateDeductionFormVisibility() {
 
   // Settings dirty state tracking
   var settingsInitialState = {};
+  var settingsServerSynced = false;
 
   function captureSettingsState() {
     settingsInitialState = {};
@@ -10938,10 +10947,13 @@ function updateDeductionFormVisibility() {
       if (element) {
         settingsInitialState[key] = config.getValue(element);
       } else {
-        const defaultVal = typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
-        settingsInitialState[key] = defaultVal;
+        // Preserve existing value from state, only default if truly missing
+        settingsInitialState[key] = state.settings[key] !== undefined
+          ? state.settings[key]
+          : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
       }
     });
+    console.log('[Settings] Captured initial state:', settingsInitialState);
   }
 
   function checkSettingsDirty() {
@@ -10964,7 +10976,18 @@ function updateDeductionFormVisibility() {
       }
     });
 
-    if (saveSettingsBtn) saveSettingsBtn.disabled = !isDirty;
+    // Only enable save button if settings have changed AND server sync is complete
+    if (saveSettingsBtn) {
+      saveSettingsBtn.disabled = !isDirty || !settingsServerSynced;
+      // Update tooltip to show why button is disabled
+      if (!settingsServerSynced) {
+        saveSettingsBtn.title = 'Loading settings from server...';
+      } else if (!isDirty) {
+        saveSettingsBtn.title = 'No changes to save';
+      } else {
+        saveSettingsBtn.title = 'Save settings to database';
+      }
+    }
     if (discardSettingsBtn) discardSettingsBtn.style.display = isDirty ? 'inline-flex' : 'none';
 
     return isDirty;
@@ -11001,11 +11024,26 @@ function updateDeductionFormVisibility() {
         if (element) {
           next[key] = config.getValue(element);
         } else {
-          const defaultVal = typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
-          next[key] = defaultVal;
+          // Preserve existing value from state, only default if truly missing
+          next[key] = state.settings[key] !== undefined
+            ? state.settings[key]
+            : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
         }
       });
 
+      // Only send changed settings to reduce blast radius
+      const changedSettings = {};
+      Object.keys(next).forEach((key) => {
+        if (next[key] !== settingsInitialState[key]) {
+          changedSettings[key] = next[key];
+        }
+      });
+
+      console.log('[Settings] Saving settings. Changed keys:', Object.keys(changedSettings));
+      console.log('[Settings] Full settings object being saved:', next);
+      console.log('[Settings] Initial state for comparison:', settingsInitialState);
+
+      // Apply all settings locally for immediate UI update
       applyTheme(next.theme);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
@@ -11019,13 +11057,17 @@ function updateDeductionFormVisibility() {
       setStatus('Saving settings...', 'warn');
       google.script.run
         .withSuccessHandler(() => {
+          console.log('[Settings] Save successful');
           setStatus('Settings saved', 'success');
           captureSettingsState();
           checkSettingsDirty();
           renderIncomeSummary();
         })
-        .withFailureHandler(() => setStatus('Settings failed', 'error'))
-        .api_updateSettings(next);
+        .withFailureHandler((error) => {
+          console.error('[Settings] Save failed:', error);
+          setStatus('Settings failed', 'error');
+        })
+        .api_updateSettings(changedSettings);
     };
   }
 
@@ -11045,6 +11087,8 @@ function updateDeductionFormVisibility() {
 
   // Initial load
   function init() {
+    console.log('[Settings] Init starting...');
+    console.log('[Settings] Cached state.settings:', state.settings);
     loadCache();
     renderEntries();
     // Load settings into UI inputs from cache
@@ -11066,7 +11110,9 @@ function updateDeductionFormVisibility() {
     refreshContractBindings();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
     renderFeatureFlags();
+    console.log('[Settings] About to call applyFeatureFlags()...');
     applyFeatureFlags();
+    console.log('[Settings] Starting async server calls, settingsServerSynced =', settingsServerSynced);
     setStatus('Syncing...', 'warn');
     google.script.run
       .withSuccessHandler((entries) => {
@@ -11082,38 +11128,106 @@ function updateDeductionFormVisibility() {
       })
       .withFailureHandler(() => setStatus('Entries sync failed', 'error'))
       .api_getEntries({});
-    google.script.run
-      .withSuccessHandler((settings) => {
-        state.settings = settings || {};
+    // Settings loader with retry mechanism
+    let settingsRetryCount = 0;
+    const MAX_SETTINGS_RETRIES = 3;
 
-        // Parse custom_theme_config if it's a JSON string
-        if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
-          try {
-            state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
-          } catch (e) {
-            // If parsing fails, reset to default
-            state.settings.custom_theme_config = null;
-          }
-        }
+    function loadSettingsWithRetry() {
+      google.script.run
+        .withSuccessHandler((settings) => {
+          console.log('[Settings] Received from server (attempt ' + (settingsRetryCount + 1) + '):', settings);
 
-        saveCache();
-        // Load settings into UI inputs
-        Object.keys(SETTINGS_CONFIG).forEach((key) => {
-          const config = SETTINGS_CONFIG[key];
-          const element = config.element();
-          if (element) {
-            const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
-            config.setValue(element, value);
+          // If null or empty object received, retry up to MAX_SETTINGS_RETRIES times
+          if (!settings || (typeof settings === 'object' && Object.keys(settings).length === 0)) {
+            if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+              settingsRetryCount++;
+              const delay = Math.pow(2, settingsRetryCount) * 500; // Exponential backoff: 1s, 2s, 4s
+              console.warn('[Settings] Received null/empty settings, retrying in ' + delay + 'ms (attempt ' + settingsRetryCount + '/' + MAX_SETTINGS_RETRIES + ')');
+              setTimeout(loadSettingsWithRetry, delay);
+              return;
+            } else {
+              console.error('[Settings] Received null/empty after ' + MAX_SETTINGS_RETRIES + ' retries, using cached settings');
+              // Don't overwrite state.settings if we have cached data
+              if (!state.settings || Object.keys(state.settings).length === 0) {
+                state.settings = {};
+              }
+              settingsServerSynced = true;
+              checkSettingsDirty();
+              return;
+            }
           }
-        });
-        applyTheme(state.settings.theme || 'dark');
-        captureSettingsState();
-        checkSettingsDirty();
-        applyStatusDisplay();
-        renderCalendar();
-      })
-      .withFailureHandler(() => {})
-      .api_getSettings();
+
+          // Valid settings received
+          console.log('[Settings] Valid settings received with ' + Object.keys(settings).length + ' keys');
+          state.settings = settings;
+
+          // Parse custom_theme_config if it's a JSON string
+          if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
+            try {
+              state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
+            } catch (e) {
+              // If parsing fails, reset to default
+              state.settings.custom_theme_config = null;
+            }
+          }
+
+          saveCache();
+          // Load settings into UI inputs
+          const uiUpdates = {};
+          Object.keys(SETTINGS_CONFIG).forEach((key) => {
+            const config = SETTINGS_CONFIG[key];
+            const element = config.element();
+            if (element) {
+              const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
+              config.setValue(element, value);
+              uiUpdates[key] = value;
+            } else {
+              console.warn('[Settings] Element not found for key:', key);
+            }
+          });
+          console.log('[Settings] Updated UI with values:', uiUpdates);
+          applyTheme(state.settings.theme || 'dark');
+
+          // If custom theme flag is enabled, ensure theme is set to custom
+          // This handles the case where api_getFeatureFlags completed before api_getSettings
+          const customThemeFlag = state.featureFlags.custom_theme || DEFAULT_FEATURE_FLAGS.custom_theme || { enabled: false };
+          if (customThemeFlag.enabled && themeSelect && themeSelect.value !== 'custom') {
+            console.log('[Settings] Custom theme flag was already enabled, forcing theme to custom');
+            themeSelect.value = 'custom';
+            state.settings.theme = 'custom';
+            applyTheme('custom');
+          }
+
+          captureSettingsState();
+          // Mark settings as synced from server - enables save button
+          settingsServerSynced = true;
+          checkSettingsDirty();
+          applyStatusDisplay();
+          renderCalendar();
+          console.log('[Settings] Sync complete, settingsServerSynced = true');
+        })
+        .withFailureHandler((error) => {
+          console.error('[Settings] Failed to load from server:', error);
+
+          // Retry on failure too
+          if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+            settingsRetryCount++;
+            const delay = Math.pow(2, settingsRetryCount) * 500;
+            console.warn('[Settings] API call failed, retrying in ' + delay + 'ms (attempt ' + settingsRetryCount + '/' + MAX_SETTINGS_RETRIES + ')');
+            setTimeout(loadSettingsWithRetry, delay);
+            return;
+          }
+
+          // Even on failure, mark as synced to prevent user from being stuck
+          // They can still save changes based on cached settings
+          settingsServerSynced = true;
+          checkSettingsDirty();
+        })
+        .api_getSettings();
+    }
+
+    // Start loading settings
+    loadSettingsWithRetry();
     // Load super guarantee rates
     google.script.run
       .withSuccessHandler((rates) => {

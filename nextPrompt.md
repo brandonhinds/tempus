@@ -41,15 +41,11 @@
 
 ## Small Changes
 
-- Fix the theme not being honoured sometimes on refresh.
-
 - Add the easter easter egg. Add a Konami Code.
     * Add cool neon theme as easter egg?
     * Can we implement brick breaker using the CSS elements as bricks?
 
 - Implement some sort of loading screen. Can we expand on that cool CSS box?
-
-- Rework superannuation so the guarantee rates are set to date periods, so it can be edited over time.
 
 - Company expenses on annual view
 	* Company income
@@ -67,7 +63,9 @@
 
 - Move super, super lost, deductions, and tax back in line with gross/net income on annual sheet
 
-- Fix the settings layout
+- Remove the hover highlights on the cards at the top of the annual view, because they can't actually be clicked
+
+- Today's date is auto-prepop'd when loading the calendar, but it should pre-pop the whole entry if there is an existing entry. This allows people to edit today's entry quickly.
 
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.

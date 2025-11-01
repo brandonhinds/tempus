@@ -3,11 +3,27 @@ var FEATURE_FLAG_CACHE_KEY = 'feature_flags_v2';
 function api_getSettings() {
   var key = 'settings';
   var cached = cacheGet(key);
-  if (cached) return cached;
+  // Only use cache if it's a valid non-empty object
+  if (cached && typeof cached === 'object' && Object.keys(cached).length > 0) {
+    Logger.log('api_getSettings: Returning ' + Object.keys(cached).length + ' settings from cache');
+    return cached;
+  }
+
+  Logger.log('api_getSettings: Cache miss or empty, reading from sheet');
   var sh = getOrCreateSheet('user_settings');
   var values = sh.getDataRange().getValues();
   var out = {};
-  values.slice(1).forEach(function(r){ if (r[0] !== '') out[r[0]] = r[1]; });
+
+  // Skip header row and build settings object
+  for (var i = 1; i < values.length; i++) {
+    var rowKey = values[i][0];
+    var rowValue = values[i][1];
+    if (rowKey !== '' && rowKey !== null && rowKey !== undefined) {
+      out[rowKey] = rowValue;
+    }
+  }
+
+  Logger.log('api_getSettings: Loaded ' + Object.keys(out).length + ' settings from sheet');
   cacheSet(key, out);
   return out;
 }
