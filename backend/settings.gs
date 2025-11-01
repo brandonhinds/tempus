@@ -1,5 +1,37 @@
 /** Settings / Projects / Feature Flags API */
 var FEATURE_FLAG_CACHE_KEY = 'feature_flags_v2';
+
+function api_getScriptId() {
+  return ScriptApp.getScriptId();
+}
+
+function api_backupSpreadsheet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    var backupName = 'Tempus Backup - ' + timestamp;
+
+    // Create a copy in the same folder as the original
+    var file = DriveApp.getFileById(ss.getId());
+    var parentFolder = file.getParents().hasNext() ? file.getParents().next() : DriveApp.getRootFolder();
+    var backup = file.makeCopy(backupName, parentFolder);
+
+    Logger.log('Created backup: ' + backupName + ' (ID: ' + backup.getId() + ')');
+
+    return {
+      success: true,
+      name: backupName,
+      url: backup.getUrl()
+    };
+  } catch (e) {
+    Logger.log('Backup failed: ' + e.toString());
+    return {
+      success: false,
+      error: e.toString()
+    };
+  }
+}
+
 function api_getSettings() {
   var key = 'settings';
   var cached = cacheGet(key);

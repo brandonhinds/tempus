@@ -402,6 +402,18 @@
   .ts-container--fluid { max-width:none; }
   .ts-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:var(--space-4); box-shadow: var(--shadow-lg); overflow:hidden; width:100%; max-width:min(1280px, calc(100vw - (2 * var(--space-4)))); margin-left:auto; margin-right:auto; }
   .ts-card--wide { max-width:min(1600px, calc(100vw - (2 * var(--space-4)))); }
+  #page-about a:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15); border-color: var(--primary); }
+  #page-about details[open] > summary > span:first-child { transform: rotate(90deg); }
+  #page-about details > summary::-webkit-details-marker { display: none; }
+  .ts-copy-btn { background: var(--primary); color: var(--muted); border: none; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: transform 0.1s; }
+  .ts-copy-btn:hover { transform: translateY(-1px); }
+  .ts-copy-btn:active { transform: translateY(0); }
+  .ts-tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+  .ts-tab-btn { background: none; border: none; padding: var(--space-2) var(--space-3); font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .ts-tab-btn:hover { color: var(--text); }
+  .ts-tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .ts-tab-content { display: none; }
+  .ts-tab-content.active { display: block; }
   .ts-row { display:flex; gap:var(--space-4); flex-wrap:wrap; }
   .ts-col { flex:1 1 200px; min-width:200px; }
   .ts-gap-sm { gap:var(--space-2); }
@@ -603,7 +615,7 @@
   .ts-table th, .ts-table td { text-align:right; padding:8px 10px; border-bottom:1px solid var(--border); font-size:13px; white-space:nowrap; }
   .ts-table th:first-child, .ts-table td:first-child { text-align:left; }
   .ts-table thead th { background: var(--panel); position:sticky; top:0; z-index:1; }
-  .ts-table tbody tr:nth-child(even) { background: var(--surface-subtle); }
+  .ts-table tbody tr.ts-stripe { background: var(--surface-subtle); }
   .contract-detail-grid { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
   .contract-detail { margin-top:12px; }
   .contract-detail-item { flex:1 1 220px; min-width:220px; background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; }
@@ -780,7 +792,6 @@
   .ts-calendar-filter-color { width:12px; height:12px; border-radius:50%; border:1px solid var(--border); }
   .ts-calendar-filter-name { font-size:13px; }
   @media (max-width: 720px){ .ts-col { min-width:100%; } .ts-modal-content { width:95%; max-width:none; } }
-  .ts-annual-stat-card:hover { transform: translateY(-2px); box-shadow:0 14px 32px rgba(15, 23, 42, 0.18); border-color:var(--primary); }
   @keyframes calendarSelect {
     0% {
       transform: scale(0.98);

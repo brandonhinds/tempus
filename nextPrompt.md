@@ -39,6 +39,8 @@
 
 - Implement phase 10 of UI suggestion improvements.
 
+- Build importer from old sheets to pull historical data
+
 ## Small Changes
 
 - Add the easter easter egg. Add a Konami Code.
@@ -60,10 +62,6 @@
 - Improve custom theme implementation
     * Add constraints or auto-generated supporting shades (derived lighter/darker variants) to maintain readability.
     * Provide preview indicators (contrast checks) when users pick low-contrast palettes.
-
-- Move super, super lost, deductions, and tax back in line with gross/net income on annual sheet
-
-- Remove the hover highlights on the cards at the top of the annual view, because they can't actually be clicked
 
 - Today's date is auto-prepop'd when loading the calendar, but it should pre-pop the whole entry if there is an existing entry. This allows people to edit today's entry quickly.
 

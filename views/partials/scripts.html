@@ -9,6 +9,7 @@
   const pageRatePreview = document.getElementById('page-rate-preview');
   const pageSettings = document.getElementById('page-settings');
   const pageInvoices = document.getElementById('page-invoices');
+  const pageAbout = document.getElementById('page-about');
   const navToggle = document.getElementById('nav-toggle');
   const navHomeBtn = document.getElementById('nav-home');
   const navMenu = document.getElementById('nav-menu');
@@ -21,6 +22,7 @@
   const navAnnualViewsBtn = document.getElementById('nav-annual-views');
   const navInvoicesBtn = document.getElementById('nav-invoices');
   const navSettingsBtn = document.getElementById('nav-settings');
+  const navAboutBtn = document.getElementById('nav-about');
   const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
   const ratePreviewPercentInput = document.getElementById('rate-preview-percent');
   const ratePreviewRateInput = document.getElementById('rate-preview-rate');
@@ -308,7 +310,7 @@ let ratePreviewInputSyncing = false;
   let deductionCategoryDeleteId = null;
   let deductionCategorySavePending = false;
 
-  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'settings'];
+  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'settings', 'about'];
   const LAST_PAGE_KEY = 'ts_last_page';
 
   function persistLastPage(page) {
@@ -357,7 +359,8 @@ let ratePreviewInputSyncing = false;
       bas: pageBas,
       'annual-views': pageAnnualViews,
       invoices: pageInvoices,
-      settings: pageSettings
+      settings: pageSettings,
+      about: pageAbout
     };
     Object.keys(pages).forEach((key) => {
       const page = pages[key];
@@ -376,10 +379,158 @@ let ratePreviewInputSyncing = false;
     if (normalized === 'invoices') {
       renderInvoicesPage();
     }
+    if (normalized === 'about') {
+      loadScriptId();
+    }
     if (!opts.skipRemember) {
       persistLastPage(normalized);
     }
   }
+
+  function loadScriptId() {
+    const scriptIdDisplay = document.getElementById('script-id-display');
+    const scriptIdValue = document.getElementById('script-id-value');
+
+    if (scriptIdDisplay && scriptIdValue) {
+      google.script.run
+        .withSuccessHandler((scriptId) => {
+          scriptIdDisplay.textContent = scriptId;
+          scriptIdValue.textContent = scriptId;
+        })
+        .withFailureHandler(() => {
+          scriptIdDisplay.textContent = '[Error loading Script ID]';
+          scriptIdValue.textContent = 'Unable to load';
+        })
+        .api_getScriptId();
+    }
+  }
+
+  // Backup sheet functionality
+  const backupSheetBtn = document.getElementById('backup-sheet-btn');
+  if (backupSheetBtn) {
+    backupSheetBtn.onclick = function() {
+      const originalText = backupSheetBtn.textContent;
+      backupSheetBtn.disabled = true;
+      backupSheetBtn.textContent = 'Creating backup...';
+
+      google.script.run
+        .withSuccessHandler((result) => {
+          backupSheetBtn.disabled = false;
+          backupSheetBtn.textContent = originalText;
+
+          if (result.success) {
+            setStatus('Backup created: ' + result.name, 'success');
+            customAlert(
+              'Your spreadsheet has been backed up successfully!\n\n' +
+              'Backup name: ' + result.name + '\n\n' +
+              'The backup is saved in the same folder as your original sheet.',
+              { title: 'Backup Created' }
+            );
+          } else {
+            setStatus('Backup failed: ' + result.error, 'error');
+            customAlert(
+              'Failed to create backup:\n\n' + result.error,
+              { title: 'Backup Failed' }
+            );
+          }
+        })
+        .withFailureHandler((error) => {
+          backupSheetBtn.disabled = false;
+          backupSheetBtn.textContent = originalText;
+          setStatus('Backup failed', 'error');
+          customAlert(
+            'Failed to create backup:\n\n' + error,
+            { title: 'Backup Failed' }
+          );
+        })
+        .api_backupSpreadsheet();
+    };
+  }
+
+  // Copy-to-clipboard functionality for code blocks
+  const copyButtons = document.querySelectorAll('.ts-copy-btn');
+  copyButtons.forEach((button) => {
+    button.addEventListener('click', function() {
+      const codeBlock = this.parentElement.querySelector('code');
+      if (!codeBlock) return;
+
+      const textToCopy = codeBlock.textContent;
+      const originalText = this.textContent;
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textToCopy)
+          .then(() => {
+            this.textContent = 'Copied!';
+            setTimeout(() => {
+              this.textContent = originalText;
+            }, 2000);
+          })
+          .catch((err) => {
+            console.warn('Failed to copy text:', err);
+            this.textContent = 'Failed';
+            setTimeout(() => {
+              this.textContent = originalText;
+            }, 2000);
+          });
+      } else {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+
+        try {
+          document.execCommand('copy');
+          this.textContent = 'Copied!';
+          setTimeout(() => {
+            this.textContent = originalText;
+          }, 2000);
+        } catch (err) {
+          console.warn('Failed to copy text:', err);
+          this.textContent = 'Failed';
+          setTimeout(() => {
+            this.textContent = originalText;
+          }, 2000);
+        }
+
+        document.body.removeChild(textarea);
+      }
+    });
+  });
+
+  // Tab switching functionality for About page
+  const tabButtons = document.querySelectorAll('.ts-tab-btn');
+  tabButtons.forEach((button) => {
+    button.addEventListener('click', function() {
+      const targetTabId = this.getAttribute('data-tab');
+      if (!targetTabId) return;
+
+      // Get the parent tabs container to scope our selection
+      const tabsContainer = this.parentElement;
+      const contentContainer = tabsContainer.nextElementSibling.parentElement;
+
+      // Remove active class from all tab buttons in this container
+      tabsContainer.querySelectorAll('.ts-tab-btn').forEach((btn) => {
+        btn.classList.remove('active');
+      });
+
+      // Add active class to clicked button
+      this.classList.add('active');
+
+      // Hide all tab content panels
+      contentContainer.querySelectorAll('.ts-tab-content').forEach((content) => {
+        content.classList.remove('active');
+      });
+
+      // Show the target tab content
+      const targetContent = document.getElementById(targetTabId);
+      if (targetContent) {
+        targetContent.classList.add('active');
+      }
+    });
+  });
 
   function closeNavMenu() {
     if (!navMenu) return;
@@ -461,6 +612,7 @@ let ratePreviewInputSyncing = false;
   if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
   if (navInvoicesBtn) navInvoicesBtn.onclick = () => { closeNavMenu(); showPage('invoices'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
+  if (navAboutBtn) navAboutBtn.onclick = () => { closeNavMenu(); showPage('about'); };
   if (ratePreviewContractSelect) ratePreviewContractSelect.addEventListener('change', handleRatePreviewContractChange);
   if (ratePreviewPercentInput) {
     ratePreviewPercentInput.addEventListener('input', handleRatePreviewPercentInput);
@@ -785,6 +937,34 @@ let ratePreviewInputSyncing = false;
     if (rounded === 0) return '0%';
     const abs = Math.abs(rounded).toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
     return `${rounded > 0 ? '+' : '-'}${abs}%`;
+  };
+
+  // Restripe table rows based on visible rows only
+  // This is needed because CSS nth-child counts hidden rows
+  const restripeTable = (tableBodyId) => {
+    const tbody = document.getElementById(tableBodyId);
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    let visibleIndex = 0;
+
+    rows.forEach((row) => {
+      // Check if row is visible (not display:none)
+      const isVisible = row.style.display !== 'none' && window.getComputedStyle(row).display !== 'none';
+
+      if (isVisible) {
+        // Apply stripe class to even visible rows (0-indexed, so 1, 3, 5... get striped)
+        if (visibleIndex % 2 === 1) {
+          row.classList.add('ts-stripe');
+        } else {
+          row.classList.remove('ts-stripe');
+        }
+        visibleIndex++;
+      } else {
+        // Hidden rows shouldn't have stripe class
+        row.classList.remove('ts-stripe');
+      }
+    });
   };
 
   function resolveInvoiceDate(invoice) {
@@ -2587,6 +2767,9 @@ function loadAnnualData() {
     document.getElementById('annual-breakdown-net').textContent = formatCurrency(totals.netIncome);
     document.getElementById('annual-breakdown-net-pct').textContent = netPct.toFixed(1) + '%';
     document.getElementById('annual-breakdown-net-bar').style.width = netPct.toFixed(1) + '%';
+
+    // Update table striping based on visible rows
+    restripeTable('annual-income-breakdown-table');
   }
 
   // Chart.js plugin for center text in donut charts
@@ -8371,7 +8554,6 @@ function updateDeductionFormVisibility() {
     if (themeSelect && customThemeFlag.enabled) {
       // Only force theme to custom if not already set, to avoid overwriting user's server-synced theme
       if (themeSelect.value !== 'custom') {
-        console.log('[Settings] Custom theme flag enabled, forcing theme to custom');
         themeSelect.value = 'custom';
         state.settings.theme = 'custom';
         applyTheme('custom');
@@ -10953,7 +11135,6 @@ function updateDeductionFormVisibility() {
           : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
       }
     });
-    console.log('[Settings] Captured initial state:', settingsInitialState);
   }
 
   function checkSettingsDirty() {
@@ -11039,10 +11220,6 @@ function updateDeductionFormVisibility() {
         }
       });
 
-      console.log('[Settings] Saving settings. Changed keys:', Object.keys(changedSettings));
-      console.log('[Settings] Full settings object being saved:', next);
-      console.log('[Settings] Initial state for comparison:', settingsInitialState);
-
       // Apply all settings locally for immediate UI update
       applyTheme(next.theme);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
@@ -11057,7 +11234,6 @@ function updateDeductionFormVisibility() {
       setStatus('Saving settings...', 'warn');
       google.script.run
         .withSuccessHandler(() => {
-          console.log('[Settings] Save successful');
           setStatus('Settings saved', 'success');
           captureSettingsState();
           checkSettingsDirty();
@@ -11087,8 +11263,6 @@ function updateDeductionFormVisibility() {
 
   // Initial load
   function init() {
-    console.log('[Settings] Init starting...');
-    console.log('[Settings] Cached state.settings:', state.settings);
     loadCache();
     renderEntries();
     // Load settings into UI inputs from cache
@@ -11110,9 +11284,7 @@ function updateDeductionFormVisibility() {
     refreshContractBindings();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
     renderFeatureFlags();
-    console.log('[Settings] About to call applyFeatureFlags()...');
     applyFeatureFlags();
-    console.log('[Settings] Starting async server calls, settingsServerSynced =', settingsServerSynced);
     setStatus('Syncing...', 'warn');
     google.script.run
       .withSuccessHandler((entries) => {
@@ -11135,8 +11307,6 @@ function updateDeductionFormVisibility() {
     function loadSettingsWithRetry() {
       google.script.run
         .withSuccessHandler((settings) => {
-          console.log('[Settings] Received from server (attempt ' + (settingsRetryCount + 1) + '):', settings);
-
           // If null or empty object received, retry up to MAX_SETTINGS_RETRIES times
           if (!settings || (typeof settings === 'object' && Object.keys(settings).length === 0)) {
             if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
@@ -11158,7 +11328,6 @@ function updateDeductionFormVisibility() {
           }
 
           // Valid settings received
-          console.log('[Settings] Valid settings received with ' + Object.keys(settings).length + ' keys');
           state.settings = settings;
 
           // Parse custom_theme_config if it's a JSON string
@@ -11173,26 +11342,22 @@ function updateDeductionFormVisibility() {
 
           saveCache();
           // Load settings into UI inputs
-          const uiUpdates = {};
           Object.keys(SETTINGS_CONFIG).forEach((key) => {
             const config = SETTINGS_CONFIG[key];
             const element = config.element();
             if (element) {
               const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
               config.setValue(element, value);
-              uiUpdates[key] = value;
             } else {
               console.warn('[Settings] Element not found for key:', key);
             }
           });
-          console.log('[Settings] Updated UI with values:', uiUpdates);
           applyTheme(state.settings.theme || 'dark');
 
           // If custom theme flag is enabled, ensure theme is set to custom
           // This handles the case where api_getFeatureFlags completed before api_getSettings
           const customThemeFlag = state.featureFlags.custom_theme || DEFAULT_FEATURE_FLAGS.custom_theme || { enabled: false };
           if (customThemeFlag.enabled && themeSelect && themeSelect.value !== 'custom') {
-            console.log('[Settings] Custom theme flag was already enabled, forcing theme to custom');
             themeSelect.value = 'custom';
             state.settings.theme = 'custom';
             applyTheme('custom');
@@ -11204,7 +11369,6 @@ function updateDeductionFormVisibility() {
           checkSettingsDirty();
           applyStatusDisplay();
           renderCalendar();
-          console.log('[Settings] Sync complete, settingsServerSynced = true');
         })
         .withFailureHandler((error) => {
           console.error('[Settings] Failed to load from server:', error);
