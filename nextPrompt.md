@@ -26,6 +26,9 @@
 
 - Refactor scripts sheet to split up all functions into relevant categories
 
+- Make the time entry work nicely on mobile
+    * The UI is responsive, but it still isn't usable on a mobile
+
 ## Medium Changes
 
 - Add new light-weight page that loads extremely quickly, that is only used to edit time for that day
@@ -42,6 +45,9 @@
 - Build importer from old sheets to pull historical data
 
 - Embed a scratch pad sheet into the Web app
+
+- Non-optimistic UI
+    * Adding contract
 
 ## Small Changes
 

@@ -1,9 +1,8 @@
 /** Web entry + HTML includes */
 function doGet(e) {
   var tpl = HtmlService.createTemplateFromFile('views/index');
-  // TODO: Update favicon URL to real Tempus logo once hosted
   var html = tpl.evaluate()
-    .setFaviconUrl('https://www.google.com/favicon.ico')
+    .setFaviconUrl('https://drive.google.com/file/d/1ML7_AKRdPDUxh3fvZpgj1ec2Ltr4mxny')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   return html;
 }

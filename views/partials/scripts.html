@@ -8493,9 +8493,9 @@ function updateDeductionFormVisibility() {
     if (navInvoicesBtn) {
       navInvoicesBtn.style.display = invoicesFlag.enabled ? 'block' : 'none';
     }
-    if (invoiceTemplateCol) invoiceTemplateCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
-    if (invoiceOutputFolderCol) invoiceOutputFolderCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
-    if (invoiceLineLimitCol) invoiceLineLimitCol.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    if (invoiceTemplateCol) invoiceTemplateCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (invoiceOutputFolderCol) invoiceOutputFolderCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (invoiceLineLimitCol) invoiceLineLimitCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
     if (!invoicesFlag.enabled && state.currentPage === 'invoices') {
       showPage('time');
     }
@@ -8508,27 +8508,28 @@ function updateDeductionFormVisibility() {
     // Show/hide public holidays state setting
     const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
     if (publicHolidayStateCol) {
-      publicHolidayStateCol.style.display = publicHolidaysFlag.enabled ? 'block' : 'none';
+      publicHolidayStateCol.classList.toggle('ts-hidden', !publicHolidaysFlag.enabled);
     }
     if (publicHolidaysFlag.enabled) {
       loadPublicHolidays();
     }
 
-    // Show/hide PAYG rate setting (only when company tracking is enabled)
+    // Show/hide PAYG rate setting (only for sole traders)
+    const soleTraderFlag = state.featureFlags.is_sole_trader || DEFAULT_FEATURE_FLAGS.is_sole_trader || { enabled: false };
     if (paygRateCol) {
-      paygRateCol.style.display = state.companyTrackingEnabled ? 'block' : 'none';
+      paygRateCol.classList.toggle('ts-hidden', !soleTraderFlag.enabled);
     }
 
     // Show/hide minimum end time setting
     const suggestEndTimeFlag = state.featureFlags.suggest_end_time || DEFAULT_FEATURE_FLAGS.suggest_end_time || { enabled: false };
     if (minimumEndTimeCol) {
-      minimumEndTimeCol.style.display = suggestEndTimeFlag.enabled ? 'block' : 'none';
+      minimumEndTimeCol.classList.toggle('ts-hidden', !suggestEndTimeFlag.enabled);
     }
 
     // Show/hide lost super recovery mode setting
     const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions || DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
     if (lostSuperRecoveryCol) {
-      lostSuperRecoveryCol.style.display = noLostSuperFlag.enabled ? 'block' : 'none';
+      lostSuperRecoveryCol.classList.toggle('ts-hidden', !noLostSuperFlag.enabled);
     }
 
     // Show/hide colorblind theme options
