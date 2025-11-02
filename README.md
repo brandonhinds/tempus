@@ -154,17 +154,9 @@ To share Tempus with a partner or team member:
 
 **Note**: Everyone accesses the same data. There are no per-user permissions within Tempus itself.
 
-## Documentation
+## Support / Feature Requests
 
-- **[context.md](context.md)** - Product requirements and feature specifications
-- **[sheetSchemas.md](sheetSchemas.md)** - Complete database schema
-- **[featureFlags.md](featureFlags.md)** - Feature flag definitions
-- **[CLAUDE.md](CLAUDE.md)** - Developer guidance for AI assistants
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/brandonhinds/tempus/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/brandonhinds/tempus/discussions)
+Raise an [issue](https://github.com/brandonhinds/tempus/issues) for bugs or feature requests.
 
 ## Contributing
 
@@ -172,7 +164,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License. You are free to use, modify, and distribute this software. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. You are free to use, modify, and distribute this software. See the [LICENSE](license.md) file for details.
 
 ## Acknowledgments
 
