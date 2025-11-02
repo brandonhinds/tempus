@@ -48,6 +48,8 @@
 
 - Non-optimistic UI
     * Adding contract
+    * Adding deduction category
+    * Adding default hours
 
 ## Small Changes
 
@@ -71,6 +73,14 @@
 
 - Today's date is auto-prepop'd when loading the calendar, but it should pre-pop the whole entry if there is an existing entry. This allows people to edit today's entry quickly.
 
+- Either add ability to add attachments to deductions, or remove the text saying we will have that feature
+
+- Add the ability to optionally associate a default with an hour type. If set, the hour type is included when using the default, otherwise it just adds the hours to the currently selected hour type
+
+- Add the ability to define a reoccurring time entry, for things like parental leave. These can auto populate up to the dates covered by contracts, to avoid making them for all time.
+
+- Fix the calculation used by thinkStack to return lost super (make it match whatever David is doing)
+
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
     * Consider whether this is a good idea, because it would be the only feature that is truly incompatible with other parts of the sheet.
@@ -80,16 +90,19 @@
 
 ## Bugs from Initial Creation
 
-- The total hours for the month, without any hours added in the entire sheet, is `0.02`
+- The total hours for the month, without any hours added in the entire sheet, is `0.02`.
 
-- A lot of settings that are meant to be behind feature flags are not:
-    * Lost super recovery method (it also still has its info icon even though it does nothing)
-    * PAYG instalment rate
-    * Public holidays
-    * Suggested minimum end time
-    * Invoice template
-    * Invoice output folder path
-    * Invoice line placeholder limit
+- The hour entries are not displaying until some feature flags are enabled. Will need to track down which.
+
+- When adding a deduction the "No categories yet" message takes up a lot of room. A user shouldn't need to add a category, so there should be a way to opt out of that message.
+
+- The spacing of the add deduction modal is all out
+
+- The projected variance is out by a fairy amount. It thinks monthly hours should be 112, rather than 143.75.
+
+- Public holidays are loading into the database but are not showing up in the calendar view
+
+- Days without time are coming through as 0.02, rather than 0, on the payroll helper. This is probably related to the hours showing 0.02 when the sheet is empty.
 
 ## Logo
 

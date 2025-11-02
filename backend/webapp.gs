@@ -2,7 +2,7 @@
 function doGet(e) {
   var tpl = HtmlService.createTemplateFromFile('views/index');
   var html = tpl.evaluate()
-    .setFaviconUrl('https://drive.google.com/file/d/1ML7_AKRdPDUxh3fvZpgj1ec2Ltr4mxny')
+    .setFaviconUrl('https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/images/favicon.ico')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   return html;
 }
