@@ -41,6 +41,8 @@
 
 - Build importer from old sheets to pull historical data
 
+- Embed a scratch pad sheet into the Web app
+
 ## Small Changes
 
 - Add the easter easter egg. Add a Konami Code.
@@ -52,8 +54,6 @@
 - Company expenses on annual view
 	* Company income
 	* Company expenses
-
-- Add Koffee link
 
 - Update the Favicon to something real (especially important because we cannot set the tab title without the pop-up issue)
 
@@ -71,6 +71,19 @@
 
 - Things that may not be possible:
     * Add colours to hour type drop down (or dots of the colour or something)
+
+## Bugs from Initial Creation
+
+- The total hours for the month, without any hours added in the entire sheet, is `0.02`
+
+- A lot of settings that are meant to be behind feature flags are not:
+    * Lost super recovery method (it also still has its info icon even though it does nothing)
+    * PAYG instalment rate
+    * Public holidays
+    * Suggested minimum end time
+    * Invoice template
+    * Invoice output folder path
+    * Invoice line placeholder limit
 
 ## Logo
 

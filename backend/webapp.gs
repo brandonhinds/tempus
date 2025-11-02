@@ -11,3 +11,143 @@ function doGet(e) {
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
+
+/**
+ * Adds a custom menu to the spreadsheet when it opens.
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Tempus')
+    .addItem('Get Web App URL', 'getTempusWebAppUrl')
+    .addToUi();
+}
+
+/**
+ * Gets the Tempus web app URL and displays it, or shows setup instructions.
+ */
+function getTempusWebAppUrl() {
+  var ui = SpreadsheetApp.getUi();
+  var url = null;
+
+  try {
+    url = ScriptApp.getService().getUrl();
+  } catch (e) {
+    Logger.log('Error getting service URL: ' + e.toString());
+  }
+
+  var message = '';
+
+  // Check if we have a test deployment URL (contains /dev)
+  if (url && url.indexOf('/dev') !== -1) {
+    message = 'Your Tempus Web App URL:\n\n' +
+              url + '\n\n'
+  } else {
+    message = 'Unable to retrieve the test deployment.\n\n' +
+              'To create a test deployment, or get an existing URL that the script cannot find:\n\n' +
+              '1. Click "Extensions" → "Apps Script" in the toolbar above\n' +
+              '2. In Apps Script Editor, click "Deploy" → "Test deployments"\n' +
+              '3. Click the "Copy" button under the URL\n\n'
+  }
+
+  message = message + 
+            'Bookmark this URL for easy access.\n\n' +
+            'The test deployment URL automatically updates when you push updates to Tempus, so this is a one-time process.\n\n' +
+            'To share access with others:\n' +
+            '1. Share your Google Sheet with them (Editor or Viewer)\n' +
+            '2. Give them the URL\n'
+
+  ui.alert('Tempus Web App URL', message, ui.ButtonSet.OK);
+
+  return url;
+}
+
+/**
+ * ⚠️ DANGER: Deletes all sheets except 'INTRO' to reset dev environment.
+ *
+ * This function is ONLY for development/testing purposes.
+ * It will permanently delete all data sheets (timesheet_entries, contracts, etc.)
+ * while preserving only the INTRO sheet.
+ *
+ * MANUAL EXECUTION ONLY - Do NOT create buttons or UI triggers for this function.
+ * Run from Apps Script Editor: Select function → Run
+ *
+ * Use case: Resetting dev environment to factory settings for testing.
+ */
+function DANGER_resetToFactorySettings() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // First confirmation
+  var response1 = ui.alert(
+    '⚠️ DANGER: Reset to Factory Settings',
+    'This will PERMANENTLY DELETE all sheets except INTRO.\n\n' +
+    'ALL DATA WILL BE LOST:\n' +
+    '- timesheet_entries\n' +
+    '- contracts\n' +
+    '- user_settings\n' +
+    '- feature_flags\n' +
+    '- projects\n' +
+    '- And any other sheets\n\n' +
+    'Are you absolutely sure you want to continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response1 !== ui.Button.YES) {
+    Logger.log('Reset cancelled by user at first confirmation');
+    return { success: false, message: 'Reset cancelled' };
+  }
+
+  // Second confirmation
+  var response2 = ui.alert(
+    '⚠️ FINAL WARNING',
+    'This action CANNOT BE UNDONE.\n\n' +
+    'All your time entries, contracts, and settings will be permanently deleted.\n\n' +
+    'Click YES to proceed with deletion.',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response2 !== ui.Button.YES) {
+    Logger.log('Reset cancelled by user at second confirmation');
+    return { success: false, message: 'Reset cancelled' };
+  }
+
+  // Proceed with deletion
+  var sheets = ss.getSheets();
+  var deletedSheets = [];
+  var errors = [];
+
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var sheetName = sheet.getName();
+
+    if (sheetName !== 'INTRO') {
+      try {
+        ss.deleteSheet(sheet);
+        deletedSheets.push(sheetName);
+        Logger.log('Deleted sheet: ' + sheetName);
+      } catch (e) {
+        errors.push(sheetName + ': ' + e.toString());
+        Logger.log('Error deleting sheet ' + sheetName + ': ' + e.toString());
+      }
+    }
+  }
+
+  var resultMessage = 'Factory reset complete!\n\n' +
+                      'Deleted ' + deletedSheets.length + ' sheets:\n' +
+                      deletedSheets.join(', ') + '\n\n' +
+                      'Preserved: INTRO';
+
+  if (errors.length > 0) {
+    resultMessage += '\n\nErrors:\n' + errors.join('\n');
+  }
+
+  ui.alert('Reset Complete', resultMessage, ui.ButtonSet.OK);
+
+  Logger.log('Factory reset complete. Deleted: ' + deletedSheets.length + ' sheets');
+
+  return {
+    success: true,
+    deletedSheets: deletedSheets,
+    errors: errors
+  };
+}
