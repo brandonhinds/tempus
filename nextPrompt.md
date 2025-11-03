@@ -104,6 +104,16 @@
 
 - Days without time are coming through as 0.02, rather than 0, on the payroll helper. This is probably related to the hours showing 0.02 when the sheet is empty.
 
+- Have the number of hours persist switching hours, as long as both the old and new values don't already exist
+
+- Fix update process:
+    * Download latest version of repo
+    * Open directory with clasp clone and delete all non-hidden files
+    * Replace contents with files from git repo
+    * clasp push
+
+    We should be able to automate that whole process
+
 ## Logo
 
 https://www.design.com/maker/logo/geometric-time-hourglass-237278?text=Tempus&layoutOrientation=auto&colorPalette=grayscale&isVariation=True&searchImpressionId=d5f8f130-bed6-4a24-b02a-ebafdba1e506

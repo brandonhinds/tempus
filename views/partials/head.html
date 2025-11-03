@@ -239,6 +239,8 @@
     --primary-glow: rgba(0, 180, 216, 0.38);
     --primary-hint-bg: rgba(0, 180, 216, 0.18);
     --primary-hint-border: rgba(0, 180, 216, 0.55);
+    --surface-subtle: #1b2d46;
+    --focus-ring: rgba(0, 180, 216, 0.45);
     --hover-bg: rgba(0, 180, 216, 0.12);
     --border-color: var(--border);
     --text-secondary: var(--muted);
@@ -278,6 +280,8 @@
     --primary-glow: rgba(139, 92, 246, 0.4);
     --primary-hint-bg: rgba(139, 92, 246, 0.18);
     --primary-hint-border: rgba(139, 92, 246, 0.5);
+    --surface-subtle: #332351;
+    --focus-ring: rgba(139, 92, 246, 0.45);
     --hover-bg: rgba(139, 92, 246, 0.12);
     --border-color: var(--border);
     --text-secondary: var(--muted);
@@ -317,6 +321,8 @@
     --primary-glow: rgba(236, 72, 153, 0.4);
     --primary-hint-bg: rgba(236, 72, 153, 0.16);
     --primary-hint-border: rgba(236, 72, 153, 0.6);
+    --surface-subtle: #372038;
+    --focus-ring: rgba(236, 72, 153, 0.45);
     --hover-bg: rgba(236, 72, 153, 0.12);
     --border-color: var(--border);
     --text-secondary: var(--muted);
@@ -356,6 +362,8 @@
     --primary-glow: rgba(212, 212, 212, 0.28);
     --primary-hint-bg: rgba(212, 212, 212, 0.14);
     --primary-hint-border: rgba(212, 212, 212, 0.45);
+    --surface-subtle: #141414;
+    --focus-ring: rgba(212, 212, 212, 0.4);
     --hover-bg: rgba(212, 212, 212, 0.08);
     --border-color: var(--border);
     --text-secondary: var(--muted);
@@ -515,6 +523,20 @@
   .ts-badge.warn { background: var(--badge-warn-bg); border-color: var(--badge-warn-border); color: var(--badge-warn-text); }
   .ts-badge.error { background: var(--badge-error-bg); border-color: var(--badge-error-border); color: var(--badge-error-text); }
   .ts-badge--warn { background: var(--badge-warn-bg); border-color: var(--badge-warn-border); color: var(--badge-warn-text); }
+  .ts-custom-theme-preview { margin-top:var(--space-4); border:1px solid var(--border); border-radius:12px; padding:var(--space-4); background: var(--bg); color: var(--text); display:flex; flex-direction:column; gap:var(--space-3); }
+  .ts-custom-theme-preview__panel { background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:var(--space-4); display:flex; flex-direction:column; gap:var(--space-3); }
+  .ts-custom-theme-preview__buttons { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+  .ts-custom-theme-preview__buttons button { pointer-events:none; box-shadow:none; }
+  .ts-custom-theme-preview__buttons button.secondary { border-color: var(--border); }
+  .ts-custom-theme-preview__buttons button.outline { background: transparent; color: var(--primary); border:1px solid var(--primary); box-shadow:none; }
+  .ts-custom-theme-preview__badges { display:flex; gap:var(--space-2); flex-wrap:wrap; }
+  .ts-custom-theme-preview__badge { padding:var(--space-1) var(--space-2); border-radius:999px; font-size:var(--font-size-xs); font-weight:600; letter-spacing:0.01em; }
+  .ts-custom-theme-preview__badge.success { background: var(--badge-success-bg); border:1px solid var(--badge-success-border); color: var(--badge-success-text); }
+  .ts-custom-theme-preview__badge.warn { background: var(--badge-warn-bg); border:1px solid var(--badge-warn-border); color: var(--badge-warn-text); }
+  .ts-custom-theme-preview__badge.danger { background: var(--badge-error-bg); border:1px solid var(--badge-error-border); color: var(--badge-error-text); }
+  .ts-custom-theme-preview__calendar { display:flex; gap:var(--space-2); align-items:center; }
+  .ts-custom-theme-preview__calendar-day { width:36px; height:36px; border-radius:8px; border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; font-size:var(--font-size-xs); background: var(--panel); position:relative; color: var(--text-secondary); }
+  .ts-custom-theme-preview__calendar-day--selected { border-color: var(--calendar-selected-border); box-shadow:0 0 0 3px var(--calendar-selected-glow); background: var(--calendar-selected-bg); color: var(--primary); font-weight:600; }
   .ts-list { display:flex; flex-direction: column; gap:10px; list-style:none; margin:0; padding:0; }
   .ts-item { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:var(--space-4); display:flex; justify-content:space-between; gap:var(--space-3); align-items:flex-start; transform:translateY(0); transition: transform .2s ease, box-shadow .2s ease; }
   .ts-item:hover { transform: translateY(-2px); box-shadow:var(--shadow-md); }

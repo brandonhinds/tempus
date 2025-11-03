@@ -4827,6 +4827,17 @@ function updateDeductionFormVisibility() {
 
   const THEME_KEYS = ['dark', 'light', 'og', 'rose', 'sierra117', 'protanopia', 'deuteranopia', 'tritanopia', 'monochrome', 'custom'];
 
+  const CUSTOM_THEME_DEFAULTS = {
+    bg: '#0b1220',
+    panel: '#111d33',
+    text: '#e8edf7',
+    muted: '#a4b5d6',
+    primary: '#3b82f6',
+    success: '#22c55e',
+    warning: '#fbbf24',
+    danger: '#ef4444'
+  };
+
   function applyTheme(theme) {
     const normalizedTheme = (typeof theme === 'string' ? theme.trim().toLowerCase() : '');
     const normalized = THEME_KEYS.includes(normalizedTheme) ? normalizedTheme : 'dark';
@@ -4852,6 +4863,35 @@ function updateDeductionFormVisibility() {
         renderContractBurndown(activeContract, usage);
       }
     }
+  }
+
+  function normalizeCustomThemeConfig(raw) {
+    var base = { ...CUSTOM_THEME_DEFAULTS };
+    if (raw && typeof raw === 'object') {
+      Object.keys(raw).forEach(function(key) {
+        if (raw[key]) {
+          base[key] = raw[key];
+        }
+      });
+    }
+
+    if (!base.panel) {
+      base.panel = isColorLight(base.bg) ? darken(base.bg, 0.12) : lighten(base.bg, 0.12);
+    }
+    if (!base.muted) {
+      base.muted = mixColors(base.text, base.bg, 0.65);
+    }
+    if (!base.success) {
+      base.success = CUSTOM_THEME_DEFAULTS.success;
+    }
+    if (!base.warning) {
+      base.warning = adjustHue(base.primary, 35);
+    }
+    if (!base.danger) {
+      base.danger = adjustHue(base.primary, -25);
+    }
+
+    return base;
   }
 
   // Color manipulation helpers
@@ -4939,28 +4979,99 @@ function updateDeductionFormVisibility() {
     return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   }
 
-  function generateCustomTheme(bgColor, primaryColor, textColor, successColor) {
-    var bg = bgColor;
-    var panel = lighten(bg, 0.06);
-    var border = lighten(bg, 0.12);
-    var text = textColor;
-    var primary = primaryColor;
-    var primaryDark = darken(primary, 0.15);
-    var success = successColor;
-    var danger = adjustHue(primary, 15);
+  function clamp01(value) {
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+  }
 
-    // Calculate muted text (between bg and text)
-    var bgRgb = hexToRgb(bg);
-    var textRgb = hexToRgb(text);
-    var muted = rgbToHex(
-      Math.floor((bgRgb.r + textRgb.r * 2) / 3),
-      Math.floor((bgRgb.g + textRgb.g * 2) / 3),
-      Math.floor((bgRgb.b + textRgb.b * 2) / 3)
-    );
+  function mixColors(hexA, hexB, weight) {
+    var rgbA = hexToRgb(hexA);
+    var rgbB = hexToRgb(hexB);
+    var w = clamp01(typeof weight === 'number' ? weight : 0.5);
 
-    var primaryRgb = hexToRgb(primary);
-    var successRgb = hexToRgb(success);
-    var dangerRgb = hexToRgb(danger);
+    if (!rgbA && !rgbB) return '#000000';
+    if (!rgbA) return rgbToHex(rgbB.r, rgbB.g, rgbB.b);
+    if (!rgbB) return rgbToHex(rgbA.r, rgbA.g, rgbA.b);
+
+    var r = Math.round(rgbA.r * (1 - w) + rgbB.r * w);
+    var g = Math.round(rgbA.g * (1 - w) + rgbB.g * w);
+    var b = Math.round(rgbA.b * (1 - w) + rgbB.b * w);
+    return rgbToHex(r, g, b);
+  }
+
+  function getLuminance(hex) {
+    var rgb = hexToRgb(hex);
+    if (!rgb) return 0;
+    var channel = [rgb.r, rgb.g, rgb.b].map(function(component) {
+      var c = component / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * channel[0] + 0.7152 * channel[1] + 0.0722 * channel[2];
+  }
+
+  function getContrastRatio(hexA, hexB) {
+    var lumA = getLuminance(hexA);
+    var lumB = getLuminance(hexB);
+    var lighter = Math.max(lumA, lumB);
+    var darker = Math.min(lumA, lumB);
+    if (!lighter && !darker) return 1;
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  function formatContrast(value) {
+    if (!value || !isFinite(value)) return '0.00';
+    return (Math.round(value * 100) / 100).toFixed(2);
+  }
+
+  function isColorLight(hex) {
+    return getLuminance(hex) > 0.6;
+  }
+
+  function generateCustomTheme(config) {
+    var normalized = normalizeCustomThemeConfig(config);
+    var bg = normalized.bg;
+    var panel = normalized.panel;
+    var text = normalized.text;
+    var muted = normalized.muted;
+    var primary = normalized.primary;
+    var success = normalized.success;
+    var warning = normalized.warning;
+    var danger = normalized.danger;
+
+    var bgIsLight = isColorLight(bg);
+    var panelIsLight = isColorLight(panel);
+
+    var border = mixColors(panel, bg, 0.35);
+    var surfaceSubtle = bgIsLight ? darken(bg, 0.04) : lighten(bg, 0.04);
+    var focusRing = withAlpha(primary, 0.55);
+    var primaryDark = darken(primary, 0.16);
+
+    var primarySoftBg = withAlpha(primary, 0.18);
+    var primarySoftBorder = withAlpha(primary, 0.65);
+    var primarySoftText = panelIsLight ? darken(primary, 0.25) : lighten(primary, 0.25);
+    var primaryGlow = withAlpha(primary, 0.3);
+    var primaryHintBg = withAlpha(primary, 0.16);
+    var primaryHintBorder = withAlpha(primary, 0.55);
+    var hoverBg = withAlpha(primary, 0.12);
+
+    var successText = isColorLight(success) ? darken(success, 0.3) : lighten(success, 0.3);
+    var warningText = isColorLight(warning) ? darken(warning, 0.35) : lighten(warning, 0.35);
+    var dangerText = isColorLight(danger) ? darken(danger, 0.35) : lighten(danger, 0.35);
+
+    var badgeSuccessBg = withAlpha(success, 0.18);
+    var badgeSuccessBorder = withAlpha(success, 0.55);
+    var badgeWarnBg = withAlpha(warning, 0.18);
+    var badgeWarnBorder = withAlpha(warning, 0.55);
+    var badgeErrorBg = withAlpha(danger, 0.2);
+    var badgeErrorBorder = withAlpha(danger, 0.6);
+
+    var holidayBg = withAlpha(success, 0.18);
+    var holidayBorder = withAlpha(success, 0.5);
+    var holidayHover = withAlpha(success, 0.75);
+
+    var calendarGlow = withAlpha(primary, 0.36);
+    var calendarBg = withAlpha(primary, 0.22);
 
     return {
       '--bg': bg,
@@ -4970,55 +5081,46 @@ function updateDeductionFormVisibility() {
       '--primary': primary,
       '--primary-600': primaryDark,
       '--danger': danger,
+      '--warning': warning,
       '--success': success,
       '--border': border,
       '--badge-bg': panel,
       '--badge-border': border,
       '--badge-text': text,
-      '--badge-success-bg': 'rgba(' + successRgb.r + ', ' + successRgb.g + ', ' + successRgb.b + ', 0.2)',
-      '--badge-success-border': 'rgba(' + successRgb.r + ', ' + successRgb.g + ', ' + successRgb.b + ', 0.65)',
-      '--badge-success-text': success,
-      '--badge-warn-bg': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.22)',
-      '--badge-warn-border': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.65)',
-      '--badge-warn-text': lighten(primary, 0.15),
-      '--badge-error-bg': 'rgba(' + dangerRgb.r + ', ' + dangerRgb.g + ', ' + dangerRgb.b + ', 0.2)',
-      '--badge-error-border': 'rgba(' + dangerRgb.r + ', ' + dangerRgb.g + ', ' + dangerRgb.b + ', 0.65)',
-      '--badge-error-text': danger,
-      '--primary-soft-bg': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.2)',
-      '--primary-soft-border': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.75)',
-      '--primary-soft-text': lighten(primary, 0.2),
-      '--primary-glow': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.4)',
-      '--primary-hint-bg': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.16)',
-      '--primary-hint-border': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.6)',
-      '--hover-bg': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.12)',
+      '--badge-success-bg': badgeSuccessBg,
+      '--badge-success-border': badgeSuccessBorder,
+      '--badge-success-text': successText,
+      '--badge-warn-bg': badgeWarnBg,
+      '--badge-warn-border': badgeWarnBorder,
+      '--badge-warn-text': warningText,
+      '--badge-error-bg': badgeErrorBg,
+      '--badge-error-border': badgeErrorBorder,
+      '--badge-error-text': dangerText,
+      '--primary-soft-bg': primarySoftBg,
+      '--primary-soft-border': primarySoftBorder,
+      '--primary-soft-text': primarySoftText,
+      '--primary-glow': primaryGlow,
+      '--primary-hint-bg': primaryHintBg,
+      '--primary-hint-border': primaryHintBorder,
+      '--hover-bg': hoverBg,
       '--border-color': border,
       '--text-secondary': muted,
-      '--holiday-bg': 'rgba(' + successRgb.r + ', ' + successRgb.g + ', ' + successRgb.b + ', 0.2)',
-      '--holiday-border': 'rgba(' + successRgb.r + ', ' + successRgb.g + ', ' + successRgb.b + ', 0.55)',
-      '--holiday-hover': 'rgba(' + successRgb.r + ', ' + successRgb.g + ', ' + successRgb.b + ', 0.8)',
+      '--surface-subtle': surfaceSubtle,
+      '--focus-ring': focusRing,
+      '--holiday-bg': holidayBg,
+      '--holiday-border': holidayBorder,
+      '--holiday-hover': holidayHover,
       '--calendar-selected-border': primary,
-      '--calendar-selected-glow': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.4)',
-      '--calendar-selected-bg': 'rgba(' + primaryRgb.r + ', ' + primaryRgb.g + ', ' + primaryRgb.b + ', 0.2)'
+      '--calendar-selected-glow': calendarGlow,
+      '--calendar-selected-bg': calendarBg
     };
   }
 
   function applyCustomTheme() {
-    var customThemeConfig = state.settings.custom_theme_config;
-    if (!customThemeConfig) {
-      customThemeConfig = {
-        bg: '#0b1220',
-        primary: '#3b82f6',
-        text: '#e2e8f0',
-        success: '#10b981'
-      };
-    }
+    var customThemeConfig = normalizeCustomThemeConfig(state.settings.custom_theme_config);
+    state.settings.custom_theme_config = customThemeConfig;
 
-    var themeVars = generateCustomTheme(
-      customThemeConfig.bg,
-      customThemeConfig.primary,
-      customThemeConfig.text,
-      customThemeConfig.success
-    );
+    var themeVars = generateCustomTheme(customThemeConfig);
 
     // Find or create style element for custom theme
     var styleId = 'custom-theme-style';
@@ -15353,29 +15455,145 @@ function updateDeductionFormVisibility() {
   const btnSaveCustomTheme = document.getElementById('btn-save-custom-theme');
   const btnCancelCustomTheme = document.getElementById('btn-cancel-custom-theme');
   const modalCustomTheme = document.getElementById('modal-custom-theme');
+  const customThemeInputs = {
+    bg: document.getElementById('custom-theme-bg'),
+    panel: document.getElementById('custom-theme-panel'),
+    primary: document.getElementById('custom-theme-primary'),
+    success: document.getElementById('custom-theme-success'),
+    warning: document.getElementById('custom-theme-warning'),
+    danger: document.getElementById('custom-theme-danger'),
+    text: document.getElementById('custom-theme-text'),
+    muted: document.getElementById('custom-theme-muted')
+  };
+  const customThemePreview = document.getElementById('custom-theme-preview');
+  const customThemeValidation = document.getElementById('custom-theme-validation');
+
+  function readCustomThemeInputs() {
+    return {
+      bg: customThemeInputs.bg ? customThemeInputs.bg.value : CUSTOM_THEME_DEFAULTS.bg,
+      panel: customThemeInputs.panel ? customThemeInputs.panel.value : '',
+      primary: customThemeInputs.primary ? customThemeInputs.primary.value : '',
+      success: customThemeInputs.success ? customThemeInputs.success.value : '',
+      warning: customThemeInputs.warning ? customThemeInputs.warning.value : '',
+      danger: customThemeInputs.danger ? customThemeInputs.danger.value : '',
+      text: customThemeInputs.text ? customThemeInputs.text.value : '',
+      muted: customThemeInputs.muted ? customThemeInputs.muted.value : ''
+    };
+  }
+
+  function validateCustomThemeConfig(config) {
+    var normalized = normalizeCustomThemeConfig(config);
+    var issues = [];
+
+    var bgContrast = getContrastRatio(normalized.bg, normalized.text);
+    if (bgContrast < 4.5) {
+      issues.push({
+        level: 'error',
+        message: 'Background and text contrast is ' + formatContrast(bgContrast) + ':1 (needs 4.5:1).'
+      });
+    }
+
+    var panelContrast = getContrastRatio(normalized.panel, normalized.text);
+    if (panelContrast < 4.5) {
+      issues.push({
+        level: 'error',
+        message: 'Surface and text contrast is ' + formatContrast(panelContrast) + ':1 (needs 4.5:1).'
+      });
+    }
+
+    var primaryContrast = getContrastRatio(normalized.primary, '#ffffff');
+    if (primaryContrast < 4.5) {
+      issues.push({
+        level: primaryContrast < 3 ? 'error' : 'warning',
+        message: 'Primary buttons contrast with white text is ' + formatContrast(primaryContrast) + ':1.'
+      });
+    }
+
+    var successContrast = getContrastRatio(normalized.success, normalized.panel);
+    if (successContrast < 3) {
+      issues.push({
+        level: 'warning',
+        message: 'Success text on surfaces may be low contrast (' + formatContrast(successContrast) + ':1).'
+      });
+    }
+
+    var warningContrast = getContrastRatio(normalized.warning, normalized.panel);
+    if (warningContrast < 3) {
+      issues.push({
+        level: 'warning',
+        message: 'Warning text on surfaces may be low contrast (' + formatContrast(warningContrast) + ':1).'
+      });
+    }
+
+    var dangerContrast = getContrastRatio(normalized.danger, normalized.panel);
+    if (dangerContrast < 3) {
+      issues.push({
+        level: 'warning',
+        message: 'Danger text on surfaces may be low contrast (' + formatContrast(dangerContrast) + ':1).'
+      });
+    }
+
+    return {
+      normalized,
+      issues,
+      hasErrors: issues.some(function(issue) { return issue.level === 'error'; })
+    };
+  }
+
+  function renderCustomThemeValidation(validation) {
+    if (!customThemeValidation) return;
+    if (!validation.issues.length) {
+      customThemeValidation.style.display = 'none';
+      customThemeValidation.textContent = '';
+      return;
+    }
+
+    customThemeValidation.style.display = 'block';
+    customThemeValidation.style.color = validation.hasErrors ? 'var(--danger)' : 'var(--warning)';
+    customThemeValidation.innerHTML = validation.issues.map(function(issue) {
+      return issue.message;
+    }).join('<br/>');
+  }
+
+  function updateCustomThemePreview() {
+    var inputConfig = readCustomThemeInputs();
+    var validation = validateCustomThemeConfig(inputConfig);
+
+    if (customThemePreview) {
+      var themeVars = generateCustomTheme(validation.normalized);
+      Object.keys(themeVars).forEach(function(token) {
+        customThemePreview.style.setProperty(token, themeVars[token]);
+      });
+    }
+
+    renderCustomThemeValidation(validation);
+
+    if (btnSaveCustomTheme) {
+      btnSaveCustomTheme.disabled = validation.hasErrors;
+    }
+
+    return validation;
+  }
 
   function showCustomThemeModal() {
     if (!modalCustomTheme) return;
 
-    // Load saved config or use defaults
-    var config = state.settings.custom_theme_config || {
-      bg: '#0b1220',
-      primary: '#3b82f6',
-      text: '#e2e8f0',
-      success: '#10b981'
-    };
+    var config = normalizeCustomThemeConfig(state.settings.custom_theme_config);
 
-    // Populate inputs with saved values
-    const bgInput = document.getElementById('custom-theme-bg');
-    const primaryInput = document.getElementById('custom-theme-primary');
-    const textInput = document.getElementById('custom-theme-text');
-    const successInput = document.getElementById('custom-theme-success');
+    Object.keys(customThemeInputs).forEach(function(key) {
+      var input = customThemeInputs[key];
+      if (input && config[key]) {
+        input.value = config[key];
+      } else if (input && CUSTOM_THEME_DEFAULTS[key]) {
+        input.value = CUSTOM_THEME_DEFAULTS[key];
+      }
+    });
 
-    if (bgInput) bgInput.value = config.bg;
-    if (primaryInput) primaryInput.value = config.primary;
-    if (textInput) textInput.value = config.text;
-    if (successInput) successInput.value = config.success;
+    if (btnSaveCustomTheme) {
+      btnSaveCustomTheme.disabled = false;
+    }
 
+    updateCustomThemePreview();
     modalCustomTheme.style.display = 'flex';
   }
 
@@ -15383,30 +15601,22 @@ function updateDeductionFormVisibility() {
     if (modalCustomTheme) {
       modalCustomTheme.style.display = 'none';
     }
+    if (btnSaveCustomTheme) {
+      btnSaveCustomTheme.disabled = false;
+    }
   }
 
   function saveCustomTheme() {
-    const bgInput = document.getElementById('custom-theme-bg');
-    const primaryInput = document.getElementById('custom-theme-primary');
-    const textInput = document.getElementById('custom-theme-text');
-    const successInput = document.getElementById('custom-theme-success');
+    var validation = updateCustomThemePreview() || { normalized: readCustomThemeInputs(), hasErrors: false };
+    if (validation.hasErrors) {
+      showNotification('Fix the highlighted contrast issues before saving.', 'danger');
+      return;
+    }
 
-    if (!bgInput || !primaryInput || !textInput || !successInput) return;
-
-    const config = {
-      bg: bgInput.value,
-      primary: primaryInput.value,
-      text: textInput.value,
-      success: successInput.value
-    };
-
-    // Save to state
-    state.settings.custom_theme_config = config;
-
-    // Apply the theme immediately
+    var normalized = validation.normalized;
+    state.settings.custom_theme_config = normalized;
     applyCustomTheme();
 
-    // Persist to backend
     google.script.run
       .withSuccessHandler(function() {
         showNotification('Custom theme saved successfully', 'success');
@@ -15415,9 +15625,9 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(function(error) {
         showNotification('Failed to save custom theme: ' + error.message, 'danger');
       })
-      .api_updateSettings([
-        { key: 'custom_theme_config', value: JSON.stringify(config), type: 'string' }
-      ]);
+      .api_updateSettings({
+        custom_theme_config: JSON.stringify(normalized)
+      });
   }
 
   if (btnConfigureTheme) {
@@ -15432,7 +15642,13 @@ function updateDeductionFormVisibility() {
     btnCancelCustomTheme.addEventListener('click', hideCustomThemeModal);
   }
 
-  // Close modal when clicking outside
+  Object.keys(customThemeInputs).forEach(function(key) {
+    var input = customThemeInputs[key];
+    if (input) {
+      input.addEventListener('input', updateCustomThemePreview);
+    }
+  });
+
   if (modalCustomTheme) {
     modalCustomTheme.addEventListener('click', function(e) {
       if (e.target === modalCustomTheme) {
@@ -15440,7 +15656,6 @@ function updateDeductionFormVisibility() {
       }
     });
 
-    // Close modal on X button
     const closeBtn = modalCustomTheme.querySelector('.ts-modal-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', hideCustomThemeModal);

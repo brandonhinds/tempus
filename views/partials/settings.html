@@ -259,43 +259,128 @@
    <div class="ts-note" style="margin-bottom: 16px;">
     Choose your main colors and the theme will automatically generate complementary shades for the entire interface.
    </div>
-   <div class="ts-row" style="margin-bottom: 16px;">
+  <div class="ts-row" style="margin-bottom: 16px;">
     <div class="ts-col">
      <label>
       Background Color
      </label>
      <input id="custom-theme-bg" type="color" value="#0b1220"/>
      <div class="ts-note">
-      Dark base color for the app background
+      Base colour for the app background
      </div>
     </div>
+    <div class="ts-col">
+     <label>
+      Surface Color
+     </label>
+     <input id="custom-theme-panel" type="color" value="#111d33"/>
+     <div class="ts-note">
+      Panels, cards, and modals use this surface shade
+     </div>
+   </div>
+  </div>
+  <div class="ts-row" style="margin-bottom: 16px;">
     <div class="ts-col">
      <label>
       Primary Color
      </label>
      <input id="custom-theme-primary" type="color" value="#3b82f6"/>
      <div class="ts-note">
-      Main accent color for buttons and highlights
-     </div>
-    </div>
-   </div>
-   <div class="ts-row">
-    <div class="ts-col">
-     <label>
-      Text Color
-     </label>
-     <input id="custom-theme-text" type="color" value="#e2e8f0"/>
-     <div class="ts-note">
-      Main text color for readability
+      Main accent for buttons and key highlights
      </div>
     </div>
     <div class="ts-col">
      <label>
       Success Color
      </label>
-     <input id="custom-theme-success" type="color" value="#10b981"/>
+     <input id="custom-theme-success" type="color" value="#22c55e"/>
      <div class="ts-note">
-      Color for success states and positive indicators
+      Positive statuses and success indicators
+     </div>
+    </div>
+   </div>
+  <div class="ts-row">
+    <div class="ts-col">
+     <label>
+      Warning Color
+     </label>
+     <input id="custom-theme-warning" type="color" value="#fbbf24"/>
+     <div class="ts-note">
+      Caution banners, badges, and hour type alerts
+     </div>
+    </div>
+    <div class="ts-col">
+     <label>
+      Danger Color
+     </label>
+     <input id="custom-theme-danger" type="color" value="#ef4444"/>
+     <div class="ts-note">
+      Destructive actions and critical alerts
+     </div>
+    </div>
+   </div>
+  <div class="ts-row">
+    <div class="ts-col">
+     <label>
+      Text Color
+     </label>
+     <input id="custom-theme-text" type="color" value="#e8edf7"/>
+     <div class="ts-note">
+      Primary text against the background and surfaces
+     </div>
+    </div>
+    <div class="ts-col">
+     <label>
+      Muted Text Color
+     </label>
+     <input id="custom-theme-muted" type="color" value="#a4b5d6"/>
+     <div class="ts-note">
+      Secondary labels and helper text
+     </div>
+    </div>
+   </div>
+   <div class="ts-note" id="custom-theme-validation" style="display:none; margin-top: 16px;">
+   </div>
+   <div class="ts-custom-theme-preview" id="custom-theme-preview">
+    <div class="ts-custom-theme-preview__panel">
+     <h4 style="margin:0;">
+      Theme preview
+     </h4>
+     <p style="margin:0;">
+      Headlines, body text, and helper copy reflect your palette choices.
+     </p>
+     <div class="ts-custom-theme-preview__buttons">
+      <button type="button">
+       Primary action
+      </button>
+      <button class="secondary" type="button">
+       Secondary
+      </button>
+      <button class="outline" type="button">
+       Outline
+      </button>
+     </div>
+     <div class="ts-custom-theme-preview__badges">
+      <span class="ts-custom-theme-preview__badge success">
+       Success
+      </span>
+      <span class="ts-custom-theme-preview__badge warn">
+       Warning
+      </span>
+      <span class="ts-custom-theme-preview__badge danger">
+       Danger
+      </span>
+     </div>
+     <div class="ts-custom-theme-preview__calendar">
+      <div class="ts-custom-theme-preview__calendar-day">
+       12
+      </div>
+      <div class="ts-custom-theme-preview__calendar-day ts-custom-theme-preview__calendar-day--selected">
+       13
+      </div>
+      <div class="ts-custom-theme-preview__calendar-day">
+       14
+      </div>
      </div>
     </div>
    </div>
