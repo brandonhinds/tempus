@@ -4811,7 +4811,7 @@ function updateDeductionFormVisibility() {
     },
     custom_theme: {
       name: 'Enable custom theme',
-      description: 'Locks the theme selector to Custom and unlocks the colour configuration modal.',
+      description: 'Adds a Custom theme option with configurable colours.',
       order: 510,
       group: 'accessibility'
     },
@@ -4838,6 +4838,53 @@ function updateDeductionFormVisibility() {
     danger: '#ef4444'
   };
 
+  function getCustomThemeFlag() {
+    const fromState = state && state.featureFlags ? state.featureFlags.custom_theme : null;
+    const fromDefaults = DEFAULT_FEATURE_FLAGS ? DEFAULT_FEATURE_FLAGS.custom_theme : null;
+    return fromState || fromDefaults || { enabled: false };
+  }
+
+  function isCustomThemeEnabled() {
+    const flag = getCustomThemeFlag();
+    return !!(flag && flag.enabled);
+  }
+
+  function getLastNonCustomTheme() {
+    if (state && state.settings && state.settings.last_non_custom_theme && state.settings.last_non_custom_theme !== 'custom') {
+      return state.settings.last_non_custom_theme;
+    }
+    return 'dark';
+  }
+
+  function updateCustomThemeControls(activeTheme) {
+    const themeSelectEl = document.getElementById('set-theme');
+    const customThemeOption = document.querySelector('.ts-custom-theme');
+    const configureButton = document.getElementById('btn-configure-theme');
+    const customEnabled = isCustomThemeEnabled();
+    const currentTheme = activeTheme || (themeSelectEl ? themeSelectEl.value : (state.settings && state.settings.theme) || 'dark');
+
+    if (!customEnabled && currentTheme === 'custom') {
+      const fallback = getLastNonCustomTheme();
+      if (themeSelectEl) themeSelectEl.value = fallback;
+      applyTheme(fallback);
+      if (typeof checkSettingsDirty === 'function') {
+        checkSettingsDirty();
+      }
+      return;
+    }
+
+    if (customThemeOption) {
+      customThemeOption.style.display = customEnabled ? 'block' : 'none';
+    }
+
+    if (configureButton) {
+      const effectiveTheme = themeSelectEl ? themeSelectEl.value : currentTheme;
+      configureButton.style.display = customEnabled && effectiveTheme === 'custom'
+        ? 'inline-block'
+        : 'none';
+    }
+  }
+
   function applyTheme(theme) {
     const normalizedTheme = (typeof theme === 'string' ? theme.trim().toLowerCase() : '');
     const normalized = THEME_KEYS.includes(normalizedTheme) ? normalizedTheme : 'dark';
@@ -4845,6 +4892,9 @@ function updateDeductionFormVisibility() {
     THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
     body.classList.add('ts-theme-' + normalized);
     state.settings = { ...state.settings, theme: normalized };
+    if (normalized !== 'custom') {
+      state.settings.last_non_custom_theme = normalized;
+    }
     if (themeSelect) themeSelect.value = normalized;
 
     // Apply custom theme if selected
@@ -4863,6 +4913,8 @@ function updateDeductionFormVisibility() {
         renderContractBurndown(activeContract, usage);
       }
     }
+
+    updateCustomThemeControls(normalized);
   }
 
   function normalizeCustomThemeConfig(raw) {
@@ -8641,31 +8693,8 @@ function updateDeductionFormVisibility() {
       option.style.display = colorblindThemesFlag.enabled ? 'block' : 'none';
     });
 
-    // Show/hide custom theme option and configure button
-    const customThemeFlag = state.featureFlags.custom_theme || DEFAULT_FEATURE_FLAGS.custom_theme || { enabled: false };
-    const customThemeOption = document.querySelector('.ts-custom-theme');
-    if (customThemeOption) {
-      customThemeOption.style.display = customThemeFlag.enabled ? 'block' : 'none';
-    }
-
-    const btnConfigureTheme = document.getElementById('btn-configure-theme');
-    if (btnConfigureTheme) {
-      btnConfigureTheme.style.display = customThemeFlag.enabled ? 'inline-block' : 'none';
-    }
-
-    // Lock theme dropdown to "custom" when custom theme flag is enabled
-    if (themeSelect && customThemeFlag.enabled) {
-      // Only force theme to custom if not already set, to avoid overwriting user's server-synced theme
-      if (themeSelect.value !== 'custom') {
-        themeSelect.value = 'custom';
-        state.settings.theme = 'custom';
-        applyTheme('custom');
-        // Re-capture settings state after this forced change
-        if (settingsServerSynced) {
-          captureSettingsState();
-        }
-      }
-    }
+    // Update custom theme availability and controls
+    updateCustomThemeControls();
   }
 
   if (contractSaveBtn) {
@@ -11431,6 +11460,9 @@ function updateDeductionFormVisibility() {
           }
 
           // Valid settings received
+          const previousLastNonCustomTheme = state.settings && state.settings.last_non_custom_theme
+            ? state.settings.last_non_custom_theme
+            : '';
           state.settings = settings;
 
           // Parse custom_theme_config if it's a JSON string
@@ -11440,6 +11472,14 @@ function updateDeductionFormVisibility() {
             } catch (e) {
               // If parsing fails, reset to default
               state.settings.custom_theme_config = null;
+            }
+          }
+
+          if (!state.settings.last_non_custom_theme) {
+            if (state.settings.theme && state.settings.theme !== 'custom') {
+              state.settings.last_non_custom_theme = state.settings.theme;
+            } else if (previousLastNonCustomTheme && previousLastNonCustomTheme !== 'custom') {
+              state.settings.last_non_custom_theme = previousLastNonCustomTheme;
             }
           }
 
@@ -11456,15 +11496,6 @@ function updateDeductionFormVisibility() {
             }
           });
           applyTheme(state.settings.theme || 'dark');
-
-          // If custom theme flag is enabled, ensure theme is set to custom
-          // This handles the case where api_getFeatureFlags completed before api_getSettings
-          const customThemeFlag = state.featureFlags.custom_theme || DEFAULT_FEATURE_FLAGS.custom_theme || { enabled: false };
-          if (customThemeFlag.enabled && themeSelect && themeSelect.value !== 'custom') {
-            themeSelect.value = 'custom';
-            state.settings.theme = 'custom';
-            applyTheme('custom');
-          }
 
           captureSettingsState();
           // Mark settings as synced from server - enables save button

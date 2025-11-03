@@ -1,0 +1,3 @@
+# Ignore local tooling and assets that should not be pushed to Apps Script
+**/.git/**
+scripts/**

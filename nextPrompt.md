@@ -114,6 +114,8 @@
 
     We should be able to automate that whole process
 
+- Prevent users from modifying settings until they've been synced (they are visible but read only)
+
 ## Logo
 
 https://www.design.com/maker/logo/geometric-time-hourglass-237278?text=Tempus&layoutOrientation=auto&colorPalette=grayscale&isVariation=True&searchImpressionId=d5f8f130-bed6-4a24-b02a-ebafdba1e506
