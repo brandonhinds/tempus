@@ -6,11 +6,11 @@ usage() {
   cat <<'EOF'
 Usage: update-tempus.sh [options]
 
-Clones the configured Google Apps Script project, replaces its contents with the
-current repository, and runs `clasp push`.
+Clones the configured Google Apps Script project, downloads the latest Tempus
+sources from GitHub, and runs `clasp push`.
 
 Options:
-  -s, --script-id <id>   Override the Apps Script project ID
+  -s, --script-id <id>   Apps Script project ID to update (required)
   -c, --clone-dir <path> Use a specific working directory (must be empty)
                          (defaults to a temp directory created beside where this script is run)
   -k, --keep             Do not delete the working directory when finished
@@ -18,8 +18,6 @@ Options:
 EOF
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CALL_DIR="$(pwd)"
 
 SCRIPT_ID=""
@@ -54,20 +52,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! command -v clasp >/dev/null 2>&1; then
-  echo "Error: clasp is not installed or not on PATH." >&2
-  exit 1
-fi
-
-if [[ -z "$SCRIPT_ID" && -f "$REPO_ROOT/.clasp.json" ]]; then
-  SCRIPT_ID="$(grep -m1 '"scriptId"' "$REPO_ROOT/.clasp.json" | sed 's/.*"scriptId": *"//; s/".*//')"
-fi
-
-if [[ -z "$SCRIPT_ID" ]]; then
-  echo "Error: Unable to determine Apps Script project ID. Provide one with --script-id." >&2
-  exit 1
-fi
-
 AUTO_CLONE_DIR=0
 if [[ -z "$CLONE_DIR" ]]; then
   AUTO_CLONE_DIR=1
@@ -91,6 +75,28 @@ if find "$CLONE_DIR" -mindepth 1 -print -quit | grep -q .; then
   exit 1
 fi
 
+if ! command -v clasp >/dev/null 2>&1; then
+  echo "Error: clasp is not installed or not on PATH." >&2
+  exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Error: curl is required to download the Tempus sources." >&2
+  exit 1
+fi
+
+if ! command -v tar >/dev/null 2>&1; then
+  echo "Error: tar is required to extract the Tempus sources." >&2
+  exit 1
+fi
+
+if [[ -z "$SCRIPT_ID" ]]; then
+  echo "Error: Provide the Apps Script project ID with --script-id." >&2
+  exit 1
+fi
+
+DOWNLOAD_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t tempus-src)"
+
 CLEANUP=0
 if [[ $AUTO_CLONE_DIR -eq 1 && $KEEP_CLONE -eq 0 ]]; then
   CLEANUP=1
@@ -99,6 +105,9 @@ fi
 cleanup() {
   if [[ ${CLEANUP:-0} -eq 1 && -n "${CLONE_DIR:-}" ]]; then
     rm -rf "$CLONE_DIR"
+  fi
+  if [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]]; then
+    rm -rf "$DOWNLOAD_DIR"
   fi
 }
 trap cleanup EXIT
@@ -121,11 +130,11 @@ echo "Preparing workspace..."
   done
 )
 
+echo "Downloading latest Tempus sources from GitHub..."
+curl -fsSL "https://codeload.github.com/brandonhinds/tempus/tar.gz/refs/heads/main" | tar -xz -C "$DOWNLOAD_DIR" --strip-components=1
+
 echo "Copying repository sources..."
-cp -R "$REPO_ROOT"/* "$CLONE_DIR"/
-if [[ -f "$REPO_ROOT/.claspignore" ]]; then
-  cp "$REPO_ROOT/.claspignore" "$CLONE_DIR"/
-fi
+cp -R "$DOWNLOAD_DIR"/. "$CLONE_DIR"/
 
 echo "Pushing updated files with clasp..."
 pushd "$CLONE_DIR" >/dev/null
