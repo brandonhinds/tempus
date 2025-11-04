@@ -10,6 +10,8 @@
   const pageSettings = document.getElementById('page-settings');
   const pageInvoices = document.getElementById('page-invoices');
   const pageAbout = document.getElementById('page-about');
+  const aboutVersionDisplay = document.getElementById('about-version-display');
+  const aboutVersionStatus = document.getElementById('about-version-status');
   const navToggle = document.getElementById('nav-toggle');
   const navHomeBtn = document.getElementById('nav-home');
   const navMenu = document.getElementById('nav-menu');
@@ -381,6 +383,7 @@ let ratePreviewInputSyncing = false;
     }
     if (normalized === 'about') {
       loadScriptId();
+      loadBuildMeta();
     }
     if (!opts.skipRemember) {
       persistLastPage(normalized);
@@ -403,6 +406,70 @@ let ratePreviewInputSyncing = false;
         })
         .api_getScriptId();
     }
+  }
+
+  function loadBuildMeta() {
+    if (!aboutVersionDisplay) return;
+    aboutVersionDisplay.textContent = 'Loading...';
+    if (aboutVersionStatus) {
+      aboutVersionStatus.textContent = 'Checking...';
+      aboutVersionStatus.style.color = 'var(--muted)';
+    }
+
+    google.script.run
+      .withSuccessHandler((meta) => {
+        if (!meta || typeof meta !== 'object') {
+          aboutVersionDisplay.textContent = 'Unavailable';
+          return;
+        }
+
+        const commit = String(meta.commit || '').trim();
+        const timestamp = String(meta.timestamp || '').trim();
+        if (!commit) {
+          aboutVersionDisplay.textContent = 'Unavailable';
+          return;
+        }
+
+        let formatted = 'Build ' + commit;
+        if (timestamp) {
+          const parsed = new Date(timestamp);
+          if (!Number.isNaN(parsed.valueOf())) {
+            formatted += ' · ' + parsed.toLocaleString();
+          }
+        }
+
+        aboutVersionDisplay.textContent = formatted;
+      })
+      .withFailureHandler(() => {
+        aboutVersionDisplay.textContent = 'Unavailable';
+      })
+      .api_getBuildMeta();
+
+    google.script.run
+      .withSuccessHandler((result) => {
+        if (!aboutVersionStatus) return;
+        if (!result || (result.error && result.error.length)) {
+          aboutVersionStatus.textContent = 'Status unavailable';
+          aboutVersionStatus.style.color = 'var(--danger)';
+          return;
+        }
+        if (result.hasUpdate) {
+          aboutVersionStatus.textContent = 'Update available';
+          aboutVersionStatus.style.color = 'var(--warning)';
+        } else if (result.upstreamCommit) {
+          aboutVersionStatus.textContent = 'Up to date';
+          aboutVersionStatus.style.color = 'var(--success)';
+        } else {
+          aboutVersionStatus.textContent = 'Status unavailable';
+          aboutVersionStatus.style.color = 'var(--muted)';
+        }
+      })
+      .withFailureHandler(() => {
+        if (!aboutVersionStatus) return;
+        aboutVersionStatus.textContent = 'Status unavailable';
+        aboutVersionStatus.style.color = 'var(--danger)';
+      })
+      .api_checkForUpdate();
   }
 
   // Backup sheet functionality

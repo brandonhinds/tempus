@@ -102,12 +102,12 @@
         <h4 style="margin:var(--space-4) 0 var(--space-2); font-size:15px;">Step 2: Download and Install Latest Version</h4>
 
         <div class="ts-tabs">
-          <button class="ts-tab-btn active" data-tab="manual-update">Manual</button>
+          <button class="ts-tab-btn active" data-tab="script-update">Automated</button>
+          <button class="ts-tab-btn" data-tab="manual-update">Manual</button>
           <button class="ts-tab-btn" data-tab="git-update">Git</button>
-          <button class="ts-tab-btn" data-tab="script-update">Automated</button>
         </div>
 
-        <div id="manual-update" class="ts-tab-content active" style="margin-bottom:var(--space-4);">
+        <div id="manual-update" class="ts-tab-content" style="margin-bottom:var(--space-4);">
           <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
             <li>Download the latest release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-main.zip</a>.</li>
             <li>Extract the archive and open the extracted folder in your file browser.</li>
@@ -128,29 +128,30 @@
 
           <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
             <li>Open a terminal and change into your local Tempus repository.</li>
-            <li>Pull the latest changes from GitHub.</li>
-            <li>Remove any stray files left from previous <code>clasp pull</code> operations (for example, lingering <code>.js</code> files).</li>
+            <li>Fetch the latest commits and reset your working tree to match <code>origin/main</code>.</li>
+            <li>Remove everything except the <code>.git/</code> directory and the hidden <code>.clasp.json</code> file, then restore the tracked files from Git so no stray <code>.js</code> files remain.</li>
             <li>Run <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp push</code>.</li>
           </ol>
 
           <p style="margin:0 0 var(--space-2); font-size:13px; font-weight:600;">Bash / macOS / Linux:</p>
           <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>#!/bin/bash<br>set -euo pipefail<br>cd /path/to/tempus<br>git pull origin main<br>git clean -fd<br>clasp push<br>echo "Update complete! Refresh Tempus."</code>
+            <code>#!/bin/bash<br>set -euo pipefail<br><br>cd /path/to/tempus<br>git fetch origin main<br>git checkout main<br>git reset --hard origin/main<br><br>shopt -s dotglob nullglob<br>for entry in ./* ./.*
+do<br>&nbsp;&nbsp;name="$(basename "$entry")"<br>&nbsp;&nbsp;if [[ "$name" == "." || "$name" == ".." || "$name" == ".git" || "$name" == ".clasp.json" ]]; then<br>&nbsp;&nbsp;&nbsp;&nbsp;continue<br>&nbsp;&nbsp;fi<br>&nbsp;&nbsp;rm -rf "$entry"<br>done<br><br>git checkout -- .<br>clasp push<br>echo "Update complete! Refresh Tempus."</code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
 
           <p style="margin:0 0 var(--space-2); font-size:13px; font-weight:600;">PowerShell / Windows:</p>
           <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>Set-Location C:\path\to\tempus<br>git pull origin main<br>git clean -fd<br>clasp push<br>Write-Host "Update complete! Refresh Tempus."</code>
+            <code>Set-Location C:\path\to\tempus<br>git fetch origin main<br>git checkout main<br>git reset --hard origin/main<br><br>Get-ChildItem -Force | Where-Object { $_.Name -ne '.git' -and $_.Name -ne '.clasp.json' } | ForEach-Object { Remove-Item $_.FullName -Recurse -Force }<br><br>git checkout -- .<br>clasp push<br>Write-Host "Update complete! Refresh Tempus."</code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
 
           <div class="ts-note" style="margin:var(--space-3) 0 0; opacity:1;">
-            <strong>Heads up:</strong> <code>git clean -fd</code> permanently deletes untracked files such as leftover <code>.js</code> files. Run <code>git status</code> first and skip this command if you still need those files.
+            <strong>Heads up:</strong> These commands permanently delete every file in the working directory apart from <code>.git/</code> and <code>.clasp.json</code>. Run <code>git status</code> first and make sure you have no local changes you still need before executing them.
           </div>
         </div>
 
-        <div id="script-update" class="ts-tab-content" style="margin-bottom:var(--space-4);">
+        <div id="script-update" class="ts-tab-content active" style="margin-bottom:var(--space-4);">
           <p style="margin:0 0 var(--space-2); font-size:13px; color:var(--muted);">
             Prefer a single command? Use the bundled Bash script to clone, refresh, and push the project automatically. It runs on macOS and Linux, and Windows users can run it through <a href="https://git-scm.com/install" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Git&nbsp;Bash</a>.
           </p>
@@ -184,6 +185,13 @@
           <div style="display:flex; gap:var(--space-2);">
             <strong style="min-width:100px;">License:</strong>
             <span>MIT License</span>
+          </div>
+          <div style="display:flex; gap:var(--space-2);">
+            <strong style="min-width:100px;">Version:</strong>
+            <span>
+              <span id="about-version-display">Loading...</span>
+              <span id="about-version-status" style="margin-left:var(--space-2); color:var(--muted);">Checking...</span>
+            </span>
           </div>
         </div>
         <p style="margin:var(--space-3) 0 0; color:var(--text); line-height:1.6;">

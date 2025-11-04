@@ -76,3 +76,8 @@ I want it to look like a professional, enterprise ready application.
 - A new feature flag, `expected_monthly_hours`, adds a calendar badge that surfaces the average daily hours recorded for the active month. When expanded it breaks the projection down per contract, showing the days included, expected hours remaining, and whether the user is trending ahead or behind their contracted target based on income-contributing hour types only.
 - Contracts now expose an "Include weekends in averages" toggle so weekend days can optionally count toward the expected daily baselines used by the badge and related projections. Weekend entries always contribute to the total hours even when weekends are excluded from the day count.
 - Manual smoke tests for income should cover both company tracking on/off and salary sacrifice scenarios to confirm gross income drops while super lost to deductions updates accordingly.
+
+**About Page**
+
+- The About view displays build metadata sourced from `api_getBuildMeta`, formatted as `Build <short commit> · <localized timestamp>` so users can confirm the deployed bundle matches the latest Git commit.
+- When GitHub `main` moves ahead of the deployed commit, `api_checkForUpdate` marks the About page with an "Update available" warning so you know to redeploy.
