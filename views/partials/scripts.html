@@ -228,6 +228,9 @@ let ratePreviewInputSyncing = false;
     currentPage: 'time',
     incomeSummary: null,
     pendingTaxRequest: null,
+    pendingEntryAdds: new Map(),
+    pendingEntryUpdates: new Map(),
+    pendingEntryDeletes: new Set(),
     selectedContractId: '',
     punchDraft: null,
     currentTab: 'manual',
@@ -307,6 +310,143 @@ let ratePreviewInputSyncing = false;
     mode: 'list',
     editingId: null
   };
+
+  let entriesSyncInFlight = false;
+
+  function recordPendingEntryAdd(entry) {
+    if (!entry || !entry.id) return;
+    state.pendingEntryAdds.set(String(entry.id), {
+      entry,
+      timestamp: Date.now()
+    });
+  }
+
+  function updatePendingEntryAddId(previousId, nextEntry) {
+    if (!previousId && !nextEntry) return;
+    if (previousId != null) {
+      state.pendingEntryAdds.delete(String(previousId));
+    }
+    if (nextEntry && nextEntry.id) {
+      state.pendingEntryAdds.set(String(nextEntry.id), {
+        entry: nextEntry,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  function resolvePendingEntryAdd(id) {
+    if (id == null) return;
+    state.pendingEntryAdds.delete(String(id));
+  }
+
+  function recordPendingEntryUpdate(id, entry) {
+    if (id == null || !entry) return;
+    state.pendingEntryUpdates.set(String(id), {
+      entry,
+      timestamp: Date.now()
+    });
+  }
+
+  function resolvePendingEntryUpdate(id) {
+    if (id == null) return;
+    state.pendingEntryUpdates.delete(String(id));
+  }
+
+  function recordPendingEntryDelete(id) {
+    if (id == null) return;
+    state.pendingEntryDeletes.add(String(id));
+  }
+
+  function resolvePendingEntryDelete(id) {
+    if (id == null) return;
+    state.pendingEntryDeletes.delete(String(id));
+  }
+
+  function mergeEntriesWithServerEntries(freshEntries) {
+    const serverEntries = Array.isArray(freshEntries) ? freshEntries : [];
+    const merged = [];
+    const seenIds = new Set();
+    const serverIdSet = new Set();
+
+    serverEntries.forEach((entry) => {
+      if (!entry || !entry.id) return;
+      const id = String(entry.id);
+      serverIdSet.add(id);
+      if (state.pendingEntryDeletes.has(id)) {
+        return;
+      }
+
+      const pendingAdd = state.pendingEntryAdds.get(id);
+      if (pendingAdd && pendingAdd.entry) {
+        if (!seenIds.has(id)) {
+          merged.push(pendingAdd.entry);
+          seenIds.add(id);
+        }
+        state.pendingEntryAdds.delete(id);
+        return;
+      }
+
+      const pendingUpdate = state.pendingEntryUpdates.get(id);
+      if (pendingUpdate && pendingUpdate.entry) {
+        if (!seenIds.has(id)) {
+          merged.push(pendingUpdate.entry);
+          seenIds.add(id);
+        }
+        state.pendingEntryUpdates.delete(id);
+        return;
+      }
+
+      if (!seenIds.has(id)) {
+        merged.push(entry);
+        seenIds.add(id);
+      }
+    });
+
+    state.entries.forEach((entry) => {
+      if (!entry || !entry.id) return;
+      const id = String(entry.id);
+      if (seenIds.has(id)) return;
+      if (state.pendingEntryDeletes.has(id)) return;
+      const isTemp = id.startsWith('temp_');
+      const hasPendingAdd = state.pendingEntryAdds.has(id);
+      if (isTemp || hasPendingAdd) {
+        merged.push(entry);
+        seenIds.add(id);
+        if (hasPendingAdd) state.pendingEntryAdds.delete(id);
+        return;
+      }
+      if (state.pendingEntryUpdates.has(id)) {
+        merged.push(entry);
+        seenIds.add(id);
+        state.pendingEntryUpdates.delete(id);
+      }
+    });
+
+    state.pendingEntryDeletes.forEach((id) => {
+      if (!serverIdSet.has(id)) {
+        state.pendingEntryDeletes.delete(id);
+      }
+    });
+
+    merged.sort(entrySort);
+    state.entries = merged;
+  }
+
+  function entrySort(a, b) {
+    const dateA = a && a.date ? String(a.date) : '';
+    const dateB = b && b.date ? String(b.date) : '';
+    if (dateA !== dateB) {
+      return dateB.localeCompare(dateA);
+    }
+    const minutesA = entryFirstPunchMinutes(a);
+    const minutesB = entryFirstPunchMinutes(b);
+    if (minutesA !== minutesB) {
+      return minutesA - minutesB;
+    }
+    const idA = a && a.id ? String(a.id) : '';
+    const idB = b && b.id ? String(b.id) : '';
+    return idA.localeCompare(idB);
+  }
 
   let loadingDeductionCategories = false;
   let deductionCategoryDeleteId = null;
@@ -393,19 +533,24 @@ let ratePreviewInputSyncing = false;
   function loadScriptId() {
     const scriptIdDisplay = document.getElementById('script-id-display');
     const scriptIdValue = document.getElementById('script-id-value');
+    const scriptIdUpdate = document.getElementById('script-id-update');
 
-    if (scriptIdDisplay && scriptIdValue) {
-      google.script.run
-        .withSuccessHandler((scriptId) => {
-          scriptIdDisplay.textContent = scriptId;
-          scriptIdValue.textContent = scriptId;
-        })
-        .withFailureHandler(() => {
-          scriptIdDisplay.textContent = '[Error loading Script ID]';
-          scriptIdValue.textContent = 'Unable to load';
-        })
-        .api_getScriptId();
+    if (!scriptIdDisplay && !scriptIdValue && !scriptIdUpdate) {
+      return;
     }
+
+    google.script.run
+      .withSuccessHandler((scriptId) => {
+        if (scriptIdDisplay) scriptIdDisplay.textContent = scriptId;
+        if (scriptIdValue) scriptIdValue.textContent = scriptId;
+        if (scriptIdUpdate) scriptIdUpdate.textContent = scriptId;
+      })
+      .withFailureHandler(() => {
+        if (scriptIdDisplay) scriptIdDisplay.textContent = '[Error loading Script ID]';
+        if (scriptIdValue) scriptIdValue.textContent = 'Unable to load';
+        if (scriptIdUpdate) scriptIdUpdate.textContent = '[Error loading Script ID]';
+      })
+      .api_getScriptId();
   }
 
   function loadBuildMeta() {
@@ -5537,6 +5682,9 @@ function updateDeductionFormVisibility() {
       updateContractMap();
       updateHourTypeMap();
       applyTheme((state.settings && state.settings.theme) || 'dark');
+      state.pendingEntryAdds = new Map();
+      state.pendingEntryUpdates = new Map();
+      state.pendingEntryDeletes = new Set();
     } catch (e) {}
   }
   function saveCache() {
@@ -5754,7 +5902,10 @@ function updateDeductionFormVisibility() {
     state.currentTab = id;
   }
   $$('.ts-tab').forEach((tab) => {
-    tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
+    tab.addEventListener('click', () => {
+      activateTab(tab.getAttribute('data-tab'));
+      focusDefaultEntryField();
+    });
   });
 
   // Function to update tab disabled states
@@ -5923,6 +6074,7 @@ function updateDeductionFormVisibility() {
     }
 
     renderPunchDraft();
+    if (state.currentTab === 'punch') focusDefaultEntryField();
   }
 
   function setPunchDraftDirty() {
@@ -5948,6 +6100,9 @@ function updateDeductionFormVisibility() {
       startInput.type = 'time';
       startInput.value = punches.length > 0 ? (punches[0].in || '') : '';
       startInput.className = 'ts-punch-input';
+      startInput.dataset.punchIndex = '0';
+      startInput.dataset.punchField = 'in';
+      startInput.addEventListener('keydown', handlePunchInputEnter);
       startInput.onchange = () => {
         if (!draft.punches.length) draft.punches.push({ in: '', out: '' });
         draft.punches[0].in = startInput.value;
@@ -5958,6 +6113,9 @@ function updateDeductionFormVisibility() {
       endInput.type = 'time';
       endInput.value = punches.length > 0 ? (punches[0].out || '') : '';
       endInput.className = 'ts-punch-input';
+      endInput.dataset.punchIndex = '0';
+      endInput.dataset.punchField = 'out';
+      endInput.addEventListener('keydown', handlePunchInputEnter);
       endInput.onchange = () => {
         if (!draft.punches.length) draft.punches.push({ in: '', out: '' });
         draft.punches[0].out = endInput.value;
@@ -6003,6 +6161,9 @@ function updateDeductionFormVisibility() {
         startInput.type = 'time';
         startInput.value = punch.in || '';
         startInput.className = 'ts-punch-input';
+        startInput.dataset.punchIndex = String(index);
+        startInput.dataset.punchField = 'in';
+        startInput.addEventListener('keydown', handlePunchInputEnter);
         startInput.onchange = () => {
           draft.punches[index].in = startInput.value;
           setPunchDraftDirty();
@@ -6012,6 +6173,9 @@ function updateDeductionFormVisibility() {
         endInput.type = 'time';
         endInput.value = punch.out || '';
         endInput.className = 'ts-punch-input';
+        endInput.dataset.punchIndex = String(index);
+        endInput.dataset.punchField = 'out';
+        endInput.addEventListener('keydown', handlePunchInputEnter);
         endInput.onchange = () => {
           draft.punches[index].out = endInput.value;
           setPunchDraftDirty();
@@ -6053,6 +6217,7 @@ function updateDeductionFormVisibility() {
         punchList.appendChild(row);
       });
     }
+    applyQueuedEntryFocus();
     updatePunchSummary();
     const hasContract = !!draft.contractId;
     const hasPunches = punches.length > 0;
@@ -6242,12 +6407,15 @@ function updateDeductionFormVisibility() {
     // Optimistic update: Add entry to UI immediately for new entries
     let optimisticEntry = null;
     if (!draft.entryId) {
-      optimisticEntry = {
+      const pending = {
         id: 'temp_' + Date.now(),
         ...payload,
         created_at: isoDateTime(new Date())
       };
-      state.entries.unshift(sanitizeEntry(optimisticEntry));
+      optimisticEntry = sanitizeEntry(pending);
+      state.entries.unshift(optimisticEntry);
+      recordPendingEntryAdd(optimisticEntry);
+      state.entries.sort(entrySort);
       saveCache();
       renderEntries();
     }
@@ -6263,6 +6431,9 @@ function updateDeductionFormVisibility() {
           const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
           if (idx > -1) {
             state.entries[idx] = sanitized;
+            updatePendingEntryAddId(optimisticEntry.id, sanitized);
+            if (!entriesSyncInFlight) resolvePendingEntryAdd(sanitized.id);
+            state.entries.sort(entrySort);
           }
         } else {
           // Update existing entry
@@ -6272,6 +6443,9 @@ function updateDeductionFormVisibility() {
           } else {
             state.entries.push(sanitized);
           }
+          recordPendingEntryUpdate(sanitized.id, sanitized);
+          if (!entriesSyncInFlight) resolvePendingEntryUpdate(sanitized.id);
+          state.entries.sort(entrySort);
         }
         state.punchDraft = {
           entryId: sanitized.id,
@@ -6292,6 +6466,7 @@ function updateDeductionFormVisibility() {
             saveCache();
             renderEntries();
           }
+          resolvePendingEntryAdd(optimisticEntry.id);
         }
         setStatus('Punch save failed', 'error');
       }
@@ -6307,6 +6482,7 @@ function updateDeductionFormVisibility() {
           saveCache();
           renderEntries();
         }
+        resolvePendingEntryAdd(optimisticEntry.id);
       }
       setStatus('Punch save failed', 'error');
       renderPunchDraft();
@@ -6386,6 +6562,7 @@ function updateDeductionFormVisibility() {
 
     const backup = state.entries[idx];
     state.entries.splice(idx, 1);
+    recordPendingEntryDelete(entryId);
 
     // Clear punch draft and start fresh
     state.punchDraft = null;
@@ -6399,11 +6576,13 @@ function updateDeductionFormVisibility() {
 
     google.script.run
       .withSuccessHandler(() => {
+        if (!entriesSyncInFlight) resolvePendingEntryDelete(entryId);
         setStatus('Entry deleted', 'success');
       })
       .withFailureHandler(() => {
         // Rollback: restore the entry
         state.entries.splice(idx, 0, backup);
+        resolvePendingEntryDelete(entryId);
         saveCache();
         renderEntries();
         updateTabStates();
@@ -6441,6 +6620,74 @@ function updateDeductionFormVisibility() {
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
   const manualDeleteBtn = document.getElementById('btn-delete-manual');
+
+  let queuedEntryFocus = null;
+  let queuedFocusTimer = null;
+
+  function queueEntryFieldFocus(target) {
+    queuedEntryFocus = target;
+    if (queuedFocusTimer) clearTimeout(queuedFocusTimer);
+    queuedFocusTimer = setTimeout(() => {
+      queuedFocusTimer = null;
+      applyQueuedEntryFocus();
+    }, 0);
+  }
+
+  function applyQueuedEntryFocus() {
+    if (!queuedEntryFocus) return;
+    const target = queuedEntryFocus;
+    queuedEntryFocus = null;
+    if (target.mode === 'manual') {
+      if (manualHoursInput) manualHoursInput.focus();
+      return;
+    }
+    if (target.mode === 'punch') {
+      if (!punchList) return;
+      const selector = `[data-punch-index="${target.index}"][data-punch-field="${target.field}"]`;
+      const punchInput = punchList.querySelector(selector) || punchList.querySelector('input[type="time"]');
+      if (punchInput) punchInput.focus();
+    }
+  }
+
+  function determinePunchFocusTarget(punches) {
+    if (!Array.isArray(punches) || !punches.length) {
+      return { index: 0, field: 'in' };
+    }
+    for (let i = 0; i < punches.length; i++) {
+      const punch = punches[i] || {};
+      if (!punch.in) return { index: i, field: 'in' };
+      if (punch.in && !punch.out) return { index: i, field: 'out' };
+    }
+    return { index: 0, field: 'in' };
+  }
+
+  function focusDefaultEntryField() {
+    if (state.currentTab === 'manual') {
+      if (manualHoursInput) queueEntryFieldFocus({ mode: 'manual' });
+      return;
+    }
+    if (state.currentTab === 'punch') {
+      const draft = state.punchDraft || {};
+      const target = determinePunchFocusTarget(draft.punches || []);
+      queueEntryFieldFocus({ mode: 'punch', index: target.index, field: target.field });
+    }
+  }
+
+  function handleManualHoursEnter(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (manualSaveBtn && !manualSaveBtn.disabled) {
+      manualSaveBtn.click();
+    }
+  }
+
+  function handlePunchInputEnter(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (punchSaveBtn && !punchSaveBtn.disabled) {
+      punchSaveBtn.click();
+    }
+  }
 
   function updateBasicSaveEnabled() {
     if (!manualSaveBtn) return;
@@ -6565,8 +6812,8 @@ function updateDeductionFormVisibility() {
     state.editingEntryId = isEdit ? entry.id : null;
     state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     setManualMode(!!isEdit);
-    if (isEdit && manualHoursInput) manualHoursInput.focus();
     updateBasicSaveEnabled();
+    focusDefaultEntryField();
   }
 
   function clearManualEditing() {
@@ -6577,6 +6824,7 @@ function updateDeductionFormVisibility() {
     if (manualHoursInput) manualHoursInput.value = '';
     updateManualContractOptions();
     updateBasicSaveEnabled();
+    focusDefaultEntryField();
   }
 
   function getManualPayload() {
@@ -6658,14 +6906,20 @@ function updateDeductionFormVisibility() {
       if (idx === -1) return;
       const backup = { ...state.entries[idx] };
       const update = { id: state.editingEntryId, ...payload };
-      state.entries[idx] = sanitizeEntry({ ...backup, ...update });
+      const optimisticUpdate = sanitizeEntry({ ...backup, ...update });
+      state.entries[idx] = optimisticUpdate;
+      recordPendingEntryUpdate(state.editingEntryId, optimisticUpdate);
       saveCache();
       renderEntries();
       setStatus('Saving...', 'warn');
       google.script.run
         .withSuccessHandler((res) => {
           if (res && res.success) {
-            state.entries[idx] = sanitizeEntry(res.entry);
+            const confirmed = sanitizeEntry(res.entry);
+            state.entries[idx] = confirmed;
+            recordPendingEntryUpdate(confirmed.id, confirmed);
+            if (!entriesSyncInFlight) resolvePendingEntryUpdate(confirmed.id);
+            state.entries.sort(entrySort);
             clearManualEditing();
             saveCache();
             renderEntries();
@@ -6673,6 +6927,7 @@ function updateDeductionFormVisibility() {
             setStatus('Saved', 'success');
           } else {
             state.entries[idx] = backup;
+            resolvePendingEntryUpdate(state.editingEntryId);
             saveCache();
             renderEntries();
             setStatus('Save failed', 'error');
@@ -6680,6 +6935,7 @@ function updateDeductionFormVisibility() {
         })
         .withFailureHandler(() => {
           state.entries[idx] = backup;
+          resolvePendingEntryUpdate(state.editingEntryId);
           saveCache();
           renderEntries();
           setStatus('Save failed', 'error');
@@ -6692,7 +6948,10 @@ function updateDeductionFormVisibility() {
         ...payload,
         created_at: isoDateTime(now)
       };
-      state.entries.unshift(sanitizeEntry(entry));
+      const optimisticEntry = sanitizeEntry(entry);
+      state.entries.unshift(optimisticEntry);
+      recordPendingEntryAdd(optimisticEntry);
+      state.entries.sort(entrySort);
       saveCache();
       renderEntries();
       clearManualEditing();
@@ -6700,17 +6959,27 @@ function updateDeductionFormVisibility() {
       google.script.run
         .withSuccessHandler((res) => {
           if (res && res.success) {
-            const idx = state.entries.findIndex((e) => e.id === entry.id);
-            if (idx > -1) state.entries[idx] = sanitizeEntry(res.entry);
+            const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+            if (idx > -1) {
+              const confirmed = sanitizeEntry(res.entry);
+              state.entries[idx] = confirmed;
+              updatePendingEntryAddId(optimisticEntry.id, confirmed);
+              if (!entriesSyncInFlight) resolvePendingEntryAdd(confirmed.id);
+              state.entries.sort(entrySort);
+            }
             saveCache();
             renderEntries();
             ensurePunchDraft(payload.contract_id);
             setStatus('Saved', 'success');
           } else {
+            resolvePendingEntryAdd(optimisticEntry.id);
             setStatus('Save failed', 'error');
           }
         })
-        .withFailureHandler(() => setStatus('Save failed (offline?)', 'error'))
+        .withFailureHandler(() => {
+          resolvePendingEntryAdd(optimisticEntry.id);
+          setStatus('Save failed (offline?)', 'error');
+        })
         .api_addEntry(entry);
     }
     state.selectedCalendarDate = payload.date;
@@ -6741,6 +7010,7 @@ function updateDeductionFormVisibility() {
 
       const backup = state.entries[idx];
       state.entries.splice(idx, 1);
+      recordPendingEntryDelete(entryId);
 
       // Clear editing state and reset form
       clearManualEditing();
@@ -6753,11 +7023,13 @@ function updateDeductionFormVisibility() {
 
       google.script.run
         .withSuccessHandler(() => {
+          if (!entriesSyncInFlight) resolvePendingEntryDelete(entryId);
           setStatus('Entry deleted', 'success');
         })
         .withFailureHandler(() => {
           // Rollback: restore the entry
           state.entries.splice(idx, 0, backup);
+          resolvePendingEntryDelete(entryId);
           saveCache();
           renderEntries();
           updateTabStates();
@@ -6792,7 +7064,10 @@ function updateDeductionFormVisibility() {
     manualContract.addEventListener('change', updateBasicSaveEnabled);
   }
 
-  if (manualHoursInput) manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
+  if (manualHoursInput) {
+    manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
+    manualHoursInput.addEventListener('keydown', handleManualHoursEnter);
+  }
 
   if (manualHourType) {
     manualHourType.addEventListener('change', updateBasicSaveEnabled);
@@ -6801,6 +7076,7 @@ function updateDeductionFormVisibility() {
   if (manualHoursInput) manualHoursInput.value = '';
   updateBasicSaveEnabled();
   setManualDate(todayIso());
+  focusDefaultEntryField();
 
   const incomeNetBadge = document.getElementById('calendar-net-income');
   const incomeToggleBtn = incomeNetBadge;
@@ -10668,13 +10944,18 @@ function updateDeductionFormVisibility() {
     if (idx === -1) return;
     const backup = state.entries[idx];
     state.entries.splice(idx, 1);
+    recordPendingEntryDelete(id);
     saveCache();
     renderEntries();
     setStatus('Deleting...', 'warn');
     google.script.run
-      .withSuccessHandler(() => setStatus('Deleted', 'success'))
+      .withSuccessHandler(() => {
+        if (!entriesSyncInFlight) resolvePendingEntryDelete(id);
+        setStatus('Deleted', 'success');
+      })
       .withFailureHandler(() => {
         state.entries.splice(idx, 0, backup);
+        resolvePendingEntryDelete(id);
         saveCache();
         renderEntries();
         setStatus('Delete failed', 'error');
@@ -11028,6 +11309,7 @@ function updateDeductionFormVisibility() {
         ensurePunchDraft();
       }
     }
+    focusDefaultEntryField();
   }
   function changeCalendarMonth(delta) {
     ensureCalendarState();
@@ -11485,9 +11767,12 @@ function updateDeductionFormVisibility() {
     renderFeatureFlags();
     applyFeatureFlags();
     setStatus('Syncing...', 'warn');
+    entriesSyncInFlight = true;
     google.script.run
       .withSuccessHandler((entries) => {
-        state.entries = (entries || []).map(sanitizeEntry);
+        entriesSyncInFlight = false;
+        const sanitizedEntries = (entries || []).map(sanitizeEntry);
+        mergeEntriesWithServerEntries(sanitizedEntries);
         state.entriesLoaded = true;
         saveCache();
         renderEntries();
@@ -11497,7 +11782,10 @@ function updateDeductionFormVisibility() {
         renderBasReporting();
         maybeAutoPopulatePublicHolidayEntries();
       })
-      .withFailureHandler(() => setStatus('Entries sync failed', 'error'))
+      .withFailureHandler(() => {
+        entriesSyncInFlight = false;
+        setStatus('Entries sync failed', 'error');
+      })
       .api_getEntries({});
     // Settings loader with retry mechanism
     let settingsRetryCount = 0;
@@ -15197,7 +15485,10 @@ function updateDeductionFormVisibility() {
       if (createdEntries.length) {
         createdEntries.forEach(entry => {
           state.entries.push(entry);
+          recordPendingEntryAdd(entry);
+          if (!entriesSyncInFlight) resolvePendingEntryAdd(entry.id);
         });
+        state.entries.sort(entrySort);
         saveCache();
         renderEntries();
         updateTabStates();

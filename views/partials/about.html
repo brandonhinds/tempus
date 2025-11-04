@@ -159,7 +159,7 @@ do<br>&nbsp;&nbsp;name="$(basename "$entry")"<br>&nbsp;&nbsp;if [[ "$name" == ".
             Run the command below from any folder. It logs into Apps Script (if needed), downloads the updater, makes it executable, and pushes the latest Tempus files using the project ID linked to clasp. The script creates a temporary working directory next to where you run it and removes it afterwards by default.
           </p>
           <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id 1MNwzTYlnmlRW-xkLNojj0KrWsg9CV0tgKyzt3k6UuZ3IIEbjxbeVrOT8</code>
+            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span></code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
           <div class="ts-note" style="margin:var(--space-3) 0 0; opacity:1;">
