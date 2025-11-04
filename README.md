@@ -142,10 +142,11 @@ git pull origin main
 clasp push
 ```
 
-After cloning, run the following command to setup the post-commit git hook that updates the version number:
+After cloning, point your repository hooks at the bundled scripts so build metadata stays up to date:
 ```bash
 git config core.hooksPath .githooks
 ```
+The pre-commit hook runs `scripts/write-version.sh`, which stamps `backend/version.gs` with the current UTC build date before every commit.
 
 ## Sharing Access
 

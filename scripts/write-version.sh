@@ -1,20 +1,17 @@
 #!/bin/bash
 
-# Get the latest commit info
-COMMIT_SHA=$(git rev-parse --short HEAD)
-TIMESTAMP=$(git show -s --format=%cI HEAD)
+BUILD_DATE=$(date -u +%Y-%m-%d)
 
 # Create the version file
 cat > backend/version.gs << EOF
 // AUTO-GENERATED FILE. DO NOT EDIT MANUALLY.
-// Generated automatically by update-version.sh
+// Generated automatically by scripts/write-version.sh
 var BUILD_META = {
-  commit: '${COMMIT_SHA}',
-  timestamp: '${TIMESTAMP}'
+  buildDate: '${BUILD_DATE}'
 };
 function api_getBuildMeta() {
   return BUILD_META;
 }
 EOF
 
-echo "Updated backend/version.gs with commit ${COMMIT_SHA}"
+echo "Updated backend/version.gs with build date ${BUILD_DATE}"

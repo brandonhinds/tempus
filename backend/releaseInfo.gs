@@ -43,20 +43,21 @@ function getUpstreamCommitMeta() {
 }
 
 function api_checkForUpdate() {
-  var localCommit = BUILD_META && BUILD_META.commit ? String(BUILD_META.commit) : '';
+  var localBuildDate = BUILD_META && BUILD_META.buildDate ? String(BUILD_META.buildDate) : '';
+
   var upstream = getUpstreamCommitMeta();
-  var upstreamSha = upstream && upstream.sha ? String(upstream.sha) : '';
-  var upstreamShort = upstreamSha ? upstreamSha.substring(0, 7) : '';
+  var upstreamTimestamp = upstream && upstream.timestamp ? String(upstream.timestamp) : '';
+  var upstreamDate = upstreamTimestamp ? upstreamTimestamp.substring(0, 10) : '';
 
   var hasUpdate = false;
-  if (localCommit && upstreamShort) {
-    hasUpdate = localCommit !== upstreamShort;
+  if (localBuildDate && upstreamDate) {
+    hasUpdate = upstreamDate > localBuildDate;
   }
 
   return {
-    localCommit: localCommit,
-    upstreamCommit: upstreamShort,
-    upstreamTimestamp: upstream && upstream.timestamp ? String(upstream.timestamp) : '',
+    localBuildDate: localBuildDate,
+    upstreamDate: upstreamDate,
+    upstreamTimestamp: upstreamTimestamp,
     hasUpdate: hasUpdate,
     error: upstream && upstream.error ? String(upstream.error) : ''
   };

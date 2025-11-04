@@ -568,22 +568,13 @@ let ratePreviewInputSyncing = false;
           return;
         }
 
-        const commit = String(meta.commit || '').trim();
-        const timestamp = String(meta.timestamp || '').trim();
-        if (!commit) {
+        const buildDate = String(meta.buildDate || '').trim();
+        if (!buildDate) {
           aboutVersionDisplay.textContent = 'Unavailable';
           return;
         }
 
-        let formatted = 'Build ' + commit;
-        if (timestamp) {
-          const parsed = new Date(timestamp);
-          if (!Number.isNaN(parsed.valueOf())) {
-            formatted += ' · ' + parsed.toLocaleString();
-          }
-        }
-
-        aboutVersionDisplay.textContent = formatted;
+        aboutVersionDisplay.textContent = 'Build date ' + buildDate;
       })
       .withFailureHandler(() => {
         aboutVersionDisplay.textContent = 'Unavailable';
@@ -599,10 +590,12 @@ let ratePreviewInputSyncing = false;
           return;
         }
         if (result.hasUpdate) {
-          aboutVersionStatus.textContent = 'Update available';
+          const upstream = String(result.upstreamDate || result.upstreamTimestamp || '').trim();
+          aboutVersionStatus.textContent = upstream ? 'Update available (since ' + upstream + ')' : 'Update available';
           aboutVersionStatus.style.color = 'var(--warning)';
-        } else if (result.upstreamCommit) {
-          aboutVersionStatus.textContent = 'Up to date';
+        } else if (result.upstreamDate) {
+          const dateLabel = String(result.localBuildDate || result.upstreamDate || '').trim();
+          aboutVersionStatus.textContent = dateLabel ? 'Up to date (as of ' + dateLabel + ')' : 'Up to date';
           aboutVersionStatus.style.color = 'var(--success)';
         } else {
           aboutVersionStatus.textContent = 'Status unavailable';

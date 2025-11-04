@@ -79,5 +79,5 @@ I want it to look like a professional, enterprise ready application.
 
 **About Page**
 
-- The About view displays build metadata sourced from `api_getBuildMeta`, formatted as `Build <short commit> · <localized timestamp>` so users can confirm the deployed bundle matches the latest Git commit.
-- When GitHub `main` moves ahead of the deployed commit, `api_checkForUpdate` marks the About page with an "Update available" warning so you know to redeploy.
+- The About view displays build metadata sourced from `api_getBuildMeta`, formatted as `Build date YYYY-MM-DD`, letting users confirm when the bundle was last deployed.
+- `api_checkForUpdate` compares the stamped build date with the latest commit date on GitHub `main`; if the upstream date is newer the About page surfaces an "Update available" warning.

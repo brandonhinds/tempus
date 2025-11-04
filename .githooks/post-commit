@@ -1,31 +1,11 @@
-#!/usr/bin/env bash
-# Update build metadata after committing
+#!/bin/bash
+
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$repo_root"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# Check if we're in the middle of a merge/rebase
-if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
-  exit 0
-fi
+cd "$REPO_ROOT"
 
-# Check if this is an amend (to prevent infinite loop)
-if [ -n "${GIT_AMEND_SKIP:-}" ]; then
-  exit 0
-fi
+scripts/write-version.sh >/dev/null
 
-# Run the update script
-if [ -x scripts/write-version.sh ]; then
-  ./scripts/write-version.sh
-  
-  # Check if version.gs was modified
-  if ! git diff --quiet backend/version.gs 2>/dev/null; then
-    # Amend the commit with the updated version file
-    git add backend/version.gs
-    GIT_AMEND_SKIP=1 git commit --amend --no-edit --no-verify
-    echo "Amended commit with updated version.gs"
-  fi
-else
-  echo "warning: scripts/update-version.sh not found or not executable" >&2
-fi
+git add backend/version.gs

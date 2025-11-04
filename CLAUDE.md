@@ -23,8 +23,8 @@ No automated test suite exists. After significant changes:
 5. Monitor execution with `Logger.log` for server debugging
 
 ### Tooling
-- Run `git config core.hooksPath .githooks` after cloning so the pre-commit hook automatically regenerates `backend/version.gs` with the latest Git commit metadata.
-- If the hook cannot run (e.g., when preparing a deploy in CI), execute `node scripts/write-version.js` manually before `clasp push` to refresh the build metadata.
+- Run `git config core.hooksPath scripts/git-hooks` after cloning so the pre-commit hook automatically regenerates `backend/version.gs` with the current build date.
+- If the hook cannot run (e.g., when preparing a deploy in CI), execute `./scripts/write-version.sh` manually before `clasp push` to refresh the build metadata.
 
 ## Architecture
 

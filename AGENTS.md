@@ -10,8 +10,8 @@
 
 ## Build, Test, and Development Commands
 - There is no local build step; deploy by syncing the workspace with Google Apps Script (e.g., via `clasp push`) after validating changes, then publish the web app.
-- After cloning, run `git config core.hooksPath .githooks` so the bundled pre-commit hook can keep `backend/version.gs` in sync with the current Git commit metadata.
-- If the hook cannot run (e.g., in CI before deploy), execute `node scripts/write-version.js` manually to refresh the build metadata before `clasp push`.
+- After cloning, run `git config core.hooksPath .githooks` so the bundled pre-commit hook can keep `backend/version.gs` in sync with the current build metadata.
+- If the hook cannot run (e.g., in CI before deploy), execute `./scripts/write-version.sh` manually and re-stage `backend/version.gs` before `clasp push`.
 - To exercise APIs, load the Apps Script web preview, trigger flows (e.g., add an entry), and monitor execution logs with `Logger.log` for server output. Manual smoke tests are required after each significant change.
 
 ## Coding Style & Naming Conventions
