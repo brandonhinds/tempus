@@ -1,10 +1,9 @@
 // AUTO-GENERATED FILE. DO NOT EDIT MANUALLY.
-// Run `node scripts/write-version.js` to regenerate.
+// Generated automatically by update-version.sh
 var BUILD_META = {
-  commit: '373b6c8',
-  timestamp: '2025-11-04T13:09:01+11:00'
+  commit: 'a0ad6a6',
+  timestamp: '2025-11-04T14:51:55+11:00'
 };
-
 function api_getBuildMeta() {
   return BUILD_META;
 }

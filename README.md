@@ -142,6 +142,11 @@ git pull origin main
 clasp push
 ```
 
+After cloning, run the following command to setup the post-commit git hook that updates the version number:
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Sharing Access
 
 To share Tempus with a partner or team member:
