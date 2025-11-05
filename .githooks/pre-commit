@@ -8,4 +8,4 @@ cd "$REPO_ROOT"
 
 scripts/write-version.sh >/dev/null
 
-git add backend/version.gs
+echo "Updated build date in version.gs"

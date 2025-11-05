@@ -22,60 +22,59 @@
           </summary>
           <div style="padding:var(--space-4); background:var(--panel);">
             <p style="margin:0 0 var(--space-3); color:var(--text); line-height:1.6;">
-              If you haven't set up Tempus yet, follow these one-time steps:
+              If you haven't updated Tempus before, follow these one-time steps:
             </p>
 
             <div style="margin-bottom:var(--space-4);">
-              <p style="margin:0 0 var(--space-2); font-weight:600;">1. Install Node.js and npm (if not already installed)</p>
+              <p style="margin:0 0 var(--space-2); font-weight:600;">1. Install Git Bash (Windows only)</p>
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
-                Node.js is required to run clasp, the command-line tool that syncs code to Google Apps Script.
-              </p>
-              <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
-                Download and install Node.js from <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">nodejs.org</a> (includes npm)
+                The following setup steps, as well as the automated updater, require a terminal to run. Git Bash gives Windows the Unix-style shell it needs so the script behaves exactly the same as on macOS and Linux. Those platforms already include a compatible shell, so you can skip this step there.
               </p>
               <p class="ts-note" style="margin:0; opacity:1;">
-                To verify installation, run: <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">node --version && npm --version</code>
+                Download: <a href="https://git-scm.com/install/windows" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Git Bash for Windows</a>
               </p>
             </div>
 
             <div style="margin-bottom:var(--space-4);">
-              <p style="margin:0 0 var(--space-2); font-weight:600;">2. Install clasp (Google's command-line tool for Apps Script)</p>
+              <p style="margin:0 0 var(--space-2); font-weight:600;">2. Install Node.js (includes npm)</p>
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
-                Clasp allows you to push code updates from your computer to your Google Apps Script project.
+                Node.js is required because clasp - Google's official tool that pushes code to Apps Script - runs on Node. npm (bundled with Node) lets you install clasp globally.
+              </p>
+              <p class="ts-note" style="margin:0; opacity:1;">
+                Download from <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">nodejs.org</a>, then verify with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">node --version && npm --version</code>
+              </p>
+            </div>
+
+            <div style="margin-bottom:var(--space-4);">
+              <p style="margin:0 0 var(--space-2); font-weight:600;">3. Install clasp</p>
+              <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
+                clasp is Google's command-line tool for Apps Script. Tempus uses it to push the updated files into your project during each deployment.
               </p>
               <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:13px; overflow-x:auto;">
                 <code>npm install -g @google/clasp</code>
                 <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
               </div>
-              <p class="ts-note" style="margin:0; opacity:1;">
-                Learn more: <a href="https://github.com/google/clasp" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">github.com/google/clasp</a>
-              </p>
             </div>
 
             <div style="margin-bottom:var(--space-4);">
-              <p style="margin:0 0 var(--space-2); font-weight:600;">3. Login to clasp and connect to your Apps Script project</p>
+              <p style="margin:0 0 var(--space-2); font-weight:600;">4. Authorise clasp with your Google account</p>
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
-                This authenticates clasp with your Google account and links it to your Tempus Apps Script project.
+                You need to sign in to clasp to allow it (and the updater script) to access your Apps Script project on your behalf. This will be used to push the new code to your Tempus instance.
               </p>
               <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:13px; overflow-x:auto;">
-                <code>clasp login<br>clasp clone <span id="script-id-display" style="color:var(--muted);">[Your Script ID]</span></code>
+                <code>clasp login</code>
                 <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
               </div>
-              <p class="ts-note" style="margin:0; opacity:1;">
-                Your Script ID: <strong id="script-id-value" style="font-family:monospace;">Loading...</strong><br>
-                Find it in Apps Script under <strong>Project Settings</strong> or use the value above.
-              </p>
             </div>
 
-            <div style="margin-bottom:var(--space-4);">
-              <p style="margin:0 0 var(--space-2); font-weight:600;">4. Download the Tempus repository (only needed if using Git for updates)</p>
+            <div>
+              <p style="margin:0 0 var(--space-2); font-weight:600;">5. Enable the Google Apps Script API</p>
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
-                If you plan to use Git to easily pull future updates, clone the repository now. Otherwise, skip this step and download ZIP files manually when updating.
+                The Apps Script API must be enabled so clasp can push updates to your project. Enabling this does not expose anything else in your Google Drive to the outside world.
               </p>
-              <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-                <code>git clone https://github.com/brandonhinds/tempus.git</code>
-                <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
-              </div>
+              <p class="ts-note" style="margin:0; opacity:1;">
+                Visit <a href="https://script.google.com/home/usersettings" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">script.google.com/home/usersettings</a> and toggle <strong>Google Apps Script API</strong> on.
+              </p>
             </div>
           </div>
         </details>
@@ -104,14 +103,13 @@
         <div class="ts-tabs">
           <button class="ts-tab-btn active" data-tab="script-update">Automated</button>
           <button class="ts-tab-btn" data-tab="manual-update">Manual</button>
-          <button class="ts-tab-btn" data-tab="git-update">Git</button>
         </div>
 
         <div id="manual-update" class="ts-tab-content" style="margin-bottom:var(--space-4);">
           <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
             <li>Download the latest release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-main.zip</a>.</li>
             <li>Extract the archive and open the extracted folder in your file browser.</li>
-            <li>Open the Apps Script project folder you originally created with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp clone</code>.</li>
+            <li>Open the local Apps Script project folder you use for deployments (create one with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp clone &lt;scriptId&gt;</code> if you haven't already).</li>
             <li>Delete all files inside the directory other than the <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">.clasp.json</code> file. If you don't see that file it is because it is hidden, in which case you can safely delete all files.</li>
             <li>Copy the contents of the freshly extracted Tempus release into the Apps Script folder. Allow the file browser to merge folders and replace files so the new sources overwrite the old ones while the hidden clasp files stay put.</li>
             <li>Open a terminal in that Apps Script folder and run <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp push</code> to deploy the update.</li>
@@ -120,46 +118,15 @@
             Removing the old files before copying prevents <code>.js</code> files generated by <code>clasp pull</code> from mixing with the <code>.gs</code> sources in this repository.
           </div>
         </div>
-
-        <div id="git-update" class="ts-tab-content" style="margin-bottom:var(--space-4);">
-          <p style="margin:0 0 var(--space-2); font-size:13px; color:var(--muted);">
-            Recommended if you keep Tempus in Git. Make sure your working tree is clean before running these commands.
-          </p>
-
-          <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
-            <li>Open a terminal and change into your local Tempus repository.</li>
-            <li>Fetch the latest commits and reset your working tree to match <code>origin/main</code>.</li>
-            <li>Remove everything except the <code>.git/</code> directory and the hidden <code>.clasp.json</code> file, then restore the tracked files from Git so no stray <code>.js</code> files remain.</li>
-            <li>Run <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp push</code>.</li>
-          </ol>
-
-          <p style="margin:0 0 var(--space-2); font-size:13px; font-weight:600;">Bash / macOS / Linux:</p>
-          <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>#!/bin/bash<br>set -euo pipefail<br><br>cd /path/to/tempus<br>git fetch origin main<br>git checkout main<br>git reset --hard origin/main<br><br>shopt -s dotglob nullglob<br>for entry in ./* ./.*
-do<br>&nbsp;&nbsp;name="$(basename "$entry")"<br>&nbsp;&nbsp;if [[ "$name" == "." || "$name" == ".." || "$name" == ".git" || "$name" == ".clasp.json" ]]; then<br>&nbsp;&nbsp;&nbsp;&nbsp;continue<br>&nbsp;&nbsp;fi<br>&nbsp;&nbsp;rm -rf "$entry"<br>done<br><br>git checkout -- .<br>clasp push<br>echo "Update complete! Refresh Tempus."</code>
-            <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
-          </div>
-
-          <p style="margin:0 0 var(--space-2); font-size:13px; font-weight:600;">PowerShell / Windows:</p>
-          <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>Set-Location C:\path\to\tempus<br>git fetch origin main<br>git checkout main<br>git reset --hard origin/main<br><br>Get-ChildItem -Force | Where-Object { $_.Name -ne '.git' -and $_.Name -ne '.clasp.json' } | ForEach-Object { Remove-Item $_.FullName -Recurse -Force }<br><br>git checkout -- .<br>clasp push<br>Write-Host "Update complete! Refresh Tempus."</code>
-            <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
-          </div>
-
-          <div class="ts-note" style="margin:var(--space-3) 0 0; opacity:1;">
-            <strong>Heads up:</strong> These commands permanently delete every file in the working directory apart from <code>.git/</code> and <code>.clasp.json</code>. Run <code>git status</code> first and make sure you have no local changes you still need before executing them.
-          </div>
-        </div>
-
         <div id="script-update" class="ts-tab-content active" style="margin-bottom:var(--space-4);">
           <p style="margin:0 0 var(--space-2); font-size:13px; color:var(--muted);">
-            Prefer a single command? Use the bundled Bash script to clone, refresh, and push the project automatically. It runs on macOS and Linux, and Windows users can run it through <a href="https://git-scm.com/install" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">Git&nbsp;Bash</a>.
+            We highly recommend using the automated option because it "just works" without any input from you. It runs natively on macOS and Linux, and Windows users can launch it from Git Bash.
           </p>
           <p style="margin:0 0 var(--space-3); color:var(--text); line-height:1.6;">
             Run the command below from any folder. It logs into Apps Script (if needed), downloads the updater, makes it executable, and pushes the latest Tempus files using the project ID linked to clasp. The script creates a temporary working directory next to where you run it and removes it afterwards by default.
           </p>
           <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span></code>
+            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span> &amp;&amp; \<br>rm -f ./update-tempus.sh</code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
           <div class="ts-note" style="margin:var(--space-3) 0 0; opacity:1;">
