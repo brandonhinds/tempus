@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Logo Stroke Draw Animation</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; display: grid; place-items: center; min-height: 100svh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: conic-gradient(from 180deg at 50% 120%, #f6f6f6, #ffffff 35%, #f6f6f6);
+    }
+    .wrap { text-align: center; padding: 2rem; }
+
+    svg { width: min(90vmin, 520px); height: auto; display: block; margin-inline: auto;
+          transform-box: fill-box; transform-origin: 50% 50%; will-change: transform; }
+    .st0{fill:none;stroke:#010202;stroke-width:5;stroke-miterlimit:10;}
+    .st1{fill:none;stroke:#010202;stroke-width:10;stroke-miterlimit:10;}
+
+    .draw { stroke-linecap: round; stroke-linejoin: round; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .draw { stroke-dashoffset: 0 !important; }
+    }
+
+    .controls { margin-top: 1rem; display: inline-flex; gap: .5rem; }
+    button {
+      padding: .6rem 1rem; border: 0; border-radius: 999px; cursor: pointer;
+      background: #111; color: #fff; font-weight: 600; letter-spacing: .2px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <svg version="1.1" id="Layer_3" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 256 256" style="enable-background:new 0 0 256 256;" xml:space="preserve" aria-label="Animated logo">
+      <polyline class="st0 draw" points="220,20 36,20 128,153.44 196,56 92,56 220,240 36,240 96,152 128,204 "/>
+      <path class="st1" d="M128,153.44"/>
+    </svg>
+
+    <div class="controls">
+      <button id="replay">Replay</button>
+    </div>
+  </div>
+
+  <script>
+    (function initStrokeSequence() {
+      const svg = document.querySelector('svg');
+      const elements = Array.from(document.querySelectorAll('.draw'));
+
+      const DURATION_DRAW = 2750;     // forward & reverse draw duration
+      const EASING = 'ease-in-out';
+      const ROTATE = 1700;            // 180° flip duration
+
+      let looping = false;
+
+      function setDash(el) {
+        let len = 0;
+        try { len = el.getTotalLength(); } catch(e) { len = 0; }
+        el.style.strokeDasharray = String(len);
+        el.style.strokeDashoffset = String(len);
+        return len;
+      }
+
+      function forceReflow() { void svg.getBoundingClientRect(); }
+
+      function cancelAll() {
+        const anims = [];
+        if (typeof svg.getAnimations === 'function') anims.push(...svg.getAnimations());
+        elements.forEach(el => { if (typeof el.getAnimations === 'function') anims.push(...el.getAnimations()); });
+        anims.forEach(a => { try { a.cancel(); } catch(e) {} });
+      }
+
+      function hardResetOrientationAndDashes(lengths) {
+        cancelAll();
+        svg.style.transform = 'none';
+        elements.forEach((el, i) => {
+          const len = lengths ? lengths[i] : setDash(el);
+          el.style.strokeDasharray = String(len);
+          el.style.strokeDashoffset = String(len);
+        });
+        forceReflow();
+      }
+
+      function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+      async function runSequenceOnce() {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const lengths = elements.map(setDash);
+
+        if (reduce) {
+          elements.forEach((el) => el.style.strokeDashoffset = '0');
+          svg.style.transform = 'none';
+          return { lengths };
+        }
+
+        // 1) Draw forward (keep slight stagger for feel)
+        const forwardAnims = elements.map((el, i) => {
+          const len = lengths[i];
+          const delay = i * 150;
+          return el.animate([
+            { strokeDashoffset: len },
+            { strokeDashoffset: 0 }
+          ], { duration: DURATION_DRAW, easing: EASING, fill: 'forwards', delay });
+        });
+        await Promise.all(forwardAnims.map(a => a.finished.catch(() => {})));
+
+        // 2) Rotate 180° (NO pause before rotation)
+        await svg.animate([
+          { transform: 'rotate(0deg)' },
+          { transform: 'rotate(180deg)' }
+        ], { duration: ROTATE, easing: EASING, fill: 'forwards' }).finished.catch(() => {});
+
+        // 3) Reverse draw immediately (no pause/stagger)
+        const reverseAnims = elements.map((el, i) => {
+          const len = lengths[i];
+          return el.animate([
+            { strokeDashoffset: 0 },
+            { strokeDashoffset: len }
+          ], { duration: DURATION_DRAW, easing: EASING, fill: 'forwards' });
+        });
+        await Promise.all(reverseAnims.map(a => a.finished.catch(() => {})));
+
+        return { lengths };
+      }
+
+      async function startLoop() {
+        looping = true;
+        while (looping) {
+          const { lengths } = await runSequenceOnce();
+          // Use the SAME reset routine as Replay to guarantee upright + pre-draw state
+          hardResetOrientationAndDashes(lengths);
+          // Inter-cycle delay equals the rotate duration
+          await sleep(ROTATE);
+        }
+      }
+
+      async function restartLoop() {
+        looping = false;
+        // Full reset like Replay did before
+        const lengths = elements.map(setDash);
+        hardResetOrientationAndDashes(lengths);
+        await sleep(50);
+        startLoop();
+      }
+
+      // Begin looping immediately
+      startLoop();
+
+      // Replay button: reset orientation to default, then restart the loop
+      const btn = document.getElementById('replay');
+      btn?.addEventListener('click', async () => {
+        btn.disabled = true;
+        await restartLoop();
+        btn.disabled = false;
+      });
+    })();
+  </script>
+</body>
+</html>

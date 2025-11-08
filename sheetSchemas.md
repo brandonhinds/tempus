@@ -33,6 +33,7 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `punches_json` | string (JSON) | JSON-encoded array of punch objects: `[{"in":"HH:mm","out":"HH:mm"}]`. `out` may be blank for an open punch. | `[{"in":"08:10","out":"12:05"},{"in":"12:40","out":"17:10"}]` |
 | `entry_type` | string | Entry mode used: `basic` for total-hours entries, `advanced` for punch-based entries. | `basic` |
 | `hour_type_id` | string (UUID) | References the hour type for this entry. Defaults to "work" hour type if empty or invalid. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
+| `recurrence_id` | string (UUID) | Identifier of the recurring schedule that generated the entry (blank for manual entries). Stored so deleting or editing an individual occurrence never mutates the parent schedule. | `4f6bb21f-3a9e-4b9d-8a9d-b3e8f0efab2e` |
 
 ### Suggested improvements
 - Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
@@ -45,6 +46,38 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 - For single-block days the array contains one object (e.g., `[{"in":"08:30","out":"17:00"}]`). Multiple breaks become separate objects with separate punch ranges.
 - Leave `out` empty (`""`) while a punch is in progress; the backend will exclude it from `duration_minutes` but surface a warning in the UI so the user can close the range.
 - For basic (total-hours) entries, store a single punch from `00:00` to the total elapsed time.
+
+- When a recurring schedule generates entries the backend stamps `recurrence_id` so the generator can detect existing rows and avoid recreating deleted/edited occurrences.
+
+## recurring_time_entries
+Defines weekly or monthly schedules that automatically generate basic time entries. Each row captures cadence, hour/contract metadata, and the last date the generator processed so it can resume without duplicating prior occurrences.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier for the schedule. | `4f6bb21f-3a9e-4b9d-8a9d-b3e8f0efab2e` |
+| `label` | string | Human-readable description shown in the UI. | `Parental leave` |
+| `recurrence_type` | string | `weekly` or `monthly`. | `weekly` |
+| `weekly_interval` | number | Number of weeks between executions (>=1). Empty for monthly schedules. | `2` |
+| `weekly_weekdays_json` | string (JSON array) | Weekday indexes (`0` = Sunday … `6` = Saturday) that should fire within each interval. | `[5]` |
+| `monthly_interval` | number | Number of months between executions. Empty for weekly schedules. | `1` |
+| `monthly_mode` | string | `day_of_month` or `weekday_of_month`, indicating how monthly dates are calculated. | `weekday_of_month` |
+| `monthly_day` | number | Day of month used when `monthly_mode = day_of_month`. Clamp to the month length when higher. | `31` |
+| `monthly_week` | number | Ordinal week (1-4, 5 meaning “last”) when `monthly_mode = weekday_of_month`. | `2` |
+| `monthly_weekday` | number | Weekday index used alongside `monthly_week`. | `5` |
+| `duration_minutes` | number | Minutes to record for each occurrence. | `420` |
+| `hour_type_id` | string (UUID) | Hour type to apply. Defaults to the work hour type when blank. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
+| `contract_id` | string (UUID) | Contract that bounds the schedule and receives the generated entry. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
+| `start_date` | string (ISO date) | First eligible date for the schedule. Defaults to the contract start date when blank. | `2024-05-03` |
+| `end_date` | string (ISO date) | Optional manual end date (still clamped to the contract end date). | `2024-11-29` |
+| `generated_until` | string (ISO date) | The last calendar date the generator evaluated. Ensures users can delete/edit prior entries without them being recreated. | `2024-08-16` |
+| `warning_message` | string | Last warning recorded during generation (e.g., contract exceeds 3 years). Shown in the UI so users know why entries were skipped. | `Skipping: contract exceeds 3-year limit (Contract A)` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the schedule was created. | `2024-05-10T00:00:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp when the schedule was last modified. | `2024-05-12T09:14:00Z` |
+
+### Suggested improvements
+- Track a `status` column once we add pause/resume functionality.
+- Persist the number of future occurrences created during each sync for reporting/monitoring dashboards.
+- Add a `last_warning_at` timestamp if we need to distinguish stale warnings from fresh ones.
 
 ## contracts
 Contracts describe a billable agreement and govern whether time can be logged for a given date. Dates are inclusive and stored in ISO `yyyy-MM-dd` format.

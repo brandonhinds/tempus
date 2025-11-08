@@ -177,7 +177,8 @@ function normalizeEntryObject(entry) {
     punches: punches,
     punches_json: JSON.stringify(punches),
     entry_type: entry.entry_type || 'basic',
-    hour_type_id: hourTypeId
+    hour_type_id: hourTypeId,
+    recurrence_id: entry.recurrence_id || entry.recurrenceId || ''
   };
 }
 
@@ -191,7 +192,8 @@ function buildEntryRow(entry, createdAt) {
     createdAt || normalized.created_at || toIsoDateTime(new Date()),
     normalized.punches_json || '[]',
     normalized.entry_type || 'basic',
-    normalized.hour_type_id
+    normalized.hour_type_id,
+    normalized.recurrence_id || ''
   ];
 }
 
@@ -234,7 +236,8 @@ function api_addEntry(entry) {
     punches: entry && entry.punches,
     punches_json: entry && entry.punches_json,
     entry_type: entry && entry.entry_type,
-    hour_type_id: entry && entry.hour_type_id
+    hour_type_id: entry && entry.hour_type_id,
+    recurrence_id: entry && entry.recurrence_id
   });
   normalized.id = normalized.id || id;
   normalized.date = normalized.date || toIsoDate(now);
@@ -251,7 +254,8 @@ function api_addEntry(entry) {
     created_at: row[4],
     punches_json: row[5],
     entry_type: row[6],
-    hour_type_id: row[7]
+    hour_type_id: row[7],
+    recurrence_id: row[8]
   }) };
 }
 
@@ -270,6 +274,12 @@ function api_updateEntry(update) {
       }
       if (!payload.hour_type_id && values[i][7] != null) {
         payload = Object.assign({}, payload, { hour_type_id: values[i][7] });
+      }
+      if (!payload.hasOwnProperty('recurrence_id') && values[i][8] != null) {
+        payload = Object.assign({}, payload, { recurrence_id: values[i][8] });
+      }
+      if (payload.recurrence_id == null && update.recurrence_id != null) {
+        payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
       }
       var normalized = normalizeEntryObject(payload);
       normalized.id = update.id;

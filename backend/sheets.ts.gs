@@ -5,7 +5,7 @@ function getOrCreateSheet(name) {
   if (!sh) {
     sh = ss.insertSheet(name);
     if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,8).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id']]);
+      sh.getRange(1,1,1,9).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id']]);
     } else if (name === 'user_settings') {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
@@ -106,6 +106,28 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'recurring_time_entries') {
+      sh.getRange(1,1,1,19).setValues([[
+        'id',
+        'label',
+        'recurrence_type',
+        'weekly_interval',
+        'weekly_weekdays_json',
+        'monthly_interval',
+        'monthly_mode',
+        'monthly_day',
+        'monthly_week',
+        'monthly_weekday',
+        'duration_minutes',
+        'hour_type_id',
+        'contract_id',
+        'start_date',
+        'end_date',
+        'generated_until',
+        'warning_message',
+        'created_at',
+        'updated_at'
+      ]]);
     } else if (name === 'bas_submissions') {
       sh.getRange(1,1,1,15).setValues([[
         'id',
@@ -140,7 +162,7 @@ function getOrCreateSheet(name) {
     sh.getRange('H:I').setNumberFormat('@'); // created_at, updated_at
   }
   if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id'];
+    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id'];
     const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
     const headerRange = sh.getRange(1, 1, 1, lastColumn);
     const headers = headerRange.getValues()[0];
@@ -186,6 +208,16 @@ function getOrCreateSheet(name) {
         sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
       }
     }
+    const recurrenceIndex = headers.indexOf('recurrence_id');
+    if (recurrenceIndex === -1) {
+      const lastCol = sh.getLastColumn();
+      sh.insertColumnAfter(lastCol);
+      sh.getRange(1, lastCol + 1).setValue('recurrence_id');
+      const rowCount = sh.getLastRow();
+      if (rowCount > 1) {
+        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
+      }
+    }
     const sanitizedHeaders = sh.getRange(1, 1, 1, expectedHeaders.length).getValues()[0];
     if (expectedHeaders.some((header, idx) => sanitizedHeaders[idx] !== header)) {
       sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
@@ -195,6 +227,7 @@ function getOrCreateSheet(name) {
     sh.getRange('F:F').setNumberFormat('@');
     sh.getRange('G:G').setNumberFormat('@');
     sh.getRange('H:H').setNumberFormat('@');
+    sh.getRange('I:I').setNumberFormat('@');
   }
   if (name === 'invoices') {
     sh.getRange('A:A').setNumberFormat('@');

@@ -22,8 +22,6 @@
 
 ## Big Changes
 
-- Add alternative views to hours, such as weekly and fortnightly (feature flag)
-
 - Refactor scripts sheet to split up all functions into relevant categories
 
 - Make the time entry work nicely on mobile
@@ -63,12 +61,6 @@
 	* Company income
 	* Company expenses
 
-- Move the punch in/out button down next to Add Entry
-
-- Improve custom theme implementation
-    * Add constraints or auto-generated supporting shades (derived lighter/darker variants) to maintain readability.
-    * Provide preview indicators (contrast checks) when users pick low-contrast palettes.
-
 - Either add ability to add attachments to deductions, or remove the text saying we will have that feature
 
 - Add the ability to optionally associate a default with an hour type. If set, the hour type is included when using the default, otherwise it just adds the hours to the currently selected hour type
@@ -77,9 +69,13 @@
 
 - Fix the calculation used by thinkStack to return lost super (make it match whatever David is doing)
 
+- Update contract burndown so the actual average projection accounts for the pro-rate rate this month and projects out to the end of the month using the monthly average
+
 ## May Not Be Possible / Reconsider
 - Have a new, basic time entry mode where someone just puts in the total hours. In this mode double clicking on a calendar cell would allow the entry to be directly edited there. This mode would need to be feature flagged because it would be incompatible with the other data entry methods.
     * Consider whether this is a good idea, because it would be the only feature that is truly incompatible with other parts of the sheet.
 
 - Things that may not be possible:
     * Add colours to hour type drop down (or dots of the colour or something)
+
+- Add alternative views to hours, such as weekly and fortnightly (feature flag)

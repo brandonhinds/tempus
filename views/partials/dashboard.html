@@ -50,9 +50,6 @@
         <div class="ts-warning" id="punch-contract-warning" style="display:none;">No valid contract for this date. Add one on the Contracts page before logging time.</div>
       </div>
     </div>
-        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
-          <button id="btn-punch-toggle">Punch In</button>
-        </div>
     <div class="ts-note" id="punch-summary" style="margin-top:8px;"></div>
     <div class="ts-warning" id="punch-open-warning" style="display:none; margin-top:4px;"></div>
     <div class="ts-note" id="punch-suggestion" style="display:none; margin-top:4px; color: var(--success);"></div>
@@ -63,7 +60,8 @@
         <button class="ghost" id="btn-enter-punch-default" style="display:none;">Enter Default</button>
         <button class="ghost" id="btn-edit-punch-defaults" style="display:none;">Edit Defaults</button>
       </div>
-      <div class="ts-gap-sm" style="display:flex;">
+      <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button id="btn-punch-toggle">Punch In</button>
         <button class="ghost" id="btn-punch-cancel" style="display:none;">Discard Changes</button>
         <button class="ghost" id="btn-delete-punch" style="display:none;">Delete Entry</button>
         <button id="btn-punch-save">Add Entry</button>
@@ -223,6 +221,7 @@
       <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero Payroll Helper</button>
       <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB Payroll Helper</button>
       <button class="ghost" id="calendar-actual-income-btn" type="button" style="display:none;">Add Actual Income</button>
+      <button class="ghost" id="btn-manage-recurring" type="button" style="display:none;">Reoccurring Entries</button>
       <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print Monthly Hours</button>
     </div>
   </div>
@@ -434,6 +433,133 @@
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-cancel-edit-default-details">Cancel</button>
       <button id="btn-save-default-details">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-recurring-entries" style="display:none;">
+  <div class="ts-modal-content" style="max-width:960px;">
+    <div class="ts-modal-header">
+      <h3>Manage Reoccurring Entries</h3>
+      <button class="ts-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-grid ts-grid--gap-lg ts-grid--align-start">
+        <div class="ts-col-span-5">
+          <div class="ts-gap-sm" style="display:flex; justify-content:flex-end; align-items:center;">
+            <button id="btn-recurring-new">New Schedule</button>
+          </div>
+          <div id="recurring-entry-list" class="ts-gap-sm" style="margin-top:12px;"></div>
+          <div class="ts-empty" id="recurring-entry-empty" style="display:none; margin-top:24px;">
+            <p style="margin:0;">No reoccurring schedules yet. Create one to automatically add future entries.</p>
+          </div>
+        </div>
+        <div class="ts-col-span-7">
+          <div id="recurring-entry-form" class="ts-card" style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <h4 id="recurring-form-title" style="margin:0;">New Schedule</h4>
+              <p class="ts-note" id="recurring-form-subtitle" style="margin:4px 0 0;">Define cadence and contract limits.</p>
+            </div>
+            <div class="ts-warning" id="recurring-form-warning" style="display:none;"></div>
+            <div class="ts-error" id="recurring-form-error" style="display:none;"></div>
+            <label>Name<input type="text" id="recurring-name" placeholder="e.g., Parental leave" /></label>
+            <div class="ts-grid ts-grid--gap-md">
+              <div class="ts-col-span-6">
+                <label>Hours per occurrence<input type="number" id="recurring-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" /></label>
+              </div>
+              <div class="ts-col-span-6">
+                <label>Contract
+                  <select id="recurring-contract"></select>
+                </label>
+              </div>
+            </div>
+            <div id="recurring-hour-type-row" style="display:none;">
+              <label>Hour type
+                <select id="recurring-hour-type"></select>
+              </label>
+            </div>
+            <div class="ts-grid ts-grid--gap-md">
+              <div class="ts-col-span-6">
+                <label>Start date<input type="date" id="recurring-start-date" /></label>
+              </div>
+              <div class="ts-col-span-6">
+                <label>End date (optional)<input type="date" id="recurring-end-date" /></label>
+              </div>
+            </div>
+            <label>Cadence
+              <select id="recurring-frequency">
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+            <div id="recurring-weekly-fields">
+              <div class="ts-grid ts-grid--gap-md">
+                <div class="ts-col-span-6">
+                  <label>Repeat every<input type="number" id="recurring-weekly-interval" min="1" step="1" value="1" /></label>
+                  <small class="ts-note">Number of weeks between runs</small>
+                </div>
+              </div>
+            </div>
+            <div id="recurring-monthly-fields" class="ts-stack" style="display:none;">
+              <label>Repeat every<input type="number" id="recurring-monthly-interval" min="1" step="1" value="1" /></label>
+              <small class="ts-note">Number of months between runs</small>
+              <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:8px; grid-template-columns: repeat(2, minmax(0, 1fr));">
+                <div id="recurring-monthly-mode-wrapper" class="ts-stack" style="gap:8px;">
+                  <label>Schedule type</label>
+                  <select id="recurring-monthly-mode">
+                    <option value="day_of_month">Specific day of month</option>
+                    <option value="weekday_of_month">Weekday position</option>
+                  </select>
+                </div>
+                <div id="recurring-monthly-detail-wrapper" class="ts-stack" style="gap:8px;">
+                  <div id="recurring-monthly-day-wrapper">
+                    <label>Day of month</label>
+                    <input type="number" id="recurring-monthly-day" min="1" max="31" step="1" />
+                  </div>
+                  <div id="recurring-monthly-week-wrapper" style="display:none;">
+                    <label>Week & weekday</label>
+                    <div class="ts-grid ts-grid--gap-sm" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+                      <select id="recurring-monthly-week">
+                        <option value="1">First</option>
+                        <option value="2">Second</option>
+                        <option value="3">Third</option>
+                        <option value="4">Fourth</option>
+                        <option value="5">Last</option>
+                      </select>
+                      <select id="recurring-monthly-weekday">
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                        <option value="0">Sunday</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="ts-note" id="recurring-generated-summary" style="display:none;"></div>
+            <div class="ts-note" id="recurring-preview-note" style="display:none;">
+              <strong>Next occurrences</strong>
+              <ul id="recurring-preview-list" style="margin:4px 0 0; padding-left:16px;"></ul>
+            </div>
+            <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
+              <button class="ghost" id="btn-cancel-recurring">Close</button>
+              <button class="ghost danger" id="btn-delete-recurring" style="display:none;">Delete Schedule</button>
+              <button id="btn-save-recurring">Add Schedule</button>
+            </div>
+            <div id="recurring-delete-confirm" class="ts-warning" style="display:none;">
+              <p style="margin-top:0;">Delete this schedule? Existing entries remain unless you remove future ones using the button above.</p>
+              <div class="ts-gap-sm" style="display:flex; gap:8px; justify-content:flex-end;">
+                <button class="ghost" id="btn-cancel-delete-recurring">Cancel</button>
+                <button class="danger" id="btn-confirm-delete-recurring">Confirm delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

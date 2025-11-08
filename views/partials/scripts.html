@@ -1,4 +1,70 @@
 <script>
+
+  const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+  function normalizeDateInput(value) {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return '';
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    if (typeof value === 'number') {
+      return normalizeDateInput(new Date(value));
+    }
+    const str = String(value).trim();
+    if (!str) return '';
+    if (ISO_DATE_PATTERN.test(str)) return str;
+    if (str.includes('T')) {
+      const [dateOnly] = str.split('T');
+      if (ISO_DATE_PATTERN.test(dateOnly)) return dateOnly;
+    }
+    const parsed = new Date(str);
+    if (!Number.isNaN(parsed.getTime())) return normalizeDateInput(parsed);
+    return '';
+  }
+
+  const isoDate = (value) => normalizeDateInput(value);
+
+  const normalizeHolidayDate = (value) => {
+    if (!value && value !== 0) return '';
+    if (value instanceof Date) return isoDate(value);
+    if (typeof value === 'number') return isoDate(new Date(value));
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '') return '';
+      if (!trimmed.includes('T')) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) {
+        return isoDate(parsed);
+      }
+      return trimmed.split('T')[0];
+    }
+    return '';
+  };
+
+  const isoDateTime = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const parseIsoDate = (value) => {
+    const normalized = normalizeDateInput(value);
+    if (!normalized) return null;
+    const [y, m, d] = normalized.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const todayIso = () => isoDate(new Date());
+  const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const formatMonthShortYear = (dateObj) => {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
+    const month = MONTH_ABBREVIATIONS[dateObj.getMonth()] || '';
+    const year = dateObj.getFullYear();
+    return `${month} ${String(year).slice(-2)}`;
+  };
+
   // Layout navigation
   const pageTime = document.getElementById('page-time');
   const pageContracts = document.getElementById('page-contracts');
@@ -196,6 +262,7 @@ const deductionCategoryEmptyNote = document.getElementById('deduction-category-e
 let ratePreviewDebounceTimer = null;
 let ratePreviewInputSyncing = false;
 
+
   const state = {
     cacheKey: 'ts_cache',
     entries: [],
@@ -204,6 +271,14 @@ let ratePreviewInputSyncing = false;
     contractMap: {},
     hourTypes: [],
     hourTypeMap: {},
+    recurringTimeEntries: [],
+    recurringEntriesInitialized: false,
+    recurringEntriesSyncing: false,
+    recurringEntryForm: {
+      editingId: '',
+      draft: null,
+      deleteConfirm: false
+    },
     deductions: [],
     deductionCategories: [],
     deductionCategoryMap: {},
@@ -315,6 +390,8 @@ let ratePreviewInputSyncing = false;
     mode: 'list',
     editingId: null
   };
+
+  state.recurringEntryForm.draft = defaultRecurringDraft();
 
   let entriesSyncInFlight = false;
 
@@ -1046,64 +1123,6 @@ let ratePreviewInputSyncing = false;
       }, 3200);
     }
   };
-  const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-  function normalizeDateInput(value) {
-    if (value === null || value === undefined) return '';
-    if (value instanceof Date) {
-      if (Number.isNaN(value.getTime())) return '';
-      const year = value.getFullYear();
-      const month = String(value.getMonth() + 1).padStart(2, '0');
-      const day = String(value.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-    if (typeof value === 'number') {
-      return normalizeDateInput(new Date(value));
-    }
-    const str = String(value).trim();
-    if (!str) return '';
-    if (ISO_DATE_PATTERN.test(str)) return str;
-    if (str.includes('T')) {
-      const [dateOnly] = str.split('T');
-      if (ISO_DATE_PATTERN.test(dateOnly)) return dateOnly;
-    }
-    const parsed = new Date(str);
-    if (!Number.isNaN(parsed.getTime())) return normalizeDateInput(parsed);
-    return '';
-  }
-  const isoDate = (value) => normalizeDateInput(value);
-  const normalizeHolidayDate = (value) => {
-    if (!value && value !== 0) return '';
-    if (value instanceof Date) return isoDate(value);
-    if (typeof value === 'number') {
-      return isoDate(new Date(value));
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed === '') return '';
-      if (!trimmed.includes('T')) return trimmed;
-      const parsed = new Date(trimmed);
-      if (!Number.isNaN(parsed.getTime())) {
-        return isoDate(parsed);
-      }
-      return trimmed.split('T')[0];
-    }
-    return '';
-  };
-  const isoDateTime = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const parseIsoDate = (value) => {
-    const normalized = normalizeDateInput(value);
-    if (!normalized) return null;
-    const [y, m, d] = normalized.split('-').map(Number);
-    return new Date(y, m - 1, d);
-  };
-  const todayIso = () => isoDate(new Date());
-  const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const formatMonthShortYear = (dateObj) => {
-    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
-    const month = MONTH_ABBREVIATIONS[dateObj.getMonth()] || '';
-    const year = dateObj.getFullYear();
-    return `${month} ${String(year).slice(-2)}`;
-  };
   const formatHours = (minutes) => {
     const hrs = (Number(minutes) || 0) / 60;
     let out = (Math.round(hrs * 100) / 100).toFixed(2);
@@ -1707,6 +1726,9 @@ let ratePreviewInputSyncing = false;
     clone.contract_id = contractId ? String(contractId).trim() : '';
     delete clone.project;
     delete clone.contractId;
+    const recurrenceId = clone.recurrence_id || clone.recurrenceId || '';
+    clone.recurrence_id = recurrenceId ? String(recurrenceId).trim() : '';
+    delete clone.recurrenceId;
     // Preserve entry_type if it exists
     if (clone.entry_type) {
       clone.entry_type = String(clone.entry_type).trim();
@@ -1756,6 +1778,233 @@ let ratePreviewInputSyncing = false;
     clone.created_at = clone.created_at || '';
     return clone;
   };
+
+  const sanitizeRecurringEntry = (entry) => {
+    if (!entry) return null;
+    const clone = { ...entry };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.label = clone.label ? String(clone.label).trim() : '';
+    clone.recurrence_type = clone.recurrence_type === 'monthly' ? 'monthly' : 'weekly';
+    const weeklyInterval = Number(clone.weekly_interval);
+    clone.weekly_interval = Number.isFinite(weeklyInterval) && weeklyInterval > 0 ? Math.floor(weeklyInterval) : 1;
+    const weekdays = Array.isArray(clone.weekly_weekdays) ? clone.weekly_weekdays.slice() : [];
+    clone.weekly_weekdays = weekdays
+      .map((day) => Number(day))
+      .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+    const monthlyInterval = Number(clone.monthly_interval);
+    clone.monthly_interval = Number.isFinite(monthlyInterval) && monthlyInterval > 0 ? Math.floor(monthlyInterval) : 1;
+    clone.monthly_mode = clone.monthly_mode === 'weekday_of_month' ? 'weekday_of_month' : 'day_of_month';
+    const monthlyDay = Number(clone.monthly_day);
+    clone.monthly_day = Number.isFinite(monthlyDay) && monthlyDay >= 1 ? Math.min(31, Math.floor(monthlyDay)) : 1;
+    const monthlyWeek = Number(clone.monthly_week);
+    clone.monthly_week = Number.isFinite(monthlyWeek) && monthlyWeek >= 1 ? Math.min(5, Math.floor(monthlyWeek)) : 1;
+    const monthlyWeekday = Number(clone.monthly_weekday);
+    clone.monthly_weekday = Number.isFinite(monthlyWeekday) ? ((Math.floor(monthlyWeekday) % 7) + 7) % 7 : 1;
+    const duration = Number(clone.duration_minutes);
+    clone.duration_minutes = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0;
+    clone.contract_id = clone.contract_id ? String(clone.contract_id) : '';
+    clone.hour_type_id = clone.hour_type_id ? String(clone.hour_type_id) : '';
+    clone.start_date = clone.start_date || '';
+    clone.end_date = clone.end_date || '';
+    clone.generated_until = clone.generated_until || '';
+    clone.warning_message = clone.warning_message || '';
+    return clone;
+  };
+
+  function hasFutureRecurringEntries(recurrenceId) {
+    if (!recurrenceId) return false;
+    const today = todayIso();
+    return state.entries.some((entry) => entry && entry.recurrence_id === recurrenceId && entry.date && entry.date >= today);
+  }
+
+  function deleteFutureEntriesForSchedule(recurrenceId, options = {}) {
+    if (!recurrenceId) return Promise.resolve();
+    const cutoff = options.fromDate ? isoDate(options.fromDate) : todayIso();
+    const silent = !!options.silent;
+    const previousEntries = state.entries.slice();
+    const filtered = previousEntries.filter((entry) => {
+      if (!entry || entry.recurrence_id !== recurrenceId) return true;
+      if (!entry.date) return false;
+      return entry.date < cutoff;
+    });
+    const changed = filtered.length !== previousEntries.length;
+    if (changed) {
+      state.entries = filtered;
+      renderEntries();
+      renderCalendar();
+      saveCache();
+      renderRecurringEntriesList();
+    }
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(() => {
+          if (!silent) setStatus('Future entries deleted', 'success');
+          renderRecurringEntriesList();
+          resolve();
+        })
+        .withFailureHandler((error) => {
+          if (changed) {
+            state.entries = previousEntries;
+            renderEntries();
+            renderCalendar();
+            saveCache();
+            renderRecurringEntriesList();
+          }
+          if (!silent) setStatus('Failed to delete future entries', 'error');
+          reject(error);
+        })
+        .api_deleteFutureRecurringEntries({
+          recurrenceId: recurrenceId,
+          fromDate: cutoff
+        });
+    });
+  }
+
+  function cloneRecurringEntries(list) {
+    return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
+  }
+
+  function upsertRecurringEntryLocal(entry) {
+    const sanitized = sanitizeRecurringEntry(entry);
+    if (!sanitized || !sanitized.id) return;
+    const idx = state.recurringTimeEntries.findIndex((item) => item.id === sanitized.id);
+    if (idx === -1) {
+      state.recurringTimeEntries = [...state.recurringTimeEntries, sanitized];
+    } else {
+      state.recurringTimeEntries[idx] = sanitized;
+    }
+  }
+
+  function removeRecurringEntryLocal(id) {
+    if (!id) return;
+    state.recurringTimeEntries = state.recurringTimeEntries.filter((item) => item.id !== id);
+  }
+
+  function defaultRecurringDraft() {
+    const today = todayIso();
+    const dateObj = parseIsoDate(today) || new Date();
+    const weekday = dateObj.getDay();
+    const weekIndex = Math.floor((dateObj.getDate() - 1) / 7) + 1;
+    return {
+      id: '',
+      label: '',
+      recurrence_type: 'weekly',
+      weekly_interval: 1,
+      weekly_weekdays: [weekday],
+      monthly_interval: 1,
+      monthly_mode: 'day_of_month',
+      monthly_day: dateObj.getDate(),
+      monthly_week: Math.min(5, weekIndex),
+      monthly_weekday: weekday,
+      duration_minutes: 450,
+      contract_id: '',
+      hour_type_id: getDefaultHourTypeId() || '',
+      start_date: today,
+      end_date: '',
+      generated_until: '',
+      warning_message: ''
+    };
+  }
+
+  function describeRecurringEntry(entry) {
+    if (!entry) return '';
+    if (entry.recurrence_type === 'monthly') {
+      return describeMonthlyRecurringEntry(entry);
+    }
+    return describeWeeklyRecurringEntry(entry);
+  }
+
+  function describeWeeklyRecurringEntry(entry) {
+    const interval = Number(entry.weekly_interval) || 1;
+    const intervalText = interval === 1 ? 'Every week' : `Every ${interval} weeks`;
+    const weekdays = (entry.weekly_weekdays || []).map((day) => WEEKDAY_LONG[day]).filter(Boolean);
+    const weekdayText = weekdays.length ? weekdays.join(', ') : 'selected days';
+    return `${intervalText} on ${weekdayText}`;
+  }
+
+  function describeMonthlyRecurringEntry(entry) {
+    const interval = Number(entry.monthly_interval) || 1;
+    const intervalText = interval === 1 ? 'Every month' : `Every ${interval} months`;
+    if (entry.monthly_mode === 'weekday_of_month') {
+      const ordinalMap = ['First', 'Second', 'Third', 'Fourth', 'Last'];
+      const ordinal = ordinalMap[Math.max(0, Math.min(4, (Number(entry.monthly_week) || 1) - 1))];
+      const weekday = WEEKDAY_LONG[((Number(entry.monthly_weekday) || 0) + 7) % 7];
+      return `${intervalText} on the ${ordinal} ${weekday || 'weekday'}`;
+    }
+    const day = Math.min(31, Math.max(1, Number(entry.monthly_day) || 1));
+    return `${intervalText} on day ${day}`;
+  }
+
+  function buildRecurringPreview(entry, limit = 5) {
+    const sanitized = sanitizeRecurringEntry(entry);
+    if (!sanitized) return [];
+    const startIso = sanitized.start_date || todayIso();
+    let cursor = parseIsoDate(startIso) || new Date();
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+    const results = [];
+    const horizon = sanitized.recurrence_type === 'weekly' ? 200 : 600;
+    const endCursor = new Date(cursor.getTime());
+    endCursor.setDate(endCursor.getDate() + horizon);
+    const anchorDate = parseIsoDate(sanitized.start_date) || cursor;
+    while (cursor <= endCursor && results.length < limit) {
+      const dateIso = isoDate(cursor);
+      let shouldInclude = false;
+      if (sanitized.recurrence_type === 'weekly') {
+        shouldInclude = matchesWeeklyPreview(sanitized, cursor, anchorDate);
+      } else {
+        shouldInclude = matchesMonthlyPreview(sanitized, cursor, anchorDate);
+      }
+      if (shouldInclude && dateIso >= (sanitized.start_date || dateIso)) {
+        results.push(dateIso);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return results;
+  }
+
+  function matchesWeeklyPreview(entry, dateObj, anchorDate) {
+    const weekdays = entry.weekly_weekdays || [];
+    if (!weekdays.length) return false;
+    const diffDays = Math.floor((startOfDay(dateObj) - startOfDay(anchorDate)) / (24 * 60 * 60 * 1000));
+    if (diffDays < 0) return false;
+    const weekIndex = Math.floor(diffDays / 7);
+    if (weekIndex % entry.weekly_interval !== 0) return false;
+    const weekday = dateObj.getDay();
+    return weekdays.indexOf(weekday) !== -1;
+  }
+
+  function matchesMonthlyPreview(entry, dateObj, anchorDate) {
+    const diffMonths = monthsBetween(anchorDate, dateObj);
+    if (diffMonths < 0) return false;
+    if (diffMonths % entry.monthly_interval !== 0) return false;
+    if (entry.monthly_mode === 'weekday_of_month') {
+      const weekday = dateObj.getDay();
+      if (weekday !== (((entry.monthly_weekday || 0) + 7) % 7)) return false;
+      const weekOfMonth = Math.floor((dateObj.getDate() - 1) / 7) + 1;
+      if (entry.monthly_week === 5) {
+        return isLastWeekdayOfMonth(dateObj);
+      }
+      return weekOfMonth === entry.monthly_week;
+    }
+    const day = Math.min(31, Math.max(1, entry.monthly_day));
+    const daysInMonthCount = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
+    const targetDay = Math.min(day, daysInMonthCount);
+    return dateObj.getDate() === targetDay;
+  }
+
+  function monthsBetween(startDate, targetDate) {
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return 0;
+    if (!(targetDate instanceof Date) || Number.isNaN(targetDate.getTime())) return 0;
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const end = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  }
+
+  function isLastWeekdayOfMonth(dateObj) {
+    const probe = new Date(dateObj.getTime());
+    probe.setDate(probe.getDate() + 7);
+    return probe.getMonth() !== dateObj.getMonth();
+  }
 
   const sanitizeDeductionCategory = (category) => {
     if (!category) return category;
@@ -5166,6 +5415,12 @@ function updateDeductionFormVisibility() {
       order: 220,
       group: 'time_entries'
     },
+    recurring_time_entries: {
+      name: 'Enable reoccurring time entries',
+      description: 'Adds a scheduler to automatically create weekly or monthly entries that stay within active contract dates.',
+      order: 225,
+      group: 'time_entries'
+    },
     suggest_end_time: {
       name: 'Suggest exact end time',
       description: 'Uses your rounding rule and preferred finish time to recommend when to clock off for tidy totals.',
@@ -5834,6 +6089,10 @@ function updateDeductionFormVisibility() {
       state.settings = obj.settings || {};
       state.contracts = Array.isArray(obj.contracts) ? obj.contracts.map(sanitizeContract) : [];
       state.hourTypes = Array.isArray(obj.hourTypes) ? obj.hourTypes.map(sanitizeHourType) : [];
+      state.recurringTimeEntries = Array.isArray(obj.recurringTimeEntries)
+        ? obj.recurringTimeEntries.map(sanitizeRecurringEntry).filter((item) => item)
+        : [];
+      state.recurringEntriesInitialized = state.recurringTimeEntries.length > 0;
       state.deductions = Array.isArray(obj.deductions) ? dedupeById(obj.deductions.map(sanitizeDeduction)) : [];
       state.deductionCategories = Array.isArray(obj.deductionCategories) ? obj.deductionCategories.map(sanitizeDeductionCategory) : [];
       state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
@@ -5898,6 +6157,8 @@ function updateDeductionFormVisibility() {
       updateTabStates();
       updateContractMap();
       updateHourTypeMap();
+      renderRecurringEntriesList();
+      setRecurringFormDraft(state.recurringEntryForm.draft || defaultRecurringDraft());
       applyTheme((state.settings && state.settings.theme) || 'dark');
       state.pendingEntryAdds = new Map();
       state.pendingEntryUpdates = new Map();
@@ -5924,6 +6185,7 @@ function updateDeductionFormVisibility() {
         settings: state.settings,
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
+        recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
         deductions: state.deductions.map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
@@ -6837,6 +7099,44 @@ function updateDeductionFormVisibility() {
   const manualSaveBtn = document.getElementById('btn-add-manual');
   const manualCancelBtn = document.getElementById('btn-cancel-edit');
   const manualDeleteBtn = document.getElementById('btn-delete-manual');
+  const recurringManageBtn = document.getElementById('btn-manage-recurring');
+  const recurringModal = document.getElementById('modal-recurring-entries');
+  const recurringList = document.getElementById('recurring-entry-list');
+  const recurringEmpty = document.getElementById('recurring-entry-empty');
+  const recurringNewBtn = document.getElementById('btn-recurring-new');
+  const recurringForm = document.getElementById('recurring-entry-form');
+  const recurringFormTitle = document.getElementById('recurring-form-title');
+  const recurringFormSubtitle = document.getElementById('recurring-form-subtitle');
+  const recurringFormWarning = document.getElementById('recurring-form-warning');
+  const recurringFormError = document.getElementById('recurring-form-error');
+  const recurringNameInput = document.getElementById('recurring-name');
+  const recurringHoursInput = document.getElementById('recurring-hours');
+  const recurringContractSelect = document.getElementById('recurring-contract');
+  const recurringHourTypeRow = document.getElementById('recurring-hour-type-row');
+  const recurringHourTypeSelect = document.getElementById('recurring-hour-type');
+  const recurringStartDateInput = document.getElementById('recurring-start-date');
+  const recurringEndDateInput = document.getElementById('recurring-end-date');
+  const recurringFrequencySelect = document.getElementById('recurring-frequency');
+  const recurringWeeklyFields = document.getElementById('recurring-weekly-fields');
+  const recurringWeeklyIntervalInput = document.getElementById('recurring-weekly-interval');
+  const recurringMonthlyFields = document.getElementById('recurring-monthly-fields');
+  const recurringMonthlyIntervalInput = document.getElementById('recurring-monthly-interval');
+  const recurringMonthlyModeSelect = document.getElementById('recurring-monthly-mode');
+  const recurringMonthlyDayInput = document.getElementById('recurring-monthly-day');
+  const recurringMonthlyWeekSelect = document.getElementById('recurring-monthly-week');
+  const recurringMonthlyWeekdaySelect = document.getElementById('recurring-monthly-weekday');
+  const recurringMonthlyDayWrapper = document.getElementById('recurring-monthly-day-wrapper');
+  const recurringMonthlyWeekWrapper = document.getElementById('recurring-monthly-week-wrapper');
+  const recurringMonthlyModeWrapper = document.getElementById('recurring-monthly-mode-wrapper');
+  const recurringGeneratedSummary = document.getElementById('recurring-generated-summary');
+  const recurringPreviewNote = document.getElementById('recurring-preview-note');
+  const recurringPreviewList = document.getElementById('recurring-preview-list');
+  const recurringCancelBtn = document.getElementById('btn-cancel-recurring');
+  const recurringSaveBtn = document.getElementById('btn-save-recurring');
+  const recurringDeleteBtn = document.getElementById('btn-delete-recurring');
+  const recurringDeleteConfirm = document.getElementById('recurring-delete-confirm');
+  const recurringDeleteCancelBtn = document.getElementById('btn-cancel-delete-recurring');
+  const recurringDeleteConfirmBtn = document.getElementById('btn-confirm-delete-recurring');
 
   let queuedEntryFocus = null;
   let queuedFocusTimer = null;
@@ -7299,6 +7599,64 @@ function updateDeductionFormVisibility() {
   if (manualHoursInput) {
     manualHoursInput.addEventListener('input', updateBasicSaveEnabled);
     manualHoursInput.addEventListener('keydown', handleManualHoursEnter);
+  }
+
+  // Recurring entry events
+ if (recurringManageBtn) {
+   recurringManageBtn.addEventListener('click', () => {
+     const draft = state.recurringEntryForm.draft || defaultRecurringDraft();
+     setRecurringFormDraft(draft);
+     openRecurringModal();
+   });
+ }
+ if (recurringNewBtn) {
+   recurringNewBtn.addEventListener('click', () => {
+     setRecurringFormDraft(defaultRecurringDraft());
+   });
+ }
+  if (recurringCancelBtn) {
+    recurringCancelBtn.addEventListener('click', () => closeRecurringModal());
+  }
+  if (recurringSaveBtn) {
+    recurringSaveBtn.addEventListener('click', handleRecurringSave);
+  }
+  if (recurringDeleteBtn) {
+    recurringDeleteBtn.addEventListener('click', () => toggleRecurringDeleteConfirm(true));
+  }
+  if (recurringDeleteCancelBtn) {
+    recurringDeleteCancelBtn.addEventListener('click', () => toggleRecurringDeleteConfirm(false));
+  }
+  if (recurringDeleteConfirmBtn) {
+    recurringDeleteConfirmBtn.addEventListener('click', handleRecurringDelete);
+  }
+  if (recurringFrequencySelect) {
+    recurringFrequencySelect.addEventListener('change', () => {
+      updateRecurringFrequencyVisibility();
+      updateRecurringFormFromInputs();
+    });
+  }
+  [
+    recurringNameInput,
+    recurringHoursInput,
+    recurringContractSelect,
+    recurringHourTypeSelect,
+    recurringStartDateInput,
+    recurringEndDateInput,
+    recurringWeeklyIntervalInput,
+    recurringMonthlyIntervalInput,
+    recurringMonthlyDayInput,
+    recurringMonthlyWeekSelect,
+    recurringMonthlyWeekdaySelect
+  ].forEach((input) => {
+    if (!input) return;
+    const eventName = input === recurringHoursInput ? 'input' : 'change';
+    input.addEventListener(eventName, updateRecurringFormFromInputs);
+  });
+  if (recurringMonthlyModeSelect) {
+    recurringMonthlyModeSelect.addEventListener('change', () => {
+      updateRecurringMonthlyModeVisibility();
+      updateRecurringFormFromInputs();
+    });
   }
 
   if (manualHourType) {
@@ -9183,6 +9541,15 @@ function updateDeductionFormVisibility() {
     state.showZeroHours = !!zeroFlag.enabled;
     renderCalendar();
     updateClearCacheVisibility();
+
+    const recurringFlag = state.featureFlags.recurring_time_entries || DEFAULT_FEATURE_FLAGS.recurring_time_entries || { enabled: false };
+    const recurringEnabled = !!recurringFlag.enabled;
+    if (recurringManageBtn) recurringManageBtn.style.display = recurringEnabled ? 'inline-flex' : 'none';
+    if (!recurringEnabled) {
+      closeRecurringModal();
+    } else if (!state.recurringEntriesInitialized && !state.recurringEntriesSyncing) {
+      syncRecurringEntries({ silent: true });
+    }
 
     const expectedMonthlyFlag = state.featureFlags.expected_monthly_hours || DEFAULT_FEATURE_FLAGS.expected_monthly_hours || { enabled: false };
     if (contractIncludeWeekendsRow) {
@@ -12691,6 +13058,7 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((contracts) => {
         state.contracts = (contracts || []).map(sanitizeContract);
         refreshContractBindings();
+        populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id : '');
         ensureInvoiceFormOptions();
         saveCache();
         renderCalendar();
@@ -16010,6 +16378,8 @@ function updateDeductionFormVisibility() {
           closeActualIncomeModal();
         } else if (modal === printViewConfigModal) {
           closePrintViewConfigModal();
+        } else if (modal === recurringModal) {
+          closeRecurringModal();
         } else {
           hideModal(modal);
         }
@@ -16026,6 +16396,8 @@ function updateDeductionFormVisibility() {
             closeActualIncomeModal();
           } else if (modal === printViewConfigModal) {
             closePrintViewConfigModal();
+          } else if (modal === recurringModal) {
+            closeRecurringModal();
           } else {
             hideModal(modal);
           }
@@ -16112,6 +16484,609 @@ function updateDeductionFormVisibility() {
     }
   }
 
+  // Recurring entry management
+  function renderRecurringEntriesList() {
+    if (!recurringList) return;
+    recurringList.innerHTML = '';
+    const entries = (state.recurringTimeEntries || []).slice().sort((a, b) => {
+      const aDate = a && a.start_date ? a.start_date : '';
+      const bDate = b && b.start_date ? b.start_date : '';
+      if (aDate && bDate && aDate !== bDate) {
+        return aDate.localeCompare(bDate);
+      }
+      const aName = (a && a.label) ? a.label.toLowerCase() : '';
+      const bName = (b && b.label) ? b.label.toLowerCase() : '';
+      return aName.localeCompare(bName);
+    });
+    if (recurringEmpty) recurringEmpty.style.display = entries.length ? 'none' : 'block';
+    entries.forEach((entry) => {
+      const sanitized = sanitizeRecurringEntry(entry);
+      if (!sanitized) return;
+      const card = document.createElement('div');
+      card.className = 'ts-card recurring-entry-card';
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+      const title = document.createElement('strong');
+      title.textContent = sanitized.label || 'Untitled schedule';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'ghost';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => {
+        setRecurringFormDraft(sanitized);
+      });
+      header.appendChild(title);
+      header.appendChild(editBtn);
+      const summary = document.createElement('p');
+      summary.className = 'ts-note';
+      summary.textContent = describeRecurringEntry(sanitized);
+      const meta = document.createElement('p');
+      meta.className = 'ts-note';
+      const hoursText = `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs`;
+      const contractName = getContractName(sanitized.contract_id) || 'No contract';
+      const hourTypeName = sanitized.hour_type_id ? getHourTypeName(sanitized.hour_type_id) : 'Default hour type';
+      meta.textContent = `${hoursText} • ${contractName} • ${hourTypeName}`;
+      const generated = document.createElement('p');
+      generated.className = 'ts-note';
+      generated.textContent = sanitized.generated_until
+        ? `Synced through ${sanitized.generated_until}`
+        : 'Not generated yet';
+      card.append(header, summary, meta, generated);
+      if (sanitized.warning_message) {
+        const warn = document.createElement('div');
+        warn.className = 'ts-warning';
+        warn.textContent = sanitized.warning_message;
+        card.appendChild(warn);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'ts-gap-sm';
+      actions.style.display = 'flex';
+      actions.style.justifyContent = 'space-between';
+      actions.style.alignItems = 'center';
+      actions.style.marginTop = '8px';
+
+      const hasFuture = hasFutureRecurringEntries(sanitized.id);
+      const statusEl = document.createElement('div');
+      statusEl.className = 'recurring-entry-status ts-note';
+      statusEl.style.flex = '1';
+      statusEl.style.display = state.recurringEntriesSyncing ? 'block' : 'none';
+      statusEl.textContent = state.recurringEntriesSyncing ? 'Syncing…' : '';
+
+      const deleteFutureBtn = document.createElement('button');
+      deleteFutureBtn.type = 'button';
+      deleteFutureBtn.className = 'ghost';
+      deleteFutureBtn.textContent = 'Delete Future Entries';
+      deleteFutureBtn.disabled = !hasFuture;
+      deleteFutureBtn.title = hasFuture ? 'Remove upcoming entries created by this schedule' : 'No future entries to delete';
+      deleteFutureBtn.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        if (deleteFutureBtn.disabled) return;
+        await promptDeleteFutureEntries(sanitized.id);
+      });
+
+      actions.appendChild(statusEl);
+      actions.appendChild(deleteFutureBtn);
+      card.appendChild(actions);
+
+      recurringList.appendChild(card);
+    });
+    updateRecurringSyncStatus();
+  }
+
+  async function promptDeleteFutureEntries(recurrenceId) {
+    if (!recurrenceId) return;
+    const confirmed = await customConfirm(
+      'Delete all future entries generated by this schedule? This cannot be undone.',
+      { danger: true, okText: 'Delete Future Entries', cancelText: 'Cancel' }
+    );
+    if (!confirmed) return;
+    try {
+      await deleteFutureEntriesForSchedule(recurrenceId);
+      setStatus('Future entries deleted', 'success');
+    } catch (error) {
+      // deleteFutureEntriesForSchedule already handles error status
+    }
+  }
+
+  function updateRecurringSyncStatus() {
+    if (!recurringList) return;
+    const cards = recurringList.querySelectorAll('.recurring-entry-card');
+    cards.forEach((card) => {
+      const statusEl = card.querySelector('.recurring-entry-status');
+      if (statusEl) {
+        statusEl.textContent = state.recurringEntriesSyncing ? 'Syncing…' : '';
+        statusEl.style.display = state.recurringEntriesSyncing ? 'block' : 'none';
+      }
+    });
+  }
+
+  function populateRecurringContractOptions(selectedId) {
+    if (!recurringContractSelect) return;
+    recurringContractSelect.innerHTML = '';
+    const contracts = (state.contracts || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (!contracts.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Add a contract first';
+      recurringContractSelect.appendChild(opt);
+      recurringContractSelect.disabled = true;
+      return;
+    }
+    recurringContractSelect.disabled = false;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select contract';
+    recurringContractSelect.appendChild(placeholder);
+    contracts.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      recurringContractSelect.appendChild(opt);
+    });
+    const resolved = selectedId && state.contractMap[selectedId] ? selectedId : '';
+    recurringContractSelect.value = resolved;
+  }
+
+  function populateRecurringHourTypeOptions(selectedId) {
+    if (!recurringHourTypeSelect) return;
+    recurringHourTypeSelect.innerHTML = '';
+    const hourTypes = (state.hourTypes || []).slice();
+    if (!hourTypes.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Default hour type';
+      recurringHourTypeSelect.appendChild(opt);
+      recurringHourTypeSelect.value = '';
+      return;
+    }
+    hourTypes.forEach((type) => {
+      const opt = document.createElement('option');
+      opt.value = type.id;
+      opt.textContent = type.name;
+      recurringHourTypeSelect.appendChild(opt);
+    });
+    const resolved = selectedId && state.hourTypeMap[selectedId]
+      ? selectedId
+      : (hourTypes.find((type) => type.is_default) || hourTypes[0]).id;
+    recurringHourTypeSelect.value = resolved || '';
+  }
+
+  function updateRecurringHourTypeVisibility() {
+    if (!recurringHourTypeRow) return;
+    const hourTypesEnabled = !!(getFeatureFlag('hour_types') && state.hourTypes.length > 1);
+    recurringHourTypeRow.style.display = hourTypesEnabled ? 'block' : 'none';
+    if (recurringHourTypeSelect) recurringHourTypeSelect.disabled = !hourTypesEnabled;
+  }
+
+
+  function setRecurringFormDraft(draft) {
+    const sanitized = sanitizeRecurringEntry(draft || defaultRecurringDraft());
+    state.recurringEntryForm.draft = sanitized;
+    state.recurringEntryForm.editingId = sanitized.id || '';
+    state.recurringEntryForm.deleteConfirm = false;
+    if (recurringFormTitle) recurringFormTitle.textContent = sanitized.id ? 'Edit Schedule' : 'New Schedule';
+    if (recurringFormSubtitle) recurringFormSubtitle.textContent = describeRecurringEntry(sanitized);
+    if (recurringDeleteBtn) recurringDeleteBtn.style.display = sanitized.id ? 'inline-flex' : 'none';
+    if (recurringSaveBtn) recurringSaveBtn.textContent = sanitized.id ? 'Edit Schedule' : 'Add Schedule';
+    if (recurringNameInput) recurringNameInput.value = sanitized.label || '';
+    if (recurringHoursInput) {
+      recurringHoursInput.value = sanitized.duration_minutes ? formatDecimalHours(sanitized.duration_minutes / 60) : '';
+    }
+    if (recurringStartDateInput) recurringStartDateInput.value = sanitized.start_date || todayIso();
+    if (recurringEndDateInput) recurringEndDateInput.value = sanitized.end_date || '';
+    if (recurringFrequencySelect) recurringFrequencySelect.value = sanitized.recurrence_type;
+    if (recurringWeeklyIntervalInput) recurringWeeklyIntervalInput.value = sanitized.weekly_interval || 1;
+    if (recurringMonthlyIntervalInput) recurringMonthlyIntervalInput.value = sanitized.monthly_interval || 1;
+    if (recurringMonthlyDayInput) recurringMonthlyDayInput.value = sanitized.monthly_day || 1;
+    if (recurringMonthlyWeekSelect) recurringMonthlyWeekSelect.value = sanitized.monthly_week || 1;
+    if (recurringMonthlyWeekdaySelect) recurringMonthlyWeekdaySelect.value = sanitized.monthly_weekday || 1;
+    if (recurringMonthlyModeSelect) recurringMonthlyModeSelect.value = sanitized.monthly_mode || 'day_of_month';
+    populateRecurringContractOptions(sanitized.contract_id);
+    populateRecurringHourTypeOptions(sanitized.hour_type_id);
+    const weekdays = (sanitized.weekly_weekdays && sanitized.weekly_weekdays.length) ? sanitized.weekly_weekdays : [1];
+    sanitized.weekly_weekdays = weekdays;
+    updateRecurringFrequencyVisibility();
+    updateRecurringMonthlyModeVisibility();
+    setRecurringWarning(sanitized.warning_message || '');
+    updateRecurringGeneratedSummary(sanitized.generated_until);
+    toggleRecurringDeleteConfirm(false);
+    updateRecurringFormFromInputs();
+    setRecurringFormError('');
+  }
+
+  function getRecurringFormValues() {
+    const recurrenceType = recurringFrequencySelect ? recurringFrequencySelect.value : 'weekly';
+    const weeklyInterval = recurringWeeklyIntervalInput ? Number(recurringWeeklyIntervalInput.value) : 1;
+    const monthlyInterval = recurringMonthlyIntervalInput ? Number(recurringMonthlyIntervalInput.value) : 1;
+    const weeklyDays = [];
+    const hoursValue = recurringHoursInput ? Number(recurringHoursInput.value) : 0;
+    const durationMinutes = Number.isFinite(hoursValue) && hoursValue > 0 ? Math.round(hoursValue * 60) : 0;
+    const monthlyMode = recurringMonthlyModeSelect ? recurringMonthlyModeSelect.value : 'day_of_month';
+    const values = {
+      id: state.recurringEntryForm.editingId || '',
+      label: recurringNameInput ? recurringNameInput.value : '',
+      recurrence_type: recurrenceType,
+      weekly_interval: weeklyInterval,
+      weekly_weekdays: weeklyDays,
+      monthly_interval: monthlyInterval,
+      monthly_mode: monthlyMode,
+      monthly_day: recurringMonthlyDayInput ? Number(recurringMonthlyDayInput.value) : 1,
+      monthly_week: recurringMonthlyWeekSelect ? Number(recurringMonthlyWeekSelect.value) : 1,
+      monthly_weekday: recurringMonthlyWeekdaySelect ? Number(recurringMonthlyWeekdaySelect.value) : 1,
+      duration_minutes: durationMinutes,
+      contract_id: recurringContractSelect ? recurringContractSelect.value : '',
+      hour_type_id: recurringHourTypeSelect ? recurringHourTypeSelect.value : '',
+      start_date: recurringStartDateInput ? recurringStartDateInput.value : '',
+      end_date: recurringEndDateInput ? recurringEndDateInput.value : '',
+      generated_until: state.recurringEntryForm.draft ? state.recurringEntryForm.draft.generated_until : '',
+      warning_message: state.recurringEntryForm.draft ? state.recurringEntryForm.draft.warning_message : ''
+    };
+    if (recurrenceType === 'weekly') {
+      const startIso = isoDate(recurringStartDateInput ? recurringStartDateInput.value : '');
+      const startDate = parseIsoDate(startIso);
+      const weekday = startDate && Number.isFinite(startDate.getTime())
+        ? startDate.getDay()
+        : ((state.recurringEntryForm.draft && state.recurringEntryForm.draft.weekly_weekdays && state.recurringEntryForm.draft.weekly_weekdays[0]) || 1);
+      values.weekly_weekdays = [weekday];
+    } else if (!values.weekly_weekdays.length && state.recurringEntryForm.draft && Array.isArray(state.recurringEntryForm.draft.weekly_weekdays)) {
+      values.weekly_weekdays = state.recurringEntryForm.draft.weekly_weekdays.slice();
+    }
+    return sanitizeRecurringEntry(values);
+  }
+
+  function updateRecurringFormFromInputs() {
+    const values = getRecurringFormValues();
+    state.recurringEntryForm.draft = values;
+    if (recurringFormSubtitle) recurringFormSubtitle.textContent = describeRecurringEntry(values);
+    renderRecurringPreview(values);
+    setRecurringFormError('');
+  }
+
+  function updateRecurringFrequencyVisibility() {
+    if (recurringWeeklyFields) recurringWeeklyFields.style.display = (recurringFrequencySelect && recurringFrequencySelect.value === 'weekly') ? 'block' : 'none';
+    if (recurringMonthlyFields) recurringMonthlyFields.style.display = (recurringFrequencySelect && recurringFrequencySelect.value === 'monthly') ? 'block' : 'none';
+  }
+
+  function updateRecurringMonthlyModeVisibility() {
+    const mode = recurringMonthlyModeSelect ? recurringMonthlyModeSelect.value : 'day_of_month';
+    if (recurringMonthlyDayWrapper) recurringMonthlyDayWrapper.style.display = mode === 'day_of_month' ? 'block' : 'none';
+    if (recurringMonthlyWeekWrapper) recurringMonthlyWeekWrapper.style.display = mode === 'weekday_of_month' ? 'block' : 'none';
+  }
+
+  function renderRecurringPreview(values) {
+    if (!recurringPreviewNote || !recurringPreviewList) return;
+    const preview = buildRecurringPreview(values, 5);
+    if (!preview.length) {
+      recurringPreviewNote.style.display = 'none';
+      recurringPreviewList.innerHTML = '';
+      return;
+    }
+    recurringPreviewNote.style.display = 'block';
+    recurringPreviewList.innerHTML = '';
+    preview.forEach((iso) => {
+      const li = document.createElement('li');
+      li.textContent = formatFriendlyDate(iso);
+      recurringPreviewList.appendChild(li);
+    });
+  }
+
+  function formatFriendlyDate(dateIso) {
+    const date = parseIsoDate(dateIso);
+    if (!date) return dateIso || '';
+    return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function setRecurringWarning(message) {
+    if (!recurringFormWarning) return;
+    recurringFormWarning.style.display = message ? 'block' : 'none';
+    recurringFormWarning.textContent = message || '';
+  }
+
+  function updateRecurringGeneratedSummary(dateIso) {
+    if (!recurringGeneratedSummary) return;
+    recurringGeneratedSummary.style.display = 'block';
+    recurringGeneratedSummary.textContent = dateIso
+      ? `Synced through ${dateIso}`
+      : 'No entries generated yet.';
+  }
+
+  function toggleRecurringDeleteConfirm(show) {
+    if (!recurringDeleteConfirm) return;
+    state.recurringEntryForm.deleteConfirm = !!show;
+    recurringDeleteConfirm.style.display = show ? 'block' : 'none';
+    if (recurringDeleteBtn) recurringDeleteBtn.style.display = show ? 'none' : (state.recurringEntryForm.editingId ? 'inline-flex' : 'none');
+    if (recurringSaveBtn) recurringSaveBtn.disabled = !!show;
+    if (recurringCancelBtn) recurringCancelBtn.disabled = !!show;
+  }
+
+  function handleRecurringFormBusy(isBusy, label) {
+    if (!recurringSaveBtn) return;
+    recurringSaveBtn.disabled = isBusy;
+    recurringSaveBtn.textContent = isBusy ? 'Working…' : label;
+  }
+
+  function runRecurringSync(successMessage, shouldDeleteFutureEntries, recurrenceIdForCleanup) {
+    const cleanupNeeded = !!(shouldDeleteFutureEntries && recurrenceIdForCleanup);
+    const cleanup = cleanupNeeded
+      ? deleteFutureEntriesForSchedule(recurrenceIdForCleanup, { silent: true }).catch((error) => {
+        const message = (error && error.message) || 'Failed to delete future entries';
+        setStatus(message, 'error');
+        throw error;
+      })
+      : Promise.resolve();
+    return cleanup.then(() => new Promise((resolve, reject) => {
+      syncRecurringEntries({
+        silent: !successMessage,
+        onComplete: () => {
+          if (successMessage) {
+            setStatus(successMessage, 'success');
+          }
+          resolve();
+        },
+        onError: (message) => {
+          const errorMessage = message || 'Failed to sync reoccurring entries.';
+          if (successMessage) {
+            setStatus(errorMessage, 'error');
+          }
+          reject(new Error(errorMessage));
+        }
+      });
+    }));
+  }
+
+  function openRecurringModal() {
+    if (!recurringModal) return;
+    showModal(recurringModal);
+    renderRecurringEntriesList();
+    if (!state.recurringEntriesInitialized && !state.recurringEntriesSyncing) {
+      syncRecurringEntries({ silent: true });
+    }
+  }
+
+  function closeRecurringModal() {
+    if (!recurringModal) return;
+    hideModal(recurringModal);
+    toggleRecurringDeleteConfirm(false);
+    setRecurringFormError('');
+  }
+
+  function validateRecurringForm(draft) {
+    if (!draft.label) return 'Name is required.';
+    if (!draft.duration_minutes || draft.duration_minutes <= 0) return 'Hours must be greater than zero.';
+    if (!draft.contract_id) return 'Select a contract.';
+    if (!draft.start_date) return 'Start date is required.';
+    if (draft.end_date && draft.end_date < draft.start_date) return 'End date must be on or after the start date.';
+    if (draft.recurrence_type === 'weekly' && (!draft.weekly_weekdays || !draft.weekly_weekdays.length)) {
+      return 'Choose at least one weekday.';
+    }
+    return '';
+  }
+
+  function setRecurringFormError(message) {
+    if (!recurringFormError) return;
+    recurringFormError.style.display = message ? 'block' : 'none';
+    recurringFormError.textContent = message || '';
+  }
+
+  function syncRecurringEntries(options) {
+    const opts = options || {};
+    if (!state.featureFlags.recurring_time_entries || !state.featureFlags.recurring_time_entries.enabled) return;
+    if (state.recurringEntriesSyncing) return;
+    state.recurringEntriesSyncing = true;
+    updateRecurringSyncStatus();
+    if (!opts.silent) setStatus('Syncing reoccurring entries...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        state.recurringEntriesSyncing = false;
+        updateRecurringSyncStatus();
+        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        state.recurringTimeEntries = entries;
+        state.recurringEntriesInitialized = true;
+        saveCache();
+        renderRecurringEntriesList();
+        if (state.recurringEntryForm.editingId) {
+          const match = entries.find((item) => item.id === state.recurringEntryForm.editingId);
+          if (match) {
+            setRecurringFormDraft(match);
+          }
+        }
+        const finish = () => {
+          if (typeof opts.onComplete === 'function') {
+            opts.onComplete();
+          } else if (!opts.silent) {
+            setStatus('Reoccurring entries refreshed', 'success');
+          }
+        };
+        if (res && Number(res.generatedEntries) > 0) {
+          refreshEntriesFromServer(finish);
+        } else {
+          finish();
+        }
+      })
+      .withFailureHandler((error) => {
+        state.recurringEntriesSyncing = false;
+        updateRecurringSyncStatus();
+        const message = error && error.message ? error.message : 'Failed to sync reoccurring entries.';
+        if (typeof opts.onError === 'function') {
+          opts.onError(message);
+        } else if (!opts.silent) {
+          setStatus(message, 'error');
+        }
+      })
+      .api_syncRecurringTimeEntries({});
+  }
+
+  function refreshEntriesFromServer(onComplete) {
+    entriesSyncInFlight = true;
+    google.script.run
+      .withSuccessHandler((entries) => {
+        entriesSyncInFlight = false;
+        const sanitized = (entries || []).map(sanitizeEntry);
+        mergeEntriesWithServerEntries(sanitized);
+        state.entriesLoaded = true;
+        saveCache();
+        renderEntries();
+        if (typeof onComplete === 'function') onComplete();
+      })
+      .withFailureHandler(() => {
+        entriesSyncInFlight = false;
+        if (typeof onComplete === 'function') onComplete();
+        setStatus('Entries sync failed', 'error');
+      })
+      .api_getEntries({});
+  }
+
+  async function handleRecurringSave() {
+    const draft = getRecurringFormValues();
+    const error = validateRecurringForm(draft);
+    if (error) {
+      setRecurringFormError(error);
+      return;
+    }
+    setRecurringFormError('');
+    const isEdit = !!draft.id;
+    let deleteFutureEntries = false;
+    if (isEdit && hasFutureRecurringEntries(draft.id)) {
+      deleteFutureEntries = await customConfirm(
+        'Delete future entries generated by this schedule?',
+        {
+          okText: 'Delete Future Entries',
+          cancelText: 'Keep entries',
+          danger: true
+        }
+      );
+    }
+    const previousEntries = cloneRecurringEntries(state.recurringTimeEntries);
+    const previousDraft = state.recurringEntryForm.draft ? { ...state.recurringEntryForm.draft } : null;
+    const previousEditingId = state.recurringEntryForm.editingId;
+    let optimisticId = draft.id;
+    if (!isEdit) {
+      optimisticId = `temp_schedule_${Date.now()}`;
+    }
+    const optimisticEntry = { ...draft, id: optimisticId };
+    upsertRecurringEntryLocal(optimisticEntry);
+    state.recurringEntriesInitialized = true;
+    renderRecurringEntriesList();
+    setRecurringFormDraft(optimisticEntry);
+    const baseLabel = isEdit ? 'Edit Schedule' : 'Add Schedule';
+    handleRecurringFormBusy(true, baseLabel);
+    setStatus(isEdit ? 'Updating schedule...' : 'Saving schedule...', 'warn');
+    google.script.run
+      .withSuccessHandler(async (res) => {
+        handleRecurringFormBusy(false, baseLabel);
+        if (res && res.success) {
+          const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+          state.recurringTimeEntries = entries;
+          state.recurringEntriesInitialized = true;
+          saveCache();
+          renderRecurringEntriesList();
+          const updated = res.entry ? sanitizeRecurringEntry(res.entry) : defaultRecurringDraft();
+          if (updated) {
+            setRecurringFormDraft(updated);
+          } else {
+            setRecurringFormDraft(defaultRecurringDraft());
+          }
+          const recurrenceId = (res.entry && res.entry.id) || draft.id || '';
+          try {
+            await runRecurringSync(
+              isEdit ? 'Schedule updated' : 'Schedule saved',
+              deleteFutureEntries,
+              recurrenceId
+            );
+          } catch (e) {
+            // runRecurringSync already surfaced an error message
+          }
+        } else {
+          const message = res && res.error ? res.error : 'Failed to save schedule.';
+          state.recurringTimeEntries = previousEntries;
+          renderRecurringEntriesList();
+          if (previousDraft) {
+            setRecurringFormDraft(previousDraft);
+            state.recurringEntryForm.editingId = previousEditingId;
+          }
+          setRecurringFormError(message);
+          setStatus('Schedule save failed', 'error');
+        }
+      })
+      .withFailureHandler((error) => {
+        handleRecurringFormBusy(false, baseLabel);
+        state.recurringTimeEntries = previousEntries;
+        renderRecurringEntriesList();
+        if (previousDraft) {
+          setRecurringFormDraft(previousDraft);
+          state.recurringEntryForm.editingId = previousEditingId;
+        }
+        const message = error && error.message ? error.message : 'Failed to save schedule.';
+        setRecurringFormError(message);
+        setStatus('Schedule save failed', 'error');
+      })
+      .api_upsertRecurringTimeEntry({
+        ...draft
+      });
+  }
+
+  async function handleRecurringDelete() {
+    const id = state.recurringEntryForm.editingId;
+    if (!id) return;
+    let deleteFutureEntries = false;
+    if (hasFutureRecurringEntries(id)) {
+      deleteFutureEntries = await customConfirm(
+        'Delete future entries generated by this schedule?',
+        {
+          okText: 'Delete Future Entries',
+          cancelText: 'Keep entries',
+          danger: true
+        }
+      );
+    }
+    if (recurringDeleteConfirmBtn) recurringDeleteConfirmBtn.disabled = true;
+    const previousEntries = cloneRecurringEntries(state.recurringTimeEntries);
+    const previousDraft = state.recurringEntryForm.draft ? { ...state.recurringEntryForm.draft } : null;
+    const previousEditingId = state.recurringEntryForm.editingId;
+    removeRecurringEntryLocal(id);
+    renderRecurringEntriesList();
+    setRecurringFormDraft(defaultRecurringDraft());
+    setStatus('Deleting schedule...', 'warn');
+    google.script.run
+      .withSuccessHandler(async (res) => {
+        if (recurringDeleteConfirmBtn) recurringDeleteConfirmBtn.disabled = false;
+        toggleRecurringDeleteConfirm(false);
+        state.recurringTimeEntries = Array.isArray(res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        saveCache();
+        renderRecurringEntriesList();
+        setRecurringFormDraft(defaultRecurringDraft());
+        try {
+          await runRecurringSync('Schedule deleted', deleteFutureEntries, id);
+        } catch (e) {
+          // Already surfaced
+        }
+      })
+      .withFailureHandler((error) => {
+        if (recurringDeleteConfirmBtn) recurringDeleteConfirmBtn.disabled = false;
+        state.recurringTimeEntries = previousEntries;
+        renderRecurringEntriesList();
+        if (previousDraft) {
+          setRecurringFormDraft(previousDraft);
+          state.recurringEntryForm.editingId = previousEditingId;
+        }
+        const message = error && error.message ? error.message : 'Failed to delete schedule.';
+        setRecurringFormError(message);
+        setStatus('Failed to delete schedule', 'error');
+      })
+      .api_deleteRecurringTimeEntry(id);
+  }
+
+  function editRecurringEntry(entryId) {
+    if (!entryId) return;
+    const match = state.recurringTimeEntries.find((item) => item.id === entryId);
+    if (match) {
+      setRecurringFormDraft(match);
+    }
+  }
+
   setupModalHandlers();
 
   // Initialize default entries after all functions are defined
@@ -16136,6 +17111,8 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((hourTypes) => {
         state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
         updateHourTypeMap();
+        populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
+        updateRecurringHourTypeVisibility();
         ensureInvoiceFormOptions();
         if (getFeatureFlag('enable_invoices')) {
           renderInvoiceDefaults();
@@ -17192,6 +18169,7 @@ function updateDeductionFormVisibility() {
     if (shouldShow) {
       populateHourTypeOptions();
     }
+    updateRecurringHourTypeVisibility();
   }
 
   function populateHourTypeOptions() {
