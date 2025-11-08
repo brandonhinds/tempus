@@ -237,6 +237,10 @@ let ratePreviewInputSyncing = false;
     currentTab: 'manual',
     calendarFilteredHourTypes: null,
     expectedHoursSummary: null,
+    potentialIncomeScenarios: {},
+    potentialIncomeTaxRequests: {},
+    potentialIncomeContextKey: '',
+    potentialIncomeStats: null,
     companyTrackingEnabled: false,
     companyBasQuarterly: false,
     basCurrentFy: null,
@@ -7329,6 +7333,17 @@ function updateDeductionFormVisibility() {
   const incomeActualSuperValueEl = document.getElementById('income-actual-super-value');
   const incomeActualTaxValueEl = document.getElementById('income-actual-tax-value');
   const incomeActualNetValueEl = document.getElementById('income-actual-net-value');
+  const potentialNetDivider = document.getElementById('potential-net-divider');
+  const incomePotentialNetRow = document.getElementById('income-potential-net-row');
+  const incomeEstimatedStandardRow = document.getElementById('income-estimated-standard-row');
+  const incomeEstimatedProjectedRow = document.getElementById('income-estimated-projected-row');
+  const incomeHoursBalanceStandardRow = document.getElementById('income-hours-balance-standard-row');
+  const incomeHoursBalanceProjectedRow = document.getElementById('income-hours-balance-projected-row');
+  const incomePotentialNetEl = document.getElementById('income-potential-net');
+  const incomeEstimatedStandardNetEl = document.getElementById('income-estimated-standard-net');
+  const incomeEstimatedProjectedNetEl = document.getElementById('income-estimated-projected-net');
+  const incomeHoursBalanceStandardEl = document.getElementById('income-hours-balance-standard');
+  const incomeHoursBalanceProjectedEl = document.getElementById('income-hours-balance-projected');
   const btnCompanyExpensesDetails = document.getElementById('btn-company-expenses-details');
   const btnDeductionsDetails = document.getElementById('btn-deductions-details');
   const modalMonthlyDeductions = document.getElementById('modal-monthly-deductions');
@@ -7755,6 +7770,7 @@ function updateDeductionFormVisibility() {
 
   function renderContractDetail() {
     if (!contractDetailEl) return;
+    updatePotentialIncomeSection(state.incomeSummary);
     contractDetailEl.innerHTML = '';
     if (state.contractFormMode === 'create') {
       if (contractSelector) contractSelector.value = '';
@@ -10509,7 +10525,14 @@ function updateDeductionFormVisibility() {
       netIncome: taxableIncome > 0 ? null : taxableIncome,
       requestKey,
       rateCalcHours,
-      rateCalcHourType
+      rateCalcHourType,
+      deductionSnapshot: {
+        salarySacrifice,
+        companyStandardTotal: deductionTotals.companyStandardTotal,
+        companyGstTotal: deductionTotals.companyGstTotal,
+        extraSuperFlat: deductionTotals.extraSuperFlat,
+        extraSuperPercentRate: deductionTotals.extraSuperPercentRate
+      }
     };
   }
   function applyIncomeBreakdownVisibility() {
@@ -10569,6 +10592,7 @@ function updateDeductionFormVisibility() {
       if (hourlyRateNetEl) hourlyRateNetEl.textContent = '--';
       if (hourlyRateGrossLabel) hourlyRateGrossLabel.textContent = '--';
       if (hourlyRateNetLabel) hourlyRateNetLabel.textContent = '--';
+      hidePotentialIncomeSection();
       return;
     }
     const netValue = summary.netIncome != null ? summary.netIncome : summary.taxableIncome;
@@ -10762,6 +10786,376 @@ function updateDeductionFormVisibility() {
       if (incomeActualTaxValueEl) incomeActualTaxValueEl.textContent = '';
       if (incomeActualNetValueEl) incomeActualNetValueEl.textContent = '';
     }
+
+    updatePotentialIncomeSection(summary);
+  }
+
+  function updatePotentialIncomeSection(summary) {
+    if (!potentialNetDivider || !incomePotentialNetRow) return;
+    if (!summary || !state.calendar) {
+      hidePotentialIncomeSection();
+      return;
+    }
+    const { year, month } = state.calendar;
+    if (!Number.isInteger(year) || !Number.isInteger(month)) {
+      hidePotentialIncomeSection();
+      return;
+    }
+    const contract = getSelectedPotentialContract();
+    if (!contract || !(Number(contract.hourly_rate) > 0)) {
+      hidePotentialIncomeSection();
+      return;
+    }
+    const contextKey = `${year}-${month}-${contract.id}`;
+    if (state.potentialIncomeContextKey !== contextKey) {
+      state.potentialIncomeContextKey = contextKey;
+      state.potentialIncomeScenarios = {};
+      state.potentialIncomeTaxRequests = {};
+    }
+    const stats = buildPotentialIncomeStats(contract, summary, year, month);
+    state.potentialIncomeStats = stats;
+    if (!stats) {
+      hidePotentialIncomeSection();
+      return;
+    }
+    applyPotentialIncomeDisplay(contract, stats, summary, year, month);
+  }
+
+  function getSelectedPotentialContract() {
+    if (!state.selectedContractId) return null;
+    return getContractById(state.selectedContractId) || null;
+  }
+
+  function hidePotentialIncomeSection() {
+    state.potentialIncomeStats = null;
+    const rows = [
+      potentialNetDivider,
+      incomePotentialNetRow,
+      incomeEstimatedStandardRow,
+      incomeEstimatedProjectedRow,
+      incomeHoursBalanceStandardRow,
+      incomeHoursBalanceProjectedRow
+    ];
+    rows.forEach((row) => {
+      if (row) row.hidden = true;
+    });
+    const placeholders = [
+      incomePotentialNetEl,
+      incomeEstimatedStandardNetEl,
+      incomeEstimatedProjectedNetEl,
+      incomeHoursBalanceStandardEl,
+      incomeHoursBalanceProjectedEl
+    ];
+    placeholders.forEach((el) => {
+      if (el) el.textContent = '--';
+    });
+  }
+
+  function buildPotentialIncomeStats(contract, summary, year, month) {
+    const standardHoursPerDay = Number(contract.standard_hours_per_day || 7.5);
+    if (!(standardHoursPerDay > 0)) return null;
+    const monthStart = startOfDay(new Date(year, month, 1));
+    const monthEnd = startOfDay(new Date(year, month + 1, 0));
+    const contractStart = contract.start_date ? parseIsoDate(contract.start_date) : null;
+    const contractEnd = contract.end_date ? parseIsoDate(contract.end_date) : null;
+    const periodStart = contractStart && contractStart > monthStart ? contractStart : monthStart;
+    const boundedContractEnd = contractEnd && contractEnd < monthEnd ? contractEnd : monthEnd;
+    if (boundedContractEnd < periodStart) return null;
+    const businessDays = collectBusinessDays(periodStart, boundedContractEnd, !!contract.include_weekends);
+    if (!businessDays.length) return null;
+
+    const monthEntries = entriesForMonth(year, month);
+    const today = startOfDay(new Date());
+    const nonIncomeMinutesByDay = {};
+    let totalIncomeMinutes = 0;
+
+    monthEntries.forEach((entry) => {
+      let resolvedId = entry._resolvedContractId;
+      if (!resolvedId) {
+        const resolved = resolveContractForEntry(entry);
+        if (resolved) {
+          resolvedId = resolved.id;
+          entry._resolvedContractId = resolved.id;
+        }
+      }
+      if (resolvedId !== contract.id) return;
+      const dateIso = getEntryDateIso(entry);
+      if (!dateIso) return;
+      const minutes = Number(entry.duration_minutes) || 0;
+      if (entryContributesToIncome(entry)) {
+        totalIncomeMinutes += minutes;
+      } else {
+        nonIncomeMinutesByDay[dateIso] = (nonIncomeMinutesByDay[dateIso] || 0) + minutes;
+      }
+    });
+
+    const actualIncomeHours = totalIncomeMinutes / 60;
+    let availableFractionTotal = 0;
+    let availableFractionFuture = 0;
+    businessDays.forEach((dayIso) => {
+      const nonIncomeMinutes = nonIncomeMinutesByDay[dayIso] || 0;
+      const nonIncomeHours = nonIncomeMinutes / 60;
+      const blockFraction = Math.min(1, standardHoursPerDay > 0 ? (nonIncomeHours / standardHoursPerDay) : 0);
+      const availableFraction = Math.max(0, 1 - blockFraction);
+      if (availableFraction <= 0) return;
+      availableFractionTotal += availableFraction;
+      const dayDate = parseIsoDate(dayIso);
+      if (dayDate > today) {
+        availableFractionFuture += availableFraction;
+      }
+    });
+    if (availableFractionTotal <= 0) return null;
+
+    const standardPotentialHours = standardHoursPerDay * availableFractionTotal;
+    const remainingStandardHours = standardHoursPerDay * availableFractionFuture;
+    const projectedAverageDailyHours = getProjectedAverageDailyHoursForContract(
+      contract,
+      actualIncomeHours,
+      availableFractionTotal,
+      year,
+      month
+    );
+    const projectedPotentialHours = projectedAverageDailyHours * availableFractionTotal;
+    const projectedRemainingHours = projectedAverageDailyHours * availableFractionFuture;
+
+    const standardScenarioHours = actualIncomeHours + remainingStandardHours;
+    const projectedScenarioHours = actualIncomeHours + projectedRemainingHours;
+    const standardHoursBalance = standardScenarioHours - standardPotentialHours;
+    const projectedHoursBalance = projectedScenarioHours - projectedPotentialHours;
+
+    return {
+      standardHoursPerDay,
+      standardPotentialHours,
+      remainingStandardHours,
+      projectedPotentialHours,
+      projectedRemainingHours,
+      standardScenarioHours,
+      projectedScenarioHours,
+      standardHoursBalance,
+      projectedHoursBalance,
+      actualIncomeHours,
+      periodStart: monthStart
+    };
+  }
+
+  function getProjectedAverageDailyHoursForContract(contract, actualIncomeHours, availableFractionTotal, year, month) {
+    const monthKey = monthKeyFor(year, month);
+    if (
+      state.expectedHoursSummary &&
+      state.expectedHoursSummary.monthKey === monthKey &&
+      Array.isArray(state.expectedHoursSummary.contracts)
+    ) {
+      const match = state.expectedHoursSummary.contracts.find((c) => c.contractId === contract.id);
+      if (match && Number.isFinite(Number(match.projectedAverageDailyHours))) {
+        return Number(match.projectedAverageDailyHours);
+      }
+    }
+    const evaluatedDays = Math.max(availableFractionTotal, 1);
+    const currentMonthAverage = actualIncomeHours / evaluatedDays;
+    const trendResult = calculateTrendAverage(
+      contract,
+      state.entries,
+      getTrendMethod(),
+      month,
+      year,
+      { average: currentMonthAverage, businessDays: evaluatedDays }
+    );
+    if (trendResult && Number.isFinite(Number(trendResult.averageDailyHours))) {
+      return Number(trendResult.averageDailyHours);
+    }
+    return currentMonthAverage > 0 ? currentMonthAverage : Number(contract.standard_hours_per_day || 7.5);
+  }
+
+  function calculateScenarioAmounts(contract, hours, summary, year, month) {
+    const rate = Number(contract.hourly_rate || 0);
+    if (!(rate > 0) || !(hours > 0)) {
+      return { hours: Math.max(0, hours), taxableIncome: 0, periodStart: startOfDay(new Date(year, month, 1)) };
+    }
+    const deductionSnapshot = summary && summary.deductionSnapshot
+      ? summary.deductionSnapshot
+      : computeMonthlyDeductionTotals(year, month);
+    const periodStart = startOfDay(new Date(year, month, 1));
+    const periodStartStr = periodStart.toISOString().substring(0, 10);
+    const superRate = summary && summary.superRate != null
+      ? summary.superRate
+      : getSuperGuaranteeRateForDate(periodStartStr);
+    const salarySacrifice = deductionSnapshot && deductionSnapshot.salarySacrifice
+      ? deductionSnapshot.salarySacrifice
+      : 0;
+    const extraSuperFlat = deductionSnapshot && deductionSnapshot.extraSuperFlat
+      ? deductionSnapshot.extraSuperFlat
+      : 0;
+    const extraSuperPercentRate = deductionSnapshot && deductionSnapshot.extraSuperPercentRate
+      ? deductionSnapshot.extraSuperPercentRate
+      : 0;
+    const companyEnabled = !!state.companyTrackingEnabled;
+    const companyExpenses = companyEnabled && deductionSnapshot && deductionSnapshot.companyStandardTotal
+      ? deductionSnapshot.companyStandardTotal
+      : 0;
+    const companyExpensesGst = companyEnabled && deductionSnapshot && deductionSnapshot.companyGstTotal
+      ? deductionSnapshot.companyGstTotal
+      : 0;
+    const totalPackage = hours * rate;
+    const companyIncome = companyEnabled ? totalPackage : 0;
+    const invoiceTotal = companyEnabled ? companyIncome * (1 + GST_RATE) : 0;
+    const employeePackage = companyEnabled ? Math.max(0, companyIncome - companyExpenses) : totalPackage;
+    const grossIncome = deriveGrossFromPackage(employeePackage, superRate);
+    const extraSuperPercent = Math.max(0, extraSuperPercentRate) * Math.max(0, grossIncome);
+    const extraSuper = extraSuperFlat + extraSuperPercent;
+    let superBase = Math.max(0, grossIncome - salarySacrifice);
+    const idealSuper = Math.max(0, grossIncome * superRate);
+    let superGuarantee = Math.max(0, superBase * superRate);
+    let superLostDueToDeductions = Math.max(0, idealSuper - superGuarantee);
+    const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions || DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
+    const recoveryMode = state.settings.lost_super_recovery_mode || 'extra_contribution';
+    let recoveredSuper = 0;
+    let recoveredToSuperBase = 0;
+    if (noLostSuperFlag.enabled && superLostDueToDeductions > 0) {
+      if (recoveryMode === 'extra_contribution') {
+        recoveredSuper = superLostDueToDeductions;
+        superLostDueToDeductions = 0;
+      } else if (recoveryMode === 'add_to_taxable') {
+        recoveredToSuperBase = superLostDueToDeductions;
+        superBase = Math.max(0, superBase + recoveredToSuperBase);
+        superGuarantee = Math.max(0, superBase * superRate);
+        superLostDueToDeductions = 0;
+      }
+    }
+    const taxableIncome = Math.max(0, grossIncome - extraSuper - salarySacrifice + recoveredToSuperBase);
+    return {
+      hours,
+      taxableIncome,
+      periodStart,
+      grossIncome,
+      companyIncome,
+      invoiceTotal
+    };
+  }
+
+  function ensurePotentialScenarioState(id) {
+    if (!state.potentialIncomeScenarios) state.potentialIncomeScenarios = {};
+    if (!state.potentialIncomeScenarios[id]) {
+      state.potentialIncomeScenarios[id] = {
+        status: 'idle',
+        netIncome: null,
+        taxableIncome: 0
+      };
+    }
+    return state.potentialIncomeScenarios[id];
+  }
+
+  function requestPotentialScenarioTax(id, taxableIncome, periodStart) {
+    if (!state.potentialIncomeTaxRequests) state.potentialIncomeTaxRequests = {};
+    const scenario = ensurePotentialScenarioState(id);
+    if (!(taxableIncome > 0)) {
+      scenario.status = 'resolved';
+      scenario.netIncome = taxableIncome;
+      scenario.pendingRequestId = null;
+      renderPotentialIncomeFromState();
+      return;
+    }
+    const requestId = `${id}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    scenario.status = 'pending';
+    scenario.pendingRequestId = requestId;
+    scenario.taxableIncome = taxableIncome;
+    state.potentialIncomeTaxRequests[id] = requestId;
+    renderPotentialIncomeFromState();
+    google.script.run
+      .withSuccessHandler((value) => {
+        if (state.potentialIncomeTaxRequests[id] !== requestId) return;
+        const tax = Number(value) || 0;
+        const activeScenario = state.potentialIncomeScenarios && state.potentialIncomeScenarios[id];
+        if (!activeScenario || activeScenario.contextKey !== state.potentialIncomeContextKey) {
+          state.potentialIncomeTaxRequests[id] = null;
+          return;
+        }
+        activeScenario.netIncome = Math.max(0, taxableIncome - tax);
+        activeScenario.status = 'resolved';
+        activeScenario.pendingRequestId = null;
+        state.potentialIncomeTaxRequests[id] = null;
+        renderPotentialIncomeFromState();
+      })
+      .withFailureHandler(() => {
+        if (state.potentialIncomeTaxRequests[id] !== requestId) return;
+        const activeScenario = state.potentialIncomeScenarios && state.potentialIncomeScenarios[id];
+        if (!activeScenario || activeScenario.contextKey !== state.potentialIncomeContextKey) {
+          state.potentialIncomeTaxRequests[id] = null;
+          return;
+        }
+        activeScenario.status = 'error';
+        activeScenario.netIncome = null;
+        activeScenario.pendingRequestId = null;
+        state.potentialIncomeTaxRequests[id] = null;
+        renderPotentialIncomeFromState();
+      })
+      .estimateTax(Number(taxableIncome) || 0, periodStart.toISOString());
+  }
+
+  function applyPotentialIncomeDisplay(contract, stats, summary, year, month) {
+    if (!potentialNetDivider || !incomePotentialNetRow) return;
+    const scenarios = [
+      { id: 'potential', hours: stats.standardPotentialHours, element: incomePotentialNetEl },
+      { id: 'standard', hours: stats.actualIncomeHours + stats.remainingStandardHours, element: incomeEstimatedStandardNetEl },
+      { id: 'projected', hours: stats.actualIncomeHours + stats.projectedRemainingHours, element: incomeEstimatedProjectedNetEl }
+    ];
+    scenarios.forEach(({ id, hours }) => {
+      const scenarioData = calculateScenarioAmounts(contract, hours, summary, year, month);
+      const scenarioState = ensurePotentialScenarioState(id);
+      scenarioState.hours = scenarioData.hours;
+      scenarioState.taxableIncome = scenarioData.taxableIncome;
+      scenarioState.contextKey = state.potentialIncomeContextKey;
+      if (scenarioData.taxableIncome > 0) {
+        requestPotentialScenarioTax(id, scenarioData.taxableIncome, scenarioData.periodStart);
+      } else {
+        scenarioState.status = 'resolved';
+        scenarioState.netIncome = scenarioData.taxableIncome;
+        scenarioState.pendingRequestId = null;
+      }
+    });
+    if (incomeHoursBalanceStandardEl) {
+      incomeHoursBalanceStandardEl.textContent = formatSignedHours(stats.standardHoursBalance);
+    }
+    if (incomeHoursBalanceProjectedEl) {
+      incomeHoursBalanceProjectedEl.textContent = formatSignedHours(stats.projectedHoursBalance);
+    }
+    const rowsToShow = [
+      potentialNetDivider,
+      incomePotentialNetRow,
+      incomeEstimatedStandardRow,
+      incomeEstimatedProjectedRow,
+      incomeHoursBalanceStandardRow,
+      incomeHoursBalanceProjectedRow
+    ];
+    rowsToShow.forEach((row) => {
+      if (row) row.hidden = false;
+    });
+    renderPotentialIncomeFromState();
+  }
+
+  function renderPotentialIncomeFromState() {
+    if (!state.potentialIncomeStats) return;
+    const mapping = [
+      { id: 'potential', el: incomePotentialNetEl },
+      { id: 'standard', el: incomeEstimatedStandardNetEl },
+      { id: 'projected', el: incomeEstimatedProjectedNetEl }
+    ];
+    mapping.forEach(({ id, el }) => {
+      if (!el) return;
+      const scenario = state.potentialIncomeScenarios && state.potentialIncomeScenarios[id];
+      if (!scenario) {
+        el.textContent = '--';
+        return;
+      }
+      if (scenario.status === 'pending') {
+        el.textContent = 'Calculating...';
+      } else if (scenario.status === 'error') {
+        el.textContent = 'Tax unavailable';
+      } else if (scenario.status === 'resolved') {
+        el.textContent = formatCurrency(scenario.netIncome || 0);
+      } else {
+        el.textContent = '--';
+      }
+    });
   }
   function handleTaxSuccess(requestId, taxValue) {
     if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
@@ -11110,29 +11504,6 @@ function updateDeductionFormVisibility() {
       return row;
     };
 
-    const buildVarianceStatus = (variance, prefix) => {
-      if (variance === null || variance === undefined) return null;
-      const rounded = Math.round(variance * 100) / 100;
-      const magnitude = Math.abs(rounded);
-      const statusEl = document.createElement('div');
-      if (rounded > 0.01) {
-        statusEl.className = 'ts-expected-status behind';
-        statusEl.textContent = prefix
-          ? `${prefix} projected over by ${formatDecimalHours(magnitude)} hrs`
-          : `Projected over by ${formatDecimalHours(magnitude)} hrs`;
-      } else if (rounded < -0.01) {
-        statusEl.className = 'ts-expected-status ahead';
-        statusEl.textContent = prefix
-          ? `${prefix} projected under by ${formatDecimalHours(magnitude)} hrs`
-          : `Projected under by ${formatDecimalHours(magnitude)} hrs`;
-      } else {
-        statusEl.className = 'ts-expected-status ontrack';
-        statusEl.textContent = prefix
-          ? `${prefix} projected on target`
-          : 'Projected on target';
-      }
-      return statusEl;
-    };
     const showProjectedAverage = getTrendMethod() !== 'current_month';
     const firstContract = summary.contracts[0];
 
@@ -11203,27 +11574,12 @@ function updateDeductionFormVisibility() {
         : (contract.averageContractHoursThisMonth != null ? 'Not available' : 'Not available for unlimited contracts');
       aggregate.appendChild(makeLine('Projected month variance', projectedVarianceValue));
 
-      const varianceStatus = buildVarianceStatus(contract.projectedVariance);
-      if (varianceStatus) {
-        aggregate.appendChild(varianceStatus);
-      } else {
-        const fallback = document.createElement('div');
-        fallback.className = 'ts-expected-status ontrack';
-        fallback.textContent = contract.averageContractHoursThisMonth != null
-          ? 'Projected variance not available'
-          : 'Projected variance not available for unlimited contracts';
-        aggregate.appendChild(fallback);
-      }
     } else {
       if (summary.baselineContractCount > 0) {
         aggregate.appendChild(makeLine('Average contract hours this month', `${formatDecimalHours(summary.totalAverageContractHoursThisMonth)} hrs`));
       }
       if (hasAggregateVariance) {
         aggregate.appendChild(makeLine('Projected month variance', `${formatSignedHours(summary.overallProjectedVariance)} hrs`));
-        const overallStatus = buildVarianceStatus(summary.overallProjectedVariance, 'Overall');
-        if (overallStatus) {
-          aggregate.appendChild(overallStatus);
-        }
       }
     }
 

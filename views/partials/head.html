@@ -550,12 +550,19 @@
   .ts-hour-types-breakdown[hidden] { display:none; }
   .ts-expected-breakdown { margin-top:var(--space-3); margin-bottom:var(--space-3); border-top:1px solid var(--border); padding-top:var(--space-3); display:flex; flex-direction:column; gap:var(--space-3); opacity:0; animation: fadeIn 0.45s ease-out forwards; }
   .ts-expected-breakdown[hidden] { display:none; }
-  .ts-expected-aggregate { display:flex; flex-direction:column; gap:var(--space-1); font-size:var(--font-size-sm); }
+  .ts-expected-aggregate,
+  .ts-expected-lines {
+    display:grid;
+    grid-template-columns:auto max-content;
+    column-gap:var(--space-4);
+    row-gap:var(--space-2);
+    font-size:var(--font-size-sm);
+  }
   .ts-expected-contract { border:1px solid var(--border); border-radius:10px; padding:var(--space-3); background: var(--panel); display:flex; flex-direction:column; gap:var(--space-2); }
   .ts-expected-contract-header { display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:var(--font-size-sm); }
-  .ts-expected-lines { display:flex; flex-direction:column; gap:var(--space-1); font-size:var(--font-size-sm); }
-  .ts-expected-line { display:flex; justify-content:space-between; gap:var(--space-3); }
-  .ts-expected-line span:last-child { font-weight:600; }
+  .ts-expected-line { display:contents; }
+  .ts-expected-line span:first-child { color:var(--muted); letter-spacing:-0.003em; }
+  .ts-expected-line span:last-child { font-weight:600; letter-spacing:-0.002em; }
   .ts-expected-status { font-weight:600; font-size:13px; }
   .ts-expected-status.ahead { color: var(--success); }
   .ts-expected-status.behind { color: var(--danger); }
