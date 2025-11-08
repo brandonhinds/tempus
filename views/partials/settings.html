@@ -163,6 +163,30 @@
       <input id="set-minimum-end-time" type="time"/>
      </div>
     </div>
+    <div id="monthly-insights-trend-method-col" style="display:none;">
+     <label class="ts-settings-label" for="set-monthly-insights-trend-method">
+      Monthly insights trend calculation
+     </label>
+     <div class="ts-note">
+      Choose how the projected variance badge calculates your average hours per day for trend projection.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-monthly-insights-trend-method">
+       <option value="current_month">
+        Average hours per day of current month
+       </option>
+       <option value="last_3_months">
+        Average hours per day of last 3 months
+       </option>
+       <option value="contract_lifetime">
+        Average hours per day over contract lifetime
+       </option>
+       <option value="same_month_last_year">
+        Average hours per day in this month last year
+       </option>
+      </select>
+     </div>
+    </div>
     <div id="invoice-template-col" style="display:none;">
      <label class="ts-settings-label" for="set-invoice-template">
       Invoice template (Doc ID or path)

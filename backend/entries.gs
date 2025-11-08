@@ -152,12 +152,12 @@ function normalizeEntryObject(entry) {
   var roundInterval = normalizeDurationMinutes(entry.round_interval);
   var durationFromPunches = punches.length ? punchesTotalMinutes(punches) : 0;
   if (punches.length && roundInterval > 1 && durationFromPunches > 0) {
-    durationFromPunches = Math.max(roundInterval, Math.round(durationFromPunches / roundInterval) * roundInterval);
+    durationFromPunches = Math.round(durationFromPunches / roundInterval) * roundInterval;
   }
   if (!punches.length && roundInterval > 1) {
     var rawDuration = normalizeDurationMinutes(entry.duration_minutes);
     if (rawDuration > 0) {
-      rawDuration = Math.max(roundInterval, Math.round(rawDuration / roundInterval) * roundInterval);
+      rawDuration = Math.round(rawDuration / roundInterval) * roundInterval;
       entry.duration_minutes = rawDuration;
     }
   }
