@@ -154,15 +154,35 @@ function api_setFeatureFlag(payload) {
   return { success: true, flags: api_getFeatureFlags() };
 }
 
+function sanitizeEntryDefaults(raw) {
+  var sanitized = { basic: [], advanced: [] };
+  if (raw && Array.isArray(raw.basic)) {
+    sanitized.basic = raw.basic.map(function(item) {
+      var out = item && typeof item === 'object' ? Object.assign({}, item) : {};
+      out.name = out.name ? String(out.name) : '';
+      out.duration_minutes = Number(out.duration_minutes) || 0;
+      out.hour_type_id = out.hour_type_id ? String(out.hour_type_id).trim() : '';
+      return out;
+    });
+  }
+  if (raw && Array.isArray(raw.advanced)) {
+    sanitized.advanced = raw.advanced.map(function(item) {
+      var out = item && typeof item === 'object' ? Object.assign({}, item) : {};
+      out.name = out.name ? String(out.name) : '';
+      out.punches = Array.isArray(out.punches) ? out.punches : [];
+      out.hour_type_id = out.hour_type_id ? String(out.hour_type_id).trim() : '';
+      return out;
+    });
+  }
+  return sanitized;
+}
+
 function api_getEntryDefaults() {
   var settings = api_getSettings();
   var defaultsJson = settings.entry_defaults || '{}';
   try {
-    var defaults = JSON.parse(defaultsJson);
-    return {
-      basic: defaults.basic || [],
-      advanced: defaults.advanced || []
-    };
+    var defaults = JSON.parse(defaultsJson) || {};
+    return sanitizeEntryDefaults(defaults);
   } catch (e) {
     return { basic: [], advanced: [] };
   }
@@ -196,11 +216,15 @@ function api_saveEntryDefault(type, name, data) {
     name: trimmedName
   };
 
+  var hourTypeId = data.hour_type_id ? String(data.hour_type_id).trim() : '';
+
   if (type === 'basic') {
     newDefault.duration_minutes = data.duration_minutes || 0;
   } else {
     newDefault.punches = data.punches || [];
   }
+
+  newDefault.hour_type_id = hourTypeId;
 
   // Add to defaults
   defaults[type].push(newDefault);
@@ -256,11 +280,15 @@ function api_updateEntryDefault(type, oldName, newName, data) {
     name: trimmedNewName
   };
 
+  var hourTypeId = data.hour_type_id ? String(data.hour_type_id).trim() : '';
+
   if (type === 'basic') {
     updatedDefault.duration_minutes = data.duration_minutes || 0;
   } else {
     updatedDefault.punches = data.punches || [];
   }
+
+  updatedDefault.hour_type_id = hourTypeId;
 
   defaults[type][existingIndex] = updatedDefault;
 

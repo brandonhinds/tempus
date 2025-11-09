@@ -12261,6 +12261,7 @@ function updateDeductionFormVisibility() {
       const iso = isoDate(current);
       const cell = document.createElement('div');
       cell.className = 'ts-calendar-cell';
+      cell.dataset.date = iso;
       if (current.getMonth() !== state.calendar.month) cell.classList.add('inactive');
       if (iso === todayIso()) cell.classList.add('today');
       const totalMinutes = totals[iso] || 0;
@@ -12306,6 +12307,11 @@ function updateDeductionFormVisibility() {
                 indicator.style.color = hourType.color;
                 indicator.textContent = formatHours(roundedMinutes);
                 indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
+                indicator.dataset.hourTypeId = hourTypeId;
+                indicator.addEventListener('click', (event) => {
+                  event.stopPropagation();
+                  handleCalendarClick(iso, hourTypeId);
+                });
                 otherTypesEl.appendChild(indicator);
               }
             }
@@ -12333,6 +12339,11 @@ function updateDeductionFormVisibility() {
                 indicator.style.color = hourType.color;
                 indicator.textContent = formatHours(roundedMinutes);
                 indicator.title = `${hourType.name}: ${formatHours(roundedMinutes)}`;
+                indicator.dataset.hourTypeId = hourTypeId;
+                indicator.addEventListener('click', (event) => {
+                  event.stopPropagation();
+                  handleCalendarClick(iso, hourTypeId);
+                });
                 otherTypesEl.appendChild(indicator);
               }
             }
@@ -12422,7 +12433,7 @@ function updateDeductionFormVisibility() {
     hourTypesBreakdownListEl.innerHTML = html;
   }
 
-  function handleCalendarClick(dateIso) {
+  function handleCalendarClick(dateIso, targetHourTypeId) {
     state.selectedCalendarDate = dateIso;
     setManualDate(dateIso);
     updateTabStates();
@@ -12433,7 +12444,11 @@ function updateDeductionFormVisibility() {
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
 
     if (existingEntries.length > 0) {
-      const existingEntry = existingEntries[0];
+      let existingEntry = null;
+      if (targetHourTypeId && hourTypesEnabled) {
+        existingEntry = existingEntries.find(entry => (entry.hour_type_id || getDefaultHourTypeId()) === targetHourTypeId) || null;
+      }
+      if (!existingEntry) existingEntry = existingEntries[0];
 
       const entryType = resolveEntryType(existingEntry);
 
@@ -12587,6 +12602,14 @@ function updateDeductionFormVisibility() {
   const filterSelectAll = document.getElementById('filter-select-all');
   const filterSelectNone = document.getElementById('filter-select-none');
   const filterSelectIncome = document.getElementById('filter-select-income');
+  const calendarGridEl = document.getElementById('calendar-grid');
+  const calendarContextMenu = document.getElementById('calendar-context-menu');
+  const calendarContextBasicList = document.getElementById('calendar-context-basic');
+  const calendarContextAdvancedList = document.getElementById('calendar-context-advanced');
+  const calendarContextEmptyState = document.getElementById('calendar-context-empty');
+  const calendarContextBasicSection = calendarContextMenu ? calendarContextMenu.querySelector('[data-section="basic"]') : null;
+  const calendarContextAdvancedSection = calendarContextMenu ? calendarContextMenu.querySelector('[data-section="advanced"]') : null;
+  let calendarContextMenuDate = null;
 
   function renderCalendarFilters() {
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
@@ -13157,6 +13180,10 @@ function updateDeductionFormVisibility() {
   const selectDefaultModal = document.getElementById('modal-select-default');
   const editDefaultsModal = document.getElementById('modal-edit-defaults');
   const editDefaultDetailsModal = document.getElementById('modal-edit-default-details');
+  const defaultHourTypeRow = document.getElementById('default-hour-type-row');
+  const defaultHourTypeSelect = document.getElementById('default-hour-type');
+  const editDefaultHourTypeRow = document.getElementById('edit-default-hour-type-row');
+  const editDefaultHourTypeSelect = document.getElementById('edit-default-hour-type');
 
   function updateDefaultButtonsVisibility() {
     const featureEnabled = state.featureFlags.default_inputs && state.featureFlags.default_inputs.enabled;
@@ -13167,6 +13194,7 @@ function updateDeductionFormVisibility() {
        createPunchDefaultBtn, enterPunchDefaultBtn, editPunchDefaultsBtn].forEach(btn => {
         if (btn) btn.style.display = 'none';
       });
+      hideCalendarContextMenu();
       return;
     }
 
@@ -13190,11 +13218,62 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((result) => {
         state_defaults.entryDefaults = result || { basic: [], advanced: [] };
         updateDefaultButtonsVisibility();
+        hideCalendarContextMenu();
       })
       .withFailureHandler(() => {
         console.log('Failed to load entry defaults');
       })
       .api_getEntryDefaults();
+  }
+
+  function populateDefaultHourTypeOptions(selectEl, selectedValue) {
+    if (!selectEl) return;
+    const hasHourTypes = Array.isArray(state.hourTypes) && state.hourTypes.length > 0;
+    selectEl.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Use current hour type';
+    selectEl.appendChild(placeholder);
+
+    if (!hasHourTypes) {
+      selectEl.value = '';
+      return;
+    }
+
+    state.hourTypes.forEach(hourType => {
+      const option = document.createElement('option');
+      option.value = hourType.id;
+      option.textContent = hourType.name;
+      selectEl.appendChild(option);
+    });
+
+    const targetValue = selectedValue !== undefined ? selectedValue : selectEl.value;
+    if (targetValue && state.hourTypeMap[targetValue]) {
+      selectEl.value = targetValue;
+    } else {
+      selectEl.value = '';
+    }
+  }
+
+  function refreshDefaultHourTypeControls() {
+    const hourTypesEnabled = !!(state.featureFlags.hour_types && state.featureFlags.hour_types.enabled);
+    const hasHourTypes = hourTypesEnabled && state.hourTypes.length > 0;
+
+    if (defaultHourTypeRow) {
+      defaultHourTypeRow.style.display = hasHourTypes ? 'block' : 'none';
+    }
+    if (editDefaultHourTypeRow) {
+      editDefaultHourTypeRow.style.display = hasHourTypes ? 'block' : 'none';
+    }
+
+    if (hasHourTypes) {
+      populateDefaultHourTypeOptions(defaultHourTypeSelect);
+      populateDefaultHourTypeOptions(editDefaultHourTypeSelect);
+    } else {
+      if (defaultHourTypeSelect) defaultHourTypeSelect.value = '';
+      if (editDefaultHourTypeSelect) editDefaultHourTypeSelect.value = '';
+    }
   }
 
   function showModal(modal) {
@@ -15864,9 +15943,16 @@ function updateDeductionFormVisibility() {
   }
 
   function applyDefaultToForm(defaultData, type) {
+    const hourTypeId = defaultData.hour_type_id ? String(defaultData.hour_type_id) : '';
+    const canApplyHourType = hourTypeId && getFeatureFlag('hour_types') && state.hourTypeMap[hourTypeId];
+
     if (type === 'basic') {
       const hours = (defaultData.duration_minutes || 0) / 60;
       if (manualHoursInput) manualHoursInput.value = hours > 0 ? hours.toString() : '';
+      if (canApplyHourType && manualHourType) {
+        manualHourType.value = hourTypeId;
+        updateManualContractVisibility();
+      }
       updateBasicSaveEnabled();
     } else if (type === 'advanced') {
       // Apply punches to advanced form
@@ -15876,6 +15962,10 @@ function updateDeductionFormVisibility() {
         setPunchDraftDirty();
         renderPunchDraft();
         updatePunchSummary();
+      }
+      if (canApplyHourType && punchHourType) {
+        punchHourType.value = hourTypeId;
+        updatePunchContractVisibility();
       }
     }
   }
@@ -15902,6 +15992,20 @@ function updateDeductionFormVisibility() {
 
     const nameInput = document.getElementById('default-name');
     if (nameInput) nameInput.value = '';
+    if (defaultHourTypeSelect) {
+      const currentHourTypeId = type === 'basic'
+        ? (manualHourType ? manualHourType.value : '')
+        : (punchHourType ? punchHourType.value : '');
+      if (state.hourTypes.length && getFeatureFlag('hour_types')) {
+        populateDefaultHourTypeOptions(defaultHourTypeSelect, currentHourTypeId || '');
+      } else {
+        defaultHourTypeSelect.value = '';
+      }
+    }
+    if (defaultHourTypeRow) {
+      const hourTypesEnabled = !!(state.featureFlags.hour_types && state.featureFlags.hour_types.enabled && state.hourTypes.length > 0);
+      defaultHourTypeRow.style.display = hourTypesEnabled ? 'block' : 'none';
+    }
     showModal(createDefaultModal);
     if (nameInput) nameInput.focus();
   }
@@ -16109,6 +16213,21 @@ function updateDeductionFormVisibility() {
       `;
     }
 
+    if (editDefaultHourTypeSelect) {
+      const hourTypesEnabled = !!(getFeatureFlag('hour_types') && state.hourTypes.length > 0);
+      if (hourTypesEnabled) {
+        populateDefaultHourTypeOptions(editDefaultHourTypeSelect, defaultData.hour_type_id || '');
+        if (editDefaultHourTypeRow) editDefaultHourTypeRow.style.display = 'block';
+      } else {
+        editDefaultHourTypeSelect.value = '';
+        if (editDefaultHourTypeRow) editDefaultHourTypeRow.style.display = 'none';
+      }
+    }
+
+    if (editDefaultDetailsModal) {
+      const wasListVisible = editDefaultsModal && editDefaultsModal.style.display !== 'none';
+      editDefaultDetailsModal.dataset.returnToList = wasListVisible ? 'true' : 'false';
+    }
     hideModal(editDefaultsModal);
     showModal(editDefaultDetailsModal);
   }
@@ -16178,16 +16297,51 @@ function updateDeductionFormVisibility() {
       return;
     }
 
-    // Disable save button and show saving state
+    const hourTypeId = defaultHourTypeSelect ? defaultHourTypeSelect.value : '';
+    const payload = { ...formData, hour_type_id: hourTypeId };
+
+    const previousDefaults = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    const optimisticDefault = {
+      name,
+      hour_type_id: hourTypeId || ''
+    };
+    if (type === 'basic') {
+      optimisticDefault.duration_minutes = payload.duration_minutes || 0;
+    } else {
+      optimisticDefault.punches = (payload.punches || []).map((punch) => ({ in: punch.in, out: punch.out }));
+    }
+
+    const optimisticState = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    if (!Array.isArray(optimisticState[type])) optimisticState[type] = [];
+    optimisticState[type].push(optimisticDefault);
+    state_defaults.entryDefaults = optimisticState;
+
+    updateDefaultButtonsVisibility();
+    renderEditDefaultsList();
+    hideCalendarContextMenu();
+    hideModal(createDefaultModal);
+
     if (saveBtn) {
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving...';
     }
     setStatus('Saving default...', 'warn');
 
+    const revertCreate = () => {
+      state_defaults.entryDefaults = previousDefaults;
+      updateDefaultButtonsVisibility();
+      renderEditDefaultsList();
+    };
+
+    const restoreCreateModal = () => {
+      if (!createDefaultModal) return;
+      showModal(createDefaultModal);
+      if (nameInput) nameInput.value = name;
+      if (defaultHourTypeSelect) defaultHourTypeSelect.value = hourTypeId || '';
+    };
+
     google.script.run
       .withSuccessHandler((result) => {
-        // Re-enable save button
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save Default';
@@ -16196,21 +16350,24 @@ function updateDeductionFormVisibility() {
         if (result && result.success) {
           state_defaults.entryDefaults = result.defaults;
           updateDefaultButtonsVisibility();
-          hideModal(createDefaultModal);
+          renderEditDefaultsList();
           setStatus(`Default "${name}" created`, 'success');
         } else {
+          revertCreate();
           setStatus('Failed to create default', 'error');
+          restoreCreateModal();
         }
       })
       .withFailureHandler((error) => {
-        // Re-enable save button
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save Default';
         }
+        revertCreate();
         setStatus('Failed to create default: ' + error.message, 'error');
+        restoreCreateModal();
       })
-      .api_saveEntryDefault(type, name, formData);
+      .api_saveEntryDefault(type, name, payload);
   }
 
   function saveDefaultDetails() {
@@ -16262,43 +16419,70 @@ function updateDeductionFormVisibility() {
       formData = { punches };
     }
 
-    // Disable save button and show saving state
-    const saveBtn = document.getElementById('btn-save-default-details');
-    if (saveBtn) {
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving...';
+    const hourTypeId = editDefaultHourTypeSelect ? editDefaultHourTypeSelect.value : '';
+    formData.hour_type_id = hourTypeId;
+
+    const previousDefaults = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    const listForType = state_defaults.entryDefaults[type] || [];
+    const existingIndex = listForType.findIndex((d) => d && d.name === oldName);
+    if (existingIndex === -1) {
+      setStatus('Default not found.', 'error');
+      return;
     }
+
+    const optimisticDefault = {
+      name: newName,
+      hour_type_id: hourTypeId || ''
+    };
+    if (type === 'basic') {
+      optimisticDefault.duration_minutes = formData.duration_minutes || 0;
+    } else {
+      optimisticDefault.punches = (formData.punches || []).slice();
+    }
+
+    const optimisticState = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    optimisticState[type][existingIndex] = optimisticDefault;
+    state_defaults.entryDefaults = optimisticState;
+    state_defaults.editingDefaultName = newName;
+
+    renderEditDefaultsList();
+    updateDefaultButtonsVisibility();
+    const shouldRestoreEditList = editDefaultDetailsModal && editDefaultDetailsModal.dataset.returnToList === 'true';
+    hideModal(editDefaultDetailsModal);
+    if (editDefaultDetailsModal) editDefaultDetailsModal.dataset.returnToList = 'false';
+    if (shouldRestoreEditList && editDefaultsModal) showModal(editDefaultsModal);
+    hideCalendarContextMenu();
     setStatus('Updating default...', 'warn');
+
+    const reopenEditModal = () => {
+      if (previousDefaults[type] && previousDefaults[type][existingIndex]) {
+        openEditDefaultDetails(previousDefaults[type][existingIndex]);
+      }
+    };
+
+    const revertOptimisticUpdate = () => {
+      state_defaults.entryDefaults = previousDefaults;
+      updateDefaultButtonsVisibility();
+      renderEditDefaultsList();
+    };
 
     google.script.run
       .withSuccessHandler((result) => {
-        // Re-enable save button
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save Changes';
-        }
-
         if (result && result.success) {
           state_defaults.entryDefaults = result.defaults;
           updateDefaultButtonsVisibility();
-          hideModal(editDefaultDetailsModal);
+          renderEditDefaultsList();
           setStatus(`Default "${newName}" updated`, 'success');
-          // Refresh the edit list if still open
-          if (editDefaultsModal && editDefaultsModal.style.display !== 'none') {
-            renderEditDefaultsList();
-            showModal(editDefaultsModal);
-          }
         } else {
+          revertOptimisticUpdate();
           setStatus('Failed to update default', 'error');
+          reopenEditModal();
         }
       })
       .withFailureHandler((error) => {
-        // Re-enable save button
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save Changes';
-        }
+        revertOptimisticUpdate();
         setStatus('Failed to update default: ' + error.message, 'error');
+        reopenEditModal();
       })
       .api_updateEntryDefault(type, oldName, newName, formData);
   }
@@ -16306,16 +16490,29 @@ function updateDeductionFormVisibility() {
   function deleteEntryDefault(name, deleteBtn) {
     const type = state_defaults.currentDefaultType;
 
-    // Disable delete button and show deleting state
+    const previousDefaults = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    const optimisticState = JSON.parse(JSON.stringify(state_defaults.entryDefaults || { basic: [], advanced: [] }));
+    optimisticState[type] = (optimisticState[type] || []).filter((d) => d && d.name !== name);
+    state_defaults.entryDefaults = optimisticState;
+
+    updateDefaultButtonsVisibility();
+    renderEditDefaultsList();
+    hideCalendarContextMenu();
+
     if (deleteBtn) {
       deleteBtn.disabled = true;
       deleteBtn.textContent = 'Deleting...';
     }
     setStatus('Deleting default...', 'warn');
 
+    const revertDelete = () => {
+      state_defaults.entryDefaults = previousDefaults;
+      updateDefaultButtonsVisibility();
+      renderEditDefaultsList();
+    };
+
     google.script.run
       .withSuccessHandler((result) => {
-        // Re-enable delete button
         if (deleteBtn) {
           deleteBtn.disabled = false;
           deleteBtn.textContent = 'Delete';
@@ -16327,19 +16524,158 @@ function updateDeductionFormVisibility() {
           renderEditDefaultsList();
           setStatus(`Default "${name}" deleted`, 'success');
         } else {
+          revertDelete();
           setStatus('Failed to delete default', 'error');
         }
       })
       .withFailureHandler((error) => {
-        // Re-enable delete button
         if (deleteBtn) {
           deleteBtn.disabled = false;
           deleteBtn.textContent = 'Delete';
         }
+        revertDelete();
         setStatus('Failed to delete default: ' + error.message, 'error');
       })
       .api_deleteEntryDefault(type, name);
   }
+
+  function renderCalendarContextList(listEl, defaults, type) {
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (!Array.isArray(defaults) || !defaults.length) return;
+
+    defaults.forEach((defaultData) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'ts-calendar-context-item';
+      item.textContent = defaultData.name || '(untitled)';
+      item.addEventListener('click', () => handleCalendarDefaultSelection(type, defaultData));
+      listEl.appendChild(item);
+    });
+  }
+
+  function renderCalendarContextMenuSections() {
+    if (!calendarContextMenu) return;
+    const defaults = state_defaults.entryDefaults || { basic: [], advanced: [] };
+    const basicDefaults = Array.isArray(defaults.basic) ? defaults.basic : [];
+    const advancedDefaults = Array.isArray(defaults.advanced) ? defaults.advanced : [];
+
+    renderCalendarContextList(calendarContextBasicList, basicDefaults, 'basic');
+    renderCalendarContextList(calendarContextAdvancedList, advancedDefaults, 'advanced');
+
+    const hasBasic = basicDefaults.length > 0;
+    const hasAdvanced = advancedDefaults.length > 0;
+
+    if (calendarContextBasicSection) {
+      calendarContextBasicSection.style.display = hasBasic ? 'block' : 'none';
+    }
+    if (calendarContextAdvancedSection) {
+      calendarContextAdvancedSection.style.display = hasAdvanced ? 'block' : 'none';
+    }
+    if (calendarContextEmptyState) {
+      const shouldShowEmpty = !hasBasic && !hasAdvanced;
+      calendarContextEmptyState.style.display = shouldShowEmpty ? 'block' : 'none';
+    }
+  }
+
+  function positionCalendarContextMenu(x, y) {
+    if (!calendarContextMenu) return;
+    calendarContextMenu.style.display = 'block';
+    calendarContextMenu.style.left = '0px';
+    calendarContextMenu.style.top = '0px';
+    const rect = calendarContextMenu.getBoundingClientRect();
+    const padding = 8;
+    let left = x;
+    let top = y;
+    if (left + rect.width > window.innerWidth - padding) {
+      left = window.innerWidth - rect.width - padding;
+    }
+    if (top + rect.height > window.innerHeight - padding) {
+      top = window.innerHeight - rect.height - padding;
+    }
+    left = Math.max(padding, left);
+    top = Math.max(padding, top);
+    calendarContextMenu.style.left = left + 'px';
+    calendarContextMenu.style.top = top + 'px';
+  }
+
+  function hideCalendarContextMenu() {
+    if (!calendarContextMenu) return;
+    calendarContextMenu.style.display = 'none';
+    calendarContextMenuDate = null;
+  }
+
+  function handleCalendarContextMenu(event) {
+    if (!calendarContextMenu || !calendarGridEl) return;
+    const featureEnabled = state.featureFlags.default_inputs && state.featureFlags.default_inputs.enabled;
+    if (!featureEnabled) return;
+    const cell = event.target.closest('.ts-calendar-cell');
+    if (!cell || !cell.dataset.date) return;
+    ensureCalendarState();
+    event.preventDefault();
+    calendarContextMenuDate = cell.dataset.date;
+    renderCalendarContextMenuSections();
+    positionCalendarContextMenu(event.clientX, event.clientY);
+  }
+
+  function handleCalendarDefaultSelection(type, defaultData) {
+    if (!calendarContextMenuDate || !defaultData) return;
+    const targetDate = calendarContextMenuDate;
+    hideCalendarContextMenu();
+    insertDefaultEntryForDate(targetDate, defaultData, type);
+  }
+
+  function insertDefaultEntryForDate(dateIso, defaultData, type) {
+    if (!dateIso || !defaultData) return;
+    ensureCalendarState();
+    state.selectedCalendarDate = dateIso;
+    renderCalendar();
+
+    if (type === 'basic') {
+      if (state.editingEntryId) clearManualEditing();
+      setManualDate(dateIso);
+      applyDefaultToForm(defaultData, 'basic');
+      if (!manualSaveBtn) {
+        setStatus('Manual entry form is unavailable.', 'error');
+        return;
+      }
+      if (!manualSaveBtn.disabled) {
+        manualSaveBtn.click();
+      } else {
+      setStatus('Select a contract before applying this default.', 'warn');
+      }
+    } else {
+      setPunchDate(dateIso);
+      ensurePunchDraft();
+      applyDefaultToForm(defaultData, 'advanced');
+      if (!punchSaveBtn) {
+        setStatus('Advanced entry form is unavailable.', 'error');
+        return;
+      }
+      if (!punchSaveBtn.disabled) {
+        punchSaveBtn.click();
+      } else {
+        setStatus('Select a contract before applying this default.', 'warn');
+      }
+    }
+  }
+
+  if (calendarGridEl) {
+    calendarGridEl.addEventListener('contextmenu', handleCalendarContextMenu);
+  }
+  if (calendarContextMenu) {
+    calendarContextMenu.addEventListener('contextmenu', (event) => event.preventDefault());
+  }
+  document.addEventListener('click', (event) => {
+    if (!calendarContextMenu || calendarContextMenu.style.display !== 'block') return;
+    if (calendarContextMenu.contains(event.target)) return;
+    hideCalendarContextMenu();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideCalendarContextMenu();
+  });
+  window.addEventListener('resize', hideCalendarContextMenu);
+  window.addEventListener('scroll', hideCalendarContextMenu, true);
 
   // Event handlers for default entry buttons
   if (createManualDefaultBtn) {
@@ -16464,6 +16800,7 @@ function updateDeductionFormVisibility() {
     if (cancelEditDetailsBtn) {
       cancelEditDetailsBtn.addEventListener('click', () => {
         hideModal(editDefaultDetailsModal);
+        if (editDefaultDetailsModal) editDefaultDetailsModal.dataset.returnToList = 'false';
         if (editDefaultsModal) showModal(editDefaultsModal);
       });
     }
@@ -18170,6 +18507,7 @@ function updateDeductionFormVisibility() {
       populateHourTypeOptions();
     }
     updateRecurringHourTypeVisibility();
+    refreshDefaultHourTypeControls();
   }
 
   function populateHourTypeOptions() {

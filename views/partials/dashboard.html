@@ -216,7 +216,21 @@
       <div class="ts-calendar-weekday">Sun</div>
     </div>
     <div class="ts-calendar-grid" id="calendar-grid"></div>
-    <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries.</div>
+    <div class="ts-calendar-context-menu" id="calendar-context-menu" style="display:none;">
+      <div class="ts-calendar-context-header">Add default entry</div>
+      <div class="ts-calendar-context-empty" id="calendar-context-empty" style="display:none;">
+        Create a basic or advanced default to use this shortcut.
+      </div>
+      <div class="ts-calendar-context-section" data-section="basic">
+        <div class="ts-calendar-context-title">Basic defaults</div>
+        <div class="ts-calendar-context-list" id="calendar-context-basic"></div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="advanced">
+        <div class="ts-calendar-context-title">Advanced defaults</div>
+        <div class="ts-calendar-context-list" id="calendar-context-advanced"></div>
+      </div>
+    </div>
+    <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries. Right-click to insert a default.</div>
     <div class="ts-payroll-helper-actions" id="payroll-helper-actions">
       <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero Payroll Helper</button>
       <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB Payroll Helper</button>
@@ -373,6 +387,11 @@
           <label>Default Name</label>
           <input type="text" id="default-name" placeholder="e.g., Regular Day, Split Day" />
         </div>
+        <div class="ts-col-span-12" id="default-hour-type-row" style="display:none;">
+          <label>Hour type (optional)</label>
+          <select id="default-hour-type"></select>
+          <small class="ts-note">Leave blank to respect whatever hour type is currently selected when applying this default.</small>
+        </div>
       </div>
     </div>
     <div class="ts-modal-footer">
@@ -424,6 +443,11 @@
         <div class="ts-col-span-12">
           <label>Default Name</label>
           <input type="text" id="edit-default-name" />
+        </div>
+        <div class="ts-col-span-12" id="edit-default-hour-type-row" style="display:none;">
+          <label>Hour type (optional)</label>
+          <select id="edit-default-hour-type"></select>
+          <small class="ts-note">Blank = use the hour type currently selected on the manual or punch form.</small>
         </div>
       </div>
       <div id="edit-default-form" style="margin-top:16px;">

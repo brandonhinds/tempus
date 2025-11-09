@@ -57,6 +57,12 @@ I want it to look like a professional, enterprise ready application.
 17. Error handling: How should the app behave when Google Sheets API is slow or unavailable?
     When the Google Sheets API is unavailable it should report it clearly so the user knows their data is not being saved.
 
+**Default Entries & Hour Types**
+
+- Users can save "basic" defaults (a single duration captured as minutes) or "advanced" defaults (a list of punch ranges) and we persist them per-user in `user_settings.entry_defaults`.
+- Each default may now pin an `hour_type_id`. When present, applying the default forces that hour type regardless of the current manual/punch selection. When omitted, we fall back to whatever hour type the user already has selected so older defaults remain compatible.
+- The calendar exposes a context menu on right-click that lists all available basic and advanced defaults for the targeted day so users can insert repetitive entries without touching the manual/advanced forms.
+
 **Income Summary & Payroll Settings**
 
 - The calendar header now includes a `Net income` badge beside `Total hours`; clicking the badge toggles the detailed breakdown. When company tracking is enabled the list begins with `Invoice total` and `Company income`, followed by Total package, Gross income, Superannuation guarantee, Extra super contributions, Pre-tax deductions, Taxable income, Tax, and Net income.
