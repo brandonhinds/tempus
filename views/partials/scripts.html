@@ -303,6 +303,8 @@ let ratePreviewInputSyncing = false;
     showZeroHours: false,
     currentPage: 'time',
     incomeSummary: null,
+    incomeSummaryCache: {},
+    dirtyIncomeMonths: new Set(),
     pendingTaxRequest: null,
     pendingEntryAdds: new Map(),
     pendingEntryUpdates: new Map(),
@@ -316,6 +318,7 @@ let ratePreviewInputSyncing = false;
     potentialIncomeTaxRequests: {},
     potentialIncomeContextKey: '',
     potentialIncomeStats: null,
+    potentialIncomeCache: {},
     companyTrackingEnabled: false,
     companyBasQuarterly: false,
     basCurrentFy: null,
@@ -512,6 +515,7 @@ let ratePreviewInputSyncing = false;
 
     merged.sort(entrySort);
     state.entries = merged;
+    markAllIncomeSummariesDirty();
   }
 
   function entrySort(a, b) {
@@ -1830,6 +1834,7 @@ let ratePreviewInputSyncing = false;
     const changed = filtered.length !== previousEntries.length;
     if (changed) {
       state.entries = filtered;
+      markAllIncomeSummariesDirty();
       renderEntries();
       renderCalendar();
       saveCache();
@@ -1845,6 +1850,7 @@ let ratePreviewInputSyncing = false;
         .withFailureHandler((error) => {
           if (changed) {
             state.entries = previousEntries;
+            markAllIncomeSummariesDirty();
             renderEntries();
             renderCalendar();
             saveCache();
@@ -4775,6 +4781,7 @@ function updateDeductionFormVisibility() {
     const revertOptimisticSplit = () => {
       state.deductions = previousList.slice();
       state.deductions = dedupeById(state.deductions);
+      markAllIncomeSummariesDirty();
       saveCache();
       renderDeductionsList();
       renderIncomeSummary();
@@ -4796,6 +4803,7 @@ function updateDeductionFormVisibility() {
     }
     state.deductions.push(optimisticNew);
     state.deductions = dedupeById(state.deductions);
+    markAllIncomeSummariesDirty();
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
@@ -4813,6 +4821,7 @@ function updateDeductionFormVisibility() {
                 google.script.run
                   .withSuccessHandler((deductions) => {
                     state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+                    markAllIncomeSummariesDirty();
                     saveCache();
                     renderDeductionsList();
                     renderIncomeSummary();
@@ -4908,6 +4917,7 @@ function updateDeductionFormVisibility() {
             state.deductions.push(updated);
           }
           state.deductions = dedupeById(state.deductions);
+          markAllIncomeSummariesDirty();
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
@@ -4919,6 +4929,7 @@ function updateDeductionFormVisibility() {
         } else {
           state.deductions = previousList;
           state.deductions = dedupeById(state.deductions);
+          markAllIncomeSummariesDirty();
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
@@ -4929,6 +4940,7 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(() => {
         state.deductions = previousList;
         state.deductions = dedupeById(state.deductions);
+        markAllIncomeSummariesDirty();
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
@@ -4979,6 +4991,7 @@ function updateDeductionFormVisibility() {
     const previousList = state.deductions.slice();
     state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
     state.deductions = dedupeById(state.deductions);
+    markAllIncomeSummariesDirty();
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
@@ -4994,6 +5007,7 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(() => {
         state.deductions = previousList;
         state.deductions = dedupeById(state.deductions);
+        markAllIncomeSummariesDirty();
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
@@ -6140,6 +6154,17 @@ function updateDeductionFormVisibility() {
       state.invoiceDetailLoading = false;
       state.invoiceListLoading = false;
       state.invoicesInitialized = Array.isArray(state.invoices) && state.invoices.length > 0;
+      if (obj.incomeSummaryCache && typeof obj.incomeSummaryCache === 'object') {
+        state.incomeSummaryCache = deserializeIncomeSummaryCache(obj.incomeSummaryCache);
+      } else {
+        state.incomeSummaryCache = {};
+      }
+      if (obj.potentialIncomeCache && typeof obj.potentialIncomeCache === 'object') {
+        state.potentialIncomeCache = obj.potentialIncomeCache;
+      } else {
+        state.potentialIncomeCache = {};
+      }
+      state.dirtyIncomeMonths = new Set();
       updatePublicHolidayMap();
       refreshActualIncomeMap();
       updateDeductionCategoryMap();
@@ -6201,7 +6226,9 @@ function updateDeductionFormVisibility() {
         invoiceDefaults: invoiceDefaultsForCache,
         invoiceFilters: invoiceFiltersForCache,
         invoiceSelectedId: state.invoiceSelectedId,
-        invoiceDetail: invoiceDetailForCache
+        invoiceDetail: invoiceDetailForCache,
+        incomeSummaryCache: serializeIncomeSummaryCache(),
+        potentialIncomeCache: state.potentialIncomeCache
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -6893,6 +6920,7 @@ function updateDeductionFormVisibility() {
       };
       optimisticEntry = sanitizeEntry(pending);
       state.entries.unshift(optimisticEntry);
+      markIncomeSummaryDirtyForEntry(optimisticEntry);
       recordPendingEntryAdd(optimisticEntry);
       state.entries.sort(entrySort);
       saveCache();
@@ -6910,6 +6938,7 @@ function updateDeductionFormVisibility() {
           const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
           if (idx > -1) {
             state.entries[idx] = sanitized;
+            markIncomeSummaryDirtyForEntry(sanitized);
             updatePendingEntryAddId(optimisticEntry.id, sanitized);
             if (!entriesSyncInFlight) resolvePendingEntryAdd(sanitized.id);
             state.entries.sort(entrySort);
@@ -6919,8 +6948,10 @@ function updateDeductionFormVisibility() {
           const idx = state.entries.findIndex((e) => e.id === sanitized.id);
           if (idx > -1) {
             state.entries[idx] = sanitized;
+            markIncomeSummaryDirtyForEntry(sanitized);
           } else {
             state.entries.push(sanitized);
+            markIncomeSummaryDirtyForEntry(sanitized);
           }
           recordPendingEntryUpdate(sanitized.id, sanitized);
           if (!entriesSyncInFlight) resolvePendingEntryUpdate(sanitized.id);
@@ -6942,6 +6973,7 @@ function updateDeductionFormVisibility() {
           const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
           if (idx > -1) {
             state.entries.splice(idx, 1);
+            markIncomeSummaryDirtyForEntry(optimisticEntry);
             saveCache();
             renderEntries();
           }
@@ -6958,6 +6990,7 @@ function updateDeductionFormVisibility() {
         const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
         if (idx > -1) {
           state.entries.splice(idx, 1);
+          markIncomeSummaryDirtyForEntry(optimisticEntry);
           saveCache();
           renderEntries();
         }
@@ -7041,6 +7074,7 @@ function updateDeductionFormVisibility() {
 
     const backup = state.entries[idx];
     state.entries.splice(idx, 1);
+    markIncomeSummaryDirtyForEntry(backup);
     recordPendingEntryDelete(entryId);
 
     // Clear punch draft and start fresh
@@ -7061,6 +7095,7 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(() => {
         // Rollback: restore the entry
         state.entries.splice(idx, 0, backup);
+        markIncomeSummaryDirtyForEntry(backup);
         resolvePendingEntryDelete(entryId);
         saveCache();
         renderEntries();
@@ -7439,7 +7474,9 @@ function updateDeductionFormVisibility() {
       const backup = { ...state.entries[idx] };
       const update = { id: state.editingEntryId, ...payload };
       const optimisticUpdate = sanitizeEntry({ ...backup, ...update });
+      markIncomeSummaryDirtyForEntry(backup);
       state.entries[idx] = optimisticUpdate;
+      markIncomeSummaryDirtyForEntry(optimisticUpdate);
       recordPendingEntryUpdate(state.editingEntryId, optimisticUpdate);
       saveCache();
       renderEntries();
@@ -7449,6 +7486,7 @@ function updateDeductionFormVisibility() {
           if (res && res.success) {
             const confirmed = sanitizeEntry(res.entry);
             state.entries[idx] = confirmed;
+            markIncomeSummaryDirtyForEntry(confirmed);
             recordPendingEntryUpdate(confirmed.id, confirmed);
             if (!entriesSyncInFlight) resolvePendingEntryUpdate(confirmed.id);
             state.entries.sort(entrySort);
@@ -7459,6 +7497,7 @@ function updateDeductionFormVisibility() {
             setStatus('Saved', 'success');
           } else {
             state.entries[idx] = backup;
+            markIncomeSummaryDirtyForEntry(backup);
             resolvePendingEntryUpdate(state.editingEntryId);
             saveCache();
             renderEntries();
@@ -7467,6 +7506,7 @@ function updateDeductionFormVisibility() {
         })
         .withFailureHandler(() => {
           state.entries[idx] = backup;
+          markIncomeSummaryDirtyForEntry(backup);
           resolvePendingEntryUpdate(state.editingEntryId);
           saveCache();
           renderEntries();
@@ -7482,6 +7522,7 @@ function updateDeductionFormVisibility() {
       };
       const optimisticEntry = sanitizeEntry(entry);
       state.entries.unshift(optimisticEntry);
+      markIncomeSummaryDirtyForEntry(optimisticEntry);
       recordPendingEntryAdd(optimisticEntry);
       state.entries.sort(entrySort);
       saveCache();
@@ -7495,6 +7536,7 @@ function updateDeductionFormVisibility() {
             if (idx > -1) {
               const confirmed = sanitizeEntry(res.entry);
               state.entries[idx] = confirmed;
+              markIncomeSummaryDirtyForEntry(confirmed);
               updatePendingEntryAddId(optimisticEntry.id, confirmed);
               if (!entriesSyncInFlight) resolvePendingEntryAdd(confirmed.id);
               state.entries.sort(entrySort);
@@ -7510,6 +7552,7 @@ function updateDeductionFormVisibility() {
         })
         .withFailureHandler(() => {
           resolvePendingEntryAdd(optimisticEntry.id);
+          markIncomeSummaryDirtyForEntry(optimisticEntry);
           setStatus('Save failed (offline?)', 'error');
         })
         .api_addEntry(entry);
@@ -7542,6 +7585,7 @@ function updateDeductionFormVisibility() {
 
       const backup = state.entries[idx];
       state.entries.splice(idx, 1);
+      markIncomeSummaryDirtyForEntry(backup);
       recordPendingEntryDelete(entryId);
 
       // Clear editing state and reset form
@@ -7561,6 +7605,7 @@ function updateDeductionFormVisibility() {
         .withFailureHandler(() => {
           // Rollback: restore the entry
           state.entries.splice(idx, 0, backup);
+          markIncomeSummaryDirtyForEntry(backup);
           resolvePendingEntryDelete(entryId);
           saveCache();
           renderEntries();
@@ -9779,7 +9824,101 @@ function updateDeductionFormVisibility() {
       return getEntryDateIso(entry) === target ? acc + (Number(entry.duration_minutes) || 0) : acc;
     }, 0);
   }
-  const monthKeyFor = (year, month) => `${year}-${String(month + 1).padStart(2, '0')}`;
+const monthKeyFor = (year, month) => `${year}-${String(month + 1).padStart(2, '0')}`;
+
+function monthKeyFromDateIso(dateIso) {
+  if (!dateIso) return null;
+  const date = parseIsoDate(dateIso);
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return monthKeyFor(date.getFullYear(), date.getMonth());
+}
+
+function hourTypeContributesToIncome(hourTypeId) {
+  const id = hourTypeId || getDefaultHourTypeId();
+  const hourType = state.hourTypeMap[id];
+  return hourType ? hourType.contributes_to_income : true;
+}
+
+function entryContributesToIncome(entry) {
+  if (!entry || !entry.date) return false;
+  return hourTypeContributesToIncome(entry.hour_type_id);
+}
+
+function ensureIncomeCacheStructures() {
+  if (!state.incomeSummaryCache) state.incomeSummaryCache = {};
+  if (!state.dirtyIncomeMonths) state.dirtyIncomeMonths = new Set();
+}
+
+function markIncomeMonthDirty(monthKey) {
+  if (!monthKey) return;
+  ensureIncomeCacheStructures();
+  state.dirtyIncomeMonths.add(monthKey);
+  if (state.incomeSummaryCache[monthKey]) delete state.incomeSummaryCache[monthKey];
+}
+
+function markIncomeSummaryDirtyForEntry(entry) {
+  if (!entryContributesToIncome(entry)) return;
+  const monthKey = monthKeyFromDateIso(entry.date);
+  if (monthKey) markIncomeMonthDirty(monthKey);
+}
+
+function markIncomeSummaryDirtyForEntries(entries) {
+  (entries || []).forEach((entry) => markIncomeSummaryDirtyForEntry(entry));
+}
+
+function markAllIncomeSummariesDirty() {
+  ensureIncomeCacheStructures();
+  Object.keys(state.incomeSummaryCache).forEach((key) => state.dirtyIncomeMonths.add(key));
+}
+
+function serializeIncomeSummary(summary) {
+  if (!summary) return null;
+  const { periodStart, ...rest } = summary;
+  return {
+    ...rest,
+    periodStartIso: periodStart ? periodStart.toISOString() : null
+  };
+}
+
+function deserializeIncomeSummary(data) {
+  if (!data) return null;
+  const { periodStartIso, ...rest } = data;
+  return {
+    ...rest,
+    periodStart: periodStartIso ? new Date(periodStartIso) : null
+  };
+}
+
+function serializeIncomeSummaryCache() {
+  const cache = state.incomeSummaryCache || {};
+  const out = {};
+  Object.keys(cache).forEach((key) => {
+    if (cache[key]) out[key] = { ...cache[key] };
+  });
+  return out;
+}
+
+function deserializeIncomeSummaryCache(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  Object.keys(raw).forEach((key) => {
+    if (raw[key]) out[key] = { ...raw[key] };
+  });
+  return out;
+}
+
+function cacheIncomeSummary(monthKey, summary) {
+  if (!monthKey || !summary) return;
+  ensureIncomeCacheStructures();
+  state.incomeSummaryCache[monthKey] = serializeIncomeSummary(summary);
+  state.dirtyIncomeMonths.delete(monthKey);
+  saveCache();
+}
+
+function getCachedIncomeSummary(monthKey) {
+  if (!monthKey || !state.incomeSummaryCache) return null;
+  return deserializeIncomeSummary(state.incomeSummaryCache[monthKey]);
+}
   const getEntryDateIso = (entry) => {
     if (!entry || !entry.date) return '';
     if (entry._isoDate) return entry._isoDate;
@@ -10810,11 +10949,12 @@ function updateDeductionFormVisibility() {
     }
     // Calculate hours for the hour type marked for rate calculation
     let rateCalcHours = 0;
-    let rateCalcHourType = null;
+    let rateCalcHourTypeId = null;
 
     // Find the hour type marked for rate calculation (works regardless of hour types feature flag)
-    rateCalcHourType = Object.values(state.hourTypeMap).find(ht => ht && ht.use_for_rate_calculation);
+    const rateCalcHourType = Object.values(state.hourTypeMap).find(ht => ht && ht.use_for_rate_calculation);
     if (rateCalcHourType) {
+      rateCalcHourTypeId = rateCalcHourType.id;
       const matchingEntries = allEntries.filter(entry => {
         const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
         return hourTypeId === rateCalcHourType.id;
@@ -10892,7 +11032,7 @@ function updateDeductionFormVisibility() {
       netIncome: taxableIncome > 0 ? null : taxableIncome,
       requestKey,
       rateCalcHours,
-      rateCalcHourType,
+      rateCalcHourTypeId,
       deductionSnapshot: {
         salarySacrifice,
         companyStandardTotal: deductionTotals.companyStandardTotal,
@@ -11033,7 +11173,7 @@ function updateDeductionFormVisibility() {
 
     // Show/hide and populate hourly rate section
     if (hourlyRateDivider && hourlyRateGrossRow && hourlyRateNetRow) {
-      const rateCalcType = summary.rateCalcHourType;
+      const rateCalcType = summary.rateCalcHourTypeId ? state.hourTypeMap[summary.rateCalcHourTypeId] : null;
       const shouldShowHourlyRate = rateCalcType &&
                                    rateCalcType.use_for_rate_calculation &&
                                    !rateCalcType.contributes_to_income &&
@@ -11178,6 +11318,16 @@ function updateDeductionFormVisibility() {
       state.potentialIncomeContextKey = contextKey;
       state.potentialIncomeScenarios = {};
       state.potentialIncomeTaxRequests = {};
+    }
+    ensurePotentialIncomeState();
+    const monthKey = monthKeyFor(year, month);
+    const isDirty = state.dirtyIncomeMonths && state.dirtyIncomeMonths.has(monthKey);
+    if (!isDirty && state.potentialIncomeCache && state.potentialIncomeCache[contextKey]) {
+      const cached = state.potentialIncomeCache[contextKey];
+      state.potentialIncomeStats = cached.stats || null;
+      state.potentialIncomeScenarios = cached.scenarios ? JSON.parse(JSON.stringify(cached.scenarios)) : {};
+      renderPotentialIncomeFromState();
+      return;
     }
     const stats = buildPotentialIncomeStats(contract, summary, year, month);
     state.potentialIncomeStats = stats;
@@ -11399,13 +11549,20 @@ function updateDeductionFormVisibility() {
     };
   }
 
-  function ensurePotentialScenarioState(id) {
+  function ensurePotentialIncomeState() {
     if (!state.potentialIncomeScenarios) state.potentialIncomeScenarios = {};
+    if (!state.potentialIncomeTaxRequests) state.potentialIncomeTaxRequests = {};
+    if (!state.potentialIncomeCache) state.potentialIncomeCache = {};
+  }
+
+  function ensurePotentialScenarioState(id) {
+    ensurePotentialIncomeState();
     if (!state.potentialIncomeScenarios[id]) {
       state.potentialIncomeScenarios[id] = {
         status: 'idle',
         netIncome: null,
-        taxableIncome: 0
+        taxableIncome: 0,
+        contextKey: state.potentialIncomeContextKey || ''
       };
     }
     return state.potentialIncomeScenarios[id];
@@ -11441,6 +11598,11 @@ function updateDeductionFormVisibility() {
         activeScenario.pendingRequestId = null;
         state.potentialIncomeTaxRequests[id] = null;
         renderPotentialIncomeFromState();
+        state.potentialIncomeCache[state.potentialIncomeContextKey] = {
+          stats: state.potentialIncomeStats,
+          scenarios: JSON.parse(JSON.stringify(state.potentialIncomeScenarios))
+        };
+        saveCache();
       })
       .withFailureHandler(() => {
         if (state.potentialIncomeTaxRequests[id] !== requestId) return;
@@ -11454,6 +11616,11 @@ function updateDeductionFormVisibility() {
         activeScenario.pendingRequestId = null;
         state.potentialIncomeTaxRequests[id] = null;
         renderPotentialIncomeFromState();
+        state.potentialIncomeCache[state.potentialIncomeContextKey] = {
+          stats: state.potentialIncomeStats,
+          scenarios: JSON.parse(JSON.stringify(state.potentialIncomeScenarios))
+        };
+        saveCache();
       })
       .estimateTax(Number(taxableIncome) || 0, periodStart.toISOString());
   }
@@ -11497,6 +11664,11 @@ function updateDeductionFormVisibility() {
       if (row) row.hidden = false;
     });
     renderPotentialIncomeFromState();
+    state.potentialIncomeCache[state.potentialIncomeContextKey] = {
+      stats: state.potentialIncomeStats,
+      scenarios: JSON.parse(JSON.stringify(state.potentialIncomeScenarios))
+    };
+    saveCache();
   }
 
   function renderPotentialIncomeFromState() {
@@ -11526,8 +11698,14 @@ function updateDeductionFormVisibility() {
   }
   function handleTaxSuccess(requestId, taxValue) {
     if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
-    const summary = state.incomeSummary;
-    if (!summary || summary.monthKey !== state.pendingTaxRequest.monthKey) {
+    const targetMonthKey = state.pendingTaxRequest.monthKey;
+    let summary = null;
+    if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
+      summary = state.incomeSummary;
+    } else {
+      summary = getCachedIncomeSummary(targetMonthKey);
+    }
+    if (!summary || summary.monthKey !== targetMonthKey) {
       state.pendingTaxRequest = null;
       return;
     }
@@ -11536,12 +11714,21 @@ function updateDeductionFormVisibility() {
     summary.taxStatus = 'resolved';
     summary.netIncome = summary.taxableIncome - computedTax;
     state.pendingTaxRequest = null;
-    updateIncomeSummaryUI(summary);
+    if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
+      updateIncomeSummaryUI(summary);
+    }
+    cacheIncomeSummary(summary.monthKey, summary);
   }
   function handleTaxFailure(requestId) {
     if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
-    const summary = state.incomeSummary;
-    if (!summary || summary.monthKey !== state.pendingTaxRequest.monthKey) {
+    const targetMonthKey = state.pendingTaxRequest.monthKey;
+    let summary = null;
+    if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
+      summary = state.incomeSummary;
+    } else {
+      summary = getCachedIncomeSummary(targetMonthKey);
+    }
+    if (!summary || summary.monthKey !== targetMonthKey) {
       state.pendingTaxRequest = null;
       return;
     }
@@ -11549,7 +11736,10 @@ function updateDeductionFormVisibility() {
     summary.taxStatus = 'error';
     summary.netIncome = summary.taxableIncome;
     state.pendingTaxRequest = null;
-    updateIncomeSummaryUI(summary);
+    if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
+      updateIncomeSummaryUI(summary);
+    }
+    cacheIncomeSummary(summary.monthKey, summary);
   }
   function requestTaxEstimate(summary) {
     if (!summary || summary.taxStatus !== 'pending') return;
@@ -11558,6 +11748,7 @@ function updateDeductionFormVisibility() {
       summary.tax = 0;
       summary.netIncome = summary.taxableIncome;
       updateIncomeSummaryUI(summary);
+      cacheIncomeSummary(summary.monthKey, summary);
       return;
     }
     if (state.pendingTaxRequest && state.pendingTaxRequest.key === summary.requestKey) return;
@@ -11567,6 +11758,7 @@ function updateDeductionFormVisibility() {
       summary.netIncome = summary.taxableIncome;
       updateIncomeSummaryUI(summary);
       state.pendingTaxRequest = null;
+      cacheIncomeSummary(summary.monthKey, summary);
       return;
     }
     const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -11584,7 +11776,16 @@ function updateDeductionFormVisibility() {
     if (!incomeNetBadge && !incomeBreakdownEl) return;
     ensureCalendarState();
     const { year, month } = state.calendar;
-    const summary = buildIncomeSummary(year, month);
+    const monthKey = monthKeyFor(year, month);
+    const isDirty = state.dirtyIncomeMonths && state.dirtyIncomeMonths.has(monthKey);
+    let summary = null;
+    if (!isDirty) {
+      summary = getCachedIncomeSummary(monthKey);
+    }
+    if (!summary) {
+      summary = buildIncomeSummary(year, month);
+      cacheIncomeSummary(monthKey, summary);
+    }
     state.incomeSummary = summary;
     updateIncomeSummaryUI(summary);
     applyIncomeBreakdownVisibility();
