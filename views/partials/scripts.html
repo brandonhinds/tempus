@@ -18116,24 +18116,14 @@ function getCachedIncomeSummary(monthKey) {
     };
 
     if (state.editingHourTypeId) {
-      // Optimistically update the UI if setting as default or use_for_rate_calculation
-      if (isDefault || useForRateCalc) {
+      // Optimistically update the UI if setting as default
+      if (isDefault) {
         // Unset default on all other hour types if setting as default
-        if (isDefault) {
-          state.hourTypes.forEach(ht => {
-            if (ht.id !== state.editingHourTypeId) {
-              ht.is_default = false;
-            }
-          });
-        }
-        // Unset use_for_rate_calculation on all other hour types if setting this flag
-        if (useForRateCalc) {
-          state.hourTypes.forEach(ht => {
-            if (ht.id !== state.editingHourTypeId) {
-              ht.use_for_rate_calculation = false;
-            }
-          });
-        }
+        state.hourTypes.forEach(ht => {
+          if (ht.id !== state.editingHourTypeId) {
+            ht.is_default = false;
+          }
+        });
         // Update this hour type
         const index = state.hourTypes.findIndex(ht => ht.id === state.editingHourTypeId);
         if (index !== -1) {

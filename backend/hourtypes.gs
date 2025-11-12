@@ -143,16 +143,6 @@ function api_createHourType(data) {
     }
   }
 
-  // If this is being set as use_for_rate_calculation, clear other use_for_rate_calculation flags
-  if (data.use_for_rate_calculation) {
-    for (var i = 0; i < rows.length; i++) {
-      var rateCalcIndex = headers.indexOf('use_for_rate_calculation');
-      if (rateCalcIndex !== -1 && (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE')) {
-        sh.getRange(i + 2, rateCalcIndex + 1).setValue('FALSE');
-      }
-    }
-  }
-
   var id = Utilities.getUuid();
   var now = toIsoDateTime(new Date());
 
@@ -258,18 +248,6 @@ function api_updateHourType(id, data) {
         var defaultIndex = headers.indexOf('is_default');
         if (rows[i][defaultIndex] === true || rows[i][defaultIndex] === 'TRUE') {
           sh.getRange(i + 2, defaultIndex + 1).setValue('FALSE');
-        }
-      }
-    }
-  }
-
-  // If this is being set as use_for_rate_calculation, clear other use_for_rate_calculation flags
-  if (data.use_for_rate_calculation) {
-    for (var i = 0; i < rows.length; i++) {
-      if (i !== rowIndex) {
-        var rateCalcIndex = headers.indexOf('use_for_rate_calculation');
-        if (rateCalcIndex !== -1 && (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE')) {
-          sh.getRange(i + 2, rateCalcIndex + 1).setValue('FALSE');
         }
       }
     }

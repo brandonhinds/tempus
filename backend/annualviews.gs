@@ -117,12 +117,11 @@ function api_getAnnualSummary(payload) {
     });
   }
 
-  // Find the hour type marked for rate calculation
-  var rateCalcHourTypeId = null;
+  // Find all hour types marked for rate calculation
+  var rateCalcHourTypeIds = [];
   for (var htid in hourTypeMap) {
     if (hourTypeMap[htid] && hourTypeMap[htid].use_for_rate_calculation) {
-      rateCalcHourTypeId = htid;
-      break;
+      rateCalcHourTypeIds.push(htid);
     }
   }
 
@@ -148,7 +147,7 @@ function api_getAnnualSummary(payload) {
 
   for (var m = 0; m < months.length; m++) {
     var month = months[m];
-    var monthSummary = buildMonthlySummaryForAnnual(month.year, month.month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeId);
+    var monthSummary = buildMonthlySummaryForAnnual(month.year, month.month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeIds);
     monthlyData.push(monthSummary);
 
     // Accumulate year totals
@@ -251,9 +250,9 @@ function api_getAnnualSummary(payload) {
  * @param {Object} hourTypeMap - Hour type lookup
  * @param {Object} deductionsSheet - Deductions sheet
  * @param {Object} actualIncomeMap - Actual income lookup by month (yyyy-MM)
- * @param {string} rateCalcHourTypeId - Hour type ID to use for rate calculation
+ * @param {Array} rateCalcHourTypeIds - Hour type IDs to use for rate calculation
  */
-function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeId) {
+function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, contractMap, hourTypeMap, deductionsSheet, actualIncomeMap, rateCalcHourTypeIds) {
   // Filter entries for this month (contract-filtered for income)
   var monthEntries = filteredEntries.filter(function(entry) {
     var entryDate = new Date(entry.date);
@@ -323,8 +322,8 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     var entryMinutes = Number(entry.duration_minutes) || 0;
     hourTypeHours[hourTypeId] += entryMinutes;
 
-    // Track hours for rate calculation hour type (check ALL entries, not just income-contributing)
-    if (rateCalcHourTypeId && hourTypeId === rateCalcHourTypeId) {
+    // Track hours for rate calculation hour types (check ALL entries, not just income-contributing)
+    if (rateCalcHourTypeIds && rateCalcHourTypeIds.length > 0 && rateCalcHourTypeIds.indexOf(hourTypeId) !== -1) {
       rateCalcMinutes += entryMinutes;
     }
   }
