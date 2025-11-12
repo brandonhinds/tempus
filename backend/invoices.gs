@@ -651,7 +651,7 @@ function getHourTypeNameById(id) {
   if (!cached) {
     cached = {};
     try {
-      var sh = getOrCreateSheet('hour_types');
+      var sh = getHourTypesSheet();
       var values = sh.getDataRange().getValues();
       if (values.length > 1) {
         var headers = values[0];

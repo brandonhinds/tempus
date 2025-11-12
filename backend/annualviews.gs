@@ -67,7 +67,7 @@ function api_getAnnualSummary(payload) {
   var sheet = getOrCreateSheet('timesheet_entries');
   var contractsSheet = getOrCreateSheet('contracts');
   var deductionsSheet = getOrCreateSheet('deductions');
-  var hourTypesSheet = getOrCreateSheet('hour_types');
+  var hourTypesSheet = getHourTypesSheet();
 
   // Build lookup maps
   var contractMap = {};

@@ -1,5 +1,39 @@
-function api_getHourTypes() {
+var HOUR_TYPE_HEADERS = [
+  'id',
+  'name',
+  'slug',
+  'color',
+  'contributes_to_income',
+  'requires_contract',
+  'is_default',
+  'auto_populate_public_holidays',
+  'auto_populate_hours',
+  'created_at',
+  'display_order'
+];
+
+function ensureHourTypesSchema(sh) {
+  if (!sh) return;
+  var lastColumn = Math.max(sh.getLastColumn(), HOUR_TYPE_HEADERS.length);
+  var headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
+  if (headers.indexOf('display_order') === -1) {
+    var insertPos = sh.getLastColumn() + 1;
+    sh.insertColumnAfter(insertPos - 1);
+    sh.getRange(1, insertPos).setValue('display_order');
+    if (sh.getLastRow() > 1) {
+      sh.getRange(2, insertPos, sh.getLastRow() - 1, 1).setValue('');
+    }
+  }
+}
+
+function getHourTypesSheet() {
   var sh = getOrCreateSheet('hour_types');
+  ensureHourTypesSchema(sh);
+  return sh;
+}
+
+function api_getHourTypes() {
+  var sh = getHourTypesSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0];
   var rows = data.slice(1);
@@ -15,6 +49,15 @@ function api_getHourTypes() {
 
   var hourTypes = rows.map(function(row) {
     return normalizeHourTypeRow(headers, row);
+  });
+
+  hourTypes.sort(function(a, b) {
+    var orderA = Number.isFinite(a.display_order) ? a.display_order : Number.POSITIVE_INFINITY;
+    var orderB = Number.isFinite(b.display_order) ? b.display_order : Number.POSITIVE_INFINITY;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    return String(a.name || '').localeCompare(String(b.name || ''));
   });
 
   var cacheKey = 'hour_types_all';
@@ -36,6 +79,9 @@ function normalizeHourTypeRow(headers, row) {
   var autoHoursRaw = cell('auto_populate_hours');
   var autoHours = Number(autoHoursRaw);
   if (isNaN(autoHours) || !isFinite(autoHours) || autoHours < 0) autoHours = 0;
+  var displayOrderRaw = cell('display_order');
+  var displayOrder = Number(displayOrderRaw);
+  if (!isFinite(displayOrder)) displayOrder = null;
   return {
     id: cell('id'),
     name: cell('name'),
@@ -47,7 +93,8 @@ function normalizeHourTypeRow(headers, row) {
     use_for_rate_calculation: boolFromSheetCell(cell('use_for_rate_calculation')),
     auto_populate_public_holidays: boolFromSheetCell(cell('auto_populate_public_holidays')),
     auto_populate_hours: autoHours,
-    created_at: cell('created_at')
+    created_at: cell('created_at'),
+    display_order: displayOrder
   };
 }
 
@@ -56,7 +103,7 @@ function api_createHourType(data) {
     throw new Error('Name and slug are required for hour types');
   }
 
-  var sh = getOrCreateSheet('hour_types');
+  var sh = getHourTypesSheet();
   var existingData = sh.getDataRange().getValues();
   var headers = existingData[0];
   var rows = existingData.slice(1);
@@ -67,6 +114,23 @@ function api_createHourType(data) {
   });
   if (existingSlugs.indexOf(data.slug) !== -1) {
     throw new Error('Hour type with slug "' + data.slug + '" already exists');
+  }
+
+  var displayIndex = headers.indexOf('display_order');
+  if (displayIndex !== -1) {
+    var nextOrder = 1;
+    for (var rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+      var rawOrder = Number(rows[rowIdx][displayIndex]);
+      if (isFinite(rawOrder)) {
+        nextOrder = Math.max(nextOrder, rawOrder + 1);
+      }
+    }
+    var providedOrder = Number(data.display_order);
+    if (!isFinite(providedOrder)) {
+      data.display_order = nextOrder;
+    } else {
+      data.display_order = providedOrder;
+    }
   }
 
   // If this is being set as default, clear other defaults
@@ -122,6 +186,8 @@ function api_createHourType(data) {
         return autoHours;
       case 'created_at':
         return now;
+      case 'display_order':
+        return Number.isFinite(Number(data.display_order)) ? Number(data.display_order) : '';
       default:
         return '';
     }
@@ -142,7 +208,7 @@ function api_createHourType(data) {
 }
 
 function api_updateHourType(id, data) {
-  var sh = getOrCreateSheet('hour_types');
+  var sh = getHourTypesSheet();
   var allData = sh.getDataRange().getValues();
   var headers = allData[0];
   var rows = allData.slice(1);
@@ -235,6 +301,14 @@ function api_updateHourType(id, data) {
     }
     updatedRow[autoHoursIndex] = normalizedHours;
   }
+  var orderIndex = headers.indexOf('display_order');
+  if (orderIndex !== -1 && data.hasOwnProperty('display_order')) {
+    var normalizedOrder = Number(data.display_order);
+    if (!isFinite(normalizedOrder)) {
+      normalizedOrder = '';
+    }
+    updatedRow[orderIndex] = normalizedOrder;
+  }
 
   sh.getRange(rowIndex + 2, 1, 1, updatedRow.length).setValues([updatedRow]);
 
@@ -246,7 +320,7 @@ function api_updateHourType(id, data) {
 }
 
 function api_deleteHourType(id) {
-  var sh = getOrCreateSheet('hour_types');
+  var sh = getHourTypesSheet();
   var allData = sh.getDataRange().getValues();
   var headers = allData[0];
   var rows = allData.slice(1);
@@ -295,8 +369,15 @@ function api_deleteHourType(id) {
   return { success: true };
 }
 
+function api_reorderHourTypes(payload) {
+  var order = Array.isArray(payload && payload.order) ? payload.order : [];
+  applyDisplayOrderToSheet('hour_types', order);
+  cacheClearPrefix('hour_types');
+  return { success: true };
+}
+
 function ensureWorkHourType() {
-  var sh = getOrCreateSheet('hour_types');
+  var sh = getHourTypesSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0];
 
@@ -336,6 +417,8 @@ function ensureWorkHourType() {
           return 0;
         case 'created_at':
           return now;
+        case 'display_order':
+          return 1;
         default:
           return '';
       }
@@ -372,7 +455,7 @@ function ensureWorkHourType() {
 }
 
 function getDefaultHourTypeId() {
-  var sh = getOrCreateSheet('hour_types');
+  var sh = getHourTypesSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0];
   var rows = data.slice(1);

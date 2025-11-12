@@ -15,7 +15,8 @@ var DEDUCTIONS_HEADERS = [
   'notes',
   'active',
   'created_at',
-  'updated_at'
+  'updated_at',
+  'display_order'
 ];
 var DEDUCTIONS_CACHE_KEY = 'deductions_v2';
 var GST_RATE = 0.1;
@@ -131,6 +132,10 @@ function normalizeDeductionRow(row, headers) {
   if (companyExpense && gstInclusive) {
     gstAmount = Number(map.gst_amount || (amount - amount / (1 + GST_RATE)));
   }
+  var createdAt = toIsoDateTime(map.created_at || '');
+  var updatedAt = toIsoDateTime(map.updated_at || '');
+  var displayOrderRaw = Number(map.display_order);
+  var displayOrder = Number.isFinite(displayOrderRaw) ? displayOrderRaw : null;
   return {
     id: id,
     name: map.name ? String(map.name) : '',
@@ -146,8 +151,9 @@ function normalizeDeductionRow(row, headers) {
     end_date: toIsoDate(map.end_date || ''),
     notes: map.notes ? String(map.notes) : '',
     active: map.active === '' ? true : parseBoolean(map.active),
-    created_at: toIsoDateTime(map.created_at || ''),
-    updated_at: toIsoDateTime(map.updated_at || '')
+    created_at: createdAt,
+    updated_at: updatedAt,
+    display_order: displayOrder
   };
 }
 
@@ -166,6 +172,17 @@ function listDeductionsInternal() {
     var normalized = normalizeDeductionRow(values[i], headers);
     if (normalized) result.push(normalized);
   }
+  result.sort(function(a, b) {
+    var orderA = Number.isFinite(a.display_order) ? a.display_order : Number.POSITIVE_INFINITY;
+    var orderB = Number.isFinite(b.display_order) ? b.display_order : Number.POSITIVE_INFINITY;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    if (a.active !== b.active) {
+      return a.active ? -1 : 1;
+    }
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
   cacheSet(DEDUCTIONS_CACHE_KEY, result);
   return result;
 }
@@ -235,6 +252,15 @@ function normalizeDeductionPayload(payload, existing) {
 
   var notes = payload.notes != null ? String(payload.notes).trim() : '';
   var active = payload.active === '' || payload.active === undefined ? true : parseBoolean(payload.active);
+  var displayOrderValue = null;
+  if (payload.display_order !== undefined && payload.display_order !== null) {
+    var candidateOrder = Number(payload.display_order);
+    if (Number.isFinite(candidateOrder)) {
+      displayOrderValue = candidateOrder;
+    }
+  } else if (existing && Number.isFinite(existing.display_order)) {
+    displayOrderValue = existing.display_order;
+  }
 
   return {
     id: existing && existing.id ? existing.id : (payload.id ? String(payload.id) : ''),
@@ -249,7 +275,8 @@ function normalizeDeductionPayload(payload, existing) {
     start_date: startDateIso,
     end_date: endDateIso,
     notes: notes,
-    active: active
+    active: active,
+    display_order: displayOrderValue
   };
 }
 
@@ -285,7 +312,8 @@ function buildDeductionRow(payload, timestamps) {
     payload.notes,
     payload.active ? 'TRUE' : 'FALSE',
     timestamps.created_at,
-    timestamps.updated_at
+    timestamps.updated_at,
+    payload.display_order != null ? payload.display_order : ''
   ];
 }
 
@@ -320,6 +348,17 @@ function api_upsertDeduction(payload) {
   if (!timestamps.created_at) {
     timestamps.created_at = nowIso;
   }
+  var orderIndex = headers.indexOf('display_order');
+  if (orderIndex !== -1 && !Number.isFinite(normalizedPayload.display_order)) {
+    var nextOrder = 1;
+    for (var i = 1; i < values.length; i++) {
+      var existingOrder = Number(values[i][orderIndex]);
+      if (isFinite(existingOrder)) {
+        nextOrder = Math.max(nextOrder, existingOrder + 1);
+      }
+    }
+    normalizedPayload.display_order = nextOrder;
+  }
   var row = buildDeductionRow(normalizedPayload, timestamps);
   if (targetRow === -1) {
     sh.appendRow(row);
@@ -351,3 +390,4 @@ function api_deleteDeduction(id) {
   }
   return { success: true };
 }
+

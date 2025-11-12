@@ -1780,6 +1780,8 @@ let ratePreviewInputSyncing = false;
     const autoHours = Number(clone.auto_populate_hours != null ? clone.auto_populate_hours : 0);
     clone.auto_populate_hours = Number.isFinite(autoHours) && autoHours > 0 ? autoHours : 0;
     clone.created_at = clone.created_at || '';
+    const orderValue = Number(clone.display_order);
+    clone.display_order = Number.isFinite(orderValue) ? orderValue : null;
     return clone;
   };
 
@@ -1998,6 +2000,40 @@ let ratePreviewInputSyncing = false;
     return dateObj.getDate() === targetDay;
   }
 
+  const getDisplayOrderValue = (item) => {
+    if (!item) return Number.POSITIVE_INFINITY;
+    const value = Number(item.display_order);
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+  };
+
+  const compareByDisplayOrder = (a, b, options = {}) => {
+    const orderA = getDisplayOrderValue(a);
+    const orderB = getDisplayOrderValue(b);
+    if (orderA !== orderB) return orderA - orderB;
+    if (options.activeFirst && a && b && (a.active !== b.active)) {
+      return a.active ? -1 : 1;
+    }
+    const nameA = String(a && a.name ? a.name : '');
+    const nameB = String(b && b.name ? b.name : '');
+    return nameA.localeCompare(nameB);
+  };
+
+  const reorderByIds = (list, ids) => {
+    if (!Array.isArray(list)) return [];
+    if (!Array.isArray(ids) || !ids.length) return list.slice();
+    const map = new Map(list.map((item) => [item.id, item]));
+    const ordered = [];
+    ids.forEach((id) => {
+      const entry = map.get(id);
+      if (entry) {
+        ordered.push(entry);
+        map.delete(id);
+      }
+    });
+    map.forEach((remaining) => ordered.push(remaining));
+    return ordered;
+  };
+
   function monthsBetween(startDate, targetDate) {
     if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return 0;
     if (!(targetDate instanceof Date) || Number.isNaN(targetDate.getTime())) return 0;
@@ -2051,6 +2087,8 @@ let ratePreviewInputSyncing = false;
     clone.active = clone.active !== false;
     clone.created_at = clone.created_at || '';
     clone.updated_at = clone.updated_at || '';
+    const orderValue = Number(clone.display_order);
+    clone.display_order = Number.isFinite(orderValue) ? orderValue : null;
     return clone;
   };
 
@@ -4173,10 +4211,7 @@ function loadAnnualData() {
 function renderDeductionsList() {
     if (!deductionsListEl) return;
     const list = Array.isArray(state.deductions) ? [...state.deductions] : [];
-    list.sort((a, b) => {
-      if (a.active !== b.active) return a.active ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    list.sort((a, b) => compareByDisplayOrder(a, b, { activeFirst: true }));
     const hasItems = list.length > 0;
     if (deductionsEmptyEl) {
       deductionsEmptyEl.style.display = hasItems ? 'none' : 'block';
@@ -4205,10 +4240,7 @@ function renderDeductionsList() {
       });
 
       const groupEntries = Object.keys(groups).map((key) => {
-        const items = groups[key].slice().sort((a, b) => {
-          if (a.active !== b.active) return a.active ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
+        const items = groups[key].slice().sort((a, b) => compareByDisplayOrder(a, b, { activeFirst: true }));
         const meta = key === '__uncategorised__'
           ? { id: '__uncategorised__', name: 'Uncategorised', color: '#6b7280' }
           : getDeductionCategoryMeta(key);
@@ -4297,10 +4329,10 @@ function renderDeductionsList() {
     renderAnnualCategorySection();
   }
 
-function createDeductionCard(deduction, options = {}) {
+  function createDeductionCard(deduction, options = {}) {
     const hideCategoryBadge = !!options.hideCategoryBadge;
     const wrapper = document.createElement('div');
-    wrapper.className = 'ts-item';
+    wrapper.className = 'ts-deduction-card';
     if (!deduction.active || (deduction.company_expense && !state.companyTrackingEnabled)) {
       wrapper.classList.add('ts-deduction-readonly');
     }
@@ -17685,7 +17717,9 @@ function getCachedIncomeSummary(monthKey) {
       return;
     }
 
-    const html = state.hourTypes.map(hourType => {
+    const sortedHourTypes = [...state.hourTypes].sort((a, b) => compareByDisplayOrder(a, b));
+
+    const html = sortedHourTypes.map(hourType => {
       const badges = [];
       if (hourType.is_default) badges.push('<span class="ts-hour-type-badge default">Default</span>');
       if (hourType.contributes_to_income) badges.push('<span class="ts-hour-type-badge income">Income</span>');
@@ -17715,6 +17749,120 @@ function getCachedIncomeSummary(monthKey) {
     }).join('');
 
     container.innerHTML = html;
+    hourTypesContainerElement = container;
+    ensureHourTypeReorderHandlers(container);
+    container.querySelectorAll('.ts-hour-type-item[data-id]').forEach((item) => {
+      item.setAttribute('draggable', 'true');
+      item.addEventListener('dragstart', handleHourTypeDragStart);
+      item.addEventListener('dragend', handleHourTypeDragEnd);
+    });
+  }
+
+  let hourTypeOrderInFlight = false;
+  let hourTypesContainerElement = null;
+  const hourTypeDragState = { dragging: null };
+
+  function ensureHourTypeReorderHandlers(container) {
+    if (!container || container.dataset.hourReorderAttached === 'true') return;
+    container.dataset.hourReorderAttached = 'true';
+    container.addEventListener('dragover', handleHourTypeDragOver);
+    container.addEventListener('drop', handleHourTypeDrop);
+  }
+
+  function handleHourTypeDragStart(event) {
+    const target = event.target.closest('.ts-hour-type-item[data-id]');
+    if (!target || hourTypeOrderInFlight) {
+      event.preventDefault();
+      return;
+    }
+    hourTypeDragState.dragging = target;
+    target.classList.add('ts-dragging');
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+    }
+  }
+
+  function handleHourTypeDragEnd() {
+    if (hourTypeDragState.dragging) {
+      hourTypeDragState.dragging.classList.remove('ts-dragging');
+    }
+    hourTypeDragState.dragging = null;
+  }
+
+  function handleHourTypeDragOver(event) {
+    if (!hourTypeDragState.dragging || !hourTypesContainerElement) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    const target = event.target.closest('.ts-hour-type-item[data-id]');
+    if (!target || target === hourTypeDragState.dragging) return;
+    const rect = target.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    const insertBefore = event.clientY < midpoint ? target : target.nextElementSibling;
+    hourTypesContainerElement.insertBefore(hourTypeDragState.dragging, insertBefore);
+  }
+
+  function handleHourTypeDrop(event) {
+    if (!hourTypeDragState.dragging || !hourTypesContainerElement) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    const container = hourTypesContainerElement;
+    if (hourTypeDragState.dragging.parentElement !== container) {
+      container.appendChild(hourTypeDragState.dragging);
+    }
+    const orderIds = Array.from(container.querySelectorAll('.ts-hour-type-item[data-id]')).map(el => el.dataset.id);
+    finalizeHourTypeOrder(orderIds);
+    hourTypeDragState.dragging.classList.remove('ts-dragging');
+    hourTypeDragState.dragging = null;
+  }
+
+  function finalizeHourTypeOrder(orderIds) {
+    if (!orderIds || !orderIds.length) return;
+    const previousOrder = state.hourTypes.map((item) => item.id);
+    if (previousOrder.length === orderIds.length && orderIds.every((id, idx) => id === previousOrder[idx])) {
+      return;
+    }
+    state.hourTypes = reorderByIds(state.hourTypes, orderIds);
+    state.hourTypes.forEach((item, idx) => {
+      item.display_order = idx + 1;
+    });
+    persistHourTypeOrder(orderIds, previousOrder);
+  }
+
+  function persistHourTypeOrder(orderIds, previousOrder) {
+    if (hourTypeOrderInFlight || !orderIds.length) return;
+    hourTypeOrderInFlight = true;
+    setStatus('Saving hour type order...', 'warn');
+    const previousCopy = previousOrder.slice();
+    google.script.run
+      .withSuccessHandler(() => {
+        hourTypeOrderInFlight = false;
+        setStatus('Hour type order saved', 'success');
+        saveCache();
+        renderHourTypes();
+
+        // Refresh all hour type dropdowns immediately
+        populateHourTypeOptions();
+        if (defaultHourTypeSelect) populateDefaultHourTypeOptions(defaultHourTypeSelect);
+        if (editDefaultHourTypeSelect) populateDefaultHourTypeOptions(editDefaultHourTypeSelect);
+        if (invoiceLineHourTypeSelect) populateInvoiceHourTypeOptions(invoiceLineHourTypeSelect);
+        if (invoiceDefaultHourTypeSelect) populateInvoiceHourTypeOptions(invoiceDefaultHourTypeSelect);
+        if (recurringHourTypeSelect) populateRecurringHourTypeOptions();
+      })
+      .withFailureHandler(() => {
+        hourTypeOrderInFlight = false;
+        state.hourTypes = reorderByIds(state.hourTypes, previousCopy);
+        state.hourTypes.forEach((item, idx) => {
+          item.display_order = idx + 1;
+        });
+        saveCache();
+        renderHourTypes();
+        setStatus('Failed to save hour type order', 'error');
+      })
+      .api_reorderHourTypes({ order: orderIds });
   }
 
   function loadPublicHolidays(renderAfterLoad = false) {

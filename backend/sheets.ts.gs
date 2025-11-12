@@ -13,7 +13,7 @@ function getOrCreateSheet(name) {
     } else if (name === 'feature_flags') {
       sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
     } else if (name === 'hour_types') {
-      sh.getRange(1,1,1,10).setValues([[
+      sh.getRange(1,1,1,11).setValues([[
         'id',
         'name',
         'slug',
@@ -23,10 +23,11 @@ function getOrCreateSheet(name) {
         'is_default',
         'auto_populate_public_holidays',
         'auto_populate_hours',
-        'created_at'
+        'created_at',
+        'display_order'
       ]]);
     } else if (name === 'deductions') {
-      sh.getRange(1,1,1,16).setValues([[
+      sh.getRange(1,1,1,17).setValues([[
         'id',
         'name',
         'category_id',
@@ -42,7 +43,8 @@ function getOrCreateSheet(name) {
         'notes',
         'active',
         'created_at',
-        'updated_at'
+        'updated_at',
+        'display_order'
       ]]);
     } else if (name === 'deduction_categories') {
       sh.getRange(1,1,1,5).setValues([[
@@ -400,4 +402,36 @@ function getOrCreateSheet(name) {
     sh.getRange('M:O').setNumberFormat('@'); // submitted_at, created_at, updated_at
   }
   return sh;
+}
+
+function applyDisplayOrderToSheet(name, orderIds) {
+  if (!name) return [];
+  var sh = getOrCreateSheet(name);
+  var values = sh.getDataRange().getValues();
+  if (!values || values.length <= 1) return [];
+  var headers = values[0];
+  var idIndex = headers.indexOf('id');
+  var orderIndex = headers.indexOf('display_order');
+  if (idIndex === -1 || orderIndex === -1) return [];
+  var normalizedOrder = Array.isArray(orderIds) ? orderIds : [];
+  var map = {};
+  var next = normalizedOrder.length + 1;
+  normalizedOrder.forEach(function(id, idx) {
+    if (id || id === 0) {
+      map[String(id)] = idx + 1;
+    }
+  });
+  for (var i = 1; i < values.length; i++) {
+    var rowId = String(values[i][idIndex] || '');
+    var desired = map[rowId];
+    if (!desired) {
+      desired = next++;
+      map[rowId] = desired;
+    }
+    var current = Number(values[i][orderIndex]);
+    if (current !== desired) {
+      sh.getRange(i + 1, orderIndex + 1).setValue(desired);
+    }
+  }
+  return map;
 }

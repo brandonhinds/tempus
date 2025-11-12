@@ -134,6 +134,7 @@ Stores configured deductions that affect monthly income calculations. Deductions
 | `active` | boolean/string | `TRUE`/`FALSE` flag controlling whether the deduction is in use. | `TRUE` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp when the deduction was created. | `2025-10-08T00:12:00Z` |
 | `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2025-10-08T00:12:00Z` |
+| `display_order` | number | Optional numeric rank that controls the predicate order used by drag-and-drop reordering. | `1` |
 
 ### Suggested improvements
 - Store an attachment reference once file uploads are supported for deductions.
@@ -209,6 +210,7 @@ Hour types define categories of time that can be tracked (work, annual leave, si
 | `auto_populate_public_holidays` | boolean/string | `TRUE`/`FALSE` flag enabling automatic entry creation on weekday public holidays. Requires public holiday feature. | `FALSE` |
 | `auto_populate_hours` | number | Hours (decimal) to record when auto-populating a weekday public holiday. | `7.5` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the hour type was created server-side. | `2025-10-06T10:15:00Z` |
+| `display_order` | number | Optional numeric rank used by the UI when users drag hour type cards to set a preferred order. | `1` |
 
 ### Built-in hour types
 - The "Work" hour type (`slug: "work"`) is automatically created and cannot be deleted. It contributes to income, requires a contract, is the default when the hour_types feature is disabled, and is used for rate calculation if no other hour type has that flag set.
