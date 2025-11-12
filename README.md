@@ -70,6 +70,10 @@ If you want to modify Tempus or contribute to development:
 
 #### Setup
 
+> **Note**: All terminal commands in this section must be run in a Unix-like terminal:
+> - **Windows**: Use Git Bash (or WSL)
+> - **macOS/Linux**: Use the built-in Terminal
+
 1. **Install clasp**:
    ```bash
    npm install -g @google/clasp
@@ -86,6 +90,10 @@ If you want to modify Tempus or contribute to development:
 4. **Login to clasp and connect to your Apps Script project**:
    ```bash
    clasp login
+   ```
+   **Important**: When prompted, make sure to allow **all requested permissions**. Clasp needs full access to manage your Apps Script projects.
+
+   ```bash
    clasp clone [Your Script ID]
    ```
 
@@ -117,6 +125,10 @@ After initial setup, your workflow is simple:
 
 ## Updating Tempus
 
+> **Note**: All terminal commands in this section must be run in a Unix-like terminal:
+> - **Windows**: Use Git Bash (or WSL)
+> - **macOS/Linux**: Use the built-in Terminal
+
 ### For Users
 
 If you copied the template and want to get the latest features:
@@ -125,12 +137,21 @@ If you copied the template and want to get the latest features:
 2. **Download the latest version**:
    - Download [tempus-main.zip](https://github.com/brandonhinds/tempus/archive/refs/heads/main.zip)
    - Extract to your computer
-3. **Update via clasp**:
+3. **Authenticate with clasp** (first time only):
+   ```bash
+   clasp login
+   ```
+   **Important**: When prompted, make sure to allow **all requested permissions**. Clasp needs full access to manage your Apps Script projects.
+
+4. **Update via clasp**:
    ```bash
    cd /path/to/extracted/tempus
    clasp push
    ```
-4. **Refresh your web app** - Changes appear immediately
+
+   > **Troubleshooting**: If you get an "Insufficient Permission" error, clasp likely needs additional permissions. Run `clasp login` again and ensure you grant all requested permissions.
+
+5. **Refresh your web app** - Changes appear immediately
 
 ### For Developers
 
@@ -141,6 +162,8 @@ cd /path/to/tempus
 git pull origin main
 clasp push
 ```
+
+> **Troubleshooting**: If you get an "Insufficient Permission" error during `clasp push`, run `clasp login` again and ensure you grant all requested permissions.
 
 After cloning, point your repository hooks at the bundled scripts so build metadata stays up to date:
 ```bash
