@@ -1,0 +1,1652 @@
+Revised Lazy Loading Implementation Plan
+
+  Updated Tier Structure
+
+  Tier 1: Critical & Immediately Visible (~1-2 seconds)
+  - Entries
+  - Contracts
+  - Settings
+  - Feature Flags
+  - Hour Types (from cache if available) - Critical for entry forms
+
+  Tier 2: Important Supporting Data (background, ~2-4 seconds total)
+  - Hour Types (fresh from server) - Refresh cached data
+  - Deductions
+  - Actual Income
+  - Super Guarantee Rates
+  - Deduction Exceptions
+
+  Tier 3: Background Eager Load (all features, ~4-8 seconds total)
+  - BAS Submissions
+  - Invoices (if enabled)
+  - Public Holidays (if enabled)
+  - Recurring Entries (if enabled)
+  - Deduction Categories (if enabled)
+
+  Tier 4: Progressive Month Pre-Calculation (~8-15 seconds total)
+  - Current month income summary (if not cached/dirty)
+  - Adjacent months (±2 months)
+  - All past months in current year (won't change unless user edits)
+  - All future months with entries (unlikely to change)
+  - Extended past months (previous year) - lowest priority
+
+  Key Architectural Changes
+
+  1. Smarter Monthly Cache Strategy
+
+  Instead of recalculating everything, we:
+  - Mark months as "dirty" when entries/deductions change for that month
+  - Trust cached calculations for untouched months
+  - Separate cache for each month with metadata (last calculated, entry count hash)
+  - Progressive invalidation: Only invalidate specific months when data changes
+
+  2. Eliminate api_getAnnualSummary() Call
+
+  Current problem: Calls backend which calculates all 12 months synchronously
+
+  New approach:
+  - Build annual view client-side from individual month caches
+  - Fetch only missing months via new api_getMonthSummary(year, month) endpoint
+  - Progressive rendering: Show cached months immediately, fill in missing ones
+  - Background refresh: Recalculate only dirty months
+
+  3. Hour Types Smart Loading
+
+  - Check cache first: If hour types in cache and < 24 hours old, use immediately
+  - Background refresh: Always fetch fresh hour types in Tier 2, update cache
+  - Graceful degradation: If cache missing and API fails, show error but don't block
+
+  ---
+  Detailed Technical Implementation Plan
+
+  Phase 1: Enhanced State Management & Cache Structure
+
+  File: views/partials/scripts.html
+
+  Location: Around line 400, in the main state object definition
+
+  Add new state properties:
+
+  state.loadingTiers = {
+    tier1Complete: false,
+    tier2Complete: false,
+    tier3Complete: false,
+    tier4Complete: false,
+
+    // Individual feature tracking
+    features: {
+      hourTypes: { loaded: false, loading: false, lastUpdate: null },
+      basSubmissions: { loaded: false, loading: false },
+      invoices: { loaded: false, loading: false },
+      publicHolidays: { loaded: false, loading: false },
+      recurringEntries: { loaded: false, loading: false },
+      deductionCategories: { loaded: false, loading: false }
+    }
+  };
+
+  // Enhanced month cache with metadata
+  state.incomeSummaryCache = {}; // Already exists, enhance structure
+  state.incomeCacheMetadata = {
+    // Structure: { 'yyyy-MM': { lastCalculated: timestamp, entryHash: 'hash', isDirty: false } }
+  };
+
+  state.lazyLoadQueue = {
+    monthsToCalculate: [], // Priority queue: current, adjacent, past, future
+    currentlyCalculating: null,
+    progressiveLoadComplete: false
+  };
+
+  Location: Around line 6097, in loadCache() function
+
+  Enhance cache loading to include metadata:
+
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(state.cacheKey);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+
+      // ... existing cache loading ...
+
+      // Load month cache metadata
+      if (obj.incomeCacheMetadata && typeof obj.incomeCacheMetadata === 'object') {
+        state.incomeCacheMetadata = obj.incomeCacheMetadata;
+      } else {
+        state.incomeCacheMetadata = {};
+      }
+
+      // Load tier state (don't restore loading states, only completion)
+      if (obj.loadingTiers && typeof obj.loadingTiers === 'object') {
+        // Only restore "loaded" status for features
+        if (obj.loadingTiers.features) {
+          Object.keys(obj.loadingTiers.features).forEach(feature => {
+            if (state.loadingTiers.features[feature]) {
+              state.loadingTiers.features[feature].loaded = obj.loadingTiers.features[feature].loaded || false;
+              state.loadingTiers.features[feature].lastUpdate = obj.loadingTiers.features[feature].lastUpdate || null;
+            }
+          });
+        }
+      }
+
+      // ... rest of existing cache loading ...
+    } catch (e) {}
+  }
+
+  Location: Around line 6193, in saveCache() function
+
+  Enhance cache saving:
+
+  function saveCache() {
+    try {
+      const payload = {
+        // ... existing payload properties ...
+
+        incomeCacheMetadata: state.incomeCacheMetadata,
+
+        loadingTiers: {
+          features: Object.keys(state.loadingTiers.features).reduce((acc, key) => {
+            acc[key] = {
+              loaded: state.loadingTiers.features[key].loaded,
+              lastUpdate: state.loadingTiers.features[key].lastUpdate
+            };
+            return acc;
+          }, {})
+        }
+      };
+
+      localStorage.setItem(state.cacheKey, JSON.stringify(payload));
+    } catch (e) {}
+  }
+
+  Phase 2: Refactor Init Sequence
+
+  File: views/partials/scripts.html
+
+  Location: Around line 13136, replace entire init() function
+
+  function init() {
+    loadCache();
+    renderEntries();
+
+    // Load settings into UI inputs from cache
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      if (element) {
+        const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function'
+   ? config.defaultValue() : config.defaultValue);
+        config.setValue(element, value);
+      }
+    });
+
+    applyTheme(state.settings.theme || 'dark');
+    captureSettingsState();
+    checkSettingsDirty();
+    applyStatusDisplay();
+    renderContractsUI();
+    renderDeductionsList();
+    hideContractForm();
+    refreshContractBindings();
+    state.featureFlags = normalizeFeatureFlags(state.featureFlags);
+    renderFeatureFlags();
+
+    // Start tiered loading
+    setStatus('Loading...', 'warn');
+    loadTier1Critical();
+  }
+
+  Location: Immediately after init() function (around line 13180)
+
+  Add new tiered loading functions:
+
+  function loadTier1Critical() {
+    // Track pending loads (5 items: entries, contracts, settings, feature flags, hour types if cached)
+    const tier1Items = {
+      entries: false,
+      contracts: false,
+      settings: false,
+      featureFlags: false,
+      hourTypes: false // Will be true if loaded from cache or if feature disabled
+    };
+
+    const checkTier1Complete = () => {
+      if (Object.values(tier1Items).every(v => v === true)) {
+        state.loadingTiers.tier1Complete = true;
+        setStatus('Ready', 'success');
+
+        // Immediately start Tier 2
+        loadTier2Supporting();
+      }
+    };
+
+    // 1. Load Entries (most critical)
+    entriesSyncInFlight = true;
+    google.script.run
+      .withSuccessHandler((entries) => {
+        entriesSyncInFlight = false;
+        const sanitizedEntries = (entries || []).map(sanitizeEntry);
+        mergeEntriesWithServerEntries(sanitizedEntries);
+        state.entriesLoaded = true;
+        saveCache();
+        renderEntries();
+        updateTabStates();
+        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
+
+        tier1Items.entries = true;
+        checkTier1Complete();
+      })
+      .withFailureHandler(() => {
+        entriesSyncInFlight = false;
+        setStatus('Entries sync failed', 'error');
+        tier1Items.entries = true; // Continue even on failure
+        checkTier1Complete();
+      })
+      .api_getEntries({});
+
+    // 2. Load Contracts
+    google.script.run
+      .withSuccessHandler((contracts) => {
+        state.contracts = (contracts || []).map(sanitizeContract);
+        refreshContractBindings();
+        populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id :
+  '');
+        ensureInvoiceFormOptions();
+        saveCache();
+        renderCalendar();
+
+        tier1Items.contracts = true;
+        checkTier1Complete();
+      })
+      .withFailureHandler(() => {
+        setStatus('Contracts sync failed', 'error');
+        tier1Items.contracts = true;
+        checkTier1Complete();
+      })
+      .api_getContracts();
+
+    // 3. Load Settings (with retry mechanism)
+    let settingsRetryCount = 0;
+    const MAX_SETTINGS_RETRIES = 3;
+
+    function loadSettingsWithRetry() {
+      google.script.run
+        .withSuccessHandler((settings) => {
+          // If null or empty object received, retry up to MAX_SETTINGS_RETRIES times
+          if (!settings || (typeof settings === 'object' && Object.keys(settings).length === 0)) {
+            if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+              settingsRetryCount++;
+              const delay = Math.pow(2, settingsRetryCount) * 500;
+              console.warn('[Settings] Received null/empty settings, retrying in ' + delay + 'ms (attempt ' +
+  settingsRetryCount + '/' + MAX_SETTINGS_RETRIES + ')');
+              setTimeout(loadSettingsWithRetry, delay);
+              return;
+            } else {
+              console.error('[Settings] Received null/empty after ' + MAX_SETTINGS_RETRIES + ' retries, using cached
+  settings');
+              if (!state.settings || Object.keys(state.settings).length === 0) {
+                state.settings = {};
+              }
+              settingsServerSynced = true;
+              checkSettingsDirty();
+              tier1Items.settings = true;
+              checkTier1Complete();
+              return;
+            }
+          }
+
+          // Valid settings received
+          const previousLastNonCustomTheme = state.settings && state.settings.last_non_custom_theme
+            ? state.settings.last_non_custom_theme
+            : '';
+          state.settings = settings;
+
+          // Parse custom_theme_config if it's a JSON string
+          if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
+            try {
+              state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
+            } catch (e) {
+              state.settings.custom_theme_config = null;
+            }
+          }
+
+          if (!state.settings.last_non_custom_theme) {
+            if (state.settings.theme && state.settings.theme !== 'custom') {
+              state.settings.last_non_custom_theme = state.settings.theme;
+            } else if (previousLastNonCustomTheme && previousLastNonCustomTheme !== 'custom') {
+              state.settings.last_non_custom_theme = previousLastNonCustomTheme;
+            }
+          }
+
+          saveCache();
+          Object.keys(SETTINGS_CONFIG).forEach((key) => {
+            const config = SETTINGS_CONFIG[key];
+            const element = config.element();
+            if (element) {
+              const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue ===
+  'function' ? config.defaultValue() : config.defaultValue);
+              config.setValue(element, value);
+            } else {
+              console.warn('[Settings] Element not found for key:', key);
+            }
+          });
+          applyTheme(state.settings.theme || 'dark');
+
+          captureSettingsState();
+          settingsServerSynced = true;
+          checkSettingsDirty();
+          applyStatusDisplay();
+          renderCalendar();
+
+          tier1Items.settings = true;
+          checkTier1Complete();
+        })
+        .withFailureHandler((error) => {
+          console.error('[Settings] Failed to load from server:', error);
+
+          if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+            settingsRetryCount++;
+            const delay = Math.pow(2, settingsRetryCount) * 500;
+            console.warn('[Settings] API call failed, retrying in ' + delay + 'ms (attempt ' + settingsRetryCount + '/' +
+  MAX_SETTINGS_RETRIES + ')');
+            setTimeout(loadSettingsWithRetry, delay);
+            return;
+          }
+
+          settingsServerSynced = true;
+          checkSettingsDirty();
+          tier1Items.settings = true;
+          checkTier1Complete();
+        })
+        .api_getSettings();
+    }
+
+    loadSettingsWithRetry();
+
+    // 4. Load Feature Flags
+    google.script.run
+      .withSuccessHandler((flags) => {
+        state.featureFlags = normalizeFeatureFlags(flags);
+        saveCache();
+        renderFeatureFlags();
+        // Don't call applyFeatureFlags() yet - wait for all tiers
+
+        tier1Items.featureFlags = true;
+        checkTier1Complete();
+      })
+      .withFailureHandler(() => {
+        tier1Items.featureFlags = true;
+        checkTier1Complete();
+      })
+      .api_getFeatureFlags();
+
+    // 5. Load Hour Types from cache OR mark as pending for Tier 2
+    const hourTypesFeatureEnabled = getFeatureFlag('hour_types');
+
+    if (!hourTypesFeatureEnabled) {
+      // Feature disabled, mark as complete
+      tier1Items.hourTypes = true;
+      checkTier1Complete();
+    } else if (state.hourTypes && state.hourTypes.length > 0 &&
+               state.loadingTiers.features.hourTypes.loaded &&
+               state.loadingTiers.features.hourTypes.lastUpdate &&
+               (Date.now() - state.loadingTiers.features.hourTypes.lastUpdate) < 86400000) {
+      // Have cached hour types less than 24 hours old
+      console.log('[HourTypes] Using cached hour types from ' + new
+  Date(state.loadingTiers.features.hourTypes.lastUpdate).toISOString());
+      updateHourTypeMap();
+      populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
+      updateRecurringHourTypeVisibility();
+      ensureInvoiceFormOptions();
+      renderCalendarFilters();
+
+      tier1Items.hourTypes = true;
+      checkTier1Complete();
+
+      // Still refresh in background (will happen in Tier 2)
+    } else {
+      // No cache or stale cache, must load in Tier 1 for critical path
+      console.log('[HourTypes] No valid cache, loading in Tier 1');
+      google.script.run
+        .withSuccessHandler((hourTypes) => {
+          state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
+          updateHourTypeMap();
+          populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id :
+  '');
+          updateRecurringHourTypeVisibility();
+          ensureInvoiceFormOptions();
+          renderCalendarFilters();
+
+          state.loadingTiers.features.hourTypes.loaded = true;
+          state.loadingTiers.features.hourTypes.lastUpdate = Date.now();
+          saveCache();
+
+          tier1Items.hourTypes = true;
+          checkTier1Complete();
+        })
+        .withFailureHandler((error) => {
+          console.error('[HourTypes] Failed to load in Tier 1:', error);
+          tier1Items.hourTypes = true; // Continue even on failure
+          checkTier1Complete();
+        })
+        .api_getHourTypes();
+    }
+  }
+
+  function loadTier2Supporting() {
+    console.log('[Loading] Starting Tier 2 (Supporting Data)');
+
+    const tier2Items = {
+      hourTypesRefresh: false,
+      deductions: false,
+      actualIncome: false,
+      superRates: false,
+      deductionExceptions: false
+    };
+
+    const checkTier2Complete = () => {
+      if (Object.values(tier2Items).every(v => v === true)) {
+        state.loadingTiers.tier2Complete = true;
+        console.log('[Loading] Tier 2 complete, starting Tier 3');
+
+        // Now that we have all supporting data, apply feature flags
+        applyFeatureFlagsLazy();
+
+        // Render components that depend on Tier 2 data
+        renderIncomeSummary();
+        renderDeductionsList();
+
+        // Start Tier 3 (background eager load)
+        loadTier3BackgroundEager();
+      }
+    };
+
+    // 1. Refresh Hour Types (if not already fresh from Tier 1)
+    const hourTypesFeatureEnabled = getFeatureFlag('hour_types');
+    if (!hourTypesFeatureEnabled ||
+        (state.loadingTiers.features.hourTypes.loaded &&
+         state.loadingTiers.features.hourTypes.lastUpdate &&
+         (Date.now() - state.loadingTiers.features.hourTypes.lastUpdate) < 300000)) {
+      // Feature disabled or refreshed within last 5 minutes, skip
+      tier2Items.hourTypesRefresh = true;
+      checkTier2Complete();
+    } else {
+      console.log('[HourTypes] Refreshing in background (Tier 2)');
+      google.script.run
+        .withSuccessHandler((hourTypes) => {
+          state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
+          updateHourTypeMap();
+          populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id :
+  '');
+          updateRecurringHourTypeVisibility();
+          ensureInvoiceFormOptions();
+          if (getFeatureFlag('enable_invoices')) {
+            renderInvoiceDefaults();
+            renderInvoiceDetail();
+          }
+          renderHourTypes();
+          updateHourTypeFormVisibility();
+          renderCalendarFilters();
+          renderCalendar();
+
+          state.loadingTiers.features.hourTypes.loaded = true;
+          state.loadingTiers.features.hourTypes.lastUpdate = Date.now();
+          saveCache();
+
+          tier2Items.hourTypesRefresh = true;
+          checkTier2Complete();
+        })
+        .withFailureHandler((error) => {
+          console.error('[HourTypes] Failed to refresh in Tier 2:', error);
+          tier2Items.hourTypesRefresh = true;
+          checkTier2Complete();
+        })
+        .api_getHourTypes();
+    }
+
+    // 2. Load Deductions
+    google.script.run
+      .withSuccessHandler((deductions) => {
+        state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+        saveCache();
+        renderDeductionsList();
+        renderIncomeSummary();
+        renderAnnualCategorySection();
+
+        tier2Items.deductions = true;
+        checkTier2Complete();
+      })
+      .withFailureHandler(() => {
+        setStatus('Deductions sync failed', 'error');
+        tier2Items.deductions = true;
+        checkTier2Complete();
+      })
+      .api_getDeductions();
+
+    // 3. Load Actual Income
+    google.script.run
+      .withSuccessHandler((actualIncome) => {
+        state.actualIncome = actualIncome || [];
+        refreshActualIncomeMap();
+        saveCache();
+        renderIncomeSummary();
+
+        tier2Items.actualIncome = true;
+        checkTier2Complete();
+      })
+      .withFailureHandler((error) => {
+        console.error('[ActualIncome] Failed to load:', error);
+        tier2Items.actualIncome = true;
+        checkTier2Complete();
+      })
+      .api_getActualIncome();
+
+    // 4. Load Super Guarantee Rates
+    google.script.run
+      .withSuccessHandler((rates) => {
+        cacheSuperGuaranteeRates(rates);
+
+        tier2Items.superRates = true;
+        checkTier2Complete();
+      })
+      .withFailureHandler(() => {
+        tier2Items.superRates = true;
+        checkTier2Complete();
+      })
+      .api_getSuperGuaranteeRates();
+
+    // 5. Load Deduction Exceptions
+    google.script.run
+      .withSuccessHandler((exceptions) => {
+        state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
+        saveCache();
+        renderIncomeSummary();
+
+        tier2Items.deductionExceptions = true;
+        checkTier2Complete();
+      })
+      .withFailureHandler(() => {
+        console.error('[DeductionExceptions] Failed to load');
+        tier2Items.deductionExceptions = true;
+        checkTier2Complete();
+      })
+      .api_getDeductionExceptions();
+  }
+
+  function loadTier3BackgroundEager() {
+    console.log('[Loading] Starting Tier 3 (Background Eager Load)');
+
+    // These all load in parallel, no blocking
+    const tier3Items = {
+      basSubmissions: false,
+      invoices: false,
+      publicHolidays: false,
+      recurringEntries: false,
+      deductionCategories: false
+    };
+
+    const checkTier3Complete = () => {
+      if (Object.values(tier3Items).every(v => v === true)) {
+        state.loadingTiers.tier3Complete = true;
+        console.log('[Loading] Tier 3 complete, starting Tier 4 (month pre-calculation)');
+
+        // Start month pre-calculation
+        loadTier4MonthPreCalculation();
+      }
+    };
+
+    // 1. Load BAS Submissions (always load if company tracking enabled)
+    if (!state.companyTrackingEnabled) {
+      tier3Items.basSubmissions = true;
+      checkTier3Complete();
+    } else {
+      google.script.run
+        .withSuccessHandler((submissions) => {
+          state.basSubmissions = submissions || [];
+          state.loadingTiers.features.basSubmissions.loaded = true;
+          saveCache();
+          renderBasReporting();
+
+          tier3Items.basSubmissions = true;
+          checkTier3Complete();
+        })
+        .withFailureHandler(() => {
+          tier3Items.basSubmissions = true;
+          checkTier3Complete();
+        })
+        .api_getBasSubmissions();
+    }
+
+    // 2. Load Invoices (if feature enabled)
+    if (!getFeatureFlag('enable_invoices')) {
+      tier3Items.invoices = true;
+      checkTier3Complete();
+    } else {
+      let invoicesPending = 2;
+      const invoicesComplete = () => {
+        invoicesPending--;
+        if (invoicesPending === 0) {
+          state.invoicesInitialized = true;
+          state.loadingTiers.features.invoices.loaded = true;
+          ensureInvoiceFiltersInitialized();
+          ensureInvoiceFormOptions();
+          saveCache();
+
+          tier3Items.invoices = true;
+          checkTier3Complete();
+        }
+      };
+
+      // Load invoice defaults
+      google.script.run
+        .withSuccessHandler((defaults) => {
+          state.invoiceDefaults = Array.isArray(defaults) ? defaults.slice() : [];
+          state.invoiceDefaultMap = state.invoiceDefaults.reduce((acc, item) => {
+            if (item && item.id) acc[item.id] = item;
+            return acc;
+          }, {});
+          renderInvoiceDefaults();
+          saveCache();
+          invoicesComplete();
+        })
+        .withFailureHandler(() => {
+          setStatus('Failed to load invoice defaults', 'error');
+          invoicesComplete();
+        })
+        .api_listInvoiceDefaultLineItems();
+
+      // Load invoice list
+      google.script.run
+        .withSuccessHandler((invoices) => {
+          state.invoices = Array.isArray(invoices) ? invoices.slice() : [];
+          sortInvoices();
+          updateInvoiceMaps();
+          saveCache();
+          renderBasInvoiceTable();
+          invoicesComplete();
+        })
+        .withFailureHandler(() => {
+          setStatus('Failed to load invoices', 'error');
+          invoicesComplete();
+        })
+        .api_listInvoices({ include_summary: true });
+    }
+
+    // 3. Load Public Holidays (if feature enabled)
+    if (!getFeatureFlag('enable_public_holidays')) {
+      tier3Items.publicHolidays = true;
+      checkTier3Complete();
+    } else {
+      ensureCalendarState();
+      const year = state.calendar.year;
+
+      google.script.run
+        .withSuccessHandler((holidays) => {
+          const newHolidays = Array.isArray(holidays) ? holidays : [];
+          const oldJson = JSON.stringify(state.publicHolidays);
+          const newJson = JSON.stringify(newHolidays);
+
+          if (oldJson !== newJson) {
+            state.publicHolidays = newHolidays;
+            updatePublicHolidayMap();
+            saveCache();
+            renderCalendar();
+          }
+
+          state.loadingTiers.features.publicHolidays.loaded = true;
+          maybeAutoPopulatePublicHolidayEntries();
+
+          tier3Items.publicHolidays = true;
+          checkTier3Complete();
+        })
+        .withFailureHandler((error) => {
+          console.error('[PublicHolidays] Failed to load:', error);
+          tier3Items.publicHolidays = true;
+          checkTier3Complete();
+        })
+        .api_getPublicHolidays({ year: year });
+    }
+
+    // 4. Load Recurring Entries (if feature enabled)
+    if (!getFeatureFlag('recurring_time_entries')) {
+      tier3Items.recurringEntries = true;
+      checkTier3Complete();
+    } else if (state.recurringEntriesInitialized) {
+      // Already initialized from cache
+      tier3Items.recurringEntries = true;
+      checkTier3Complete();
+    } else {
+      syncRecurringEntries({
+        silent: true,
+        onComplete: () => {
+          state.loadingTiers.features.recurringEntries.loaded = true;
+          tier3Items.recurringEntries = true;
+          checkTier3Complete();
+        }
+      });
+    }
+
+    // 5. Load Deduction Categories (if feature enabled)
+    if (!getFeatureFlag('enable_deduction_categories')) {
+      tier3Items.deductionCategories = true;
+      checkTier3Complete();
+    } else {
+      google.script.run
+        .withSuccessHandler((categories) => {
+          state.deductionCategories = (categories || []).map(sanitizeDeductionCategory);
+          updateDeductionCategoryMap();
+          ensureDeductionCategoryCollapseState();
+          saveCache();
+          renderDeductionCategoryOptions('');
+          renderDeductionsList();
+          renderAnnualCategorySection();
+
+          state.loadingTiers.features.deductionCategories.loaded = true;
+
+          tier3Items.deductionCategories = true;
+          checkTier3Complete();
+        })
+        .withFailureHandler(() => {
+          console.error('[DeductionCategories] Failed to load');
+          tier3Items.deductionCategories = true;
+          checkTier3Complete();
+        })
+        .api_getDeductionCategories();
+    }
+  }
+
+  function loadTier4MonthPreCalculation() {
+    console.log('[Loading] Starting Tier 4 (Month Pre-Calculation)');
+
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+
+    // Build priority queue for month calculation
+    const queue = [];
+
+    // Priority 1: Current month (if not cached or dirty)
+    const currentMonthKey = monthKeyFor(year, month);
+    if (shouldRecalculateMonth(currentMonthKey)) {
+      queue.push({ year, month, priority: 1 });
+    }
+
+    // Priority 2: Adjacent months (±2)
+    for (let offset = -2; offset <= 2; offset++) {
+      if (offset === 0) continue; // Already added current month
+      const adj = getAdjacentMonth(year, month, offset);
+      const adjKey = monthKeyFor(adj.year, adj.month);
+      if (shouldRecalculateMonth(adjKey)) {
+        queue.push({ ...adj, priority: 2 });
+      }
+    }
+
+    // Priority 3: All past months in current calendar year (unlikely to change)
+    for (let m = 0; m < month; m++) {
+      const pastKey = monthKeyFor(year, m);
+      if (shouldRecalculateMonth(pastKey)) {
+        queue.push({ year, month: m, priority: 3 });
+      }
+    }
+
+    // Priority 4: All future months in current calendar year that have entries
+    for (let m = month + 1; m < 12; m++) {
+      if (monthHasEntries(year, m)) {
+        const futureKey = monthKeyFor(year, m);
+        if (shouldRecalculateMonth(futureKey)) {
+          queue.push({ year, month: m, priority: 4 });
+        }
+      }
+    }
+
+    // Priority 5: Previous year months (lowest priority)
+    const prevYear = year - 1;
+    for (let m = 0; m < 12; m++) {
+      if (monthHasEntries(prevYear, m)) {
+        const prevKey = monthKeyFor(prevYear, m);
+        if (shouldRecalculateMonth(prevKey)) {
+          queue.push({ year: prevYear, month: m, priority: 5 });
+        }
+      }
+    }
+
+    // Sort by priority
+    queue.sort((a, b) => a.priority - b.priority);
+
+    state.lazyLoadQueue.monthsToCalculate = queue;
+    state.lazyLoadQueue.progressiveLoadComplete = false;
+
+    console.log('[Loading] Tier 4 queue has ' + queue.length + ' months to calculate');
+
+    // Start processing queue
+    processMonthCalculationQueue();
+  }
+
+  function processMonthCalculationQueue() {
+    if (state.lazyLoadQueue.monthsToCalculate.length === 0) {
+      state.lazyLoadQueue.progressiveLoadComplete = true;
+      state.loadingTiers.tier4Complete = true;
+      console.log('[Loading] Tier 4 complete - all months pre-calculated');
+      return;
+    }
+
+    // Don't block if user is actively interacting
+    if (state.lazyLoadQueue.currentlyCalculating) {
+      // Already processing one, wait
+      return;
+    }
+
+    const nextMonth = state.lazyLoadQueue.monthsToCalculate.shift();
+    state.lazyLoadQueue.currentlyCalculating = nextMonth;
+
+    const monthKey = monthKeyFor(nextMonth.year, nextMonth.month);
+    console.log('[Loading] Calculating month ' + monthKey + ' (priority ' + nextMonth.priority + ')');
+
+    // Calculate in next tick to avoid blocking UI
+    setTimeout(() => {
+      const summary = buildIncomeSummary(nextMonth.year, nextMonth.month);
+      cacheIncomeSummary(monthKey, summary);
+
+      // Update metadata
+      state.incomeCacheMetadata[monthKey] = {
+        lastCalculated: Date.now(),
+        entryHash: calculateMonthEntryHash(nextMonth.year, nextMonth.month),
+        isDirty: false
+      };
+
+      saveCache();
+
+      state.lazyLoadQueue.currentlyCalculating = null;
+
+      // Process next month with small delay to avoid CPU hogging
+      setTimeout(processMonthCalculationQueue, 50);
+    }, 10);
+  }
+
+  function shouldRecalculateMonth(monthKey) {
+    // Always calculate if no cache
+    const cached = getCachedIncomeSummary(monthKey);
+    if (!cached) return true;
+
+    // Check if marked dirty
+    const metadata = state.incomeCacheMetadata[monthKey];
+    if (metadata && metadata.isDirty) return true;
+
+    // Check if entry hash changed
+    const [yearStr, monthStr] = monthKey.split('-');
+    const year = parseInt(yearStr);
+    const month = parseInt(monthStr) - 1; // monthKeyFor uses 1-based
+    const currentHash = calculateMonthEntryHash(year, month);
+    if (metadata && metadata.entryHash !== currentHash) return true;
+
+    // Cache is valid
+    return false;
+  }
+
+  function calculateMonthEntryHash(year, month) {
+    // Create a simple hash of entry IDs and durations for this month
+    const monthEntries = entriesForMonth(year, month);
+    const hashString = monthEntries
+      .map(e => `${e.id}:${e.duration_minutes}:${e.contract_id}`)
+      .sort()
+      .join('|');
+
+    // Simple string hash
+    let hash = 0;
+    for (let i = 0; i < hashString.length; i++) {
+      const char = hashString.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  }
+
+  function monthHasEntries(year, month) {
+    const monthEntries = entriesForMonth(year, month);
+    return monthEntries.length > 0;
+  }
+
+  function getAdjacentMonth(year, month, offset) {
+    let m = month + offset;
+    let y = year;
+
+    while (m < 0) {
+      m += 12;
+      y--;
+    }
+    while (m > 11) {
+      m -= 12;
+      y++;
+    }
+
+    return { year: y, month: m };
+  }
+
+  function markMonthDirty(year, month) {
+    const monthKey = monthKeyFor(year, month);
+
+    // Mark metadata as dirty
+    if (!state.incomeCacheMetadata[monthKey]) {
+      state.incomeCacheMetadata[monthKey] = {
+        lastCalculated: 0,
+        entryHash: '',
+        isDirty: true
+      };
+    } else {
+      state.incomeCacheMetadata[monthKey].isDirty = true;
+    }
+
+    // Add to dirty set for immediate recalc
+    if (!state.dirtyIncomeMonths) {
+      state.dirtyIncomeMonths = new Set();
+    }
+    state.dirtyIncomeMonths.add(monthKey);
+
+    console.log('[Cache] Marked month ' + monthKey + ' as dirty');
+  }
+
+  function onCalendarMonthChange(newYear, newMonth) {
+    // User navigated to different month
+    // Queue calculation for new adjacent months
+
+    // Clear current queue and restart with new priorities
+    state.lazyLoadQueue.monthsToCalculate = [];
+    state.lazyLoadQueue.currentlyCalculating = null;
+
+    const queue = [];
+
+    // Priority 1: New current month
+    const currentMonthKey = monthKeyFor(newYear, newMonth);
+    if (shouldRecalculateMonth(currentMonthKey)) {
+      queue.push({ year: newYear, month: newMonth, priority: 1 });
+    }
+
+    // Priority 2: New adjacent months
+    for (let offset = -2; offset <= 2; offset++) {
+      if (offset === 0) continue;
+      const adj = getAdjacentMonth(newYear, newMonth, offset);
+      const adjKey = monthKeyFor(adj.year, adj.month);
+      if (shouldRecalculateMonth(adjKey)) {
+        queue.push({ ...adj, priority: 2 });
+      }
+    }
+
+    queue.sort((a, b) => a.priority - b.priority);
+    state.lazyLoadQueue.monthsToCalculate = queue;
+
+    processMonthCalculationQueue();
+  }
+
+  Phase 3: Modify Feature Flag Application
+
+  File: views/partials/scripts.html
+
+  Location: Around line 9568, replace applyFeatureFlags() function
+
+  function applyFeatureFlagsLazy() {
+    // This is called AFTER Tier 2 completes
+    // Only apply UI visibility changes, don't trigger data loads
+    // Data loads happen in Tier 3 background eager load
+
+    const rememberFlag = state.featureFlags.remember_last_page || DEFAULT_FEATURE_FLAGS.remember_last_page || { enabled:
+  false };
+    if (rememberFlag.enabled) {
+      let stored = null;
+      try {
+        stored = localStorage.getItem(LAST_PAGE_KEY);
+      } catch (e) {}
+      if (!stored) {
+        persistLastPage(state.currentPage);
+      } else if (stored && PAGE_KEYS.includes(stored) && stored !== state.currentPage) {
+        showPage(stored);
+      }
+    } else {
+      try {
+        localStorage.removeItem(LAST_PAGE_KEY);
+      } catch (e) {}
+    }
+
+    const zeroFlag = state.featureFlags.show_zero_hours || DEFAULT_FEATURE_FLAGS.show_zero_hours || { enabled: false };
+    state.showZeroHours = !!zeroFlag.enabled;
+    renderCalendar();
+    updateClearCacheVisibility();
+
+    const recurringFlag = state.featureFlags.recurring_time_entries || DEFAULT_FEATURE_FLAGS.recurring_time_entries || {
+  enabled: false };
+    const recurringEnabled = !!recurringFlag.enabled;
+    if (recurringManageBtn) recurringManageBtn.style.display = recurringEnabled ? 'inline-flex' : 'none';
+    if (!recurringEnabled) {
+      closeRecurringModal();
+    }
+    // Don't call syncRecurringEntries here - will be loaded in Tier 3
+
+    const expectedMonthlyFlag = state.featureFlags.expected_monthly_hours || DEFAULT_FEATURE_FLAGS.expected_monthly_hours
+  || { enabled: false };
+    if (contractIncludeWeekendsRow) {
+      contractIncludeWeekendsRow.style.display = expectedMonthlyFlag.enabled ? 'flex' : 'none';
+    }
+
+    const companyFlag = state.featureFlags.enable_company_tracking_features ||
+  DEFAULT_FEATURE_FLAGS.enable_company_tracking_features || { enabled: false };
+    state.companyTrackingEnabled = !!companyFlag.enabled;
+    updateDeductionFormVisibility();
+
+    const categoryFlag = state.featureFlags.enable_deduction_categories ||
+  DEFAULT_FEATURE_FLAGS.enable_deduction_categories || { enabled: false };
+    if (btnManageDeductionCategories) {
+      btnManageDeductionCategories.style.display = categoryFlag.enabled ? 'inline-flex' : 'none';
+    }
+    // Don't load categories here - will be loaded in Tier 3
+
+    renderDeductionsList();
+    renderIncomeSummary();
+
+    const quarterlyFlag = state.featureFlags.enable_company_quarterly_bas ||
+  DEFAULT_FEATURE_FLAGS.enable_company_quarterly_bas || { enabled: false };
+    state.companyBasQuarterly = state.companyTrackingEnabled && !!quarterlyFlag.enabled;
+    if (navBasBtn) {
+      navBasBtn.style.display = state.companyTrackingEnabled ? 'block' : 'none';
+    }
+    if (!state.companyTrackingEnabled && state.currentPage === 'bas') {
+      showPage('time');
+    }
+
+    updatePayrollHelperButtons();
+
+    // Show/hide hour types navigation
+    const hourTypesFlag = state.featureFlags.hour_types || DEFAULT_FEATURE_FLAGS.hour_types || { enabled: false };
+    if (navHourTypesBtn) {
+      navHourTypesBtn.style.display = hourTypesFlag.enabled ? 'block' : 'none';
+    }
+    // Hour types already loaded in Tier 1 or Tier 2
+    updateHourTypeFormVisibility();
+
+    const ratePreviewFlag = state.featureFlags.contract_rate_preview || DEFAULT_FEATURE_FLAGS.contract_rate_preview || {
+  enabled: false };
+    if (navRatePreviewBtn) {
+      navRatePreviewBtn.style.display = ratePreviewFlag.enabled ? 'block' : 'none';
+    }
+    if (ratePreviewFlag.enabled) {
+      renderRatePreviewContractOptions();
+      updateRatePreviewEmptyState();
+    } else {
+      if (state.currentPage === 'rate-preview') {
+        showPage('contracts');
+      }
+      resetRatePreviewState();
+    }
+
+    const invoicesFlag = state.featureFlags.enable_invoices || DEFAULT_FEATURE_FLAGS.enable_invoices || { enabled: false
+  };
+    if (navInvoicesBtn) {
+      navInvoicesBtn.style.display = invoicesFlag.enabled ? 'block' : 'none';
+    }
+    if (invoiceTemplateCol) invoiceTemplateCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (invoiceOutputFolderCol) invoiceOutputFolderCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (invoiceLineLimitCol) invoiceLineLimitCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (!invoicesFlag.enabled && state.currentPage === 'invoices') {
+      showPage('time');
+    }
+    if (!invoicesFlag.enabled) {
+      resetInvoicesState();
+    }
+    // Don't load invoices here - will be loaded in Tier 3
+
+    // Show/hide public holidays state setting
+    const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays
+  || { enabled: false };
+    if (publicHolidayStateCol) {
+      publicHolidayStateCol.classList.toggle('ts-hidden', !publicHolidaysFlag.enabled);
+    }
+    // Don't load public holidays here - will be loaded in Tier 3
+
+    // Show/hide PAYG rate setting (only for sole traders)
+    const soleTraderFlag = state.featureFlags.is_sole_trader || DEFAULT_FEATURE_FLAGS.is_sole_trader || { enabled: false
+  };
+    if (paygRateCol) {
+      paygRateCol.classList.toggle('ts-hidden', !soleTraderFlag.enabled);
+    }
+
+    // Show/hide minimum end time setting
+    const suggestEndTimeFlag = state.featureFlags.suggest_end_time || DEFAULT_FEATURE_FLAGS.suggest_end_time || { enabled:
+   false };
+    if (minimumEndTimeCol) {
+      minimumEndTimeCol.classList.toggle('ts-hidden', !suggestEndTimeFlag.enabled);
+    }
+
+    // Show/hide monthly insights trend method setting
+    if (monthlyInsightsTrendMethodCol) {
+      monthlyInsightsTrendMethodCol.classList.toggle('ts-hidden', !expectedMonthlyFlag.enabled);
+    }
+
+    // Show/hide lost super recovery mode setting
+    const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions ||
+  DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
+    if (lostSuperRecoveryCol) {
+      lostSuperRecoveryCol.classList.toggle('ts-hidden', !noLostSuperFlag.enabled);
+    }
+
+    // Show/hide colorblind theme options
+    const colorblindThemesFlag = state.featureFlags.enable_colorblind_themes ||
+  DEFAULT_FEATURE_FLAGS.enable_colorblind_themes || { enabled: false };
+    const colorblindThemeOptions = document.querySelectorAll('.ts-colorblind-theme');
+    colorblindThemeOptions.forEach(function(option) {
+      option.style.display = colorblindThemesFlag.enabled ? 'block' : 'none';
+    });
+
+    // ... rest of feature flag UI updates ...
+    updateDefaultButtonsVisibility();
+  }
+
+  Phase 4: Eliminate Annual API Call & Build Client-Side
+
+  File: views/partials/scripts.html
+
+  Location: Around line 2831, replace loadAnnualData() function
+
+  function loadAnnualData() {
+    // New approach: Build annual view from cached monthly summaries
+    // Only fetch missing months via new monthly endpoint
+
+    const payload = {
+      yearType: state.annualYearType,
+      startYear: state.annualCurrentYear,
+      contractIds: state.annualFilteredContracts
+    };
+
+    const hasAnyCachedData = state.annualData !== null;
+    const useSkeleton = !hasAnyCachedData;
+
+    showAnnualLoadingState(useSkeleton);
+
+    if (hasAnyCachedData) {
+      renderAnnualData();
+      toggleAnnualSkeleton(false);
+    }
+
+    // Build annual view client-side from monthly caches
+    buildAnnualDataFromMonthlyCache(payload, (annualData) => {
+      state.annualData = annualData;
+      saveCache();
+      hideAnnualLoadingState();
+      toggleAnnualSkeleton(false);
+      renderAnnualData();
+      setStatus('Ready', 'success');
+    });
+  }
+
+  function buildAnnualDataFromMonthlyCache(payload, callback) {
+    const yearType = payload.yearType || 'financial';
+    const startYear = payload.startYear;
+    const contractIds = payload.contractIds || [];
+
+    // Get months for this year
+    const months = yearType === 'financial'
+      ? getFinancialYearMonths(startYear)
+      : getCalendarYearMonths(startYear);
+
+    // Check which months we have cached
+    const missingMonths = [];
+    const cachedMonthData = [];
+
+    months.forEach(({ year, month }) => {
+      const monthKey = monthKeyFor(year, month);
+      const cached = getCachedIncomeSummary(monthKey);
+
+      if (cached && !shouldRecalculateMonth(monthKey)) {
+        // Have valid cache, convert to annual format
+        cachedMonthData.push({
+          ...cached,
+          year,
+          month,
+          label: getMonthLabel(year, month)
+        });
+      } else {
+        // Need to fetch/calculate this month
+        missingMonths.push({ year, month });
+      }
+    });
+
+    if (missingMonths.length === 0) {
+      // All months cached, build immediately
+      const annualData = buildAnnualDataFromMonths(cachedMonthData, yearType, startYear, contractIds);
+      callback(annualData);
+      return;
+    }
+
+    // Fetch missing months (calculate them in Tier 4 queue or on-demand)
+    let pending = missingMonths.length;
+    const allMonthData = [...cachedMonthData];
+
+    missingMonths.forEach(({ year, month }) => {
+      // Calculate this month
+      setTimeout(() => {
+        const summary = buildIncomeSummary(year, month);
+        cacheIncomeSummary(monthKeyFor(year, month), summary);
+
+        allMonthData.push({
+          ...summary,
+          year,
+          month,
+          label: getMonthLabel(year, month)
+        });
+
+        pending--;
+        if (pending === 0) {
+          // All months ready
+          allMonthData.sort((a, b) => {
+            if (a.year !== b.year) return a.year - b.year;
+            return a.month - b.month;
+          });
+
+          const annualData = buildAnnualDataFromMonths(allMonthData, yearType, startYear, contractIds);
+          callback(annualData);
+        }
+      }, 10);
+    });
+  }
+
+  function buildAnnualDataFromMonths(monthlyData, yearType, startYear, contractIds) {
+    // Aggregate monthly data into annual summary
+    const yearTotals = {
+      grossIncome: 0,
+      superGuarantee: 0,
+      superLost: 0,
+      extraSuper: 0,
+      otherDeductions: 0,
+      tax: 0,
+      netIncome: 0,
+      totalHours: 0,
+      rateCalcHours: 0,
+      companyIncome: 0,
+      companyExpenses: 0,
+      invoiceTotal: 0
+    };
+
+    const contractGrossIncome = {};
+    const hourTypeHours = {};
+
+    monthlyData.forEach(month => {
+      yearTotals.grossIncome += month.grossIncome || 0;
+      yearTotals.superGuarantee += month.superGuarantee || 0;
+      yearTotals.superLost += month.superLost || 0;
+      yearTotals.extraSuper += month.extraSuper || 0;
+      yearTotals.otherDeductions += month.otherDeductions || 0;
+      yearTotals.tax += month.tax || 0;
+      yearTotals.netIncome += month.netIncome || 0;
+      yearTotals.totalHours += month.totalHours || 0;
+      yearTotals.rateCalcHours += month.rateCalcHours || 0;
+      yearTotals.companyIncome += month.companyIncome || 0;
+      yearTotals.companyExpenses += month.companyExpenses || 0;
+      yearTotals.invoiceTotal += month.invoiceTotal || 0;
+
+      // Aggregate contract income (would need to enhance monthly summary to include this)
+      // For now, calculate from entries
+      const monthEntries = entriesForMonth(month.year, month.month);
+      monthEntries.forEach(entry => {
+        if (contractIds.length > 0 && !contractIds.includes(entry.contract_id)) {
+          return;
+        }
+
+        const contract = state.contractMap[entry.contract_id];
+        if (!contract) return;
+
+        const hourType = state.hourTypeMap[entry.hour_type_id || 'work'];
+        const contributesToIncome = hourType ? hourType.contributes_to_income : true;
+
+        if (contributesToIncome) {
+          const hours = (entry.duration_minutes || 0) / 60;
+          const income = hours * (contract.hourly_rate || 0);
+
+          if (!contractGrossIncome[entry.contract_id]) {
+            contractGrossIncome[entry.contract_id] = 0;
+          }
+          contractGrossIncome[entry.contract_id] += income;
+        }
+
+        // Aggregate hour type hours
+        const hourTypeId = entry.hour_type_id || 'work';
+        if (!hourTypeHours[hourTypeId]) {
+          hourTypeHours[hourTypeId] = 0;
+        }
+        hourTypeHours[hourTypeId] += entry.duration_minutes || 0;
+      });
+    });
+
+    // Build contract breakdown
+    const contractBreakdown = Object.keys(contractGrossIncome).map(contractId => {
+      const contract = state.contractMap[contractId];
+      return {
+        contractId,
+        contractName: contract ? contract.name : 'Unknown',
+        grossIncome: contractGrossIncome[contractId]
+      };
+    });
+
+    // Build hour type breakdown
+    const hourTypeBreakdown = Object.keys(hourTypeHours).map(hourTypeId => {
+      const hourType = state.hourTypeMap[hourTypeId];
+      return {
+        hourTypeId,
+        hourTypeName: hourType ? hourType.name : (hourTypeId === 'work' ? 'Work' : 'Unknown'),
+        hourTypeColor: hourType ? hourType.color : '#3b82f6',
+        hours: hourTypeHours[hourTypeId] / 60
+      };
+    });
+
+    return {
+      yearType,
+      startYear,
+      monthlyData,
+      yearTotals,
+      contractBreakdown,
+      hourTypeBreakdown
+    };
+  }
+
+  function getMonthLabel(year, month) {
+    const date = new Date(year, month, 1);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return monthNames[month] + ' ' + year;
+  }
+
+  function getFinancialYearMonths(startYear) {
+    const months = [];
+    const FINANCIAL_YEAR_START_MONTH = 6; // July (0-indexed)
+
+    for (let i = 0; i < 12; i++) {
+      const monthIndex = (FINANCIAL_YEAR_START_MONTH + i) % 12;
+      const yearOffset = Math.floor((FINANCIAL_YEAR_START_MONTH + i) / 12);
+      months.push({ year: startYear + yearOffset, month: monthIndex });
+    }
+
+    return months;
+  }
+
+  function getCalendarYearMonths(year) {
+    const months = [];
+    for (let m = 0; m < 12; m++) {
+      months.push({ year, month: m });
+    }
+    return months;
+  }
+
+  Phase 5: Update Entry Mutation to Mark Months Dirty
+
+  File: views/partials/scripts.html
+
+  Location: In entry mutation functions (add, update, delete) - search for api_addEntry, api_updateEntry, api_deleteEntry
+
+  After each successful mutation, add:
+
+  // Example in add entry success handler
+  .withSuccessHandler((result) => {
+    // ... existing code ...
+
+    // Mark month as dirty for recalculation
+    const entryDate = parseIsoDate(result.entry.date);
+    if (entryDate) {
+      markMonthDirty(entryDate.getFullYear(), entryDate.getMonth());
+
+      // Trigger immediate recalc if on current month
+      ensureCalendarState();
+      if (entryDate.getFullYear() === state.calendar.year && entryDate.getMonth() === state.calendar.month) {
+        renderIncomeSummary();
+      }
+    }
+
+    // ... existing code ...
+  })
+
+  Similarly for deduction mutations in api_addDeduction, api_updateDeduction, api_deleteDeduction.
+
+  Phase 6: Hook Calendar Navigation
+
+  File: views/partials/scripts.html
+
+  Location: Find calendar month navigation functions (search for "previous month" or "next month" buttons)
+
+  Add to month change handler:
+
+  // After state.calendar.month and state.calendar.year are updated
+  onCalendarMonthChange(state.calendar.year, state.calendar.month);
+
+  Phase 7: Update Page Navigation (Already Mostly Good)
+
+  File: views/partials/scripts.html
+
+  Location: Around line 555, showPage() function - minimal changes needed
+
+  async function showPage(target, options) {
+    // ... existing code ...
+
+    state.currentPage = normalized;
+
+    // Pages now just render - data already loaded in Tier 3
+    if (normalized === 'bas') {
+      renderBasReporting();
+    }
+
+    if (normalized === 'rate-preview') {
+      renderRatePreviewPage();
+    }
+
+    if (normalized === 'annual-views') {
+      renderAnnualViews(); // Now builds from cached months
+    }
+
+    if (normalized === 'invoices') {
+      renderInvoicesPage();
+    }
+
+    if (normalized === 'hour-types') {
+      renderHourTypesPage();
+    }
+
+    if (normalized === 'about') {
+      loadScriptId();
+      loadBuildMeta();
+    }
+
+    if (!opts.skipRemember) {
+      persistLastPage(normalized);
+    }
+  }
+
+  ---
+  Backend Optimization (Optional but Recommended)
+
+  New Endpoint for Single Month Summary
+
+  File: backend/annualviews.gs
+
+  Location: Around line 220, add new function
+
+  /**
+   * Get summary for a single month (lighter than full annual)
+   * @param {Object} payload - { year: 2024, month: 5, contractIds: [] }
+   * @returns {Object} Monthly summary
+   */
+  function api_getMonthSummary(payload) {
+    var year = Number(payload.year);
+    var month = Number(payload.month); // 0-indexed
+    var contractIds = payload.contractIds || [];
+
+    var cacheKey = 'month_' + year + '_' + month + '_' + (contractIds.length > 0 ? contractIds.sort().join(',') : 'all');
+    var cached = cacheGet(cacheKey);
+    if (cached) {
+      Logger.log('Returning cached month summary for ' + cacheKey);
+      return cached;
+    }
+
+    var actualIncomeList = listActualIncomeInternal();
+    var actualIncomeMap = {};
+    for (var i = 0; i < actualIncomeList.length; i++) {
+      var item = actualIncomeList[i];
+      actualIncomeMap[item.month] = item;
+    }
+
+    var sheet = getOrCreateSheet('timesheet_entries');
+    var contractsSheet = getOrCreateSheet('contracts');
+    var deductionsSheet = getOrCreateSheet('deductions');
+    var hourTypesSheet = getOrCreateSheet('hour_types');
+
+    // Build lookup maps (same as annual)
+    var contractMap = {};
+    var contractsData = contractsSheet.getDataRange().getValues();
+    for (var i = 1; i < contractsData.length; i++) {
+      var row = contractsData[i];
+      contractMap[row[0]] = {
+        id: row[0],
+        name: row[1],
+        hourly_rate: Number(row[4]) || 0
+      };
+    }
+
+    var hourTypeMap = {};
+    var hourTypesData = hourTypesSheet.getDataRange().getValues();
+    for (var i = 1; i < hourTypesData.length; i++) {
+      var row = hourTypesData[i];
+      hourTypeMap[row[0]] = {
+        id: row[0],
+        name: row[1],
+        slug: row[2],
+        color: row[3],
+        contributes_to_income: row[4] === 'TRUE' || row[4] === true,
+        use_for_rate_calculation: row[7] === 'TRUE' || row[7] === true
+      };
+    }
+
+    // Get entries for this month only
+    var entriesData = sheet.getDataRange().getValues();
+    var allEntries = [];
+    for (var i = 1; i < entriesData.length; i++) {
+      var row = entriesData[i];
+      var entryDate = new Date(row[1]);
+      if (entryDate.getFullYear() === year && entryDate.getMonth() === month) {
+        allEntries.push({
+          id: row[0],
+          date: row[1],
+          duration_minutes: Number(row[2]) || 0,
+          contract_id: row[3],
+          hour_type_id: row[7]
+        });
+      }
+    }
+
+    var filteredEntries = allEntries;
+    if (contractIds.length > 0) {
+      filteredEntries = allEntries.filter(function(entry) {
+        return contractIds.indexOf(entry.contract_id) >= 0;
+      });
+    }
+
+    var rateCalcHourTypeId = null;
+    for (var htid in hourTypeMap) {
+      if (hourTypeMap[htid] && hourTypeMap[htid].use_for_rate_calculation) {
+        rateCalcHourTypeId = htid;
+        break;
+      }
+    }
+
+    var result = buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, contractMap, hourTypeMap,
+  deductionsSheet, actualIncomeMap, rateCalcHourTypeId);
+
+    cacheSet(cacheKey, result);
+    return result;
+  }
+
+  ---
+  Implementation Checklist (Updated)
+
+  Phase 1: Foundation & State Management ✅
+
+  - Add state.loadingTiers object (scripts.html ~line 400)
+  - Add state.incomeCacheMetadata object (scripts.html ~line 400)
+  - Add state.lazyLoadQueue object (scripts.html ~line 400)
+  - Update loadCache() to load metadata (scripts.html ~line 6097)
+  - Update saveCache() to save metadata (scripts.html ~line 6193)
+
+  Phase 2: Tiered Loading System ✅
+
+  - Replace init() function (scripts.html ~line 13136)
+  - Create loadTier1Critical() (scripts.html ~line 13180)
+  - Create loadTier2Supporting() (scripts.html ~line 13180)
+  - Create loadTier3BackgroundEager() (scripts.html ~line 13180)
+  - Create loadTier4MonthPreCalculation() (scripts.html ~line 13180)
+  - Create processMonthCalculationQueue() (scripts.html ~line 13180)
+
+  Phase 3: Month Cache Intelligence ✅
+
+  - Create shouldRecalculateMonth() (scripts.html ~line 13180)
+  - Create calculateMonthEntryHash() (scripts.html ~line 13180)
+  - Create markMonthDirty() (scripts.html ~line 13180)
+  - Create onCalendarMonthChange() (scripts.html ~line 13180)
+  - Create helper functions: getAdjacentMonth(), monthHasEntries() (scripts.html ~line 13180)
+
+  Phase 4: Annual View Client-Side Build ✅
+
+  - Replace loadAnnualData() (scripts.html ~line 2831)
+  - Create buildAnnualDataFromMonthlyCache() (scripts.html ~line 2831)
+  - Create buildAnnualDataFromMonths() (scripts.html ~line 2831)
+  - Create helper functions: getMonthLabel(), getFinancialYearMonths(), getCalendarYearMonths() (scripts.html ~line 2831)
+
+  Phase 5: Feature Flag Optimization ✅
+
+  - Replace applyFeatureFlags() with applyFeatureFlagsLazy() (scripts.html ~line 9568)
+  - Remove data loading calls from feature flag application
+  - Ensure all feature data loads happen in Tier 3
+
+  Phase 6: Entry Mutation Hooks ✅
+
+  - Add markMonthDirty() to entry add success handler (search for api_addEntry)
+  - Add markMonthDirty() to entry update success handler (search for api_updateEntry)
+  - Add markMonthDirty() to entry delete success handler (search for api_deleteEntry)
+  - Add markMonthDirty() to deduction mutation handlers (search for api_addDeduction, etc.)
+
+  Phase 7: Calendar Navigation Hooks ✅
+
+  - Find calendar month navigation handlers (search for "previous month" or calendar controls)
+  - Add onCalendarMonthChange() call after month changes
+  - Test month navigation triggers adjacent month pre-calc
+
+  Phase 8: Backend Optimization (Optional)
+
+  - Add api_getMonthSummary() endpoint (annualviews.gs ~line 220)
+  - Update entry mutation endpoints to clear month-specific cache (entries.gs)
+  - Update deduction mutation endpoints to clear month-specific cache (deductions.gs)
+
+  Phase 9: Testing & Validation
+
+  - Test fresh user (empty cache) - should see Tier 1 load quickly
+  - Test returning user (full cache) - should see instant load with hour types from cache
+  - Test month navigation - should be instant after pre-calc
+  - Test annual views - should build from cached months
+  - Test entry mutation - should mark month dirty and recalculate
+  - Test each page navigation - should render without delay (data already loaded)
+  - Test with slow network throttling
+  - Verify console logs show tier progression
+  - Verify no errors or race conditions
+
+  ---
+  Expected Performance (Updated)
+
+  Before:
+  - Initial load: 8+ APIs, 3-5 seconds to interactive
+  - Hour types: Blocks if not loaded
+  - Annual views: 2-5 second freeze (api_getAnnualSummary)
+  - Month navigation: 100-500ms delay
+  - All features loaded upfront
+
+  After:
+  - Initial load: Tier 1 (4-5 APIs), 1-2 seconds to interactive
+  - Hour types: Instant from cache, refreshes in background
+  - Annual views: Instant (built from monthly cache), 200-500ms to fill missing months
+  - Month navigation: Instant (pre-calculated ±2 months)
+  - Features load progressively, user never waits
+
+  Real Impact:
+  - 70-80% faster time to interactive
+  - Annual views 90% faster (instant with cached months)
+  - Month navigation feels instant (pre-calculated)
+  - All pages feel instant (data pre-loaded in background)
+
+  This is a much more sophisticated implementation that truly eliminates waiting throughout the entire app!

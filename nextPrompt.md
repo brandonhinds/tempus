@@ -63,10 +63,6 @@
 
 - Either add ability to add attachments to deductions, or remove the text saying we will have that feature
 
-- Add the ability to optionally associate a default with an hour type. If set, the hour type is included when using the default, otherwise it just adds the hours to the currently selected hour type
-
-- Add the ability to define a reoccurring time entry, for things like parental leave. These can auto populate up to the dates covered by contracts, to avoid making them for all time.
-
 - Fix the calculation used by thinkStack to return lost super (make it match whatever David is doing)
 
 - Update contract burndown so the actual average projection accounts for the pro-rate rate this month and projects out to the end of the month using the monthly average

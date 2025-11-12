@@ -13,6 +13,28 @@ function deriveGrossIncomeFromPackage(packageAmount, superRate) {
   return total / denominator;
 }
 
+function getRoundIntervalFromSettings(settingsData) {
+  if (!Array.isArray(settingsData)) return 0;
+  for (var i = 1; i < settingsData.length; i++) {
+    var key = settingsData[i][0];
+    if (String(key || '').trim() === 'round_to_nearest') {
+      var rawValue = Number(settingsData[i][1]);
+      if (isFinite(rawValue) && rawValue > 1) {
+        return Math.round(rawValue);
+      }
+      return 0;
+    }
+  }
+  return 0;
+}
+
+function roundMinutesToInterval(minutes, interval) {
+  var base = Math.max(0, Math.round(Number(minutes) || 0));
+  if (!interval || interval <= 1) return base;
+  var rounded = Math.round(base / interval) * interval;
+  return Math.max(0, rounded);
+}
+
 /**
  * Get annual summary data
  * @param {Object} payload - { yearType: 'financial'|'calendar', startYear: 2024, contractIds: [] }
@@ -252,15 +274,18 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   // Get settings
   var settingsSheet = getOrCreateSheet('user_settings');
   var settingsData = settingsSheet.getDataRange().getValues();
+  var roundingInterval = getRoundIntervalFromSettings(settingsData);
 
   // Calculate income by contract (using contract-filtered entries)
   var contractIncome = {};
+  var totalMinutes = 0;
   var totalHours = 0;
 
   for (var i = 0; i < monthEntries.length; i++) {
     var entry = monthEntries[i];
-    var hours = entry.duration_minutes / 60;
-    totalHours += hours;
+    var minutes = Number(entry.duration_minutes) || 0;
+    totalMinutes += minutes;
+    var hours = minutes / 60;
 
     // Calculate income (only for income-contributing hour types)
     var hourTypeId = entry.hour_type_id || 'work';
@@ -279,22 +304,31 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     }
   }
 
+  var roundedMinutes = roundMinutesToInterval(totalMinutes, roundingInterval);
+  var roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
+  totalHours = roundedMinutes / 60;
+  for (var cid in contractIncome) {
+    contractIncome[cid] = contractIncome[cid] * roundingScale;
+  }
+
   // Track hour type hours across ALL entries (not filtered by contract)
   var hourTypeHours = {};
-  var rateCalcHours = 0;
+  var rateCalcMinutes = 0;
   for (var i = 0; i < allMonthEntries.length; i++) {
     var entry = allMonthEntries[i];
     var hourTypeId = entry.hour_type_id || 'work';
     if (!hourTypeHours[hourTypeId]) {
       hourTypeHours[hourTypeId] = 0;
     }
-    hourTypeHours[hourTypeId] += entry.duration_minutes;
+    var entryMinutes = Number(entry.duration_minutes) || 0;
+    hourTypeHours[hourTypeId] += entryMinutes;
 
     // Track hours for rate calculation hour type (check ALL entries, not just income-contributing)
     if (rateCalcHourTypeId && hourTypeId === rateCalcHourTypeId) {
-      rateCalcHours += entry.duration_minutes / 60;
+      rateCalcMinutes += entryMinutes;
     }
   }
+  var rateCalcHours = roundMinutesToInterval(rateCalcMinutes, roundingInterval) / 60;
 
   // Sum up total package (hourly rate * hours)
   var totalPackage = 0;

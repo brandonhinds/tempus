@@ -10913,6 +10913,9 @@ function getCachedIncomeSummary(monthKey) {
       totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
       totalHours = totalMinutes / 60;
     }
+    const roundedMinutes = roundDuration(totalMinutes);
+    const roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
+    const roundedHours = roundedMinutes / 60;
     const validContractsUsed = entries.reduce((set, entry) => {
       const contract = state.contractMap[entry.contract_id];
       if (contract && contractIsValid(contract, entry.date)) set.add(contract.id);
@@ -10927,12 +10930,12 @@ function getCachedIncomeSummary(monthKey) {
       const onlyId = Array.from(validContractsUsed)[0];
       const contract = state.contractMap[onlyId];
       const rate = contract ? Number(contract.hourly_rate || 0) : 0;
-      totalPackage = totalHours * rate;
+      totalPackage = roundedHours * rate;
     } else if (!validContractsUsed.size && validContractsAcrossDates.size === 1) {
       const fallbackId = Array.from(validContractsAcrossDates)[0];
       const contract = state.contractMap[fallbackId];
       const rate = contract ? Number(contract.hourly_rate || 0) : 0;
-      totalPackage = totalHours * rate;
+      totalPackage = roundedHours * rate;
     } else {
       totalPackage = entries.reduce((acc, entry) => {
         const minutes = Number(entry.duration_minutes) || 0;
@@ -10944,7 +10947,8 @@ function getCachedIncomeSummary(monthKey) {
           const valids = validContractsForDate(entry.date);
           if (valids.length === 1) rate = Number(valids[0].hourly_rate || 0);
         }
-        return acc + (minutes / 60) * rate;
+        const scaledMinutes = roundingScale > 0 ? (minutes * roundingScale) : 0;
+        return acc + (scaledMinutes / 60) * rate;
       }, 0);
     }
     // Calculate hours for the hour type marked for rate calculation
@@ -10961,7 +10965,8 @@ function getCachedIncomeSummary(monthKey) {
       });
 
       const rateCalcMinutes = matchingEntries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
-      rateCalcHours = rateCalcMinutes / 60;
+      const roundedRateCalcMinutes = roundDuration(rateCalcMinutes);
+      rateCalcHours = roundedRateCalcMinutes / 60;
     }
 
     const deductionTotals = computeMonthlyDeductionTotals(year, month);

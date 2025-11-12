@@ -138,7 +138,7 @@ cp -R "$DOWNLOAD_DIR"/. "$CLONE_DIR"/
 
 echo "Pushing updated files with clasp..."
 pushd "$CLONE_DIR" >/dev/null
-clasp push
+clasp push -f
 popd >/dev/null
 
 if [[ $CLEANUP -eq 1 ]]; then
