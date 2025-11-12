@@ -38,8 +38,6 @@
     * Add report that shows your hour variance to the current date vs the expected burndown up to that point on the contract screen
     * Add ability to assume a regular number of hours worked for the rest of the month in the monthly insights view
 
-- Implement phase 10 of UI suggestion improvements.
-
 - Build importer from old sheets to pull historical data
 
 - Embed a scratch pad sheet into the Web app

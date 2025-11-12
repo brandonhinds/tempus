@@ -12022,6 +12022,127 @@ function getCachedIncomeSummary(monthKey) {
         statusText = 'Variance not available for unlimited contracts';
       }
 
+      // NEW: Calculate Monthly hours balance
+      // Group entries by date with income/non-income breakdown
+      const dailyHours = new Map();
+      allContractEntries.forEach((entry) => {
+        const entryDateIso = getEntryDateIso(entry);
+        if (!entryDateIso) return;
+        const entryDateObj = parseIsoDate(entryDateIso);
+        if (!entryDateObj || Number.isNaN(entryDateObj.getTime())) return;
+        if (entryDateObj > periodEnd) return;
+
+        const hours = (Number(entry.duration_minutes) || 0) / 60;
+        if (hours <= 0) return;
+
+        if (!dailyHours.has(entryDateIso)) {
+          dailyHours.set(entryDateIso, { income: 0, nonIncome: 0 });
+        }
+
+        const dayData = dailyHours.get(entryDateIso);
+        if (entryContributesToIncome(entry)) {
+          dayData.income += hours;
+        } else {
+          dayData.nonIncome += hours;
+        }
+      });
+
+      // Calculate capped hours for each day
+      let cappedMonthlyHours = 0;
+      dailyHours.forEach((dayData) => {
+        const incomeHours = dayData.income;
+        const nonIncomeHours = dayData.nonIncome;
+        // Non-income hours can only fill up to standard hours cap
+        const nonIncomeAllowance = Math.max(0, standardHoursPerDay - incomeHours);
+        const cappedNonIncome = Math.min(nonIncomeHours, nonIncomeAllowance);
+        const dailyTotal = incomeHours + cappedNonIncome;
+        cappedMonthlyHours += dailyTotal;
+      });
+
+      // Monthly hours balance = expected - actual (capped)
+      const expectedMonthlyHours = monthBusinessDays * standardHoursPerDay;
+      const monthlyHoursBalance = expectedMonthlyHours - cappedMonthlyHours;
+
+      // NEW: Calculate Contract monthly hours balance (cumulative from contract start to current month)
+      let contractMonthlyHoursBalance = 0;
+      const contractStartMonth = contractStart.getMonth();
+      const contractStartYear = contractStart.getFullYear();
+      const currentMonth = month;
+      const currentYear = year;
+
+      // Iterate through all months from contract start to current viewing month
+      let iterMonth = contractStartMonth;
+      let iterYear = contractStartYear;
+      while (iterYear < currentYear || (iterYear === currentYear && iterMonth <= currentMonth)) {
+        const iterMonthStart = startOfDay(new Date(iterYear, iterMonth, 1));
+        const iterMonthEnd = startOfDay(new Date(iterYear, iterMonth + 1, 0));
+
+        // Calculate period bounds for this iteration month
+        const iterPeriodStart = contractStart > iterMonthStart ? contractStart : iterMonthStart;
+        const iterPeriodEnd = boundedContractEnd && boundedContractEnd < iterMonthEnd ? boundedContractEnd : iterMonthEnd;
+
+        if (iterPeriodEnd >= iterPeriodStart) {
+          // Calculate business days for this month period
+          const iterBusinessDaysList = collectBusinessDays(iterPeriodStart, iterPeriodEnd, includeWeekends);
+          const iterBusinessDays = iterBusinessDaysList.length;
+
+          // Get all entries for this contract in this month period
+          const iterPeriodStartIso = isoDate(iterPeriodStart);
+          const iterPeriodEndIso = isoDate(iterPeriodEnd);
+          const iterMonthEntries = state.entries.filter((e) => {
+            if (!e) return false;
+            const resolvedId = e._resolvedContract?.id || e.contract_id;
+            if (resolvedId !== contract.id) return false;
+            const entryDateIso = getEntryDateIso(e);
+            if (!entryDateIso) return false;
+            return entryDateIso >= iterPeriodStartIso && entryDateIso <= iterPeriodEndIso;
+          });
+
+          // Group by date and calculate capped hours
+          const iterDailyHours = new Map();
+          iterMonthEntries.forEach((entry) => {
+            const entryDateIso = getEntryDateIso(entry);
+            if (!entryDateIso) return;
+            const entryDateObj = parseIsoDate(entryDateIso);
+            if (!entryDateObj || Number.isNaN(entryDateObj.getTime())) return;
+
+            const hours = (Number(entry.duration_minutes) || 0) / 60;
+            if (hours <= 0) return;
+
+            if (!iterDailyHours.has(entryDateIso)) {
+              iterDailyHours.set(entryDateIso, { income: 0, nonIncome: 0 });
+            }
+
+            const dayData = iterDailyHours.get(entryDateIso);
+            if (entryContributesToIncome(entry)) {
+              dayData.income += hours;
+            } else {
+              dayData.nonIncome += hours;
+            }
+          });
+
+          let iterCappedHours = 0;
+          iterDailyHours.forEach((dayData) => {
+            const incomeHours = dayData.income;
+            const nonIncomeHours = dayData.nonIncome;
+            const nonIncomeAllowance = Math.max(0, standardHoursPerDay - incomeHours);
+            const cappedNonIncome = Math.min(nonIncomeHours, nonIncomeAllowance);
+            iterCappedHours += incomeHours + cappedNonIncome;
+          });
+
+          const iterExpectedHours = iterBusinessDays * standardHoursPerDay;
+          const iterMonthBalance = iterExpectedHours - iterCappedHours;
+          contractMonthlyHoursBalance += iterMonthBalance;
+        }
+
+        // Move to next month
+        iterMonth++;
+        if (iterMonth > 11) {
+          iterMonth = 0;
+          iterYear++;
+        }
+      }
+
       contractSummaries.push({
         contractId: contract.id,
         contractName: contract.name || 'Untitled contract',
@@ -12044,7 +12165,9 @@ function getCachedIncomeSummary(monthKey) {
         trendMethod,
         trendFallbackApplied,
         status,
-        statusText
+        statusText,
+        monthlyHoursBalance,
+        contractMonthlyHoursBalance
       });
     });
 
@@ -12179,6 +12302,14 @@ function getCachedIncomeSummary(monthKey) {
         : (contract.averageContractHoursThisMonth != null ? 'Not available' : 'Not available for unlimited contracts');
       aggregate.appendChild(makeLine('Projected month variance', projectedVarianceValue));
 
+      // NEW: Display temporary testing fields for single contract
+      if (contract.monthlyHoursBalance != null) {
+        aggregate.appendChild(makeLine('Monthly hours balance', `${formatSignedHours(contract.monthlyHoursBalance)} hrs`));
+      }
+      if (contract.contractMonthlyHoursBalance != null) {
+        aggregate.appendChild(makeLine('Contract monthly hours balance', `${formatSignedHours(contract.contractMonthlyHoursBalance)} hrs`));
+      }
+
     } else {
       if (summary.baselineContractCount > 0) {
         aggregate.appendChild(makeLine('Average contract hours this month', `${formatDecimalHours(summary.totalAverageContractHoursThisMonth)} hrs`));
@@ -12248,6 +12379,14 @@ function getCachedIncomeSummary(monthKey) {
         } else {
           lines.appendChild(makeLine('Average contract hours this month', 'Not available for unlimited contracts'));
           lines.appendChild(makeLine('Projected month variance', 'Not available for unlimited contracts'));
+        }
+
+        // NEW: Display temporary testing fields
+        if (contract.monthlyHoursBalance != null) {
+          lines.appendChild(makeLine('Monthly hours balance', `${formatSignedHours(contract.monthlyHoursBalance)} hrs`));
+        }
+        if (contract.contractMonthlyHoursBalance != null) {
+          lines.appendChild(makeLine('Contract monthly hours balance', `${formatSignedHours(contract.contractMonthlyHoursBalance)} hrs`));
         }
 
         lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining)} hrs`));
