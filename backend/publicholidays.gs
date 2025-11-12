@@ -63,21 +63,49 @@ function fetchNextPublicHolidays() {
 }
 
 /**
+ * Ensures the public_holidays sheet has proper headers
+ * This validates and repairs the schema if needed
+ */
+function ensurePublicHolidaysSchema() {
+  var sh = getOrCreateSheet('public_holidays');
+  var values = sh.getDataRange().getValues();
+
+  // If sheet is completely empty, add headers
+  if (values.length === 0) {
+    sh.appendRow(['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at']);
+    return;
+  }
+
+  // Check if row 1 contains valid headers
+  var firstRow = values[0];
+  var expectedHeaders = ['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at'];
+
+  // If first cell is 'date', assume headers are present
+  if (firstRow[0] === 'date') {
+    return; // Headers already exist, nothing to do
+  }
+
+  // Headers are missing - insert them at the top
+  sh.insertRowBefore(1);
+  sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+
+  Logger.log('Public holidays schema repaired: inserted missing headers');
+}
+
+/**
  * Stores public holiday data in the public_holidays sheet
  */
 function storePublicHolidays(holidays) {
   if (!holidays || holidays.length === 0) return;
 
+  // Ensure schema is valid before storing data
+  ensurePublicHolidaysSchema();
+
   var sh = getOrCreateSheet('public_holidays');
   var values = sh.getDataRange().getValues();
-  var headers = values.length > 0 ? values[0] : ['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at'];
   var timezone = getSpreadsheetTimeZone();
 
-  if (values.length === 0) {
-    sh.appendRow(headers);
-    values = sh.getDataRange().getValues();
-  }
-
+  // After ensurePublicHolidaysSchema(), row 0 is always headers, data starts at row 1
   var existingDates = {};
   for (var i = 1; i < values.length; i++) {
     var existingKey = formatSheetDateKey(values[i][0], timezone);
@@ -207,6 +235,9 @@ function api_getPublicHolidays(payload) {
   var settings = api_getSettings();
   var userState = settings.public_holiday_state || 'ACT';
 
+  // Ensure schema is valid before doing anything else
+  ensurePublicHolidaysSchema();
+
   // Check cache first for performance
   var cacheKey = PUBLIC_HOLIDAYS_CACHE_KEY + '_' + years.join('_') + '_' + userState;
   var cached = cacheGet(cacheKey);
@@ -267,6 +298,9 @@ function api_getPublicHolidays(payload) {
  * API endpoint to manually refresh public holidays
  */
 function api_refreshPublicHolidays() {
+  // Ensure schema is valid before refreshing data
+  ensurePublicHolidaysSchema();
+
   var currentYear = new Date().getFullYear();
   var years = [currentYear - 1, currentYear, currentYear + 1];
 
