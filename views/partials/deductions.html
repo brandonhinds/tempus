@@ -33,18 +33,18 @@
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
-        <div class="ts-col-span-6">
+        <div class="ts-col-span-4">
           <label for="deduction-name">Name</label>
           <input id="deduction-name" placeholder="e.g. Novated lease" />
         </div>
-        <div class="ts-col-span-3" style="max-width:220px;">
+        <div class="ts-col-span-4" style="max-width:240px;">
           <label for="deduction-type">Type</label>
           <select id="deduction-type">
             <option value="standard">Standard deduction</option>
             <option value="extra_super">Extra super contribution</option>
           </select>
         </div>
-        <div class="ts-col-span-3" style="max-width:220px;" id="deduction-category-column">
+        <div class="ts-col-span-4" style="max-width:240px;" id="deduction-category-column">
           <label for="deduction-category">Category</label>
           <select id="deduction-category">
             <option value="">Uncategorised</option>
@@ -57,16 +57,18 @@
         </div>
       </div>
       <div class="ts-grid ts-grid--gap-md" style="margin-top:12px;">
-        <div class="ts-col-span-4" style="max-width:260px;">
+        <div class="ts-col-span-4" style="max-width:220px;">
           <div id="deduction-amount-wrapper">
             <label for="deduction-amount">Amount</label>
             <input type="number" id="deduction-amount" min="0" step="0.01" />
           </div>
-          <div id="deduction-percent-wrapper" style="display:none; margin-top:12px;">
+          <div id="deduction-percent-wrapper" style="display:none;">
             <label for="deduction-percent">Percentage of gross income</label>
             <input type="number" id="deduction-percent" min="0" max="100" step="0.1" placeholder="e.g. 2" />
           </div>
-          <div id="deduction-amount-mode-wrapper" style="display:none; margin-top:12px;">
+        </div>
+        <div class="ts-col-span-4" style="max-width:220px;">
+          <div id="deduction-amount-mode-wrapper" style="display:none;">
             <label for="deduction-amount-mode">Calculation</label>
             <select id="deduction-amount-mode">
               <option value="flat">Flat amount</option>
@@ -74,14 +76,14 @@
             </select>
           </div>
         </div>
-        <div class="ts-col-span-4" id="deduction-gst-wrapper" style="max-width:220px; display:flex; flex-direction:column; align-items:center;">
+        <div class="ts-col-span-4" id="deduction-gst-wrapper" style="display:flex; flex-direction:column; align-items:center;">
           <label for="deduction-gst" style="margin-bottom:4px;">Amount includes GST</label>
           <label class="ts-toggle">
             <input type="checkbox" id="deduction-gst" />
             <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
           </label>
         </div>
-        <div class="ts-col-span-4" id="deduction-company-wrapper" style="max-width:220px; display:none; flex-direction:column; align-items:center;">
+        <div class="ts-col-span-4" id="deduction-company-wrapper" style="display:none; flex-direction:column; align-items:center;">
           <label for="deduction-company-expense" style="margin-bottom:4px;">Company expense</label>
           <label class="ts-toggle">
             <input type="checkbox" id="deduction-company-expense" />
