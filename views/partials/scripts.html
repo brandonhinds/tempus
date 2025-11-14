@@ -12547,9 +12547,8 @@ function getCachedIncomeSummary(monthKey) {
       }
     });
   }
-  function handleTaxSuccess(requestId, taxValue) {
-    if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
-    const targetMonthKey = state.pendingTaxRequest.monthKey;
+  function handleTaxSuccess(requestId, monthKey, taxValue) {
+    const targetMonthKey = monthKey;
     let summary = null;
     if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
       summary = state.incomeSummary;
@@ -12557,22 +12556,25 @@ function getCachedIncomeSummary(monthKey) {
       summary = getCachedIncomeSummary(targetMonthKey);
     }
     if (!summary || summary.monthKey !== targetMonthKey) {
-      state.pendingTaxRequest = null;
+      if (state.pendingTaxRequest && state.pendingTaxRequest.id === requestId) {
+        state.pendingTaxRequest = null;
+      }
       return;
     }
     const computedTax = Math.max(0, Number(taxValue) || 0);
     summary.tax = computedTax;
     summary.taxStatus = 'resolved';
     summary.netIncome = summary.taxableIncome - computedTax;
-    state.pendingTaxRequest = null;
+    if (state.pendingTaxRequest && state.pendingTaxRequest.id === requestId) {
+      state.pendingTaxRequest = null;
+    }
     if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
       updateIncomeSummaryUI(summary);
     }
     cacheIncomeSummary(summary.monthKey, summary);
   }
-  function handleTaxFailure(requestId) {
-    if (!state.pendingTaxRequest || state.pendingTaxRequest.id !== requestId) return;
-    const targetMonthKey = state.pendingTaxRequest.monthKey;
+  function handleTaxFailure(requestId, monthKey) {
+    const targetMonthKey = monthKey;
     let summary = null;
     if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
       summary = state.incomeSummary;
@@ -12580,13 +12582,17 @@ function getCachedIncomeSummary(monthKey) {
       summary = getCachedIncomeSummary(targetMonthKey);
     }
     if (!summary || summary.monthKey !== targetMonthKey) {
-      state.pendingTaxRequest = null;
+      if (state.pendingTaxRequest && state.pendingTaxRequest.id === requestId) {
+        state.pendingTaxRequest = null;
+      }
       return;
     }
     summary.tax = 0;
     summary.taxStatus = 'error';
     summary.netIncome = summary.taxableIncome;
-    state.pendingTaxRequest = null;
+    if (state.pendingTaxRequest && state.pendingTaxRequest.id === requestId) {
+      state.pendingTaxRequest = null;
+    }
     if (state.incomeSummary && state.incomeSummary.monthKey === targetMonthKey) {
       updateIncomeSummaryUI(summary);
     }
@@ -12613,14 +12619,15 @@ function getCachedIncomeSummary(monthKey) {
       return;
     }
     const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const monthKey = summary.monthKey;
     state.pendingTaxRequest = {
       id: requestId,
       key: summary.requestKey,
-      monthKey: summary.monthKey
+      monthKey: monthKey
     };
     google.script.run
-      .withSuccessHandler((value) => handleTaxSuccess(requestId, value))
-      .withFailureHandler(() => handleTaxFailure(requestId))
+      .withSuccessHandler((value) => handleTaxSuccess(requestId, monthKey, value))
+      .withFailureHandler(() => handleTaxFailure(requestId, monthKey))
       .estimateTax(Number(summary.taxableIncome) || 0, summary.periodStart.toISOString());
   }
   function renderIncomeSummary() {
@@ -14812,6 +14819,10 @@ function getCachedIncomeSummary(monthKey) {
         if (shouldRecalculateMonth(year, month)) {
           const summary = buildIncomeSummary(year, month);
           cacheIncomeSummary(monthKey, summary);
+          // Lazy load tax estimate in background if pending
+          if (summary.taxStatus === 'pending') {
+            requestTaxEstimate(summary);
+          }
         }
       } finally {
         state.lazyLoadQueue.currentlyCalculating = null;
