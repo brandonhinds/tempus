@@ -172,6 +172,9 @@
      </div>
      <div class="ts-settings-field ts-settings-control">
       <select id="set-monthly-insights-trend-method">
+       <option value="standard_contract_hours">
+        Standard contract hours
+       </option>
        <option value="current_month">
         Average hours per day of current month
        </option>
@@ -183,6 +186,30 @@
        </option>
        <option value="same_month_last_year">
         Average hours per day in this month last year
+       </option>
+      </select>
+     </div>
+    </div>
+    <div id="projections-variance-value-col" style="display:none;">
+     <label class="ts-settings-label" for="set-projections-variance-value">
+      Projections variance badge value
+     </label>
+     <div class="ts-note">
+      Decide which comparison drives the Projected variance badge.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-projections-variance-value">
+       <option value="monthly_capacity">
+        Monthly capacity based on available business days
+       </option>
+       <option value="contract_pace">
+        Contract monthly average capacity
+       </option>
+       <option value="projected_vs_contract">
+        Projected difference with target contract average
+       </option>
+       <option value="projected_vs_standard">
+        Projected difference with target available business days
        </option>
       </select>
      </div>

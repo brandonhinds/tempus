@@ -1349,9 +1349,9 @@ let ratePreviewInputSyncing = false;
    * Returns { averageDailyHours, method, fallbackApplied }
    */
   function calculateTrendAverage(contract, allEntries, selectedMethod, currentMonth, currentYear, currentMonthData) {
-    const methods = ['current_month', 'last_3_months', 'contract_lifetime', 'same_month_last_year'];
+    const methods = ['standard_contract_hours', 'current_month', 'last_3_months', 'contract_lifetime', 'same_month_last_year'];
+    if (!methods.includes(selectedMethod)) selectedMethod = 'standard_contract_hours';
     const methodIndex = methods.indexOf(selectedMethod);
-    if (methodIndex === -1) selectedMethod = 'current_month';
 
     // Try selected method first
     let result = tryTrendMethod(contract, allEntries, selectedMethod, currentMonth, currentYear, currentMonthData);
@@ -1378,6 +1378,11 @@ let ratePreviewInputSyncing = false;
 
   function tryTrendMethod(contract, allEntries, method, currentMonth, currentYear, currentMonthData) {
     switch (method) {
+      case 'standard_contract_hours':
+        if (Number.isFinite(currentMonthData.standardHoursPerDay) && currentMonthData.standardHoursPerDay > 0) {
+          return { success: true, average: currentMonthData.standardHoursPerDay };
+        }
+        return { success: false };
       case 'current_month':
         return { success: true, average: currentMonthData.average };
       case 'last_3_months':
@@ -1690,8 +1695,13 @@ let ratePreviewInputSyncing = false;
 
   const getTrendMethod = () => {
     const value = state.settings ? state.settings.monthly_insights_trend_method : undefined;
-    const validMethods = ['current_month', 'last_3_months', 'contract_lifetime', 'same_month_last_year'];
-    return validMethods.includes(value) ? value : 'current_month';
+    const validMethods = ['standard_contract_hours', 'current_month', 'last_3_months', 'contract_lifetime', 'same_month_last_year'];
+    return validMethods.includes(value) ? value : 'standard_contract_hours';
+  };
+  const getProjectionsVarianceValue = () => {
+    const value = state.settings ? state.settings.projections_variance_value : undefined;
+    const validValues = ['monthly_capacity', 'contract_pace', 'projected_vs_contract', 'projected_vs_standard'];
+    return validValues.includes(value) ? value : 'monthly_capacity';
   };
   const roundDuration = (minutes) => {
     const base = Math.max(0, Math.round(Number(minutes) || 0));
@@ -8419,6 +8429,8 @@ function updateDeductionFormVisibility() {
   const minimumEndTimeCol = document.getElementById('minimum-end-time-col');
   const monthlyInsightsTrendMethodSelect = document.getElementById('set-monthly-insights-trend-method');
   const monthlyInsightsTrendMethodCol = document.getElementById('monthly-insights-trend-method-col');
+  const projectionsVarianceValueSelect = document.getElementById('set-projections-variance-value');
+  const projectionsVarianceValueCol = document.getElementById('projections-variance-value-col');
   const lostSuperRecoveryModeSelect = document.getElementById('set-lost-super-recovery-mode');
   const lostSuperRecoveryCol = document.getElementById('lost-super-recovery-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
@@ -10288,6 +10300,9 @@ function updateDeductionFormVisibility() {
     // Show/hide monthly insights trend method setting
     if (monthlyInsightsTrendMethodCol) {
       monthlyInsightsTrendMethodCol.classList.toggle('ts-hidden', !expectedMonthlyFlag.enabled);
+    }
+    if (projectionsVarianceValueCol) {
+      projectionsVarianceValueCol.classList.toggle('ts-hidden', !expectedMonthlyFlag.enabled);
     }
 
     // Show/hide lost super recovery mode setting
@@ -12532,15 +12547,18 @@ function getCachedIncomeSummary(monthKey) {
     const monthEndDate = startOfDay(new Date(year, month + 1, 0));
 
     const aggregatedPastDays = new Set();
-    const aggregatedMonthDays = new Set();
-    let aggregatedPastHours = 0;
-    let aggregatedHoursLoggedToDate = 0;
+    const aggregatedIncomeEntryDays = new Set();
     let aggregatedFutureBusinessDays = 0;
-    let aggregatedFutureHours = 0;
-    let aggregatedExpectedHoursLoggedToDate = 0;
-    let aggregatedTotalExpectedHours = 0;
     let aggregatedAverageContractHours = 0;
-    let aggregatedBaselineExpectedHours = 0;
+    let aggregatedProjectedHoursThisMonth = 0;
+    let aggregatedStandardHoursBasedOnBusinessDays = 0;
+    let aggregatedIncomeHoursToDate = 0;
+    let aggregatedCapacityComparisonTotal = 0;
+    let aggregatedContractPaceComparisonTotal = 0;
+    let aggregatedContractPaceComparisonCount = 0;
+    let aggregatedProjectedVsContractAverage = 0;
+    let aggregatedProjectedVsContractAverageCount = 0;
+    let aggregatedProjectedVsStandardHours = 0;
     let baselineContracts = 0;
 
     const contractSummaries = [];
@@ -12562,7 +12580,6 @@ function getCachedIncomeSummary(monthKey) {
       const periodEndIso = isoDate(periodEnd);
 
       const monthBusinessDaysList = collectBusinessDays(periodStart, periodEnd, includeWeekends);
-      monthBusinessDaysList.forEach((day) => aggregatedMonthDays.add(day));
       const monthBusinessDays = monthBusinessDaysList.length;
       if (monthBusinessDays === 0) return;
 
@@ -12584,7 +12601,6 @@ function getCachedIncomeSummary(monthKey) {
         return acc + (Number(entry.duration_minutes) || 0);
       }, 0);
       const totalHours = totalMinutes / 60;
-      aggregatedPastHours += totalHours;
 
       const allContractEntries = monthEntries.filter((e) => {
         if (!e) return false;
@@ -12627,9 +12643,7 @@ function getCachedIncomeSummary(monthKey) {
       const evaluatedBusinessDaysWithFuture = pastBusinessDays + futureBusinessDayContribution;
       if (evaluatedBusinessDaysWithFuture === 0) return;
 
-      aggregatedHoursLoggedToDate += hoursLoggedToDate;
       aggregatedFutureBusinessDays += futureBusinessDayContribution;
-      aggregatedFutureHours += futureIncomeHours;
 
       const currentMonthAverage = evaluatedBusinessDaysWithFuture > 0 ? hoursLoggedToDate / evaluatedBusinessDaysWithFuture : 0;
       const selectedTrendMethod = getTrendMethod();
@@ -12639,17 +12653,15 @@ function getCachedIncomeSummary(monthKey) {
         selectedTrendMethod,
         month,
         year,
-        { average: currentMonthAverage }
+        { average: currentMonthAverage, standardHoursPerDay }
       );
       const projectedAverageDailyHours = Number(trendResult.averageDailyHours) || 0;
       const trendMethod = trendResult.method;
       const trendFallbackApplied = trendResult.fallbackApplied;
-      const actualAverageDailyHours = evaluatedBusinessDaysWithFuture > 0 ? hoursLoggedToDate / evaluatedBusinessDaysWithFuture : 0;
+      let actualAverageDailyHours = 0;
 
       const expectedHoursLoggedToDate = projectedAverageDailyHours * evaluatedBusinessDaysWithFuture;
       const totalExpectedHoursThisMonth = projectedAverageDailyHours * monthBusinessDays;
-      aggregatedExpectedHoursLoggedToDate += expectedHoursLoggedToDate;
-      aggregatedTotalExpectedHours += totalExpectedHoursThisMonth;
 
       const hasBaseline = Number(contract.total_hours || 0) > 0 && contract.end_date;
       let averageContractHoursThisMonth = null;
@@ -12658,7 +12670,6 @@ function getCachedIncomeSummary(monthKey) {
         if (proRatedMonths > 0) {
           averageContractHoursThisMonth = Number(contract.total_hours || 0) / proRatedMonths;
           aggregatedAverageContractHours += averageContractHoursThisMonth;
-          aggregatedBaselineExpectedHours += totalExpectedHoursThisMonth;
           baselineContracts += 1;
         }
       }
@@ -12720,11 +12731,12 @@ function getCachedIncomeSummary(monthKey) {
       });
 
       // Count full non-income days (days where non_income >= standard_hours)
-      let fullNonIncomeDaysToDate = 0;
+      let fullNonIncomeDays = 0;
       let daysWithEntriesCount = 0;
+      let incomeEntryDaysCount = 0;
       dailyHours.forEach((dayData, dateIso) => {
         const dateObj = parseIsoDate(dateIso);
-        if (!dateObj || dateObj > today) return;
+        if (!dateObj || Number.isNaN(dateObj.getTime())) return;
 
         daysWithEntriesCount++;
 
@@ -12733,9 +12745,14 @@ function getCachedIncomeSummary(monthKey) {
 
         // If a day has non-income hours >= standard hours, it's a full non-income day
         if (nonIncomeHours >= standardHoursPerDay) {
-          fullNonIncomeDaysToDate++;
+          fullNonIncomeDays++;
+        }
+        if (incomeHours > 0 && dateObj <= today) {
+          incomeEntryDaysCount++;
+          aggregatedIncomeEntryDays.add(dateIso);
         }
       });
+      actualAverageDailyHours = incomeEntryDaysCount > 0 ? totalIncomeHoursToDate / incomeEntryDaysCount : 0;
 
       // Calculate business days elapsed to date
       const businessDaysElapsed = collectBusinessDays(periodStart, today < periodEnd ? today : periodEnd, includeWeekends).length;
@@ -12761,36 +12778,37 @@ function getCachedIncomeSummary(monthKey) {
       // FIELD 2: Capacity Comparison (with projection)
       // Adjusted expected = total expected - full non-income days
       const totalExpected = monthBusinessDays * standardHoursPerDay;
-      const adjustedExpected = totalExpected - (fullNonIncomeDaysToDate * standardHoursPerDay);
+      const adjustedExpected = totalExpected - (fullNonIncomeDays * standardHoursPerDay);
 
       // Remaining days = business days without any entries yet
       const remainingDays = Math.max(0, monthBusinessDays - daysWithEntriesCount);
+      const projectedHoursThisMonth = totalIncomeHoursToDate + (remainingDays * projectedAverageDailyHours);
 
       // Projected = income logged + (remaining days × standard hours)
       const projectedTotal = totalIncomeHoursToDate + (remainingDays * standardHoursPerDay);
 
       // Balance
       const capacityComparison = adjustedExpected - projectedTotal;
+      const projectedVsContractAverage = averageContractHoursThisMonth != null
+        ? projectedHoursThisMonth - averageContractHoursThisMonth
+        : null;
+      const projectedVsStandard = projectedHoursThisMonth - adjustedExpected;
 
-      // Debug logging
-      console.log('Four-Metric Calculation:', {
-        contractId: contract.id,
-        contractName: contract.name,
-        contractMonths,
-        monthBusinessDays,
-        businessDaysElapsed,
-        standardHoursPerDay,
-        daysWithEntriesCount,
-        fullNonIncomeDaysToDate,
-        totalIncomeHoursToDate: Math.round(totalIncomeHoursToDate * 100) / 100,
-        field1_monthlyPace: monthlyPace ? Math.round(monthlyPace * 100) / 100 : null,
-        field1_contractPaceComparison: contractPaceComparison !== null ? Math.round(contractPaceComparison * 100) / 100 : null,
-        field2_totalExpected: Math.round(totalExpected * 100) / 100,
-        field2_adjustedExpected: Math.round(adjustedExpected * 100) / 100,
-        field2_remainingDays: remainingDays,
-        field2_projectedTotal: Math.round(projectedTotal * 100) / 100,
-        field2_capacityComparison: Math.round(capacityComparison * 100) / 100
-      });
+      aggregatedIncomeHoursToDate += totalIncomeHoursToDate;
+      aggregatedProjectedHoursThisMonth += projectedHoursThisMonth;
+      aggregatedStandardHoursBasedOnBusinessDays += adjustedExpected;
+      aggregatedProjectedVsStandardHours += projectedVsStandard;
+      if (typeof capacityComparison === 'number') {
+        aggregatedCapacityComparisonTotal += capacityComparison;
+      }
+      if (contractPaceComparison !== null && contractPaceComparison !== undefined) {
+        aggregatedContractPaceComparisonTotal += contractPaceComparison;
+        aggregatedContractPaceComparisonCount++;
+      }
+      if (projectedVsContractAverage !== null) {
+        aggregatedProjectedVsContractAverage += projectedVsContractAverage;
+        aggregatedProjectedVsContractAverageCount++;
+      }
 
       // FIELD 3 & 4: Cumulative comparisons (sum across all months)
       let cumulativeCapacityComparison = 0;
@@ -12921,9 +12939,11 @@ function getCachedIncomeSummary(monthKey) {
         futureHours: futureIncomeHours,
         actualAverageDailyHours,
         projectedAverageDailyHours,
+        projectedHoursThisMonth,
         expectedHoursLoggedToDate,
         totalExpectedHoursThisMonth,
         averageContractHoursThisMonth,
+        standardHoursBasedOnBusinessDays: adjustedExpected,
         expectedHoursRemaining,
         projectedVariance,
         trendMethod,
@@ -12943,9 +12963,8 @@ function getCachedIncomeSummary(monthKey) {
     const totalEvaluatedDays = uniquePastDays + aggregatedFutureBusinessDays;
     if (totalEvaluatedDays <= 2) return null;
 
-    const totalBusinessDays = aggregatedMonthDays.size || contractSummaries.reduce((max, summary) => Math.max(max, summary.monthBusinessDays), 0);
-    const averageHours = totalEvaluatedDays > 0 ? (aggregatedHoursLoggedToDate / totalEvaluatedDays) : 0;
-    const overallProjectedVariance = baselineContracts > 0 ? (aggregatedBaselineExpectedHours - aggregatedAverageContractHours) : null;
+    const aggregatedIncomeDays = aggregatedIncomeEntryDays.size;
+    const averageHours = aggregatedIncomeDays > 0 ? (aggregatedIncomeHoursToDate / aggregatedIncomeDays) : 0;
 
     contractSummaries.sort((a, b) => a.contractName.localeCompare(b.contractName));
 
@@ -12954,18 +12973,14 @@ function getCachedIncomeSummary(monthKey) {
       contracts: contractSummaries,
       contractCount: contractSummaries.length,
       averageDailyHours: averageHours,
-      totalHoursLoggedToDate: aggregatedHoursLoggedToDate,
-      pastHours: aggregatedPastHours,
-      futureHours: aggregatedFutureHours,
-      daysEvaluated: totalEvaluatedDays,
-      pastBusinessDays: uniquePastDays,
-      futureBusinessDays: aggregatedFutureBusinessDays,
-      totalBusinessDays,
-      totalExpectedHoursLoggedToDate: aggregatedExpectedHoursLoggedToDate,
-      totalExpectedHoursThisMonth: aggregatedTotalExpectedHours,
+      totalProjectedHoursThisMonth: aggregatedProjectedHoursThisMonth,
+      totalStandardHoursBasedOnBusinessDays: aggregatedStandardHoursBasedOnBusinessDays,
+      totalCapacityComparison: aggregatedCapacityComparisonTotal,
+      totalContractPaceComparison: aggregatedContractPaceComparisonCount > 0 ? aggregatedContractPaceComparisonTotal : null,
+      totalProjectedVsContractAverage: aggregatedProjectedVsContractAverageCount > 0 ? aggregatedProjectedVsContractAverage : null,
+      totalProjectedVsStandardHours: aggregatedProjectedVsStandardHours,
       totalAverageContractHoursThisMonth: aggregatedAverageContractHours,
-      baselineContractCount: baselineContracts,
-      overallProjectedVariance
+      baselineContractCount: baselineContracts
     };
 
   }
@@ -12977,7 +12992,7 @@ function getCachedIncomeSummary(monthKey) {
     expectedHoursContentEl.innerHTML = '';
     if (!summary || !summary.contracts || !summary.contracts.length) return;
 
-    const makeLine = (label, value, title) => {
+    const buildLineRow = (label, title) => {
       const row = document.createElement('div');
       row.className = 'ts-expected-line';
       const labelEl = document.createElement('span');
@@ -12993,123 +13008,165 @@ function getCachedIncomeSummary(monthKey) {
         labelEl.appendChild(infoIcon);
       }
       const valueEl = document.createElement('span');
-      valueEl.textContent = value;
+      valueEl.style.display = 'flex';
+      valueEl.style.alignItems = 'center';
+      valueEl.style.justifyContent = 'flex-end';
+      valueEl.style.gap = '6px';
       row.append(labelEl, valueEl);
+      return { row, valueEl };
+    };
+
+    const makeLine = (label, value, title) => {
+      const { row, valueEl } = buildLineRow(label, title);
+      valueEl.textContent = value;
       return row;
     };
 
-    const showProjectedAverage = getTrendMethod() !== 'current_month';
-    const firstContract = summary.contracts[0];
-
-    const aggregate = document.createElement('div');
-    aggregate.className = 'ts-expected-aggregate';
-    aggregate.appendChild(makeLine('Average daily hours', `${formatDecimalHours(summary.averageDailyHours)} hrs`));
-
-    if (showProjectedAverage && firstContract && firstContract.projectedAverageDailyHours != null) {
-      aggregate.appendChild(makeLine('Projected average daily hours', `${formatDecimalHours(firstContract.projectedAverageDailyHours)} hrs`));
-    }
-
-    const daysLabel = summary.totalBusinessDays > 0
-      ? `${formatDecimalHours(summary.daysEvaluated)} of ${summary.totalBusinessDays}`
-      : formatDecimalHours(summary.daysEvaluated);
-    let daysTooltip = null;
-    if (summary.futureBusinessDays > 0) {
-      daysTooltip = `Past: ${formatDecimalHours(summary.pastBusinessDays)} days, Future: ${formatDecimalHours(summary.futureBusinessDays)} days`;
-    }
-    aggregate.appendChild(makeLine('Business days evaluated', daysLabel, daysTooltip));
-
-    let hoursTooltip = null;
-    if (summary.futureHours > 0) {
-      hoursTooltip = `Past: ${formatDecimalHours(summary.pastHours)} hrs, Future: ${formatDecimalHours(summary.futureHours)} hrs`;
-    }
-    aggregate.appendChild(makeLine('Hours logged this month', `${formatDecimalHours(summary.totalHoursLoggedToDate)} hrs`, hoursTooltip));
-
-    if (showProjectedAverage) {
-      const totalExpectedLoggedThisMonth = summary.contracts.reduce((acc, contract) => {
-        const avg = Number(contract.projectedAverageDailyHours) || 0;
-        const daysEvaluated = Number(contract.businessDaysEvaluated) || 0;
-        return acc + (avg * daysEvaluated);
-      }, 0);
-      aggregate.appendChild(makeLine('Expected hours logged this month', `${formatDecimalHours(totalExpectedLoggedThisMonth)} hrs`));
-    }
-    aggregate.appendChild(makeLine('Total expected hours this month', `${formatDecimalHours(summary.totalExpectedHoursThisMonth)} hrs`));
-
-    if (showProjectedAverage && firstContract && firstContract.trendMethod) {
-      const methodLabels = {
-        current_month: 'current month',
-        last_3_months: 'last 3 months',
-        contract_lifetime: 'contract lifetime',
-        same_month_last_year: 'same month last year'
-      };
-      const methodLabel = methodLabels[firstContract.trendMethod] || firstContract.trendMethod;
-      const trendNote = document.createElement('div');
-      trendNote.className = 'ts-note';
-      trendNote.style.marginTop = '8px';
-      trendNote.style.gridColumn = '1 / -1'; // Span full width of grid
-      if (firstContract.trendFallbackApplied) {
-        trendNote.textContent = `Trend projection based on ${methodLabel} average (insufficient data for selected method)`;
-      } else {
-        trendNote.textContent = `Trend projection based on ${methodLabel} average`;
+    const makeLineWithDiff = (label, value, diffHours, title) => {
+      const { row, valueEl } = buildLineRow(label, title);
+      if (typeof diffHours === 'number' && !Number.isNaN(diffHours)) {
+        const roundedDiff = Math.round(diffHours * 100) / 100;
+        if (Math.abs(roundedDiff) >= 0.01) {
+          const diffEl = document.createElement('span');
+          const isPositive = roundedDiff >= 0;
+          diffEl.style.color = isPositive ? 'var(--success)' : 'var(--danger)';
+          diffEl.style.whiteSpace = 'nowrap';
+          const arrow = isPositive ? '↑' : '↓';
+          const diffValue = `${formatDecimalHours(Math.abs(roundedDiff))} hrs`;
+          diffEl.textContent = `${arrow} ${diffValue}`;
+          valueEl.appendChild(diffEl);
+        }
       }
-      aggregate.appendChild(trendNote);
-    }
+      const valueText = document.createElement('span');
+      valueText.textContent = value;
+      valueEl.appendChild(valueText);
+      return row;
+    };
 
-    const isSingleContract = summary.contractCount === 1;
-    const hasAggregateVariance = summary.contractCount > 1 && summary.overallProjectedVariance !== null;
+    const appendSectionHeader = (container, text) => {
+      const header = document.createElement('div');
+      header.className = 'ts-expected-section-title';
+      header.textContent = text;
+      header.style.gridColumn = '1 / -1';
+      header.style.fontWeight = '600';
+      header.style.margin = '8px 0 4px';
+      container.appendChild(header);
+    };
 
-    if (isSingleContract) {
-      const contract = firstContract;
-      const averageContractHoursValue = contract.averageContractHoursThisMonth != null
-        ? `${formatDecimalHours(contract.averageContractHoursThisMonth)} hrs`
-        : 'Not available for unlimited contracts';
-      aggregate.appendChild(makeLine('Average contract hours this month', averageContractHoursValue));
-
-      const projectedVarianceValue = contract.projectedVariance != null
-        ? `${formatSignedHours(contract.projectedVariance)} hrs`
-        : (contract.averageContractHoursThisMonth != null ? 'Not available' : 'Not available for unlimited contracts');
-      aggregate.appendChild(makeLine('Projected month variance', projectedVarianceValue));
-
-      // Add section divider before new capacity metrics
+    const createDivider = () => {
       const divider = document.createElement('div');
       divider.style.gridColumn = '1 / -1';
       divider.style.height = '1px';
       divider.style.background = 'var(--border)';
       divider.style.margin = '16px 0 8px';
-      aggregate.appendChild(divider);
+      return divider;
+    };
 
-      // NEW: Display four-metric system for single contract
+    const showProjectedAverage = getTrendMethod() !== 'current_month';
+    const firstContract = summary.contracts[0];
+
+    const methodLabels = {
+      standard_contract_hours: 'standard contract hours',
+      current_month: 'current month',
+      last_3_months: 'last 3 months',
+      contract_lifetime: 'contract lifetime',
+      same_month_last_year: 'same month last year'
+    };
+    const getTrendTooltip = (contract) => {
+      if (!contract || !contract.trendMethod) return null;
+      const methodLabel = methodLabels[contract.trendMethod] || contract.trendMethod;
+      if (contract.trendFallbackApplied) {
+        return `Trend projection based on ${methodLabel} average (insufficient data for selected method)`;
+      }
+      return `Trend projection based on ${methodLabel} average`;
+    };
+    const tooltipText = {
+      averageDaily: 'Income-generating hours logged so far divided by the count of days that include income entries.',
+      projectedAverage: 'The projected daily trend, based on your selected calculation method.',
+      totalProjected: 'Hours logged to date plus the remaining business days multiplied by the projected average daily hours.',
+      targetContract: 'Average contract hours per month (total contract hours ÷ contract duration).',
+      targetBusiness: 'Business days in this month × standard hours per day, minus any full non-income day deductions.',
+      expectedHoursRemaining: 'Projected hours still needed to hit this month’s target after accounting for logged/projected time.',
+      businessDaysRemaining: 'Business days left in the current month (includes upcoming leave as deductions).'
+    };
+    const appendCapacityLines = (container, contract) => {
+      if (!contract) return false;
+      let appended = false;
       if (contract.contractPaceComparison !== null && contract.contractPaceComparison !== undefined) {
         const paceValue = formatSignedHours(contract.contractPaceComparison);
         const tooltip = 'Shows if you\'re ahead or behind the linear contract pace (target hours per month). ' +
                        '\n\nFormula: (contract_hours ÷ contract_months × days_elapsed ÷ business_days) - income_hours_logged';
-        aggregate.appendChild(makeLine('Contract monthly average capacity', `${paceValue} hrs`, tooltip));
+        container.appendChild(makeLine('Contract monthly average capacity', `${paceValue} hrs`, tooltip));
+        appended = true;
       }
       if (typeof contract.cumulativeContractPaceComparison === 'number') {
         const cumulativePaceValue = formatSignedHours(contract.cumulativeContractPaceComparison);
         const tooltip = 'Running total showing cumulative performance against contract pace across all months. ' +
                        'Positive means you\'re behind on contract hours, negative means you\'re ahead.';
-        aggregate.appendChild(makeLine('Cumulative contract monthly average capacity', `${cumulativePaceValue} hrs`, tooltip));
+        container.appendChild(makeLine('Cumulative contract monthly average capacity', `${cumulativePaceValue} hrs`, tooltip));
+        appended = true;
       }
       if (typeof contract.capacityComparison === 'number') {
         const capacityValue = formatSignedHours(contract.capacityComparison);
         const tooltip = 'Shows how many hours you need to work to hit standard hours for the business days in this month, accounting for leave. ' +
                        '\n\nFormula: (business_days × standard_hours - full_non_income_days × standard_hours) - (income_logged + remaining_days × standard_hours)';
-        aggregate.appendChild(makeLine('Monthly capacity', `${capacityValue} hrs`, tooltip));
+        container.appendChild(makeLine('Monthly capacity based on available business days', `${capacityValue} hrs`, tooltip));
+        appended = true;
       }
       if (typeof contract.cumulativeCapacityComparison === 'number') {
         const cumulativeValue = formatSignedHours(contract.cumulativeCapacityComparison);
         const tooltip = 'Running total of monthly capacity across all months in the contract. ' +
                        'Shows cumulative hours needed to maintain standard hours for all days worked.';
-        aggregate.appendChild(makeLine('Cumulative monthly capacity', `${cumulativeValue} hrs`, tooltip));
+        container.appendChild(makeLine('Cumulative monthly capacity based on available business days', `${cumulativeValue} hrs`, tooltip));
+        appended = true;
       }
+      return appended;
+    };
 
+    const appendCapacitySection = (container, contract) => {
+      const fragment = document.createDocumentFragment();
+      const appended = appendCapacityLines(fragment, contract);
+      if (!appended) return false;
+      appendSectionHeader(container, 'Hour Budgets');
+      container.appendChild(fragment);
+      return true;
+    };
+
+    const aggregate = document.createElement('div');
+    aggregate.className = 'ts-expected-aggregate';
+    const isSingleContract = summary.contractCount === 1;
+    if (isSingleContract && firstContract) {
+      const budgetsRendered = appendCapacitySection(aggregate, firstContract);
+      if (budgetsRendered) aggregate.appendChild(createDivider());
+    }
+
+    appendSectionHeader(aggregate, 'Projections');
+    aggregate.appendChild(makeLine('Average daily hours', `${formatDecimalHours(summary.averageDailyHours)} hrs`, tooltipText.averageDaily));
+
+    if (showProjectedAverage && firstContract && firstContract.projectedAverageDailyHours != null) {
+      aggregate.appendChild(makeLine('Projected average daily hours', `${formatDecimalHours(firstContract.projectedAverageDailyHours)} hrs`, getTrendTooltip(firstContract)));
+    }
+
+    if (isSingleContract && firstContract) {
+      aggregate.appendChild(makeLine('Total projected hours', `${formatDecimalHours(firstContract.projectedHoursThisMonth)} hrs`, tooltipText.totalProjected));
+      if (firstContract.averageContractHoursThisMonth != null) {
+        const contractDiff = firstContract.projectedHoursThisMonth - firstContract.averageContractHoursThisMonth;
+        aggregate.appendChild(makeLineWithDiff('Target hours based on contract average', `${formatDecimalHours(firstContract.averageContractHoursThisMonth)} hrs`, contractDiff, tooltipText.targetContract));
+      } else {
+        aggregate.appendChild(makeLine('Target hours based on contract average', 'Not available for unlimited contracts', tooltipText.targetContract));
+      }
+      const standardHours = Number(firstContract.standardHoursBasedOnBusinessDays) || 0;
+      const standardDiff = firstContract.projectedHoursThisMonth - standardHours;
+      aggregate.appendChild(makeLineWithDiff('Target hours based on available business days', `${formatDecimalHours(standardHours)} hrs`, standardDiff, tooltipText.targetBusiness));
     } else {
+      aggregate.appendChild(makeLine('Total projected hours', `${formatDecimalHours(summary.totalProjectedHoursThisMonth)} hrs`, tooltipText.totalProjected));
       if (summary.baselineContractCount > 0) {
-        aggregate.appendChild(makeLine('Average contract hours this month', `${formatDecimalHours(summary.totalAverageContractHoursThisMonth)} hrs`));
+        const contractDiff = summary.totalProjectedHoursThisMonth - summary.totalAverageContractHoursThisMonth;
+        aggregate.appendChild(makeLineWithDiff('Target hours based on contract average', `${formatDecimalHours(summary.totalAverageContractHoursThisMonth)} hrs`, contractDiff, tooltipText.targetContract));
       }
-      if (hasAggregateVariance) {
-        aggregate.appendChild(makeLine('Projected month variance', `${formatSignedHours(summary.overallProjectedVariance)} hrs`));
-      }
+      const standardTarget = Number(summary.totalStandardHoursBasedOnBusinessDays) || 0;
+      const standardDiff = summary.totalProjectedHoursThisMonth - standardTarget;
+      aggregate.appendChild(makeLineWithDiff('Target hours based on available business days', `${formatDecimalHours(standardTarget)} hrs`, standardDiff, tooltipText.targetBusiness));
     }
 
     expectedHoursContentEl.appendChild(aggregate);
@@ -13137,79 +13194,30 @@ function getCachedIncomeSummary(monthKey) {
 
         const lines = document.createElement('div');
         lines.className = 'ts-expected-lines';
-        lines.appendChild(makeLine('Average daily hours', `${formatDecimalHours(contract.actualAverageDailyHours)} hrs`));
+        const budgetsRendered = appendCapacitySection(lines, contract);
+        if (budgetsRendered) lines.appendChild(createDivider());
+
+        appendSectionHeader(lines, 'Projections');
+        lines.appendChild(makeLine('Average daily hours', `${formatDecimalHours(contract.actualAverageDailyHours)} hrs`, tooltipText.averageDaily));
         if (showProjectedAverage) {
-          lines.appendChild(makeLine('Projected average daily hours', `${formatDecimalHours(contract.projectedAverageDailyHours)} hrs`));
+          lines.appendChild(makeLine('Projected average daily hours', `${formatDecimalHours(contract.projectedAverageDailyHours)} hrs`, getTrendTooltip(contract)));
         }
 
-        const contractDaysLabel = contract.monthBusinessDays > 0
-          ? `${formatDecimalHours(contract.businessDaysEvaluated)} of ${contract.monthBusinessDays}`
-          : formatDecimalHours(contract.businessDaysEvaluated);
-        let contractDaysTooltip = null;
-        if (contract.futureBusinessDays > 0) {
-          contractDaysTooltip = `Past: ${formatDecimalHours(contract.pastBusinessDays)} days, Future: ${formatDecimalHours(contract.futureBusinessDays)} days`;
-        }
-        lines.appendChild(makeLine('Business days evaluated', contractDaysLabel, contractDaysTooltip));
-
-        let contractHoursTooltip = null;
-        if (contract.futureHours > 0) {
-          contractHoursTooltip = `Past: ${formatDecimalHours(contract.pastHours)} hrs, Future: ${formatDecimalHours(contract.futureHours)} hrs`;
-        }
-        lines.appendChild(makeLine('Hours logged this month', `${formatDecimalHours(contract.hoursLoggedToDate)} hrs`, contractHoursTooltip));
-
-        if (showProjectedAverage) {
-          const contractExpectedLogged = (Number(contract.projectedAverageDailyHours) || 0) * (Number(contract.businessDaysEvaluated) || 0);
-          lines.appendChild(makeLine('Expected hours logged this month', `${formatDecimalHours(contractExpectedLogged)} hrs`));
-        }
-        lines.appendChild(makeLine('Total expected hours this month', `${formatDecimalHours(contract.totalExpectedHoursThisMonth)} hrs`));
+        lines.appendChild(makeLine('Total projected hours', `${formatDecimalHours(contract.projectedHoursThisMonth)} hrs`, tooltipText.totalProjected));
 
         if (contract.averageContractHoursThisMonth != null) {
-          lines.appendChild(makeLine('Average contract hours this month', `${formatDecimalHours(contract.averageContractHoursThisMonth)} hrs`));
-          const projectedVarianceValue = contract.projectedVariance != null
-            ? `${formatSignedHours(contract.projectedVariance)} hrs`
-            : 'Not available';
-          lines.appendChild(makeLine('Projected month variance', projectedVarianceValue));
+          const contractDiff = contract.projectedHoursThisMonth - contract.averageContractHoursThisMonth;
+          lines.appendChild(makeLineWithDiff('Target hours based on contract average', `${formatDecimalHours(contract.averageContractHoursThisMonth)} hrs`, contractDiff, tooltipText.targetContract));
         } else {
-          lines.appendChild(makeLine('Average contract hours this month', 'Not available for unlimited contracts'));
-          lines.appendChild(makeLine('Projected month variance', 'Not available for unlimited contracts'));
+          lines.appendChild(makeLine('Target hours based on contract average', 'Not available for unlimited contracts', tooltipText.targetContract));
         }
 
-        // Add section divider before new capacity metrics
-        const contractDivider = document.createElement('div');
-        contractDivider.style.gridColumn = '1 / -1';
-        contractDivider.style.height = '1px';
-        contractDivider.style.background = 'var(--border)';
-        contractDivider.style.margin = '16px 0 8px';
-        lines.appendChild(contractDivider);
+        const contractStandardHours = Number(contract.standardHoursBasedOnBusinessDays) || 0;
+        const standardDiff = contract.projectedHoursThisMonth - contractStandardHours;
+        lines.appendChild(makeLineWithDiff('Target hours based on available business days', `${formatDecimalHours(contractStandardHours)} hrs`, standardDiff, tooltipText.targetBusiness));
 
-        // NEW: Display four-metric system for multiple contracts
-        if (contract.contractPaceComparison !== null && contract.contractPaceComparison !== undefined) {
-          const paceValue = formatSignedHours(contract.contractPaceComparison);
-          const tooltip = 'Shows if you\'re ahead or behind the linear contract pace (target hours per month). ' +
-                         'Formula: (contract_hours ÷ contract_months × days_elapsed ÷ business_days) - income_hours_logged';
-          lines.appendChild(makeLine('Contract monthly average capacity', `${paceValue} hrs`, tooltip));
-        }
-        if (typeof contract.cumulativeContractPaceComparison === 'number') {
-          const cumulativePaceValue = formatSignedHours(contract.cumulativeContractPaceComparison);
-          const tooltip = 'Running total showing cumulative performance against contract pace across all months. ' +
-                         'Positive means you\'re behind on contract hours, negative means you\'re ahead.';
-          lines.appendChild(makeLine('Cumulative contract monthly average capacity', `${cumulativePaceValue} hrs`, tooltip));
-        }
-        if (typeof contract.capacityComparison === 'number') {
-          const capacityValue = formatSignedHours(contract.capacityComparison);
-          const tooltip = 'Shows how many hours you need to work to hit standard hours for the business days in this month, accounting for leave. ' +
-                         'Formula: (business_days × standard_hours - full_non_income_days × standard_hours) - (income_logged + remaining_days × standard_hours)';
-          lines.appendChild(makeLine('Monthly capacity', `${capacityValue} hrs`, tooltip));
-        }
-        if (typeof contract.cumulativeCapacityComparison === 'number') {
-          const cumulativeValue = formatSignedHours(contract.cumulativeCapacityComparison);
-          const tooltip = 'Running total of monthly capacity across all months in the contract. ' +
-                         'Shows cumulative hours needed to maintain standard hours for all days worked.';
-          lines.appendChild(makeLine('Cumulative monthly capacity', `${cumulativeValue} hrs`, tooltip));
-        }
-
-        lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining)} hrs`));
-        lines.appendChild(makeLine('Business days remaining', formatDecimalHours(contract.businessDaysRemaining)));
+        lines.appendChild(makeLine('Expected hours remaining', `${formatDecimalHours(contract.expectedHoursRemaining)} hrs`, tooltipText.expectedHoursRemaining));
+        lines.appendChild(makeLine('Business days remaining', formatDecimalHours(contract.businessDaysRemaining), tooltipText.businessDaysRemaining));
         wrapper.appendChild(lines);
 
         const statusEl = document.createElement('div');
@@ -13223,6 +13231,35 @@ function getCachedIncomeSummary(monthKey) {
   }
 
 
+  function resolveProjectedVarianceValue(summary) {
+    if (!summary) return null;
+    const selection = getProjectionsVarianceValue();
+    const singleContract = summary.contractCount === 1 ? summary.contracts[0] : null;
+    const projectedVsContract = (contract) => {
+      if (!contract || contract.averageContractHoursThisMonth == null) return null;
+      return contract.projectedHoursThisMonth - contract.averageContractHoursThisMonth;
+    };
+    const projectedVsStandard = (contract) => {
+      if (!contract) return null;
+      const standardHours = Number(contract.standardHoursBasedOnBusinessDays) || 0;
+      return contract.projectedHoursThisMonth - standardHours;
+    };
+
+    switch (selection) {
+      case 'contract_pace':
+        return singleContract ? singleContract.contractPaceComparison : summary.totalContractPaceComparison;
+      case 'projected_vs_contract':
+        if (singleContract) return projectedVsContract(singleContract);
+        return summary.totalProjectedVsContractAverage;
+      case 'projected_vs_standard':
+        if (singleContract) return projectedVsStandard(singleContract);
+        return summary.totalProjectedVsStandardHours;
+      case 'monthly_capacity':
+      default:
+        return singleContract ? singleContract.capacityComparison : summary.totalCapacityComparison;
+    }
+  }
+
   function resetExpectedHoursBadge(text) {
     if (!expectedHoursBadge) return;
     expectedHoursBadge.className = 'ts-badge ts-expected-badge';
@@ -13234,13 +13271,9 @@ function getCachedIncomeSummary(monthKey) {
     resetExpectedHoursBadge();
     if (!summary) return;
 
-    let varianceValue = summary.overallProjectedVariance;
-    if ((varianceValue === null || varianceValue === undefined) && summary.contractCount === 1 && summary.contracts[0]) {
-      varianceValue = summary.contracts[0].projectedVariance;
-    }
-
+    const varianceValue = resolveProjectedVarianceValue(summary);
     const suffix = summary.contractCount > 1 ? ` (${summary.contractCount})` : '';
-    if (varianceValue === null || varianceValue === undefined) {
+    if (varianceValue === null || varianceValue === undefined || Number.isNaN(varianceValue)) {
       expectedHoursBadge.textContent = `Projected variance: --${suffix}`;
       return;
     }
@@ -13953,8 +13986,15 @@ function getCachedIncomeSummary(monthKey) {
     monthly_insights_trend_method: {
       element: () => monthlyInsightsTrendMethodSelect,
       getValue: (el) => el.value,
-      setValue: (el, val) => el.value = val || 'current_month',
-      defaultValue: 'current_month',
+      setValue: (el, val) => el.value = val || 'standard_contract_hours',
+      defaultValue: 'standard_contract_hours',
+      event: 'change'
+    },
+    projections_variance_value: {
+      element: () => projectionsVarianceValueSelect,
+      getValue: (el) => el.value,
+      setValue: (el, val) => el.value = val || 'monthly_capacity',
+      defaultValue: 'monthly_capacity',
       event: 'change'
     },
     invoice_template_reference: {
