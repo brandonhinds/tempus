@@ -360,6 +360,26 @@ let ratePreviewInputSyncing = false;
       generating: false
     },
     invoicesInitialized: false,
+    loadingTiers: {
+      tier1Complete: false,
+      tier2Complete: false,
+      tier3Complete: false,
+      tier4Complete: false,
+      features: {
+        hourTypes: { loaded: false, loading: false, lastUpdate: null },
+        basSubmissions: { loaded: false, loading: false, lastUpdate: null },
+        invoices: { loaded: false, loading: false, lastUpdate: null },
+        publicHolidays: { loaded: false, loading: false, lastUpdate: null },
+        recurringEntries: { loaded: false, loading: false, lastUpdate: null },
+        deductionCategories: { loaded: false, loading: false, lastUpdate: null }
+      }
+    },
+    incomeCacheMetadata: {},
+    lazyLoadQueue: {
+      monthsToCalculate: [],
+      currentlyCalculating: null,
+      progressiveLoadComplete: false
+    },
     annualCharts: {
       income: null,
       incomePie: null,
@@ -388,6 +408,104 @@ let ratePreviewInputSyncing = false;
     editingId: null,
     original: null
   };
+
+  function createDefaultLoadingTiers() {
+    return {
+      tier1Complete: false,
+      tier2Complete: false,
+      tier3Complete: false,
+      tier4Complete: false,
+      features: {
+        hourTypes: { loaded: false, loading: false, lastUpdate: null },
+        basSubmissions: { loaded: false, loading: false, lastUpdate: null },
+        invoices: { loaded: false, loading: false, lastUpdate: null },
+        publicHolidays: { loaded: false, loading: false, lastUpdate: null },
+        recurringEntries: { loaded: false, loading: false, lastUpdate: null },
+        deductionCategories: { loaded: false, loading: false, lastUpdate: null }
+      }
+    };
+  }
+
+  function createDefaultLazyLoadQueue() {
+    return {
+      monthsToCalculate: [],
+      currentlyCalculating: null,
+      progressiveLoadComplete: false
+    };
+  }
+
+  function initializeLazyLoadingState() {
+    if (!state.loadingTiers || typeof state.loadingTiers !== 'object') {
+      state.loadingTiers = createDefaultLoadingTiers();
+    } else {
+      const defaults = createDefaultLoadingTiers().features;
+      if (!state.loadingTiers.features || typeof state.loadingTiers.features !== 'object') {
+        state.loadingTiers.features = createDefaultLoadingTiers().features;
+      } else {
+        Object.keys(defaults).forEach((feature) => {
+          if (!state.loadingTiers.features[feature]) {
+            state.loadingTiers.features[feature] = { ...defaults[feature] };
+          } else {
+            state.loadingTiers.features[feature] = {
+              loaded: !!state.loadingTiers.features[feature].loaded,
+              loading: false,
+              lastUpdate: state.loadingTiers.features[feature].lastUpdate || null
+            };
+          }
+        });
+      }
+    }
+    if (!state.incomeCacheMetadata || typeof state.incomeCacheMetadata !== 'object') {
+      state.incomeCacheMetadata = {};
+    }
+    if (!state.lazyLoadQueue || typeof state.lazyLoadQueue !== 'object') {
+      state.lazyLoadQueue = createDefaultLazyLoadQueue();
+    }
+  }
+
+  function resetLazyLoadQueue() {
+    state.lazyLoadQueue = createDefaultLazyLoadQueue();
+  }
+
+  function updateLoadingFeatureState(feature, updates) {
+    initializeLazyLoadingState();
+    if (!state.loadingTiers.features[feature]) {
+      state.loadingTiers.features[feature] = { loaded: false, loading: false, lastUpdate: null };
+    }
+    state.loadingTiers.features[feature] = {
+      ...state.loadingTiers.features[feature],
+      ...updates
+    };
+  }
+
+  function hydrateLoadingTierCache(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    initializeLazyLoadingState();
+    if (raw.features && typeof raw.features === 'object') {
+      Object.keys(raw.features).forEach((feature) => {
+        const source = raw.features[feature] || {};
+        state.loadingTiers.features[feature] = {
+          loaded: !!source.loaded,
+          loading: false,
+          lastUpdate: source.lastUpdate || null
+        };
+      });
+    }
+  }
+
+  function serializeLoadingTierCache() {
+    const features = {};
+    if (state.loadingTiers && state.loadingTiers.features) {
+      Object.keys(state.loadingTiers.features).forEach((feature) => {
+        const meta = state.loadingTiers.features[feature] || {};
+        features[feature] = {
+          loaded: !!meta.loaded,
+          lastUpdate: meta.lastUpdate || null
+        };
+      });
+    }
+    return { features };
+  }
 
   const deductionCategoryFormState = {
     mode: 'list',
@@ -447,7 +565,40 @@ let ratePreviewInputSyncing = false;
     state.pendingEntryDeletes.delete(String(id));
   }
 
+  function buildEntryHashMap(entries) {
+    const buckets = {};
+    (entries || []).forEach((entry) => {
+      if (!entry || !entry.date) return;
+      const monthKey = monthKeyFromDateIso(entry.date);
+      if (!monthKey) return;
+      if (!buckets[monthKey]) buckets[monthKey] = [];
+      buckets[monthKey].push(entry);
+    });
+    const hashes = {};
+    Object.keys(buckets).forEach((monthKey) => {
+      hashes[monthKey] = calculateEntryListHash(buckets[monthKey]);
+    });
+    return hashes;
+  }
+
+  function reconcileIncomeMetadataWithEntries(previousEntries, nextEntries) {
+    ensureIncomeCacheStructures();
+    const prevHashes = buildEntryHashMap(previousEntries);
+    const nextHashes = buildEntryHashMap(nextEntries);
+    const monthKeys = new Set([...Object.keys(prevHashes), ...Object.keys(nextHashes)]);
+    monthKeys.forEach((monthKey) => {
+      const before = prevHashes[monthKey] || '';
+      const after = nextHashes[monthKey] || '';
+      if (before !== after) {
+        markMonthDirty(monthKey);
+        if (!state.incomeCacheMetadata[monthKey]) state.incomeCacheMetadata[monthKey] = {};
+        state.incomeCacheMetadata[monthKey].entryHash = after;
+      }
+    });
+  }
+
   function mergeEntriesWithServerEntries(freshEntries) {
+    const previousEntries = Array.isArray(state.entries) ? state.entries.slice() : [];
     const serverEntries = Array.isArray(freshEntries) ? freshEntries : [];
     const merged = [];
     const seenIds = new Set();
@@ -515,7 +666,7 @@ let ratePreviewInputSyncing = false;
 
     merged.sort(entrySort);
     state.entries = merged;
-    markAllIncomeSummariesDirty();
+    reconcileIncomeMetadataWithEntries(previousEntries, merged);
   }
 
   function entrySort(a, b) {
@@ -2873,39 +3024,427 @@ function loadAnnualData() {
       contractIds: state.annualFilteredContracts
     };
 
-    // Check if we have any cached annual data at all
     const hasAnyCachedData = state.annualData !== null;
     const useSkeleton = !hasAnyCachedData;
 
-    // Always show loading state when loading data
     showAnnualLoadingState(useSkeleton);
 
-    // Show cached data underneath if available (optimistic UI)
     if (hasAnyCachedData) {
       renderAnnualData();
       toggleAnnualSkeleton(false);
     }
 
-    // Then fetch fresh data in background
     const statusMsg = hasAnyCachedData ? 'Updating annual data...' : 'Loading annual data...';
     setStatus(statusMsg, 'info');
-    google.script.run
-      .withSuccessHandler((data) => {
+
+    setTimeout(() => {
+      try {
+        const data = buildAnnualDataFromMonthlyCache(payload);
         state.annualData = data;
         saveCache();
         hideAnnualLoadingState();
         toggleAnnualSkeleton(false);
         renderAnnualData();
         setStatus('Ready', 'success');
-      })
-      .withFailureHandler((error) => {
-        console.error('Failed to load annual data:', error);
+      } catch (error) {
+        console.error('Failed to build annual data:', error);
         hideAnnualLoadingState();
         toggleAnnualSkeleton(false);
         setStatus('Error loading annual data', 'error');
-      })
-      .api_getAnnualSummary(payload);
+      }
+    }, 0);
 }
+
+  function buildAnnualDataFromMonthlyCache({ yearType, startYear, contractIds }) {
+    const normalizedContractIds = Array.isArray(contractIds)
+      ? contractIds.filter((id) => id != null && id !== '').map((id) => String(id))
+      : [];
+    const months = yearType === 'financial'
+      ? getFinancialYearMonths(startYear)
+      : getCalendarYearMonths(startYear);
+    const monthlyData = months.map(({ year, month }) => buildAnnualMonthSummary(year, month, normalizedContractIds));
+    const yearTotals = monthlyData.reduce((acc, month) => {
+      acc.grossIncome += month.grossIncome || 0;
+      acc.superGuarantee += month.superGuarantee || 0;
+      acc.superLost += month.superLost || 0;
+      acc.extraSuper += month.extraSuper || 0;
+      acc.otherDeductions += month.otherDeductions || 0;
+      acc.tax += month.tax || 0;
+      acc.netIncome += month.netIncome || 0;
+      acc.totalHours += month.totalHours || 0;
+      acc.rateCalcHours += month.rateCalcHours || 0;
+      acc.companyIncome += month.companyIncome || 0;
+      acc.companyExpenses += month.companyExpenses || 0;
+      acc.invoiceTotal += month.invoiceTotal || 0;
+      return acc;
+    }, {
+      grossIncome: 0,
+      superGuarantee: 0,
+      superLost: 0,
+      extraSuper: 0,
+      otherDeductions: 0,
+      tax: 0,
+      netIncome: 0,
+      totalHours: 0,
+      rateCalcHours: 0,
+      companyIncome: 0,
+      companyExpenses: 0,
+      invoiceTotal: 0
+    });
+    return {
+      yearType,
+      startYear,
+      monthlyData,
+      yearTotals,
+      contractBreakdown: buildAnnualContractBreakdown(monthlyData),
+      hourTypeBreakdown: buildAnnualHourTypeBreakdown(monthlyData)
+    };
+  }
+
+  function getMonthLabel(year, month) {
+    return MONTH_YEAR_FORMATTER.format(new Date(year, month, 1));
+  }
+
+  function buildAnnualMonthSummary(year, month, contractIds) {
+    ensureIncomeCacheStructures();
+    const contractFilter = Array.isArray(contractIds) && contractIds.length ? new Set(contractIds.map(String)) : null;
+    const monthEntries = entriesForMonth(year, month);
+    const filteredEntries = contractFilter
+      ? monthEntries.filter((entry) => contractFilter.has(String(entry.contract_id)))
+      : monthEntries.slice();
+    const periodStart = startOfDay(new Date(year, month, 1));
+    const periodEnd = startOfDay(new Date(year, month + 1, 0));
+    const periodStartIso = periodStart.toISOString().substring(0, 10);
+    const superRate = getSuperGuaranteeRateForDate(periodStartIso);
+    const contractIncome = {};
+    let totalMinutes = 0;
+    filteredEntries.forEach((entry) => {
+      const minutes = Number(entry.duration_minutes) || 0;
+      totalMinutes += minutes;
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      const hourType = state.hourTypeMap[hourTypeId];
+      const contributes = hourType ? hourType.contributes_to_income : true;
+      if (!contributes) return;
+      const contractId = entry.contract_id || '';
+      const contract = state.contractMap[contractId];
+      let rate = 0;
+      if (contract && contractIsValid(contract, entry.date)) {
+        rate = Number(contract.hourly_rate || 0);
+      } else {
+        const valids = validContractsForDate(entry.date);
+        if (valids.length === 1) rate = Number(valids[0].hourly_rate || 0);
+      }
+      const hours = minutes / 60;
+      if (!contractIncome[contractId]) contractIncome[contractId] = 0;
+      contractIncome[contractId] += hours * rate;
+    });
+    const roundedMinutes = roundDuration(totalMinutes);
+    const roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
+    const totalHours = roundedMinutes / 60;
+    Object.keys(contractIncome).forEach((cid) => {
+      contractIncome[cid] = contractIncome[cid] * roundingScale;
+    });
+
+    const hourTypeMinutes = {};
+    const rateCalcHourTypeIds = new Set(
+      (state.hourTypes || []).filter((ht) => ht && ht.use_for_rate_calculation).map((ht) => ht.id)
+    );
+    let rateCalcMinutes = 0;
+    monthEntries.forEach((entry) => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      const minutes = Number(entry.duration_minutes) || 0;
+      if (!hourTypeMinutes[hourTypeId]) hourTypeMinutes[hourTypeId] = 0;
+      hourTypeMinutes[hourTypeId] += minutes;
+      if (rateCalcHourTypeIds.has(hourTypeId)) {
+        rateCalcMinutes += minutes;
+      }
+    });
+    const rateCalcHours = roundDuration(rateCalcMinutes) / 60;
+
+    const monthStart = periodStart;
+    const monthEnd = periodEnd;
+    let extraSuperFlat = 0;
+    let extraSuperPercentRate = 0;
+    let otherDeductions = 0;
+    let companyExpenses = 0;
+    let companyExpensesGst = 0;
+    const categoryTotals = {};
+    const categoryDeductionMap = {};
+    const activeDeductions = Array.isArray(state.deductions) ? state.deductions : [];
+    activeDeductions.forEach((deduction) => {
+      if (!deduction || deduction.active === false) return;
+      const occurrences = getDeductionOccurrencesWithExceptions(deduction, monthStart, monthEnd);
+      if (!occurrences.length) return;
+      if (deduction.deduction_type === 'extra_super') {
+        if (deduction.amount_type === 'percent') {
+          extraSuperPercentRate += (Number(deduction.amount_value) || 0) * occurrences.length;
+        } else {
+          occurrences.forEach((occ) => {
+            const amount = occ.amount !== null ? occ.amount : deduction.amount_value;
+            extraSuperFlat += Number(amount) || 0;
+          });
+        }
+        return;
+      }
+      if (deduction.amount_type === 'percent') {
+        return;
+      }
+      occurrences.forEach((occ) => {
+        const baseAmount = occ.amount !== null ? occ.amount : deduction.amount_value;
+        let netAmount = Number(baseAmount) || 0;
+        if (deduction.gst_inclusive) {
+          netAmount = netAmount / (1 + GST_RATE);
+        }
+        const categoryId = deduction.category_id || '';
+        categoryTotals[categoryId] = (categoryTotals[categoryId] || 0) + netAmount;
+        const deductionId = deduction.id ? String(deduction.id) : '';
+        if (deductionId) {
+          if (!categoryDeductionMap[categoryId]) categoryDeductionMap[categoryId] = {};
+          if (!categoryDeductionMap[categoryId][deductionId]) {
+            categoryDeductionMap[categoryId][deductionId] = {
+              deductionId,
+              name: deduction.name,
+              amount: 0,
+              company_expense: !!deduction.company_expense
+            };
+          }
+          categoryDeductionMap[categoryId][deductionId].amount += netAmount;
+        }
+        if (deduction.company_expense) {
+          companyExpenses += netAmount;
+          if (deduction.gst_inclusive) {
+            const gstComponent = (Number(baseAmount) || 0) - netAmount;
+            companyExpensesGst += gstComponent;
+          }
+        } else {
+          otherDeductions += netAmount;
+        }
+      });
+    });
+
+    const companyEnabled = !!state.companyTrackingEnabled;
+    if (!companyEnabled) {
+      companyExpenses = 0;
+      companyExpensesGst = 0;
+    }
+
+    const totalPackage = Object.values(contractIncome).reduce((sum, value) => sum + value, 0);
+    const companyIncome = companyEnabled ? totalPackage : 0;
+    const invoiceTotal = companyEnabled ? companyIncome * (1 + GST_RATE) : 0;
+    const employeePackage = companyEnabled ? Math.max(0, companyIncome - companyExpenses) : totalPackage;
+    const grossIncome = deriveGrossFromPackage(employeePackage, superRate);
+    const extraSuperPercent = Math.max(0, extraSuperPercentRate);
+    let extraSuper = extraSuperFlat + (extraSuperPercent * Math.max(0, grossIncome));
+
+    let superBase = Math.max(0, grossIncome - otherDeductions);
+    const idealSuper = Math.max(0, grossIncome * superRate);
+    let superGuarantee = Math.max(0, superBase * superRate);
+    let superLost = Math.max(0, idealSuper - superGuarantee);
+    const noLostSuperEnabled = !!getFeatureFlag('no_lost_super_to_deductions');
+    const recoveryMode = state.settings && state.settings.lost_super_recovery_mode
+      ? state.settings.lost_super_recovery_mode
+      : 'extra_contribution';
+    let recoveredSuper = 0;
+    let recoveredToSuperBase = 0;
+    if (noLostSuperEnabled && superLost > 0) {
+      if (recoveryMode === 'extra_contribution') {
+        recoveredSuper = superLost;
+        extraSuper += recoveredSuper;
+        superLost = 0;
+      } else if (recoveryMode === 'add_to_taxable') {
+        recoveredToSuperBase = superLost;
+        superBase = Math.max(0, superBase + recoveredToSuperBase);
+        superGuarantee = Math.max(0, superBase * superRate);
+        superLost = 0;
+      }
+    }
+
+    const taxableIncome = Math.max(0, grossIncome - extraSuper - otherDeductions + recoveredToSuperBase);
+    let tax = 0;
+    if (taxableIncome > 0) {
+      tax = estimateTaxLocal(grossIncome, periodStartIso);
+    }
+    const netIncome = Math.max(0, taxableIncome - tax);
+
+    const hourTypeHours = {};
+    Object.keys(hourTypeMinutes).forEach((id) => {
+      hourTypeHours[id] = hourTypeMinutes[id] / 60;
+    });
+
+    const categoryBreakdown = buildAnnualCategoryBreakdown(categoryTotals, categoryDeductionMap);
+
+    const actualIncome = state.actualIncomeMap ? state.actualIncomeMap[monthKeyFor(year, month)] : null;
+    let finalGrossIncome = grossIncome;
+    let finalSuperGuarantee = superGuarantee;
+    let finalExtraSuper = extraSuper;
+    let finalTax = tax;
+    let finalNetIncome = netIncome;
+    let hasActualIncome = false;
+    if (actualIncome) {
+      hasActualIncome = true;
+      finalGrossIncome = Number(actualIncome.gross_income) || 0;
+      const actualSuper = Number(actualIncome.superannuation) || 0;
+      const estimatedTotalSuper = (superGuarantee + extraSuper) || 0;
+      if (estimatedTotalSuper > 0) {
+        const guaranteeRatio = superGuarantee / estimatedTotalSuper;
+        finalSuperGuarantee = actualSuper * guaranteeRatio;
+        finalExtraSuper = actualSuper * (1 - guaranteeRatio);
+      } else {
+        finalSuperGuarantee = actualSuper;
+        finalExtraSuper = 0;
+      }
+      finalTax = Number(actualIncome.tax) || 0;
+      finalNetIncome = Number(actualIncome.net_income) || 0;
+    }
+
+    return {
+      year,
+      month,
+      label: getMonthLabel(year, month),
+      monthKey: monthKeyFor(year, month),
+      grossIncome: finalGrossIncome,
+      superGuarantee: finalSuperGuarantee,
+      superLost,
+      extraSuper: finalExtraSuper,
+      otherDeductions,
+      taxableIncome,
+      tax: finalTax,
+      netIncome: finalNetIncome,
+      totalHours,
+      rateCalcHours,
+      companyIncome,
+      companyExpenses,
+      companyExpensesGst,
+      invoiceTotal,
+      superRate,
+      contractIncome,
+      hourTypeHours,
+      categoryBreakdown: {
+        categories: categoryBreakdown
+      },
+      hasActualIncome
+    };
+  }
+
+  function buildAnnualCategoryBreakdown(categoryTotals, categoryDeductionMap) {
+    return Object.keys(categoryTotals).map((categoryId) => {
+      const total = Math.round(categoryTotals[categoryId] * 100) / 100;
+      const deductionMap = categoryDeductionMap[categoryId] || {};
+      const deductions = Object.keys(deductionMap).map((deductionId) => {
+        const item = deductionMap[deductionId];
+        return {
+          deductionId: item.deductionId,
+          name: item.name,
+          amount: Math.round((item.amount || 0) * 100) / 100,
+          company_expense: !!item.company_expense
+        };
+      }).sort((a, b) => b.amount - a.amount);
+      return {
+        categoryId,
+        total,
+        deductions
+      };
+    });
+  }
+
+  function buildAnnualContractBreakdown(monthlyData) {
+    const incomeByContract = {};
+    monthlyData.forEach((month) => {
+      const incomeMap = month.contractIncome || {};
+      Object.keys(incomeMap).forEach((contractId) => {
+        incomeByContract[contractId] = (incomeByContract[contractId] || 0) + incomeMap[contractId];
+      });
+    });
+    const breakdown = [];
+    Object.keys(incomeByContract).forEach((contractId) => {
+      const contract = state.contractMap[contractId];
+      if (!contract) return;
+      breakdown.push({
+        contractId,
+        contractName: contract.name,
+        grossIncome: incomeByContract[contractId]
+      });
+    });
+    breakdown.sort((a, b) => b.grossIncome - a.grossIncome);
+    return breakdown;
+  }
+
+  function buildAnnualHourTypeBreakdown(monthlyData) {
+    const hoursByType = {};
+    monthlyData.forEach((month) => {
+      const hourMap = month.hourTypeHours || {};
+      Object.keys(hourMap).forEach((hourTypeId) => {
+        hoursByType[hourTypeId] = (hoursByType[hourTypeId] || 0) + hourMap[hourTypeId];
+      });
+    });
+    const breakdown = [];
+    Object.keys(hoursByType).forEach((hourTypeId) => {
+      const hourType = state.hourTypeMap[hourTypeId];
+      let resolvedId = hourTypeId;
+      let resolvedName = 'Unknown';
+      let resolvedColor = '#94a3b8';
+      if (hourType) {
+        resolvedId = hourType.id;
+        resolvedName = hourType.name;
+        resolvedColor = hourType.color || resolvedColor;
+      } else if (!hourTypeId || hourTypeId === 'work') {
+        resolvedId = 'work';
+        resolvedName = 'Work';
+        resolvedColor = '#3b82f6';
+      }
+      breakdown.push({
+        hourTypeId: resolvedId,
+        hourTypeName: resolvedName,
+        hourTypeColor: resolvedColor,
+        hours: hoursByType[hourTypeId]
+      });
+    });
+    breakdown.sort((a, b) => b.hours - a.hours);
+    return breakdown;
+  }
+
+  function estimateTaxLocal(grossIncome, currentDate) {
+    let income = Number(grossIncome) || 0;
+    if (income < 0) income = 0;
+    const decimal = Number(((income % 1).toFixed(2)));
+    if (decimal === 0.33) {
+      income += 0.01;
+    }
+    const weeklyIncome = Math.floor(income * (3 / 13)) + 0.99;
+    const targetDate = new Date(currentDate);
+    let financialYear = '2024/2025';
+    if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())) {
+      if (targetDate <= new Date('2024-05-30')) {
+        financialYear = '2020/2021';
+      } else if (targetDate <= new Date('2099-05-30')) {
+        financialYear = '2024/2025';
+      }
+    }
+    let a = 0;
+    let b = 0;
+    if (financialYear === '2020/2021') {
+      if (weeklyIncome < 359) { a = 0; b = 0; } else
+      if (weeklyIncome < 438) { a = 0.19; b = 68.3462; } else
+      if (weeklyIncome < 548) { a = 0.29; b = 112.1942; } else
+      if (weeklyIncome < 721) { a = 0.21; b = 68.3465; } else
+      if (weeklyIncome < 865) { a = 0.219; b = 74.8369; } else
+      if (weeklyIncome < 1282) { a = 0.3477; b = 186.2119; } else
+      if (weeklyIncome < 2307) { a = 0.345; b = 182.7504; } else
+      if (weeklyIncome < 3461) { a = 0.39; b = 286.5965; } else { a = 0.47; b = 563.5196; }
+    } else {
+      if (weeklyIncome < 361) { a = 0; b = 0; } else
+      if (weeklyIncome < 500) { a = 0.16; b = 57.8462; } else
+      if (weeklyIncome < 625) { a = 0.26; b = 107.8462; } else
+      if (weeklyIncome < 721) { a = 0.18; b = 57.8462; } else
+      if (weeklyIncome < 865) { a = 0.189; b = 64.3365; } else
+      if (weeklyIncome < 1282) { a = 0.3277; b = 180.0385; } else
+      if (weeklyIncome < 2596) { a = 0.32; b = 176.5769; } else
+      if (weeklyIncome < 3653) { a = 0.39; b = 358.3077; } else { a = 0.47; b = 650.6154; }
+    }
+    const weeklyTax = (a * weeklyIncome) - b;
+    const monthlyTax = Math.round(weeklyTax * (13 / 3));
+    return Math.max(0, Math.round(monthlyTax));
+  }
 
   function renderAnnualViews() {
     if (!pageAnnualViews) return;
@@ -6191,6 +6730,11 @@ function updateDeductionFormVisibility() {
       } else {
         state.incomeSummaryCache = {};
       }
+      if (obj.incomeCacheMetadata && typeof obj.incomeCacheMetadata === 'object') {
+        state.incomeCacheMetadata = { ...obj.incomeCacheMetadata };
+      } else {
+        state.incomeCacheMetadata = {};
+      }
       if (obj.potentialIncomeCache && typeof obj.potentialIncomeCache === 'object') {
         state.potentialIncomeCache = obj.potentialIncomeCache;
       } else {
@@ -6202,6 +6746,9 @@ function updateDeductionFormVisibility() {
       updateDeductionCategoryMap();
       ensureDeductionCategoryCollapseState();
       ensureInvoiceFormOptions();
+      initializeLazyLoadingState();
+      hydrateLoadingTierCache(obj.loadingTiers);
+      resetLazyLoadQueue();
 
       // Set initial tab based on today's entry type
       const today = todayIso();
@@ -6260,7 +6807,9 @@ function updateDeductionFormVisibility() {
         invoiceSelectedId: state.invoiceSelectedId,
         invoiceDetail: invoiceDetailForCache,
         incomeSummaryCache: serializeIncomeSummaryCache(),
-        potentialIncomeCache: state.potentialIncomeCache
+        incomeCacheMetadata: state.incomeCacheMetadata,
+        potentialIncomeCache: state.potentialIncomeCache,
+        loadingTiers: serializeLoadingTierCache()
       };
       localStorage.setItem(state.cacheKey, JSON.stringify(payload));
     } catch (e) {}
@@ -7977,6 +8526,14 @@ function updateDeductionFormVisibility() {
     return months;
   }
 
+  function getCalendarYearMonths(year) {
+    const months = [];
+    for (let month = 0; month < 12; month += 1) {
+      months.push({ year, month });
+    }
+    return months;
+  }
+
   function startOfFinancialYear(startYear) {
     return startOfDay(new Date(startYear, FINANCIAL_YEAR_START_MONTH, 1));
   }
@@ -9558,7 +10115,11 @@ function updateDeductionFormVisibility() {
           state.featureFlags = normalizeFeatureFlags(res.flags);
           saveCache();
           renderFeatureFlags();
-          applyFeatureFlags();
+          applyFeatureFlagsLazy();
+          handleFeatureFlagDataLoad(featureKey, enabled);
+          if (state.annualData) {
+            loadAnnualData();
+          }
 
           // If no_lost_super_to_deductions was just enabled and the setting doesn't exist, save default
           if (featureKey === 'no_lost_super_to_deductions' && enabled && !state.settings.lost_super_recovery_mode) {
@@ -9597,7 +10158,7 @@ function updateDeductionFormVisibility() {
       });
   }
 
-  function applyFeatureFlags() {
+  function applyFeatureFlagsLazy() {
     const rememberFlag = state.featureFlags.remember_last_page || DEFAULT_FEATURE_FLAGS.remember_last_page || { enabled: false };
     if (rememberFlag.enabled) {
       let stored = null;
@@ -9624,8 +10185,6 @@ function updateDeductionFormVisibility() {
     if (recurringManageBtn) recurringManageBtn.style.display = recurringEnabled ? 'inline-flex' : 'none';
     if (!recurringEnabled) {
       closeRecurringModal();
-    } else if (!state.recurringEntriesInitialized && !state.recurringEntriesSyncing) {
-      syncRecurringEntries({ silent: true });
     }
 
     const expectedMonthlyFlag = state.featureFlags.expected_monthly_hours || DEFAULT_FEATURE_FLAGS.expected_monthly_hours || { enabled: false };
@@ -9641,9 +10200,7 @@ function updateDeductionFormVisibility() {
     if (btnManageDeductionCategories) {
       btnManageDeductionCategories.style.display = categoryFlag.enabled ? 'inline-flex' : 'none';
     }
-    if (categoryFlag.enabled) {
-      loadDeductionCategories();
-    } else {
+    if (!categoryFlag.enabled) {
       state.deductionCategories = [];
       state.deductionCategoryCollapse = { __uncategorised__: true };
       updateDeductionCategoryMap();
@@ -9748,6 +10305,28 @@ function updateDeductionFormVisibility() {
 
     // Update custom theme availability and controls
     updateCustomThemeControls();
+  }
+
+  function handleFeatureFlagDataLoad(featureKey, enabled) {
+    if (featureKey === 'enable_public_holidays') {
+      if (enabled) {
+        loadPublicHolidays(true);
+      } else {
+        state.publicHolidays = [];
+        updatePublicHolidayMap();
+        renderCalendar();
+      }
+    } else if (featureKey === 'enable_deduction_categories') {
+      if (enabled) {
+        fetchDeductionCategoriesFromServer();
+      }
+    } else if (featureKey === 'recurring_time_entries' && enabled) {
+      syncRecurringEntries({ silent: true });
+    } else if (featureKey === 'enable_invoices' && enabled) {
+      initializeInvoicesFeature();
+    } else if (featureKey === 'hour_types' && enabled) {
+      loadHourTypes();
+    }
   }
 
   if (contractSaveBtn) {
@@ -9865,6 +10444,16 @@ function monthKeyFromDateIso(dateIso) {
   return monthKeyFor(date.getFullYear(), date.getMonth());
 }
 
+function parseMonthKey(monthKey) {
+  if (!monthKey) return null;
+  const parts = monthKey.split('-');
+  if (parts.length !== 2) return null;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]) - 1;
+  if (Number.isNaN(year) || Number.isNaN(month)) return null;
+  return { year, month };
+}
+
 function hourTypeContributesToIncome(hourTypeId) {
   const id = hourTypeId || getDefaultHourTypeId();
   const hourType = state.hourTypeMap[id];
@@ -9877,15 +10466,26 @@ function entryContributesToIncome(entry) {
 }
 
 function ensureIncomeCacheStructures() {
-  if (!state.incomeSummaryCache) state.incomeSummaryCache = {};
-  if (!state.dirtyIncomeMonths) state.dirtyIncomeMonths = new Set();
+  if (!state.incomeSummaryCache || typeof state.incomeSummaryCache !== 'object') state.incomeSummaryCache = {};
+  if (!state.dirtyIncomeMonths || !(state.dirtyIncomeMonths instanceof Set)) {
+    state.dirtyIncomeMonths = new Set();
+  }
+  if (!state.incomeCacheMetadata || typeof state.incomeCacheMetadata !== 'object') {
+    state.incomeCacheMetadata = {};
+  }
 }
 
-function markIncomeMonthDirty(monthKey) {
+function markMonthDirty(monthKey) {
   if (!monthKey) return;
   ensureIncomeCacheStructures();
   state.dirtyIncomeMonths.add(monthKey);
   if (state.incomeSummaryCache[monthKey]) delete state.incomeSummaryCache[monthKey];
+  if (!state.incomeCacheMetadata[monthKey]) state.incomeCacheMetadata[monthKey] = {};
+  state.incomeCacheMetadata[monthKey].isDirty = true;
+}
+
+function markIncomeMonthDirty(monthKey) {
+  markMonthDirty(monthKey);
 }
 
 function markIncomeSummaryDirtyForEntry(entry) {
@@ -9900,7 +10500,65 @@ function markIncomeSummaryDirtyForEntries(entries) {
 
 function markAllIncomeSummariesDirty() {
   ensureIncomeCacheStructures();
-  Object.keys(state.incomeSummaryCache).forEach((key) => state.dirtyIncomeMonths.add(key));
+  const keys = new Set([
+    ...Object.keys(state.incomeSummaryCache || {}),
+    ...Object.keys(state.incomeCacheMetadata || {})
+  ]);
+  keys.forEach((key) => markMonthDirty(key));
+}
+
+function buildEntryHashPayload(entry) {
+  if (!entry) return '';
+  const punches = Array.isArray(entry.punches)
+    ? entry.punches.map((punch) => `${punch.type || ''}:${punch.time || ''}`).join(',')
+    : '';
+  return [
+    entry.id || '',
+    entry.date || '',
+    entry.duration_minutes || 0,
+    entry.contract_id || '',
+    entry.hour_type_id || '',
+    punches
+  ].join('|');
+}
+
+function calculateEntryListHash(entries) {
+  if (!Array.isArray(entries) || !entries.length) return '0';
+  const normalized = entries
+    .map((entry) => ({
+      payload: buildEntryHashPayload(entry),
+      date: entry.date || '',
+      id: entry.id || ''
+    }))
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.id.localeCompare(b.id);
+    })
+    .map((entry) => entry.payload);
+  return `${normalized.length}:${normalized.join('||')}`;
+}
+
+function calculateMonthEntryHash(year, month) {
+  const monthEntries = entriesForMonth(year, month);
+  return calculateEntryListHash(monthEntries);
+}
+
+function shouldRecalculateMonth(year, month) {
+  ensureIncomeCacheStructures();
+  const monthKey = monthKeyFor(year, month);
+  const metadata = state.incomeCacheMetadata[monthKey];
+  if (!metadata) return true;
+  if (metadata.isDirty) return true;
+  if (!state.incomeSummaryCache[monthKey]) return true;
+  const currentHash = calculateMonthEntryHash(year, month);
+  if (metadata.entryHash !== currentHash) {
+    metadata.entryHash = currentHash;
+    metadata.isDirty = true;
+    if (state.incomeSummaryCache[monthKey]) delete state.incomeSummaryCache[monthKey];
+    state.dirtyIncomeMonths.add(monthKey);
+    return true;
+  }
+  return false;
 }
 
 function serializeIncomeSummary(summary) {
@@ -9944,6 +10602,12 @@ function cacheIncomeSummary(monthKey, summary) {
   ensureIncomeCacheStructures();
   state.incomeSummaryCache[monthKey] = serializeIncomeSummary(summary);
   state.dirtyIncomeMonths.delete(monthKey);
+  const coords = parseMonthKey(monthKey);
+  const entryHash = coords ? calculateMonthEntryHash(coords.year, coords.month) : '';
+  if (!state.incomeCacheMetadata[monthKey]) state.incomeCacheMetadata[monthKey] = {};
+  state.incomeCacheMetadata[monthKey].entryHash = entryHash;
+  state.incomeCacheMetadata[monthKey].lastCalculated = Date.now();
+  state.incomeCacheMetadata[monthKey].isDirty = false;
   saveCache();
 }
 
@@ -13034,6 +13698,7 @@ function getCachedIncomeSummary(monthKey) {
       loadPublicHolidays(true); // Re-render after load when year changes
     }
     renderCalendar();
+    onCalendarMonthChange();
   }
   document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
   document.getElementById('calendar-next').onclick = () => changeCalendarMonth(1);
@@ -13096,6 +13761,7 @@ function getCachedIncomeSummary(monthKey) {
         state.calendar.month = selectedMonth;
         state.calendar.year = monthPickerState.year;
         renderCalendar();
+        onCalendarMonthChange();
         closeMonthPicker();
       };
 
@@ -13463,9 +14129,280 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
+  function fetchEntriesFromServer() {
+    return new Promise((resolve) => {
+      setStatus('Syncing...', 'warn');
+      entriesSyncInFlight = true;
+      google.script.run
+        .withSuccessHandler((entries) => {
+          entriesSyncInFlight = false;
+          const sanitizedEntries = (entries || []).map(sanitizeEntry);
+          mergeEntriesWithServerEntries(sanitizedEntries);
+          state.entriesLoaded = true;
+          saveCache();
+          renderEntries();
+          updateTabStates();
+        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
+        setStatus('Synced', 'success');
+        renderBasReporting();
+        maybeAutoPopulatePublicHolidayEntries();
+        onCalendarMonthChange();
+        resolve(true);
+      })
+        .withFailureHandler(() => {
+          entriesSyncInFlight = false;
+          setStatus('Entries sync failed', 'error');
+          resolve(false);
+        })
+        .api_getEntries({});
+    });
+  }
+
+  function fetchSettingsWithRetry() {
+    const MAX_SETTINGS_RETRIES = 3;
+    let settingsRetryCount = 0;
+
+    return new Promise((resolve) => {
+      const attempt = () => {
+        google.script.run
+          .withSuccessHandler((settings) => {
+            if (!settings || (typeof settings === 'object' && Object.keys(settings).length === 0)) {
+              if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+                settingsRetryCount += 1;
+                const delay = Math.pow(2, settingsRetryCount) * 500;
+                console.warn(`[Settings] Received null/empty settings, retrying in ${delay}ms (attempt ${settingsRetryCount}/${MAX_SETTINGS_RETRIES})`);
+                setTimeout(attempt, delay);
+                return;
+              }
+              console.error('[Settings] Received null/empty after retries, using cached settings');
+              if (!state.settings || Object.keys(state.settings).length === 0) {
+                state.settings = {};
+              }
+              settingsServerSynced = true;
+              checkSettingsDirty();
+              resolve(false);
+              return;
+            }
+
+            const previousLastNonCustomTheme = state.settings && state.settings.last_non_custom_theme
+              ? state.settings.last_non_custom_theme
+              : '';
+            state.settings = settings;
+
+            if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
+              try {
+                state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
+              } catch (e) {
+                state.settings.custom_theme_config = null;
+              }
+            }
+
+            if (!state.settings.last_non_custom_theme) {
+              if (state.settings.theme && state.settings.theme !== 'custom') {
+                state.settings.last_non_custom_theme = state.settings.theme;
+              } else if (previousLastNonCustomTheme && previousLastNonCustomTheme !== 'custom') {
+                state.settings.last_non_custom_theme = previousLastNonCustomTheme;
+              }
+            }
+
+            saveCache();
+            Object.keys(SETTINGS_CONFIG).forEach((key) => {
+              const config = SETTINGS_CONFIG[key];
+              const element = config.element();
+              if (element) {
+                const value = state.settings[key] !== undefined ? state.settings[key]
+                  : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
+                config.setValue(element, value);
+              } else {
+                console.warn('[Settings] Element not found for key:', key);
+              }
+            });
+            applyTheme(state.settings.theme || 'dark');
+
+            captureSettingsState();
+            settingsServerSynced = true;
+            checkSettingsDirty();
+            applyStatusDisplay();
+            renderCalendar();
+            resolve(true);
+          })
+          .withFailureHandler((error) => {
+            console.error('[Settings] Failed to load from server:', error);
+            if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
+              settingsRetryCount += 1;
+              const delay = Math.pow(2, settingsRetryCount) * 500;
+              console.warn(`[Settings] API call failed, retrying in ${delay}ms (attempt ${settingsRetryCount}/${MAX_SETTINGS_RETRIES})`);
+              setTimeout(attempt, delay);
+              return;
+            }
+            settingsServerSynced = true;
+            checkSettingsDirty();
+            resolve(false);
+          })
+          .api_getSettings();
+      };
+      attempt();
+    });
+  }
+
+  function fetchContractsFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((contracts) => {
+          state.contracts = (contracts || []).map(sanitizeContract);
+          refreshContractBindings();
+          populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id : '');
+          ensureInvoiceFormOptions();
+          saveCache();
+          renderCalendar();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          setStatus('Contracts sync failed', 'error');
+          resolve(false);
+        })
+        .api_getContracts();
+    });
+  }
+
+  function fetchFeatureFlagsFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((flags) => {
+          state.featureFlags = normalizeFeatureFlags(flags);
+          saveCache();
+          renderFeatureFlags();
+          applyFeatureFlagsLazy();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          resolve(false);
+        })
+        .api_getFeatureFlags();
+    });
+  }
+
+  function fetchDeductionsFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((deductions) => {
+          state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+          markAllIncomeSummariesDirty();
+          saveCache();
+          renderDeductionsList();
+          renderIncomeSummary();
+          renderAnnualCategorySection();
+          onCalendarMonthChange();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          setStatus('Deductions sync failed', 'error');
+          resolve(false);
+        })
+        .api_getDeductions();
+    });
+  }
+
+  function fetchActualIncomeFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((actualIncome) => {
+          state.actualIncome = actualIncome || [];
+          refreshActualIncomeMap();
+          saveCache();
+          renderIncomeSummary();
+          onCalendarMonthChange();
+          if (state.annualData) {
+            loadAnnualData();
+          }
+          resolve(true);
+        })
+        .withFailureHandler((error) => {
+          console.error('[ActualIncome] Failed to load:', error);
+          resolve(false);
+        })
+        .api_getActualIncome();
+    });
+  }
+
+  function fetchSuperGuaranteeRatesFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((rates) => {
+          cacheSuperGuaranteeRates(rates);
+          onCalendarMonthChange();
+          if (state.annualData) {
+            loadAnnualData();
+          }
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          resolve(false);
+        })
+        .api_getSuperGuaranteeRates();
+    });
+  }
+
+  function fetchBasSubmissionsFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((submissions) => {
+          state.basSubmissions = submissions || [];
+          saveCache();
+          renderBasReporting();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          resolve(false);
+        })
+        .api_getBasSubmissions();
+    });
+  }
+
+  function fetchDeductionCategoriesFromServer() {
+    if (!isDeductionCategoriesEnabled()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((categories) => {
+          state.deductionCategories = (categories || []).map(sanitizeDeductionCategory);
+          updateDeductionCategoryMap();
+          ensureDeductionCategoryCollapseState();
+          saveCache();
+          renderDeductionCategoryOptions('');
+          renderDeductionsList();
+          renderAnnualCategorySection();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          console.error('Failed to load deduction categories');
+          resolve(false);
+        })
+        .api_getDeductionCategories();
+    });
+  }
+
+  function fetchDeductionExceptionsFromServer() {
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((exceptions) => {
+          state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
+          saveCache();
+          renderIncomeSummary();
+          onCalendarMonthChange();
+          resolve(true);
+        })
+        .withFailureHandler(() => {
+          console.error('Failed to load deduction exceptions');
+          resolve(false);
+        })
+        .api_getDeductionExceptions();
+    });
+  }
+
   // Initial load
   function init() {
     loadCache();
+    initializeLazyLoadingState();
     renderEntries();
     // Load settings into UI inputs from cache
     Object.keys(SETTINGS_CONFIG).forEach((key) => {
@@ -13486,210 +14423,219 @@ function getCachedIncomeSummary(monthKey) {
     refreshContractBindings();
     state.featureFlags = normalizeFeatureFlags(state.featureFlags);
     renderFeatureFlags();
-    applyFeatureFlags();
-    setStatus('Syncing...', 'warn');
-    entriesSyncInFlight = true;
-    google.script.run
-      .withSuccessHandler((entries) => {
-        entriesSyncInFlight = false;
-        const sanitizedEntries = (entries || []).map(sanitizeEntry);
-        mergeEntriesWithServerEntries(sanitizedEntries);
-        state.entriesLoaded = true;
-        saveCache();
-        renderEntries();
-        updateTabStates();
-        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
-        setStatus('Synced', 'success');
-        renderBasReporting();
-        maybeAutoPopulatePublicHolidayEntries();
-      })
-      .withFailureHandler(() => {
-        entriesSyncInFlight = false;
-        setStatus('Entries sync failed', 'error');
-      })
-      .api_getEntries({});
-    // Settings loader with retry mechanism
-    let settingsRetryCount = 0;
-    const MAX_SETTINGS_RETRIES = 3;
+    applyFeatureFlagsLazy();
+    renderCalendar();
+    onCalendarMonthChange();
+    loadTier1Critical();
+  }
 
-    function loadSettingsWithRetry() {
-      google.script.run
-        .withSuccessHandler((settings) => {
-          // If null or empty object received, retry up to MAX_SETTINGS_RETRIES times
-          if (!settings || (typeof settings === 'object' && Object.keys(settings).length === 0)) {
-            if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
-              settingsRetryCount++;
-              const delay = Math.pow(2, settingsRetryCount) * 500; // Exponential backoff: 1s, 2s, 4s
-              console.warn('[Settings] Received null/empty settings, retrying in ' + delay + 'ms (attempt ' + settingsRetryCount + '/' + MAX_SETTINGS_RETRIES + ')');
-              setTimeout(loadSettingsWithRetry, delay);
-              return;
-            } else {
-              console.error('[Settings] Received null/empty after ' + MAX_SETTINGS_RETRIES + ' retries, using cached settings');
-              // Don't overwrite state.settings if we have cached data
-              if (!state.settings || Object.keys(state.settings).length === 0) {
-                state.settings = {};
-              }
-              settingsServerSynced = true;
-              checkSettingsDirty();
-              return;
-            }
-          }
+  async function loadTier1Critical() {
+    try {
+      await Promise.all([
+        fetchEntriesFromServer(),
+        fetchSettingsWithRetry(),
+        fetchContractsFromServer(),
+        fetchFeatureFlagsFromServer()
+      ]);
+    } finally {
+      state.loadingTiers.tier1Complete = true;
+      saveCache();
+      loadTier2Supporting();
+    }
+  }
 
-          // Valid settings received
-          const previousLastNonCustomTheme = state.settings && state.settings.last_non_custom_theme
-            ? state.settings.last_non_custom_theme
-            : '';
-          state.settings = settings;
-
-          // Parse custom_theme_config if it's a JSON string
-          if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
-            try {
-              state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
-            } catch (e) {
-              // If parsing fails, reset to default
-              state.settings.custom_theme_config = null;
-            }
-          }
-
-          if (!state.settings.last_non_custom_theme) {
-            if (state.settings.theme && state.settings.theme !== 'custom') {
-              state.settings.last_non_custom_theme = state.settings.theme;
-            } else if (previousLastNonCustomTheme && previousLastNonCustomTheme !== 'custom') {
-              state.settings.last_non_custom_theme = previousLastNonCustomTheme;
-            }
-          }
-
-          saveCache();
-          // Load settings into UI inputs
-          Object.keys(SETTINGS_CONFIG).forEach((key) => {
-            const config = SETTINGS_CONFIG[key];
-            const element = config.element();
-            if (element) {
-              const value = state.settings[key] !== undefined ? state.settings[key] : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
-              config.setValue(element, value);
-            } else {
-              console.warn('[Settings] Element not found for key:', key);
-            }
+  async function loadTier2Supporting() {
+    const hourTypesEnabled = getFeatureFlag('hour_types');
+    if (hourTypesEnabled) {
+      updateLoadingFeatureState('hourTypes', { loading: true });
+    }
+    const hourTypePromise = hourTypesEnabled
+      ? loadHourTypes().then((loaded) => {
+          updateLoadingFeatureState('hourTypes', {
+            loading: false,
+            loaded: !!loaded,
+            lastUpdate: loaded ? Date.now() : (state.loadingTiers.features.hourTypes.lastUpdate || null)
           });
-          applyTheme(state.settings.theme || 'dark');
-
-          captureSettingsState();
-          // Mark settings as synced from server - enables save button
-          settingsServerSynced = true;
-          checkSettingsDirty();
-          applyStatusDisplay();
-          renderCalendar();
         })
-        .withFailureHandler((error) => {
-          console.error('[Settings] Failed to load from server:', error);
+      : Promise.resolve(false);
+    await Promise.all([
+      hourTypePromise,
+      fetchDeductionsFromServer(),
+      fetchActualIncomeFromServer(),
+      fetchSuperGuaranteeRatesFromServer(),
+      fetchDeductionExceptionsFromServer()
+    ]);
+    state.loadingTiers.tier2Complete = true;
+    saveCache();
+    loadTier3BackgroundEager();
+  }
 
-          // Retry on failure too
-          if (settingsRetryCount < MAX_SETTINGS_RETRIES) {
-            settingsRetryCount++;
-            const delay = Math.pow(2, settingsRetryCount) * 500;
-            console.warn('[Settings] API call failed, retrying in ' + delay + 'ms (attempt ' + settingsRetryCount + '/' + MAX_SETTINGS_RETRIES + ')');
-            setTimeout(loadSettingsWithRetry, delay);
-            return;
-          }
+  async function loadTier3BackgroundEager() {
+    const tasks = [];
 
-          // Even on failure, mark as synced to prevent user from being stuck
-          // They can still save changes based on cached settings
-          settingsServerSynced = true;
-          checkSettingsDirty();
-        })
-        .api_getSettings();
+    updateLoadingFeatureState('basSubmissions', { loading: true });
+    tasks.push(fetchBasSubmissionsFromServer().then((success) => {
+      updateLoadingFeatureState('basSubmissions', {
+        loading: false,
+        loaded: !!success,
+        lastUpdate: success ? Date.now() : state.loadingTiers.features.basSubmissions.lastUpdate
+      });
+    }));
+
+    if (getFeatureFlag('enable_public_holidays')) {
+      updateLoadingFeatureState('publicHolidays', { loading: true });
+      tasks.push(loadPublicHolidays().then((success) => {
+        updateLoadingFeatureState('publicHolidays', {
+          loading: false,
+          loaded: !!success,
+          lastUpdate: success ? Date.now() : state.loadingTiers.features.publicHolidays.lastUpdate
+        });
+      }));
     }
 
-    // Start loading settings
-    loadSettingsWithRetry();
-    // Load super guarantee rates
-    google.script.run
-      .withSuccessHandler((rates) => {
-        cacheSuperGuaranteeRates(rates);
-      })
-      .withFailureHandler(() => {})
-      .api_getSuperGuaranteeRates();
-    google.script.run
-      .withSuccessHandler((contracts) => {
-        state.contracts = (contracts || []).map(sanitizeContract);
-        refreshContractBindings();
-        populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id : '');
-        ensureInvoiceFormOptions();
-        saveCache();
-        renderCalendar();
-      })
-      .withFailureHandler(() => setStatus('Contracts sync failed', 'error'))
-      .api_getContracts();
-    google.script.run
-      .withSuccessHandler((flags) => {
-        state.featureFlags = normalizeFeatureFlags(flags);
-        saveCache();
-        renderFeatureFlags();
-        applyFeatureFlags();
-        loadPublicHolidays();
+    if (getFeatureFlag('recurring_time_entries')) {
+      updateLoadingFeatureState('recurringEntries', { loading: true });
+      tasks.push(new Promise((resolve) => {
+        syncRecurringEntries({
+          silent: true,
+          onComplete: () => resolve(true),
+          onError: () => resolve(false)
+        });
+      }).then((success) => {
+        updateLoadingFeatureState('recurringEntries', {
+          loading: false,
+          loaded: !!success,
+          lastUpdate: success ? Date.now() : state.loadingTiers.features.recurringEntries.lastUpdate
+        });
+      }));
+    }
 
-        // Load deduction categories if feature is enabled
-        if (isDeductionCategoriesEnabled()) {
-          google.script.run
-            .withSuccessHandler((categories) => {
-              state.deductionCategories = (categories || []).map(sanitizeDeductionCategory);
-              updateDeductionCategoryMap();
-              ensureDeductionCategoryCollapseState();
-              saveCache();
-              renderDeductionCategoryOptions('');
-              renderDeductionsList();
-              renderAnnualCategorySection();
-            })
-            .withFailureHandler(() => {
-              console.error('Failed to load deduction categories');
-            })
-            .api_getDeductionCategories();
-        }
+    if (getFeatureFlag('enable_invoices')) {
+      updateLoadingFeatureState('invoices', { loading: true });
+      initializeInvoicesFeature();
+      updateLoadingFeatureState('invoices', {
+        loading: false,
+        loaded: true,
+        lastUpdate: Date.now()
+      });
+    }
 
-        // Load deduction exceptions (always loaded, not behind feature flag)
-        google.script.run
-          .withSuccessHandler((exceptions) => {
-            state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
-            saveCache();
-            renderIncomeSummary();
-          })
-          .withFailureHandler(() => {
-            console.error('Failed to load deduction exceptions');
-          })
-          .api_getDeductionExceptions();
-      })
-      .withFailureHandler(() => {})
-      .api_getFeatureFlags();
-    google.script.run
-      .withSuccessHandler((deductions) => {
-        state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
-        saveCache();
-        renderDeductionsList();
-        renderIncomeSummary();
-        renderAnnualCategorySection();
-      })
-      .withFailureHandler(() => setStatus('Deductions sync failed', 'error'))
-      .api_getDeductions();
-    google.script.run
-      .withSuccessHandler((actualIncome) => {
-        state.actualIncome = actualIncome || [];
-        refreshActualIncomeMap();
-        saveCache();
-        renderIncomeSummary();
-      })
-      .withFailureHandler((error) => {
-        console.error('[ActualIncome] Failed to load:', error);
-      })
-      .api_getActualIncome();
-    google.script.run
-      .withSuccessHandler((submissions) => {
-        state.basSubmissions = submissions || [];
-        saveCache();
-        renderBasReporting();
-      })
-      .withFailureHandler(() => {})
-      .api_getBasSubmissions();
+    if (isDeductionCategoriesEnabled()) {
+      updateLoadingFeatureState('deductionCategories', { loading: true });
+      tasks.push(fetchDeductionCategoriesFromServer().then((success) => {
+        updateLoadingFeatureState('deductionCategories', {
+          loading: false,
+          loaded: !!success,
+          lastUpdate: success ? Date.now() : state.loadingTiers.features.deductionCategories.lastUpdate
+        });
+      }));
+    }
+
+    await Promise.all(tasks);
+    state.loadingTiers.tier3Complete = true;
+    saveCache();
+    loadTier4MonthPreCalculation();
   }
+
+  function loadTier4MonthPreCalculation() {
+    seedMonthCalculationQueue();
+    processMonthCalculationQueue();
+  }
+
+  function seedMonthCalculationQueue() {
+    ensureCalendarState();
+    resetLazyLoadQueue();
+    const baseYear = state.calendar.year;
+    const baseMonth = state.calendar.month;
+    const baseIndex = (baseYear * 12) + baseMonth;
+    const seen = new Set();
+    let counter = 0;
+    const queue = [];
+
+    const enqueue = (year, month, priority) => {
+      if (year == null || month == null) return;
+      const monthKey = monthKeyFor(year, month);
+      if (seen.has(monthKey)) return;
+      seen.add(monthKey);
+      queue.push({
+        year,
+        month,
+        monthKey,
+        priority,
+        order: counter += 1,
+        index: (year * 12) + month
+      });
+    };
+
+    enqueue(baseYear, baseMonth, 0);
+    [-2, -1, 1, 2].forEach((offset) => {
+      const date = new Date(baseYear, baseMonth + offset, 1);
+      enqueue(date.getFullYear(), date.getMonth(), Math.abs(offset));
+    });
+
+    const entryMonths = new Set();
+    state.entries.forEach((entry) => {
+      const key = monthKeyFromDateIso(entry.date);
+      if (key) entryMonths.add(key);
+    });
+    entryMonths.forEach((monthKey) => {
+      const coords = parseMonthKey(monthKey);
+      if (!coords) return;
+      const diff = Math.abs(((coords.year * 12) + coords.month) - baseIndex);
+      enqueue(coords.year, coords.month, 5 + diff);
+    });
+
+    Object.keys(state.incomeCacheMetadata || {}).forEach((monthKey) => {
+      const coords = parseMonthKey(monthKey);
+      if (!coords) return;
+      const diff = Math.abs(((coords.year * 12) + coords.month) - baseIndex);
+      enqueue(coords.year, coords.month, 10 + diff);
+    });
+
+    queue.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      if (a.index !== b.index) return Math.abs(a.index - baseIndex) - Math.abs(b.index - baseIndex);
+      return a.order - b.order;
+    });
+
+    state.lazyLoadQueue.monthsToCalculate = queue;
+    state.lazyLoadQueue.currentlyCalculating = null;
+    state.lazyLoadQueue.progressiveLoadComplete = queue.length === 0;
+  }
+
+  function processMonthCalculationQueue() {
+    if (!state.lazyLoadQueue) return;
+    if (state.lazyLoadQueue.currentlyCalculating) return;
+    const next = state.lazyLoadQueue.monthsToCalculate.shift();
+    if (!next) {
+      state.lazyLoadQueue.progressiveLoadComplete = true;
+      state.loadingTiers.tier4Complete = true;
+      saveCache();
+      return;
+    }
+    const { year, month, monthKey } = next;
+    state.lazyLoadQueue.currentlyCalculating = monthKey;
+    const execute = () => {
+      try {
+        if (shouldRecalculateMonth(year, month)) {
+          const summary = buildIncomeSummary(year, month);
+          cacheIncomeSummary(monthKey, summary);
+        }
+      } finally {
+        state.lazyLoadQueue.currentlyCalculating = null;
+        saveCache();
+        setTimeout(processMonthCalculationQueue, 25);
+      }
+    };
+    setTimeout(execute, 25);
+  }
+
+  function onCalendarMonthChange() {
+    seedMonthCalculationQueue();
+    processMonthCalculationQueue();
+  }
+
+  // Default Entries
 
   // Default Entries Functionality
   const state_defaults = {
@@ -17973,33 +18919,40 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function loadHourTypes() {
-    if (!state.featureFlags.hour_types) return;
+    if (!state.featureFlags.hour_types) return Promise.resolve(false);
 
     setStatus('Loading hour types...', 'warn');
-    google.script.run
-      .withSuccessHandler((hourTypes) => {
-        state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
-        updateHourTypeMap();
-        populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
-        updateRecurringHourTypeVisibility();
-        ensureInvoiceFormOptions();
-        if (getFeatureFlag('enable_invoices')) {
-          renderInvoiceDefaults();
-          renderInvoiceDetail();
-        }
-        renderHourTypes();
-        updateHourTypeFormVisibility();
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((hourTypes) => {
+          state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
+          updateHourTypeMap();
+          populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
+          updateRecurringHourTypeVisibility();
+          ensureInvoiceFormOptions();
+          if (getFeatureFlag('enable_invoices')) {
+            renderInvoiceDefaults();
+            renderInvoiceDetail();
+          }
+          renderHourTypes();
+          updateHourTypeFormVisibility();
         renderCalendarFilters();
         renderCalendar();
         saveCache();
         setStatus('Idle');
         maybeAutoPopulatePublicHolidayEntries();
-      })
-      .withFailureHandler((error) => {
-        console.error('Failed to load hour types:', error);
-        setStatus('Error loading hour types', 'error');
-      })
-      .api_getHourTypes();
+        if (state.annualData) {
+          loadAnnualData();
+        }
+          resolve(true);
+        })
+        .withFailureHandler((error) => {
+          console.error('Failed to load hour types:', error);
+          setStatus('Error loading hour types', 'error');
+          resolve(false);
+        })
+        .api_getHourTypes();
+    });
   }
 
   function renderHourTypes() {
@@ -18160,33 +19113,38 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function loadPublicHolidays(renderAfterLoad = false) {
-    if (!state.featureFlags.enable_public_holidays || !state.featureFlags.enable_public_holidays.enabled) return;
+    if (!state.featureFlags.enable_public_holidays || !state.featureFlags.enable_public_holidays.enabled) {
+      return Promise.resolve(false);
+    }
 
     ensureCalendarState();
     const year = state.calendar.year;
 
-    // Background sync with backend
-    google.script.run
-      .withSuccessHandler((holidays) => {
-        const newHolidays = Array.isArray(holidays) ? holidays : [];
-        // Only update and re-render if data actually changed
-        const oldJson = JSON.stringify(state.publicHolidays);
-        const newJson = JSON.stringify(newHolidays);
+    return new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((holidays) => {
+          const newHolidays = Array.isArray(holidays) ? holidays : [];
+          // Only update and re-render if data actually changed
+          const oldJson = JSON.stringify(state.publicHolidays);
+          const newJson = JSON.stringify(newHolidays);
 
-        if (oldJson !== newJson) {
-          state.publicHolidays = newHolidays;
-          updatePublicHolidayMap();
-          saveCache();
-          renderCalendar();
-        } else if (renderAfterLoad) {
-          renderCalendar();
-        }
-        maybeAutoPopulatePublicHolidayEntries();
-      })
-      .withFailureHandler((error) => {
-        console.error('Failed to load public holidays:', error);
-      })
-      .api_getPublicHolidays({ year: year });
+          if (oldJson !== newJson) {
+            state.publicHolidays = newHolidays;
+            updatePublicHolidayMap();
+            saveCache();
+            renderCalendar();
+          } else if (renderAfterLoad) {
+            renderCalendar();
+          }
+          maybeAutoPopulatePublicHolidayEntries();
+          resolve(true);
+        })
+        .withFailureHandler((error) => {
+          console.error('Failed to load public holidays:', error);
+          resolve(false);
+        })
+        .api_getPublicHolidays({ year });
+    });
   }
 
   function updatePublicHolidayMap() {
