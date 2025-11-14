@@ -10,6 +10,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `default_inputs` | Disabled | Enables creating, using, and managing default time entry templates for faster data entry. |
 | `hour_types` | Disabled | Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization. |
 | `recurring_time_entries` | Disabled | Adds a scheduler for creating weekly or monthly time entries that stay within active contract dates. |
+| `bulk_time_entries` | Disabled | Adds a tool to apply identical entries across a date range with weekend and public holiday filters. |
 | `expected_monthly_hours` | Disabled | Shows a calendar badge that projects contract hours for the active month and highlights whether you are ahead or behind the target. |
 | `contract_rate_preview` | Disabled | Enables the dedicated rate preview page for modeling hourly rate changes against historical contract hours. |
 | `enable_invoices` | Disabled | Enables invoice management, default line items, and document generation from a Google Docs template. |

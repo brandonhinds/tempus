@@ -79,6 +79,26 @@ Defines weekly or monthly schedules that automatically generate basic time entri
 - Persist the number of future occurrences created during each sync for reporting/monitoring dashboards.
 - Add a `last_warning_at` timestamp if we need to distinguish stale warnings from fresh ones.
 
+## bulk_time_entries
+Stores bulk entry ranges that fill every eligible day between two dates with identical hours. Ranges respect contract boundaries and optional weekend/public holiday filters, and the sync job manages adds/removals automatically whenever the range changes.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier for the bulk range. | `5cbb7f41-a4de-46b8-9d6c-d7367ae5a1c8` |
+| `label` | string | Human-readable description shown in the UI. | `Christmas shutdown` |
+| `duration_minutes` | number | Minutes to record for each day in the range. | `450` |
+| `hour_type_id` | string (UUID) | Hour type applied to generated entries. Blank falls back to the default. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
+| `contract_id` | string (UUID) | Contract receiving the generated entries. Must have start/end dates. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
+| `start_date` | string (ISO date) | First day in the range (clamped to the contract window). | `2024-12-20` |
+| `end_date` | string (ISO date) | Final day in the range (inclusive, clamped to the contract window). | `2025-01-10` |
+| `include_weekends` | boolean/string | `TRUE`/`FALSE` flag for including weekends. Defaults to `FALSE` so weekends are skipped. | `FALSE` |
+| `skip_public_holidays` | boolean/string | `TRUE`/`FALSE` flag for skipping public holidays (per user state). Defaults to `TRUE`. | `TRUE` |
+| `last_synced_at` | string (ISO datetime, UTC) | Timestamp of the last successful sync. | `2024-12-15T00:00:00Z` |
+| `last_synced_count` | number | Count of dates synced during the last run. | `15` |
+| `warning_message` | string | Most recent warning (e.g., missing contract dates). Displayed in the UI. | `No working days matched the selected filters.` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp when the bulk range was created. | `2024-11-30T11:20:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp when it was last modified. | `2024-12-02T08:05:00Z` |
+
 ## contracts
 Contracts describe a billable agreement and govern whether time can be logged for a given date. Dates are inclusive and stored in ISO `yyyy-MM-dd` format.
 

@@ -279,6 +279,14 @@ let ratePreviewInputSyncing = false;
       draft: null,
       deleteConfirm: false
     },
+    bulkEntries: [],
+    bulkEntriesInitialized: false,
+    bulkEntriesSyncing: false,
+    bulkEntryForm: {
+      editingId: '',
+      draft: null,
+      deleteConfirm: false
+    },
     deductions: [],
     deductionCategories: [],
     deductionCategoryMap: {},
@@ -513,6 +521,7 @@ let ratePreviewInputSyncing = false;
   };
 
   state.recurringEntryForm.draft = defaultRecurringDraft();
+  state.bulkEntryForm.draft = defaultBulkDraft();
 
   let entriesSyncInFlight = false;
 
@@ -1978,6 +1987,26 @@ let ratePreviewInputSyncing = false;
     return clone;
   };
 
+  const sanitizeBulkEntry = (entry) => {
+    if (!entry) return null;
+    const clone = { ...entry };
+    clone.id = clone.id ? String(clone.id) : '';
+    clone.label = clone.label ? String(clone.label).trim() : '';
+    const duration = Number(clone.duration_minutes);
+    clone.duration_minutes = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0;
+    clone.contract_id = clone.contract_id ? String(clone.contract_id) : '';
+    clone.hour_type_id = clone.hour_type_id ? String(clone.hour_type_id) : '';
+    clone.start_date = clone.start_date || '';
+    clone.end_date = clone.end_date || '';
+    clone.include_weekends = clone.include_weekends === true || clone.include_weekends === 'TRUE';
+    clone.skip_public_holidays = clone.skip_public_holidays === false || clone.skip_public_holidays === 'FALSE' ? false : true;
+    clone.last_synced_at = clone.last_synced_at || '';
+    const syncedCount = Number(clone.last_synced_count);
+    clone.last_synced_count = Number.isFinite(syncedCount) && syncedCount >= 0 ? syncedCount : 0;
+    clone.warning_message = clone.warning_message || '';
+    return clone;
+  };
+
   function hasFutureRecurringEntries(recurrenceId) {
     if (!recurrenceId) return false;
     const today = todayIso();
@@ -2075,6 +2104,24 @@ let ratePreviewInputSyncing = false;
     };
   }
 
+  function defaultBulkDraft() {
+    const today = todayIso();
+    return {
+      id: '',
+      label: '',
+      duration_minutes: 450,
+      contract_id: '',
+      hour_type_id: getDefaultHourTypeId() || '',
+      start_date: today,
+      end_date: today,
+      include_weekends: false,
+      skip_public_holidays: true,
+      last_synced_at: '',
+      last_synced_count: 0,
+      warning_message: ''
+    };
+  }
+
   function describeRecurringEntry(entry) {
     if (!entry) return '';
     if (entry.recurrence_type === 'monthly') {
@@ -2104,6 +2151,14 @@ let ratePreviewInputSyncing = false;
     return `${intervalText} on day ${day}`;
   }
 
+  function describeBulkEntry(entry) {
+    if (!entry) return '';
+    const start = entry.start_date ? formatFriendlyDate(entry.start_date) : '';
+    const end = entry.end_date ? formatFriendlyDate(entry.end_date) : '';
+    if (start && end) return `${start} → ${end}`;
+    return start || end || '';
+  }
+
   function buildRecurringPreview(entry, limit = 5) {
     const sanitized = sanitizeRecurringEntry(entry);
     if (!sanitized) return [];
@@ -2115,7 +2170,9 @@ let ratePreviewInputSyncing = false;
     const endCursor = new Date(cursor.getTime());
     endCursor.setDate(endCursor.getDate() + horizon);
     const anchorDate = parseIsoDate(sanitized.start_date) || cursor;
+    const hardStop = sanitized.end_date ? parseIsoDate(sanitized.end_date) : null;
     while (cursor <= endCursor && results.length < limit) {
+      if (hardStop && cursor > hardStop) break;
       const dateIso = isoDate(cursor);
       let shouldInclude = false;
       if (sanitized.recurrence_type === 'weekly') {
@@ -6016,6 +6073,12 @@ function updateDeductionFormVisibility() {
       order: 225,
       group: 'time_entries'
     },
+    bulk_time_entries: {
+      name: 'Enable bulk time entries',
+      description: 'Adds a tool to apply identical entries across a date range with weekend and public holiday filters.',
+      order: 226,
+      group: 'time_entries'
+    },
     suggest_end_time: {
       name: 'Suggest exact end time',
       description: 'Uses your rounding rule and preferred finish time to recommend when to clock off for tidy totals.',
@@ -6688,6 +6751,10 @@ function updateDeductionFormVisibility() {
         ? obj.recurringTimeEntries.map(sanitizeRecurringEntry).filter((item) => item)
         : [];
       state.recurringEntriesInitialized = state.recurringTimeEntries.length > 0;
+      state.bulkEntries = Array.isArray(obj.bulkEntries)
+        ? obj.bulkEntries.map(sanitizeBulkEntry).filter((item) => item)
+        : [];
+      state.bulkEntriesInitialized = state.bulkEntries.length > 0;
       state.deductions = Array.isArray(obj.deductions) ? dedupeById(obj.deductions.map(sanitizeDeduction)) : [];
       state.deductionCategories = Array.isArray(obj.deductionCategories) ? obj.deductionCategories.map(sanitizeDeductionCategory) : [];
       state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
@@ -6773,6 +6840,8 @@ function updateDeductionFormVisibility() {
       updateHourTypeMap();
       renderRecurringEntriesList();
       setRecurringFormDraft(state.recurringEntryForm.draft || defaultRecurringDraft());
+      renderBulkEntriesList();
+      setBulkFormDraft(state.bulkEntryForm.draft || defaultBulkDraft());
       applyTheme((state.settings && state.settings.theme) || 'dark');
       state.pendingEntryAdds = new Map();
       state.pendingEntryUpdates = new Map();
@@ -6800,6 +6869,7 @@ function updateDeductionFormVisibility() {
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
         recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
+        bulkEntries: state.bulkEntries.map((item) => sanitizeBulkEntry(item)),
         deductions: state.deductions.map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
@@ -7763,6 +7833,32 @@ function updateDeductionFormVisibility() {
   const recurringDeleteConfirm = document.getElementById('recurring-delete-confirm');
   const recurringDeleteCancelBtn = document.getElementById('btn-cancel-delete-recurring');
   const recurringDeleteConfirmBtn = document.getElementById('btn-confirm-delete-recurring');
+  const bulkManageBtn = document.getElementById('btn-manage-bulk');
+  const bulkModal = document.getElementById('modal-bulk-entries');
+  const bulkList = document.getElementById('bulk-entry-list');
+  const bulkEmpty = document.getElementById('bulk-entry-empty');
+  const bulkNewBtn = document.getElementById('btn-bulk-new');
+  const bulkForm = document.getElementById('bulk-entry-form');
+  const bulkFormTitle = document.getElementById('bulk-form-title');
+  const bulkFormSubtitle = document.getElementById('bulk-form-subtitle');
+  const bulkFormWarning = document.getElementById('bulk-form-warning');
+  const bulkFormError = document.getElementById('bulk-form-error');
+  const bulkNameInput = document.getElementById('bulk-name');
+  const bulkHoursInput = document.getElementById('bulk-hours');
+  const bulkContractSelect = document.getElementById('bulk-contract');
+  const bulkHourTypeRow = document.getElementById('bulk-hour-type-row');
+  const bulkHourTypeSelect = document.getElementById('bulk-hour-type');
+  const bulkStartDateInput = document.getElementById('bulk-start-date');
+  const bulkEndDateInput = document.getElementById('bulk-end-date');
+  const bulkSkipWeekendsToggle = document.getElementById('bulk-skip-weekends');
+  const bulkSkipHolidaysToggle = document.getElementById('bulk-skip-holidays');
+  const bulkGeneratedSummary = document.getElementById('bulk-generated-summary');
+  const bulkCancelBtn = document.getElementById('btn-cancel-bulk');
+  const bulkSaveBtn = document.getElementById('btn-save-bulk');
+  const bulkDeleteBtn = document.getElementById('btn-delete-bulk');
+  const bulkDeleteConfirm = document.getElementById('bulk-delete-confirm');
+  const bulkDeleteCancelBtn = document.getElementById('btn-cancel-delete-bulk');
+  const bulkDeleteConfirmBtn = document.getElementById('btn-confirm-delete-bulk');
 
   let queuedEntryFocus = null;
   let queuedFocusTimer = null;
@@ -8293,6 +8389,34 @@ function updateDeductionFormVisibility() {
       updateRecurringMonthlyModeVisibility();
       updateRecurringFormFromInputs();
     });
+  }
+
+  if (bulkManageBtn) {
+    bulkManageBtn.addEventListener('click', () => {
+      const draft = state.bulkEntryForm.draft || defaultBulkDraft();
+      setBulkFormDraft(draft);
+      openBulkModal();
+    });
+  }
+  if (bulkNewBtn) {
+    bulkNewBtn.addEventListener('click', () => {
+      setBulkFormDraft(defaultBulkDraft());
+    });
+  }
+  if (bulkCancelBtn) {
+    bulkCancelBtn.addEventListener('click', () => closeBulkModal());
+  }
+  if (bulkSaveBtn) {
+    bulkSaveBtn.addEventListener('click', handleBulkSave);
+  }
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', () => toggleBulkDeleteConfirm(true));
+  }
+  if (bulkDeleteCancelBtn) {
+    bulkDeleteCancelBtn.addEventListener('click', () => toggleBulkDeleteConfirm(false));
+  }
+  if (bulkDeleteConfirmBtn) {
+    bulkDeleteConfirmBtn.addEventListener('click', handleBulkDelete);
   }
 
   if (manualHourType) {
@@ -10199,6 +10323,13 @@ function updateDeductionFormVisibility() {
       closeRecurringModal();
     }
 
+    const bulkFlag = state.featureFlags.bulk_time_entries || DEFAULT_FEATURE_FLAGS.bulk_time_entries || { enabled: false };
+    const bulkEnabled = !!bulkFlag.enabled;
+    if (bulkManageBtn) bulkManageBtn.style.display = bulkEnabled ? 'inline-flex' : 'none';
+    if (!bulkEnabled) {
+      closeBulkModal();
+    }
+
     const expectedMonthlyFlag = state.featureFlags.expected_monthly_hours || DEFAULT_FEATURE_FLAGS.expected_monthly_hours || { enabled: false };
     if (contractIncludeWeekendsRow) {
       contractIncludeWeekendsRow.style.display = expectedMonthlyFlag.enabled ? 'flex' : 'none';
@@ -10245,6 +10376,8 @@ function updateDeductionFormVisibility() {
       loadHourTypes();
     }
     updateHourTypeFormVisibility();
+    updateRecurringHourTypeVisibility();
+    updateBulkHourTypeVisibility();
 
     const ratePreviewFlag = state.featureFlags.contract_rate_preview || DEFAULT_FEATURE_FLAGS.contract_rate_preview || { enabled: false };
     if (navRatePreviewBtn) {
@@ -10337,6 +10470,8 @@ function updateDeductionFormVisibility() {
       }
     } else if (featureKey === 'recurring_time_entries' && enabled) {
       syncRecurringEntries({ silent: true });
+    } else if (featureKey === 'bulk_time_entries' && enabled) {
+      syncBulkEntries({ silent: true });
     } else if (featureKey === 'enable_invoices' && enabled) {
       initializeInvoicesFeature();
     } else if (featureKey === 'hour_types' && enabled) {
@@ -14550,6 +14685,23 @@ function getCachedIncomeSummary(monthKey) {
       }));
     }
 
+    if (getFeatureFlag('bulk_time_entries')) {
+      updateLoadingFeatureState('bulkEntries', { loading: true });
+      tasks.push(new Promise((resolve) => {
+        syncBulkEntries({
+          silent: true,
+          onComplete: () => resolve(true),
+          onError: () => resolve(false)
+        });
+      }).then((success) => {
+        updateLoadingFeatureState('bulkEntries', {
+          loading: false,
+          loaded: !!success,
+          lastUpdate: success ? Date.now() : state.loadingTiers.features.bulkEntries.lastUpdate
+        });
+      }));
+    }
+
     if (getFeatureFlag('enable_invoices')) {
       updateLoadingFeatureState('invoices', { loading: true });
       initializeInvoicesFeature();
@@ -18234,6 +18386,8 @@ function getCachedIncomeSummary(monthKey) {
           closePrintViewConfigModal();
         } else if (modal === recurringModal) {
           closeRecurringModal();
+        } else if (modal === bulkModal) {
+          closeBulkModal();
         } else {
           hideModal(modal);
         }
@@ -18252,6 +18406,8 @@ function getCachedIncomeSummary(monthKey) {
             closePrintViewConfigModal();
           } else if (modal === recurringModal) {
             closeRecurringModal();
+          } else if (modal === bulkModal) {
+            closeBulkModal();
           } else {
             hideModal(modal);
           }
@@ -18458,6 +18614,105 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
+  function renderBulkEntriesList() {
+    if (!bulkList) return;
+    bulkList.innerHTML = '';
+    const entries = (state.bulkEntries || []).slice().sort((a, b) => {
+      const aDate = a && a.start_date ? a.start_date : '';
+      const bDate = b && b.start_date ? b.start_date : '';
+      if (aDate && bDate && aDate !== bDate) {
+        return aDate.localeCompare(bDate);
+      }
+      const aName = (a && a.label) ? a.label.toLowerCase() : '';
+      const bName = (b && b.label) ? b.label.toLowerCase() : '';
+      return aName.localeCompare(bName);
+    });
+    if (bulkEmpty) bulkEmpty.style.display = entries.length ? 'none' : 'block';
+    entries.forEach((entry) => {
+      const sanitized = sanitizeBulkEntry(entry);
+      if (!sanitized) return;
+      const card = document.createElement('div');
+      card.className = 'ts-card bulk-entry-card';
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+      const title = document.createElement('strong');
+      title.textContent = sanitized.label || 'Untitled range';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'ghost';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => setBulkFormDraft(sanitized));
+      header.appendChild(title);
+      header.appendChild(editBtn);
+
+      const summary = document.createElement('p');
+      summary.className = 'ts-note';
+      summary.textContent = describeBulkEntry(sanitized);
+      const meta = document.createElement('p');
+      meta.className = 'ts-note';
+      const hoursText = `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs`;
+      const contractName = getContractName(sanitized.contract_id) || 'No contract';
+      const hourTypeName = sanitized.hour_type_id ? getHourTypeName(sanitized.hour_type_id) : 'Default hour type';
+      const weekendText = sanitized.include_weekends ? 'Includes weekends' : 'Skips weekends';
+      const holidayText = sanitized.skip_public_holidays ? 'Skips public holidays' : 'Includes public holidays';
+      meta.textContent = `${hoursText} • ${contractName} • ${hourTypeName} • ${weekendText}, ${holidayText}`;
+
+      const generated = document.createElement('p');
+      generated.className = 'ts-note';
+      generated.textContent = sanitized.last_synced_at
+        ? `Synced ${sanitized.last_synced_count || 0} days on ${formatFriendlyDate(sanitized.last_synced_at.split('T')[0])}`
+        : 'Not synced yet';
+
+      card.append(header, summary, meta, generated);
+      if (sanitized.warning_message) {
+        const warn = document.createElement('div');
+        warn.className = 'ts-warning';
+        warn.textContent = sanitized.warning_message;
+        card.appendChild(warn);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'ts-gap-sm';
+      actions.style.display = 'flex';
+      actions.style.justifyContent = 'space-between';
+      actions.style.alignItems = 'center';
+      actions.style.marginTop = '8px';
+
+      const statusEl = document.createElement('div');
+      statusEl.className = 'recurring-entry-status ts-note';
+      statusEl.style.flex = '1';
+      statusEl.style.display = state.bulkEntriesSyncing ? 'block' : 'none';
+      statusEl.textContent = state.bulkEntriesSyncing ? 'Syncing…' : '';
+
+      const syncBtn = document.createElement('button');
+      syncBtn.type = 'button';
+      syncBtn.className = 'ghost';
+      syncBtn.textContent = 'Resync Range';
+      syncBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        runBulkSync('Bulk entries synced', sanitized.id).catch(() => {});
+      });
+
+      actions.appendChild(statusEl);
+      actions.appendChild(syncBtn);
+      card.appendChild(actions);
+      bulkList.appendChild(card);
+    });
+    updateBulkSyncStatus();
+  }
+
+  function updateBulkSyncStatus() {
+    if (!bulkList) return;
+    const cards = bulkList.querySelectorAll('.bulk-entry-card .recurring-entry-status');
+    cards.forEach((statusEl) => {
+      if (!statusEl) return;
+      statusEl.textContent = state.bulkEntriesSyncing ? 'Syncing…' : '';
+      statusEl.style.display = state.bulkEntriesSyncing ? 'block' : 'none';
+    });
+  }
+
   function populateRecurringContractOptions(selectedId) {
     if (!recurringContractSelect) return;
     recurringContractSelect.innerHTML = '';
@@ -18507,6 +18762,376 @@ function getCachedIncomeSummary(monthKey) {
       ? selectedId
       : (hourTypes.find((type) => type.is_default) || hourTypes[0]).id;
     recurringHourTypeSelect.value = resolved || '';
+  }
+
+  function populateBulkContractOptions(selectedId) {
+    if (!bulkContractSelect) return;
+    bulkContractSelect.innerHTML = '';
+    const contracts = (state.contracts || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (!contracts.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Add a contract first';
+      bulkContractSelect.appendChild(opt);
+      bulkContractSelect.disabled = true;
+      return;
+    }
+    bulkContractSelect.disabled = false;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select contract';
+    bulkContractSelect.appendChild(placeholder);
+    contracts.forEach((contract) => {
+      const opt = document.createElement('option');
+      opt.value = contract.id;
+      opt.textContent = contract.name;
+      bulkContractSelect.appendChild(opt);
+    });
+    const resolved = selectedId && state.contractMap[selectedId] ? selectedId : '';
+    bulkContractSelect.value = resolved;
+  }
+
+  function populateBulkHourTypeOptions(selectedId) {
+    if (!bulkHourTypeSelect) return;
+    bulkHourTypeSelect.innerHTML = '';
+    const hourTypes = (state.hourTypes || []).slice();
+    if (!hourTypes.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Default hour type';
+      bulkHourTypeSelect.appendChild(opt);
+      bulkHourTypeSelect.value = '';
+      return;
+    }
+    hourTypes.forEach((type) => {
+      const opt = document.createElement('option');
+      opt.value = type.id;
+      opt.textContent = type.name;
+      bulkHourTypeSelect.appendChild(opt);
+    });
+    const resolved = selectedId && state.hourTypeMap[selectedId]
+      ? selectedId
+      : (hourTypes.find((type) => type.is_default) || hourTypes[0]).id;
+    bulkHourTypeSelect.value = resolved || '';
+  }
+
+  function updateBulkHourTypeVisibility() {
+    if (!bulkHourTypeRow) return;
+    const hourTypesEnabled = !!(getFeatureFlag('hour_types') && state.hourTypes.length > 1);
+    bulkHourTypeRow.style.display = hourTypesEnabled ? 'block' : 'none';
+    if (bulkHourTypeSelect) bulkHourTypeSelect.disabled = !hourTypesEnabled;
+  }
+
+  function setBulkFormDraft(draft) {
+    const sanitized = sanitizeBulkEntry(draft || defaultBulkDraft());
+    state.bulkEntryForm.draft = sanitized;
+    state.bulkEntryForm.editingId = sanitized.id || '';
+    state.bulkEntryForm.deleteConfirm = false;
+    if (bulkFormTitle) bulkFormTitle.textContent = sanitized.id ? 'Edit Bulk Range' : 'New Bulk Range';
+    if (bulkFormSubtitle) bulkFormSubtitle.textContent = sanitized.id
+      ? describeBulkEntry(sanitized)
+      : 'Fill a date range with matching entries.';
+    if (bulkDeleteBtn) bulkDeleteBtn.style.display = sanitized.id ? 'inline-flex' : 'none';
+    if (bulkSaveBtn) bulkSaveBtn.textContent = sanitized.id ? 'Update Range' : 'Save Range';
+    if (bulkNameInput) bulkNameInput.value = sanitized.label || '';
+    if (bulkHoursInput) {
+      bulkHoursInput.value = sanitized.duration_minutes
+        ? formatDecimalHours((sanitized.duration_minutes || 0) / 60)
+        : '';
+    }
+    populateBulkContractOptions(sanitized.contract_id);
+    populateBulkHourTypeOptions(sanitized.hour_type_id);
+    updateBulkHourTypeVisibility();
+    if (bulkStartDateInput) bulkStartDateInput.value = sanitized.start_date || todayIso();
+    if (bulkEndDateInput) bulkEndDateInput.value = sanitized.end_date || sanitized.start_date || todayIso();
+    if (bulkSkipWeekendsToggle) bulkSkipWeekendsToggle.checked = !sanitized.include_weekends;
+    if (bulkSkipHolidaysToggle) bulkSkipHolidaysToggle.checked = sanitized.skip_public_holidays !== false;
+    setBulkWarning(sanitized.warning_message || '');
+    updateBulkGeneratedSummary(sanitized);
+    toggleBulkDeleteConfirm(false);
+    setBulkFormError('');
+  }
+
+  function getBulkFormValues() {
+    const hoursValue = bulkHoursInput ? Number(bulkHoursInput.value) : 0;
+    const durationMinutes = Number.isFinite(hoursValue) && hoursValue > 0 ? Math.round(hoursValue * 60) : 0;
+    return {
+      id: state.bulkEntryForm.editingId || '',
+      label: bulkNameInput ? bulkNameInput.value : '',
+      duration_minutes: durationMinutes,
+      contract_id: bulkContractSelect ? bulkContractSelect.value : '',
+      hour_type_id: bulkHourTypeSelect ? bulkHourTypeSelect.value : '',
+      start_date: bulkStartDateInput ? bulkStartDateInput.value : '',
+      end_date: bulkEndDateInput ? bulkEndDateInput.value : '',
+      include_weekends: bulkSkipWeekendsToggle ? !bulkSkipWeekendsToggle.checked : false,
+      skip_public_holidays: bulkSkipHolidaysToggle ? !!bulkSkipHolidaysToggle.checked : true,
+      last_synced_at: state.bulkEntryForm.draft ? state.bulkEntryForm.draft.last_synced_at : '',
+      last_synced_count: state.bulkEntryForm.draft ? state.bulkEntryForm.draft.last_synced_count : 0,
+      warning_message: state.bulkEntryForm.draft ? state.bulkEntryForm.draft.warning_message : ''
+    };
+  }
+
+  function setBulkWarning(message) {
+    if (!bulkFormWarning) return;
+    bulkFormWarning.style.display = message ? 'block' : 'none';
+    bulkFormWarning.textContent = message || '';
+  }
+
+  function setBulkFormError(message) {
+    if (!bulkFormError) return;
+    bulkFormError.style.display = message ? 'block' : 'none';
+    bulkFormError.textContent = message || '';
+  }
+
+  function updateBulkGeneratedSummary(entry) {
+    if (!bulkGeneratedSummary) return;
+    const hasSync = entry && entry.last_synced_at;
+    bulkGeneratedSummary.style.display = 'block';
+    bulkGeneratedSummary.textContent = hasSync
+      ? `Last synced ${entry.last_synced_count || 0} days on ${formatFriendlyDate(entry.last_synced_at.split('T')[0])}`
+      : 'No entries generated yet.';
+  }
+
+  function toggleBulkDeleteConfirm(show) {
+    if (!bulkDeleteConfirm) return;
+    state.bulkEntryForm.deleteConfirm = !!show;
+    bulkDeleteConfirm.style.display = show ? 'block' : 'none';
+    if (bulkDeleteBtn) bulkDeleteBtn.style.display = show ? 'none' : (state.bulkEntryForm.editingId ? 'inline-flex' : 'none');
+    if (bulkSaveBtn) bulkSaveBtn.disabled = !!show;
+    if (bulkCancelBtn) bulkCancelBtn.disabled = !!show;
+  }
+
+  function handleBulkFormBusy(isBusy, label) {
+    if (!bulkSaveBtn) return;
+    bulkSaveBtn.disabled = isBusy;
+    bulkSaveBtn.textContent = isBusy ? 'Working…' : label;
+  }
+
+  function validateBulkForm(draft) {
+    if (!draft.label) return 'Name is required.';
+    if (!draft.duration_minutes || draft.duration_minutes <= 0) return 'Hours must be greater than zero.';
+    if (!draft.contract_id) return 'Select a contract.';
+    if (!draft.start_date) return 'Start date is required.';
+    if (!draft.end_date) return 'End date is required.';
+    if (draft.end_date < draft.start_date) return 'End date must be on or after the start date.';
+    return '';
+  }
+
+  function openBulkModal() {
+    if (!bulkModal) return;
+    showModal(bulkModal);
+    renderBulkEntriesList();
+    if (!state.bulkEntriesInitialized && !state.bulkEntriesSyncing) {
+      syncBulkEntries({ silent: true });
+    }
+  }
+
+  function closeBulkModal() {
+    if (!bulkModal) return;
+    hideModal(bulkModal);
+    toggleBulkDeleteConfirm(false);
+    setBulkFormError('');
+  }
+
+  function syncBulkEntries(options) {
+    const opts = options || {};
+    if (!state.featureFlags.bulk_time_entries || !state.featureFlags.bulk_time_entries.enabled) return;
+    if (state.bulkEntriesSyncing) return;
+    state.bulkEntriesSyncing = true;
+    updateBulkSyncStatus();
+    if (!opts.silent) setStatus('Syncing bulk entries...', 'warn');
+    const payload = opts.entryId ? { entryId: opts.entryId } : {};
+    google.script.run
+      .withSuccessHandler((res) => {
+        state.bulkEntriesSyncing = false;
+        updateBulkSyncStatus();
+        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+        state.bulkEntries = entries;
+        state.bulkEntriesInitialized = true;
+        saveCache();
+        renderBulkEntriesList();
+        if (state.bulkEntryForm.editingId) {
+          const match = entries.find((item) => item.id === state.bulkEntryForm.editingId);
+          if (match) {
+            setBulkFormDraft(match);
+          }
+        }
+        const finish = () => {
+          if (typeof opts.onComplete === 'function') {
+            opts.onComplete();
+          } else if (!opts.silent) {
+            setStatus('Bulk entries refreshed', 'success');
+          }
+        };
+        if (res && Number(res.totalChanges) > 0) {
+          refreshEntriesFromServer(finish);
+        } else {
+          finish();
+        }
+      })
+      .withFailureHandler((error) => {
+        state.bulkEntriesSyncing = false;
+        updateBulkSyncStatus();
+        const message = error && error.message ? error.message : 'Failed to sync bulk entries.';
+        if (typeof opts.onError === 'function') {
+          opts.onError(message);
+        } else if (!opts.silent) {
+          setStatus(message, 'error');
+        }
+      })
+      .api_syncBulkTimeEntries(payload);
+  }
+
+  function runBulkSync(successMessage, entryId) {
+    const cleanupNeeded = !!entryId;
+    return new Promise((resolve, reject) => {
+      syncBulkEntries({
+        silent: !successMessage,
+        entryId: cleanupNeeded ? entryId : '',
+        onComplete: () => {
+          if (successMessage) setStatus(successMessage, 'success');
+          resolve();
+        },
+        onError: (message) => {
+          const errorMessage = message || 'Failed to sync bulk entries.';
+          if (successMessage) setStatus(errorMessage, 'error');
+          reject(new Error(errorMessage));
+        }
+      });
+    });
+  }
+
+  async function handleBulkSave() {
+    const draft = getBulkFormValues();
+    const error = validateBulkForm(draft);
+    if (error) {
+      setBulkFormError(error);
+      return;
+    }
+    setBulkFormError('');
+    const isEdit = !!draft.id;
+    const previousEntries = cloneBulkEntries(state.bulkEntries);
+    const previousDraft = state.bulkEntryForm.draft ? { ...state.bulkEntryForm.draft } : null;
+    const previousEditingId = state.bulkEntryForm.editingId;
+    let optimisticId = draft.id;
+    if (!isEdit) {
+      optimisticId = `temp_bulk_${Date.now()}`;
+    }
+    const optimisticEntry = { ...draft, id: optimisticId };
+    upsertBulkEntryLocal(optimisticEntry);
+    state.bulkEntriesInitialized = true;
+    renderBulkEntriesList();
+    setBulkFormDraft(optimisticEntry);
+    const baseLabel = draft.id ? 'Update Range' : 'Save Range';
+    handleBulkFormBusy(true, baseLabel);
+    setStatus(isEdit ? 'Updating bulk range...' : 'Saving bulk range...', 'warn');
+    google.script.run
+      .withSuccessHandler(async (res) => {
+        handleBulkFormBusy(false, baseLabel);
+        if (res && res.success) {
+          const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+          state.bulkEntries = entries;
+          state.bulkEntriesInitialized = true;
+          saveCache();
+          renderBulkEntriesList();
+          const updated = res.entry ? sanitizeBulkEntry(res.entry) : defaultBulkDraft();
+          if (updated) {
+            setBulkFormDraft(updated);
+          } else {
+            setBulkFormDraft(defaultBulkDraft());
+          }
+          const entryId = (res.entry && res.entry.id) || draft.id || '';
+          try {
+            await runBulkSync(isEdit ? 'Bulk range updated' : 'Bulk range saved', entryId);
+          } catch (e) {
+            // sync errors already surfaced
+          }
+        } else {
+          const message = res && res.error ? res.error : 'Failed to save bulk range.';
+          state.bulkEntries = previousEntries;
+          renderBulkEntriesList();
+          if (previousDraft) {
+            setBulkFormDraft(previousDraft);
+            state.bulkEntryForm.editingId = previousEditingId;
+          }
+          setBulkFormError(message);
+          setStatus('Bulk range save failed', 'error');
+        }
+      })
+      .withFailureHandler((error) => {
+        handleBulkFormBusy(false, baseLabel);
+        state.bulkEntries = previousEntries;
+        renderBulkEntriesList();
+        if (previousDraft) {
+          setBulkFormDraft(previousDraft);
+          state.bulkEntryForm.editingId = previousEditingId;
+        }
+        const message = error && error.message ? error.message : 'Failed to save bulk range.';
+        setBulkFormError(message);
+        setStatus('Bulk range save failed', 'error');
+      })
+      .api_upsertBulkTimeEntry({
+        ...draft
+      });
+  }
+
+  async function handleBulkDelete() {
+    const id = state.bulkEntryForm.editingId;
+    if (!id) return;
+    if (bulkDeleteConfirmBtn) bulkDeleteConfirmBtn.disabled = true;
+    const previousEntries = cloneBulkEntries(state.bulkEntries);
+    const previousDraft = state.bulkEntryForm.draft ? { ...state.bulkEntryForm.draft } : null;
+    const previousEditingId = state.bulkEntryForm.editingId;
+    removeBulkEntryLocal(id);
+    renderBulkEntriesList();
+    setBulkFormDraft(defaultBulkDraft());
+    setStatus('Deleting bulk range...', 'warn');
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (bulkDeleteConfirmBtn) bulkDeleteConfirmBtn.disabled = false;
+        toggleBulkDeleteConfirm(false);
+        const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+        state.bulkEntries = entries;
+        saveCache();
+        renderBulkEntriesList();
+        setBulkFormDraft(defaultBulkDraft());
+        refreshEntriesFromServer(() => {
+          setStatus('Bulk range deleted', 'success');
+        });
+      })
+      .withFailureHandler((error) => {
+        if (bulkDeleteConfirmBtn) bulkDeleteConfirmBtn.disabled = false;
+        state.bulkEntries = previousEntries;
+        renderBulkEntriesList();
+        if (previousDraft) {
+          setBulkFormDraft(previousDraft);
+          state.bulkEntryForm.editingId = previousEditingId;
+        }
+        const message = error && error.message ? error.message : 'Failed to delete bulk range.';
+        setBulkFormError(message);
+        setStatus('Failed to delete bulk range', 'error');
+      })
+      .api_deleteBulkTimeEntry(id);
+  }
+
+  function cloneBulkEntries(list) {
+    return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
+  }
+
+  function upsertBulkEntryLocal(entry) {
+    const sanitized = sanitizeBulkEntry(entry);
+    if (!sanitized || !sanitized.id) return;
+    const idx = state.bulkEntries.findIndex((item) => item.id === sanitized.id);
+    if (idx === -1) {
+      state.bulkEntries = [...state.bulkEntries, sanitized];
+    } else {
+      state.bulkEntries[idx] = sanitized;
+    }
+  }
+
+  function removeBulkEntryLocal(id) {
+    if (!id) return;
+    state.bulkEntries = state.bulkEntries.filter((item) => item.id !== id);
   }
 
   function updateRecurringHourTypeVisibility() {
@@ -18969,6 +19594,8 @@ function getCachedIncomeSummary(monthKey) {
           updateHourTypeMap();
           populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
           updateRecurringHourTypeVisibility();
+          populateBulkHourTypeOptions(state.bulkEntryForm.draft ? state.bulkEntryForm.draft.hour_type_id : '');
+          updateBulkHourTypeVisibility();
           ensureInvoiceFormOptions();
           if (getFeatureFlag('enable_invoices')) {
             renderInvoiceDefaults();

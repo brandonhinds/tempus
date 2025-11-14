@@ -236,6 +236,7 @@
       <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB Payroll Helper</button>
       <button class="ghost" id="calendar-actual-income-btn" type="button" style="display:none;">Add Actual Income</button>
       <button class="ghost" id="btn-manage-recurring" type="button" style="display:none;">Reoccurring Entries</button>
+      <button class="ghost" id="btn-manage-bulk" type="button" style="display:none;">Bulk Entries</button>
       <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print Monthly Hours</button>
     </div>
   </div>
@@ -485,7 +486,6 @@
               <p class="ts-note" id="recurring-form-subtitle" style="margin:4px 0 0;">Define cadence and contract limits.</p>
             </div>
             <div class="ts-warning" id="recurring-form-warning" style="display:none;"></div>
-            <div class="ts-error" id="recurring-form-error" style="display:none;"></div>
             <label>Name<input type="text" id="recurring-name" placeholder="e.g., Parental leave" /></label>
             <div class="ts-grid ts-grid--gap-md">
               <div class="ts-col-span-6">
@@ -569,6 +569,7 @@
               <strong>Next occurrences</strong>
               <ul id="recurring-preview-list" style="margin:4px 0 0; padding-left:16px;"></ul>
             </div>
+            <div class="ts-error" id="recurring-form-error" style="display:none;"></div>
             <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
               <button class="ghost" id="btn-cancel-recurring">Close</button>
               <button class="ghost danger" id="btn-delete-recurring" style="display:none;">Delete Schedule</button>
@@ -579,6 +580,87 @@
               <div class="ts-gap-sm" style="display:flex; gap:8px; justify-content:flex-end;">
                 <button class="ghost" id="btn-cancel-delete-recurring">Cancel</button>
                 <button class="danger" id="btn-confirm-delete-recurring">Confirm delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal" id="modal-bulk-entries" style="display:none;">
+  <div class="ts-modal-content" style="max-width:960px;">
+    <div class="ts-modal-header">
+      <h3>Manage Bulk Entries</h3>
+      <button class="ts-modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-grid ts-grid--gap-lg ts-grid--align-start">
+        <div class="ts-col-span-5">
+          <div class="ts-gap-sm" style="display:flex; justify-content:flex-end; align-items:center;">
+            <button id="btn-bulk-new">New Bulk Range</button>
+          </div>
+          <div id="bulk-entry-list" class="ts-gap-sm" style="margin-top:12px;"></div>
+          <div class="ts-empty" id="bulk-entry-empty" style="display:none; margin-top:24px;">
+            <p style="margin:0;">No bulk ranges yet. Create one to add consistent entries between two dates.</p>
+          </div>
+        </div>
+        <div class="ts-col-span-7">
+          <div id="bulk-entry-form" class="ts-card" style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <h4 id="bulk-form-title" style="margin:0;">New Bulk Range</h4>
+              <p class="ts-note" id="bulk-form-subtitle" style="margin:4px 0 0;">Fill a date range with matching entries.</p>
+            </div>
+            <div class="ts-warning" id="bulk-form-warning" style="display:none;"></div>
+            <label>Name<input type="text" id="bulk-name" placeholder="e.g., Overseas Holiday" /></label>
+            <div class="ts-grid ts-grid--gap-md">
+              <div class="ts-col-span-6">
+                <label>Hours per day<input type="number" id="bulk-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" /></label>
+              </div>
+              <div class="ts-col-span-6">
+                <label>Contract
+                  <select id="bulk-contract"></select>
+                </label>
+              </div>
+            </div>
+            <div id="bulk-hour-type-row" style="display:none;">
+              <label>Hour type
+                <select id="bulk-hour-type"></select>
+              </label>
+            </div>
+            <div class="ts-grid ts-grid--gap-md">
+              <div class="ts-col-span-6">
+                <label>Start date<input type="date" id="bulk-start-date" /></label>
+              </div>
+              <div class="ts-col-span-6">
+                <label>End date<input type="date" id="bulk-end-date" /></label>
+              </div>
+            </div>
+            <div class="ts-stack" style="gap:8px;">
+              <label class="ts-toggle">
+                <input type="checkbox" id="bulk-skip-weekends" checked />
+                <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+                <span>Skip weekends</span>
+              </label>
+              <label class="ts-toggle">
+                <input type="checkbox" id="bulk-skip-holidays" checked />
+                <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+                <span>Skip public holidays</span>
+              </label>
+            </div>
+            <div class="ts-note" id="bulk-generated-summary" style="display:none;"></div>
+            <div class="ts-error" id="bulk-form-error" style="display:none;"></div>
+            <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
+              <button class="ghost" id="btn-cancel-bulk">Close</button>
+              <button class="ghost danger" id="btn-delete-bulk" style="display:none;">Delete Range</button>
+              <button id="btn-save-bulk">Save Range</button>
+            </div>
+            <div id="bulk-delete-confirm" class="ts-warning" style="display:none;">
+              <p style="margin-top:0;">Delete this bulk range? All generated entries will also be removed.</p>
+              <div class="ts-gap-sm" style="display:flex; gap:8px; justify-content:flex-end;">
+                <button class="ghost" id="btn-cancel-delete-bulk">Cancel</button>
+                <button class="danger" id="btn-confirm-delete-bulk">Confirm delete</button>
               </div>
             </div>
           </div>

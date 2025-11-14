@@ -130,6 +130,23 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'bulk_time_entries') {
+      sh.getRange(1,1,1,14).setValues([[
+        'id',
+        'label',
+        'duration_minutes',
+        'hour_type_id',
+        'contract_id',
+        'start_date',
+        'end_date',
+        'include_weekends',
+        'skip_public_holidays',
+        'last_synced_at',
+        'last_synced_count',
+        'warning_message',
+        'created_at',
+        'updated_at'
+      ]]);
     } else if (name === 'bas_submissions') {
       sh.getRange(1,1,1,15).setValues([[
         'id',
