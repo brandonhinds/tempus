@@ -129,10 +129,6 @@ function ensureInvoiceLineItemSchemaInternal(sh, attemptedRepair) {
   var normalizedHeaders = headers.map(function(value) {
     return String(value || '').trim();
   });
-  Logger.log('[Invoice Schema] Current headers: ' + JSON.stringify(normalizedHeaders));
-  var headerOrderMatches = expectedHeaders.every(function(name, idx) {
-    return normalizedHeaders[idx] === name;
-  });
   var hasHeaderContent = normalizedHeaders.some(function(value) { return value !== ''; });
 
   if (!hasHeaderContent) {
@@ -141,49 +137,6 @@ function ensureInvoiceLineItemSchemaInternal(sh, attemptedRepair) {
   }
 
   var hasDataRows = lastRow > 1;
-  var amountIndex = normalizedHeaders.indexOf('amount');
-  var amountModeIndex = normalizedHeaders.indexOf('amount_mode');
-
-  if (amountIndex === -1 && amountModeIndex !== -1) {
-    sh.insertColumnBefore(amountModeIndex + 1);
-    amountIndex = amountModeIndex;
-    amountModeIndex = amountModeIndex + 1;
-    sh.getRange(1, amountIndex + 1).setValue('amount');
-    var dataRowsToFill = sh.getLastRow() - 1;
-    if (dataRowsToFill > 0) {
-      var zeroRows = [];
-      for (var z = 0; z < dataRowsToFill; z++) {
-        zeroRows.push([0]);
-      }
-      sh.getRange(2, amountIndex + 1, dataRowsToFill, 1).setValues(zeroRows);
-    }
-    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
-    headers = headerRange.getValues()[0];
-    normalizedHeaders = headers.map(function(value) {
-      return String(value || '').trim();
-    });
-  }
-
-  if (amountIndex !== -1 && amountModeIndex === -1) {
-    var insertPosition = amountIndex + 1; // 1-based column for amount
-    sh.insertColumnAfter(insertPosition);
-    var amountModeColumn = insertPosition + 1;
-    sh.getRange(1, amountModeColumn).setValue('amount_mode');
-    var dataRows = sh.getLastRow() - 1;
-    if (dataRows > 0) {
-      var defaultValues = [];
-      for (var i = 0; i < dataRows; i++) {
-        defaultValues.push(['hours']);
-      }
-      sh.getRange(2, amountModeColumn, dataRows, 1).setValues(defaultValues);
-    }
-    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
-    headers = headerRange.getValues()[0];
-    normalizedHeaders = headers.map(function(value) {
-      return String(value || '').trim();
-    });
-  }
-
   var headerSet = {};
   var hasDuplicates = false;
   normalizedHeaders.forEach(function(header) {
@@ -197,15 +150,17 @@ function ensureInvoiceLineItemSchemaInternal(sh, attemptedRepair) {
   var missingHeaders = expectedHeaders.filter(function(header) {
     return normalizedHeaders.indexOf(header) === -1;
   });
-
   var hasExtraColumns = lastColumn > expectedColumnCount;
+  var orderMatches = expectedHeaders.every(function(name, idx) {
+    return normalizedHeaders[idx] === name;
+  });
 
   if ((missingHeaders.length || hasDuplicates || hasExtraColumns) && !hasDataRows) {
     resetHeaders();
     return;
   }
 
-  if (missingHeaders.length || hasDuplicates || hasExtraColumns || (!headerOrderMatches && hasDataRows)) {
+  if (missingHeaders.length || hasDuplicates || hasExtraColumns || (!orderMatches && hasDataRows)) {
     if (!attemptedRepair && hasDataRows) {
       rebuildInvoiceLineItemSheet(sh, expectedHeaders, normalizedHeaders);
       ensureInvoiceLineItemSchemaInternal(sh, true);
@@ -1613,6 +1568,16 @@ function recalculateInvoiceLineAmounts(invoiceOrId, options) {
         normalized.hours = 0;
         changed = true;
       }
+    } else if (amountMode === 'contract_template') {
+      if (normalized.hours !== 0) {
+        normalized.hours = 0;
+        changed = true;
+      }
+    } else if (amountMode === 'amount') {
+      if (normalized.hours !== 0) {
+        normalized.hours = 0;
+        changed = true;
+      }
     }
 
     if (shouldLock && amountMode !== 'amount') {
@@ -1711,17 +1676,25 @@ function api_upsertInvoiceLineItem(payload) {
   var invoiceStatus = invoice ? (invoice.status || 'draft') : 'draft';
   var shouldRecalculate = invoiceStatus !== 'generated';
 
-  if (amountMode === 'monthly_hour_type' && hourTypeId && invoice && shouldRecalculate) {
-    var invoiceYear = invoiceParseNumber(invoice.year);
-    var invoiceMonth = invoiceParseNumber(invoice.month);
-    var monthlyHours = calculateMonthlyHourTypeTotal(invoiceYear, invoiceMonth, hourTypeId, contractId);
-    amount = Math.round(monthlyHours * contractRate * 100) / 100;
+  if (amountMode === 'monthly_hour_type') {
+    var invYear = invoice && invoice.year ? invoiceParseNumber(invoice.year) : null;
+    var invMonth = invoice && invoice.month ? invoiceParseNumber(invoice.month) : null;
+    if (invYear && invMonth && hourTypeId && contractRate > 0) {
+      var monthlyHours = calculateMonthlyHourTypeTotal(invYear, invMonth, hourTypeId, contractId);
+      amount = Math.round(monthlyHours * contractRate * 100) / 100;
+    }
     hours = 0;
-  } else if (amountMode === 'monthly_hour_type' && !shouldRecalculate && existing) {
-    amount = existing.amount || 0;
+  } else if (amountMode === 'contract_template') {
     hours = 0;
-  } else if (!amountProvided && hours > 0 && contractRate > 0) {
-    amount = Math.round(hours * contractRate * 100) / 100;
+    amount = invoiceParseNumber(amountRaw, 0);
+  } else if (amountMode === 'amount') {
+    hours = 0;
+    amount = invoiceParseNumber(amountRaw, 0);
+  } else {
+    amountMode = 'hours';
+    if (!amountProvided && hours > 0 && contractRate > 0) {
+      amount = Math.round(hours * contractRate * 100) / 100;
+    }
   }
   if (!amount && amount !== 0) amount = 0;
   var defaultLabel = payload.default_label != null ? String(payload.default_label).trim() : (existing ? existing.default_label : '');
@@ -1740,7 +1713,7 @@ function api_upsertInvoiceLineItem(payload) {
     timesheetEntryId = '';
     entrySnapshotJson = '';
     lastSyncedAt = '';
-  } else {
+  } else if (amountMode === 'hours' && hours > 0 && hourTypeId) {
     var sync = syncTimesheetEntryForLineItem({
       id: lineId,
       invoice_id: invoiceId,
@@ -1754,6 +1727,10 @@ function api_upsertInvoiceLineItem(payload) {
       entrySnapshotJson = sync.snapshotJson || '';
       lastSyncedAt = sync.lastSyncedAt || '';
     }
+  } else {
+    timesheetEntryId = '';
+    entrySnapshotJson = '';
+    lastSyncedAt = '';
   }
 
   var record = {
