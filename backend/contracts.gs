@@ -38,6 +38,7 @@ function normalizeContractObject(contract) {
     total_hours: normalizeContractTotalHours(contract.total_hours || contract.totalHours),
     standard_hours_per_day: standardHours,
     include_weekends: contractParseBoolean(contract.include_weekends != null ? contract.include_weekends : contract.includeWeekends),
+    line_item_templates_json: contract.line_item_templates_json || '',
     created_at: toIsoDateTime(contract.created_at)
   };
   if (!normalized.end_date || normalized.end_date === 'Invalid Date') normalized.end_date = '';
@@ -62,8 +63,9 @@ function buildContractRow(contract, createdAt) {
     normalized.end_date,
     normalized.hourly_rate,
     normalized.total_hours,
-    normalized.standard_hours_per_day,
     normalized.include_weekends ? 'TRUE' : 'FALSE',
+    normalized.standard_hours_per_day,
+    normalized.line_item_templates_json || '',
     createdAt || normalized.created_at || toIsoDateTime(new Date())
   ];
 }
@@ -73,14 +75,14 @@ function ensureContractsSchema(sh) {
   var lastRow = sh.getLastRow();
   var lastColumn = sh.getLastColumn();
   if (lastRow === 0 || lastColumn === 0) {
-    sh.getRange(1, 1, 1, 9).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'standard_hours_per_day', 'include_weekends', 'created_at']]);
+    sh.getRange(1, 1, 1, 10).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'created_at']]);
     return;
   }
   var headerRange = sh.getRange(1, 1, 1, lastColumn);
   var headers = headerRange.getValues()[0];
   var hasHeaderContent = headers.some(function(value) { return String(value || '').trim() !== ''; });
   if (!hasHeaderContent) {
-    sh.getRange(1, 1, 1, 9).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'standard_hours_per_day', 'include_weekends', 'created_at']]);
+    sh.getRange(1, 1, 1, 10).setValues([['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'created_at']]);
     return;
   }
   if (headers.indexOf('total_hours') === -1) {
@@ -133,6 +135,24 @@ function ensureContractsSchema(sh) {
     var totalRows = sh.getLastRow();
     if (totalRows > 1) {
       sh.getRange(2, weekendsColIndex, totalRows - 1, 1).setValue('FALSE');
+    }
+    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
+    headers = headerRange.getValues()[0];
+  }
+  if (headers.indexOf('line_item_templates_json') === -1) {
+    var createdAtIndex = headers.indexOf('created_at');
+    var templatesColIndex;
+    if (createdAtIndex !== -1) {
+      templatesColIndex = createdAtIndex + 1;
+      sh.insertColumnBefore(templatesColIndex);
+    } else {
+      sh.insertColumnAfter(sh.getLastColumn());
+      templatesColIndex = sh.getLastColumn();
+    }
+    sh.getRange(1, templatesColIndex).setValue('line_item_templates_json');
+    var rowCount = sh.getLastRow();
+    if (rowCount > 1) {
+      sh.getRange(2, templatesColIndex, rowCount - 1, 1).setValue('');
     }
   }
 }

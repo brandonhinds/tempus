@@ -184,14 +184,20 @@ const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
   const invoiceDefaultAmountCol = document.getElementById('invoice-default-amount-col');
   const invoiceDefaultHoursCol = document.getElementById('invoice-default-hours-col');
   const invoiceDefaultContractSelect = document.getElementById('invoice-default-contract');
+  const invoiceDefaultTemplateCol = document.getElementById('invoice-default-template-col');
+  const invoiceDefaultTemplateSelect = document.getElementById('invoice-default-template');
   const btnInvoiceDefaultCancel = document.getElementById('btn-invoice-default-cancel');
   const btnInvoiceDefaultSave = document.getElementById('btn-invoice-default-save');
+  const invoiceLineTemplateCol = document.getElementById('invoice-line-template-col');
+  const invoiceLineTemplateSelect = document.getElementById('invoice-line-template');
   const invoiceTemplateInput = document.getElementById('set-invoice-template');
   const invoiceOutputFolderInput = document.getElementById('set-invoice-output-folder');
   const invoiceLineLimitInput = document.getElementById('set-invoice-line-limit');
+  const invoiceHoursLabelInput = document.getElementById('set-invoice-hours-label');
   const invoiceTemplateCol = document.getElementById('invoice-template-col');
   const invoiceOutputFolderCol = document.getElementById('invoice-output-folder-col');
   const invoiceLineLimitCol = document.getElementById('invoice-line-limit-col');
+  const invoiceHoursLabelCol = document.getElementById('invoice-hours-label-col');
   const invoiceMonthPickerModal = document.getElementById('modal-invoice-month-picker');
   const invoiceMonthPickerYearDisplay = document.getElementById('invoice-month-picker-year-display');
   const invoiceMonthPickerYearPrev = document.getElementById('invoice-month-picker-year-prev');
@@ -1131,11 +1137,15 @@ let ratePreviewInputSyncing = false;
   if (btnInvoiceLineCancel) btnInvoiceLineCancel.addEventListener('click', handleInvoiceLineCancel);
   if (invoiceLineItemsBody) invoiceLineItemsBody.addEventListener('click', handleInvoiceLineItemAction);
   if (invoiceLineAmountModeSelect) invoiceLineAmountModeSelect.addEventListener('change', handleInvoiceLineAmountModeChange);
+  if (invoiceLineContractSelect) invoiceLineContractSelect.addEventListener('change', handleInvoiceLineContractChange);
+  if (invoiceLineTemplateSelect) invoiceLineTemplateSelect.addEventListener('change', handleInvoiceLineTemplateChange);
   if (btnInvoiceDefaultNew) btnInvoiceDefaultNew.addEventListener('click', handleInvoiceDefaultNew);
   if (btnInvoiceDefaultCancel) btnInvoiceDefaultCancel.addEventListener('click', handleInvoiceDefaultCancel);
   if (btnInvoiceDefaultSave) btnInvoiceDefaultSave.addEventListener('click', handleInvoiceDefaultSave);
   if (invoiceDefaultList) invoiceDefaultList.addEventListener('click', handleInvoiceDefaultAction);
   if (invoiceDefaultAmountModeSelect) invoiceDefaultAmountModeSelect.addEventListener('change', handleInvoiceDefaultAmountModeChange);
+  if (invoiceDefaultContractSelect) invoiceDefaultContractSelect.addEventListener('change', handleInvoiceDefaultContractChange);
+  if (invoiceDefaultTemplateSelect) invoiceDefaultTemplateSelect.addEventListener('change', handleInvoiceDefaultTemplateChange);
   if (deductionTypeSelect) deductionTypeSelect.addEventListener('change', updateDeductionFormVisibility);
   if (deductionCategorySelect) deductionCategorySelect.addEventListener('change', () => {
     updateDeductionFormVisibility();
@@ -1289,9 +1299,8 @@ let ratePreviewInputSyncing = false;
   };
   const formatHours = (minutes) => {
     const hrs = (Number(minutes) || 0) / 60;
-    let out = (Math.round(hrs * 100) / 100).toFixed(2);
-    out = out.replace(/\.00$/, '');
-    out = out.replace(/(\.\d)0$/, '$1');
+    let out = (Math.round(hrs * 10000) / 10000).toFixed(4);
+    out = out.replace(/\.?0+$/, '');
     return out === '' ? '0' : out;
   };
   const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -6127,6 +6136,12 @@ function updateDeductionFormVisibility() {
       order: 330,
       group: 'company'
     },
+    enable_contract_line_item_templates: {
+      name: 'Enable contract line item templates',
+      description: 'Allows defining reusable line item templates with predefined descriptions and amounts on each contract.',
+      order: 335,
+      group: 'company'
+    },
     is_sole_trader: {
       name: 'Enable sole trader mode',
       description: 'Indicates the business operates as a sole trader and adjusts PAYG income calculations accordingly.',
@@ -6705,6 +6720,12 @@ function updateDeductionFormVisibility() {
     if (contract.end_date && contract.end_date !== '' && contract.end_date < dateIso) return false;
     return true;
   };
+
+  function invoiceIsLocked() {
+    const invoice = state.invoiceDetail && state.invoiceDetail.invoice;
+    if (!invoice) return false;
+    return String(invoice.status || 'draft').toLowerCase() === 'generated';
+  }
 
   function validContractsForDate(dateIso) {
     if (!dateIso) return [];
@@ -8593,6 +8614,16 @@ function updateDeductionFormVisibility() {
         return placeholder;
       })()
     : null;
+  const contractTemplatesSection = document.getElementById('contract-line-item-templates-section');
+  const contractTemplateList = document.getElementById('contract-template-list');
+  const contractTemplateEmpty = document.getElementById('contract-template-empty');
+  const contractTemplateForm = document.getElementById('contract-template-form');
+  const contractTemplateLabelInput = document.getElementById('contract-template-label');
+  const contractTemplateDescriptionInput = document.getElementById('contract-template-description');
+  const contractTemplateAmountInput = document.getElementById('contract-template-amount');
+  const btnContractTemplateNew = document.getElementById('btn-contract-template-new');
+  const btnContractTemplateCancel = document.getElementById('btn-contract-template-cancel');
+  const btnContractTemplateSave = document.getElementById('btn-contract-template-save');
   const clearCacheWrapper = document.getElementById('clear-cache-wrapper');
   const clearCacheBtn = document.getElementById('btn-clear-cache');
   const payrollXeroBtn = document.getElementById('calendar-xero-helper');
@@ -8717,15 +8748,21 @@ function updateDeductionFormVisibility() {
     if (contractFormContainer) contractFormContainer.style.display = visible ? 'block' : 'none';
     if (contractSaveBtn) contractSaveBtn.textContent = mode === 'edit' ? 'Save Changes' : 'Save';
     if (contractCancelBtn) contractCancelBtn.style.display = visible ? 'inline-flex' : 'none';
+    updateContractTemplatesSectionVisibility();
   }
 
   function showContractForm(mode) {
     if (mode === 'create') {
       state.editingContractId = null;
+      state.contractDraft = {};
       resetContractFormFields();
       placeContractFormInDetail();
       if (contractAddToggle) contractAddToggle.textContent = 'Close';
     }
+    state.contractTemplateForm = { mode: 'hidden', editingIndex: null, draft: {} };
+    renderContractTemplateList();
+    renderContractTemplateForm();
+    updateContractTemplatesSectionVisibility();
     setContractFormMode(mode);
     if (mode === 'create' && contractNameInput) contractNameInput.focus();
     renderContractDetail();
@@ -8772,6 +8809,8 @@ function updateDeductionFormVisibility() {
     const standardHoursValue = standardHoursRaw === '' ? 7.5 : Number(standardHoursRaw);
     const standardHours = standardHoursValue > 0 ? Math.round(standardHoursValue * 10) / 10 : 7.5;
     const includeWeekends = contractIncludeWeekendsInput ? contractIncludeWeekendsInput.checked : false;
+    const contract = getEditingContract();
+    const lineItemTemplatesJson = contract ? (contract.line_item_templates_json || '') : '';
     return {
       name,
       start_date: startDate,
@@ -8779,7 +8818,8 @@ function updateDeductionFormVisibility() {
       hourly_rate: Math.round(hourlyRate * 100) / 100,
       total_hours: totalHours,
       standard_hours_per_day: standardHours,
-      include_weekends: includeWeekends
+      include_weekends: includeWeekends,
+      line_item_templates_json: lineItemTemplatesJson
     };
   }
 
@@ -8798,6 +8838,10 @@ function updateDeductionFormVisibility() {
       contractStandardHoursInput.value = String(standardHours);
     }
     if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = !!contract.include_weekends;
+    state.contractTemplateForm = { mode: 'hidden', editingIndex: null, draft: {} };
+    renderContractTemplateList();
+    renderContractTemplateForm();
+    updateContractTemplatesSectionVisibility();
     placeContractFormInDetail();
     setContractFormMode('edit');
     if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
@@ -10048,6 +10092,236 @@ function updateDeductionFormVisibility() {
       .api_deleteContract(id);
   }
 
+  function handleContractTemplateNew() {
+    if (!state.contractTemplateForm) state.contractTemplateForm = {};
+    state.contractTemplateForm = { mode: 'add', editingIndex: null, draft: {} };
+    renderContractTemplateForm();
+  }
+
+  function handleContractTemplateCancel() {
+    state.contractTemplateForm = { mode: 'hidden', editingIndex: null, draft: {} };
+    renderContractTemplateForm();
+  }
+
+  function handleContractTemplateSave() {
+    if (!contractTemplateLabelInput || !contractTemplateDescriptionInput || !contractTemplateAmountInput) return;
+    const label = contractTemplateLabelInput.value.trim();
+    const description = contractTemplateDescriptionInput.value.trim();
+    const amount = Number(contractTemplateAmountInput.value);
+    if (!label) {
+      setStatus('Template label is required.', 'warn');
+      return;
+    }
+    if (!description) {
+      setStatus('Template description is required.', 'warn');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStatus('Enter a valid amount for this template.', 'warn');
+      return;
+    }
+    const contract = getEditingContract();
+    if (!contract) return;
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    const template = { label, description, amount };
+    const isEdit = state.contractTemplateForm && state.contractTemplateForm.mode === 'edit' && state.contractTemplateForm.editingIndex != null;
+    if (isEdit) {
+      templates[state.contractTemplateForm.editingIndex] = template;
+    } else {
+      templates.push(template);
+    }
+    contract.line_item_templates_json = JSON.stringify(templates);
+    state.contractTemplateForm = { mode: 'hidden', editingIndex: null, draft: {} };
+    renderContractTemplateList();
+    renderContractTemplateForm();
+
+    if (state.contractFormMode === 'edit' && state.editingContractId) {
+      setStatus('Saving template to contract...', 'warn');
+      const payload = {
+        id: state.editingContractId,
+        name: contract.name,
+        start_date: contract.start_date,
+        end_date: contract.end_date,
+        hourly_rate: contract.hourly_rate,
+        total_hours: contract.total_hours,
+        standard_hours_per_day: contract.standard_hours_per_day,
+        include_weekends: contract.include_weekends,
+        line_item_templates_json: contract.line_item_templates_json
+      };
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (res && res.success && res.contract) {
+            const normalized = sanitizeContract(res.contract);
+            state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
+            saveCache();
+            setStatus('Template saved', 'success');
+          } else {
+            setStatus('Failed to save template', 'error');
+          }
+        })
+        .withFailureHandler(() => {
+          setStatus('Failed to save template', 'error');
+        })
+        .api_updateContract(payload);
+    } else if (state.contractFormMode === 'create') {
+      setStatus('Template added (remember to save the contract)', 'success');
+    }
+  }
+
+  function handleContractTemplateAction(event) {
+    const target = event.target;
+    if (!target) return;
+    const action = target.dataset.action;
+    const index = target.dataset.index != null ? Number(target.dataset.index) : null;
+    if (action === 'edit' && index != null) {
+      const contract = getEditingContract();
+      if (!contract) return;
+      let templates = [];
+      try {
+        templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      } catch (e) {
+        templates = [];
+      }
+      const template = templates[index];
+      if (!template) return;
+      state.contractTemplateForm = { mode: 'edit', editingIndex: index, draft: template };
+      renderContractTemplateForm();
+    } else if (action === 'delete' && index != null) {
+      const contract = getEditingContract();
+      if (!contract) return;
+      let templates = [];
+      try {
+        templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      } catch (e) {
+        templates = [];
+      }
+      templates.splice(index, 1);
+      contract.line_item_templates_json = JSON.stringify(templates);
+      renderContractTemplateList();
+
+      if (state.contractFormMode === 'edit' && state.editingContractId) {
+        setStatus('Deleting template from contract...', 'warn');
+        const payload = {
+          id: state.editingContractId,
+          name: contract.name,
+          start_date: contract.start_date,
+          end_date: contract.end_date,
+          hourly_rate: contract.hourly_rate,
+          total_hours: contract.total_hours,
+          standard_hours_per_day: contract.standard_hours_per_day,
+          include_weekends: contract.include_weekends,
+          line_item_templates_json: contract.line_item_templates_json
+        };
+        google.script.run
+          .withSuccessHandler((res) => {
+            if (res && res.success && res.contract) {
+              const normalized = sanitizeContract(res.contract);
+              state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
+              saveCache();
+              setStatus('Template deleted', 'success');
+            } else {
+              setStatus('Failed to delete template', 'error');
+            }
+          })
+          .withFailureHandler(() => {
+            setStatus('Failed to delete template', 'error');
+          })
+          .api_updateContract(payload);
+      }
+    }
+  }
+
+  function getEditingContract() {
+    if (state.contractFormMode === 'edit' && state.editingContractId) {
+      return state.contracts.find((c) => c.id === state.editingContractId);
+    } else if (state.contractFormMode === 'create') {
+      if (!state.contractDraft) state.contractDraft = {};
+      return state.contractDraft;
+    }
+    return null;
+  }
+
+  function renderContractTemplateList() {
+    if (!contractTemplateList || !contractTemplateEmpty) return;
+    const showTemplates = getFeatureFlag('enable_contract_line_item_templates') && getFeatureFlag('enable_invoices');
+    if (!showTemplates) return;
+    const contract = getEditingContract();
+    if (!contract) {
+      contractTemplateList.innerHTML = '';
+      contractTemplateEmpty.style.display = 'none';
+      return;
+    }
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    if (!templates.length) {
+      contractTemplateList.innerHTML = '';
+      contractTemplateEmpty.style.display = 'block';
+      return;
+    }
+    contractTemplateEmpty.style.display = 'none';
+    const escape = (str) => {
+      const div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    };
+    const rows = templates.map((template, index) => {
+      const amount = Number(template.amount) || 0;
+      return `
+        <li style="display:flex; justify-content:space-between; align-items:center; padding:8px; border:1px solid var(--border-color); border-radius:4px;">
+          <div style="flex:1 1 auto;">
+            <div style="font-weight:600;">${escape(template.label)}</div>
+            <div class="ts-note" style="margin-top:2px;">${escape(template.description)}</div>
+            <div style="margin-top:4px; font-size:14px;">$${amount.toFixed(2)}</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="ghost" style="font-size:12px;" data-action="edit" data-index="${index}">Edit</button>
+            <button class="ghost" style="font-size:12px;" data-action="delete" data-index="${index}">Delete</button>
+          </div>
+        </li>
+      `;
+    }).join('');
+    contractTemplateList.innerHTML = rows;
+  }
+
+  function renderContractTemplateForm() {
+    if (!contractTemplateForm) return;
+    const showTemplates = getFeatureFlag('enable_contract_line_item_templates') && getFeatureFlag('enable_invoices');
+    if (!showTemplates || !state.contractTemplateForm || state.contractTemplateForm.mode === 'hidden') {
+      contractTemplateForm.style.display = 'none';
+      if (contractTemplateLabelInput) contractTemplateLabelInput.value = '';
+      if (contractTemplateDescriptionInput) contractTemplateDescriptionInput.value = '';
+      if (contractTemplateAmountInput) contractTemplateAmountInput.value = '';
+      return;
+    }
+    contractTemplateForm.style.display = 'block';
+    const draft = state.contractTemplateForm.draft || {};
+    if (contractTemplateLabelInput) contractTemplateLabelInput.value = draft.label || '';
+    if (contractTemplateDescriptionInput) contractTemplateDescriptionInput.value = draft.description || '';
+    if (contractTemplateAmountInput) contractTemplateAmountInput.value = draft.amount != null ? draft.amount : '';
+  }
+
+  function updateContractTemplatesSectionVisibility() {
+    if (!contractTemplatesSection) return;
+    const showTemplates = getFeatureFlag('enable_contract_line_item_templates') && getFeatureFlag('enable_invoices');
+    const showForm = state.contractFormMode === 'edit' || state.contractFormMode === 'create';
+    const shouldShow = showTemplates && showForm;
+    contractTemplatesSection.style.display = shouldShow ? 'block' : 'none';
+    if (shouldShow) {
+      renderContractTemplateList();
+    }
+  }
+
   function renderFeatureFlags() {
     if (!featureFlagsListEl) return;
     featureFlagsListEl.innerHTML = '';
@@ -10400,6 +10674,7 @@ function updateDeductionFormVisibility() {
     if (invoiceTemplateCol) invoiceTemplateCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
     if (invoiceOutputFolderCol) invoiceOutputFolderCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
     if (invoiceLineLimitCol) invoiceLineLimitCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
+    if (invoiceHoursLabelCol) invoiceHoursLabelCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
     if (!invoicesFlag.enabled && state.currentPage === 'invoices') {
       showPage('time');
     }
@@ -10501,6 +10776,18 @@ function updateDeductionFormVisibility() {
       }
       showContractForm('create');
     });
+  }
+  if (btnContractTemplateNew) {
+    btnContractTemplateNew.addEventListener('click', handleContractTemplateNew);
+  }
+  if (btnContractTemplateCancel) {
+    btnContractTemplateCancel.addEventListener('click', handleContractTemplateCancel);
+  }
+  if (btnContractTemplateSave) {
+    btnContractTemplateSave.addEventListener('click', handleContractTemplateSave);
+  }
+  if (contractTemplateList) {
+    contractTemplateList.addEventListener('click', handleContractTemplateAction);
   }
   if (contractSelector) {
     contractSelector.addEventListener('change', () => {
@@ -14164,6 +14451,13 @@ function getCachedIncomeSummary(monthKey) {
       setValue: (el, val) => { el.value = val != null && val !== '' ? val : ''; },
       defaultValue: '',
       event: 'input'
+    },
+    invoice_hours_label: {
+      element: () => invoiceHoursLabelInput,
+      getValue: (el) => el.value.trim(),
+      setValue: (el, val) => { el.value = val || ''; },
+      defaultValue: 'Hours',
+      event: 'input'
     }
   };
 
@@ -15625,10 +15919,20 @@ function getCachedIncomeSummary(monthKey) {
       return;
     }
     updateInvoiceConfigNote();
+    updateInvoiceHoursLabels();
+    updateInvoiceTemplateOptionVisibility();
     renderInvoiceNavigator();
     renderInvoiceSelector();
     renderInvoiceDefaults();
     renderInvoiceDetail();
+  }
+
+  function updateInvoiceTemplateOptionVisibility() {
+    const showTemplate = getFeatureFlag('enable_contract_line_item_templates') && getFeatureFlag('enable_invoices');
+    const lineTemplateOption = document.getElementById('invoice-line-amount-mode-template');
+    const defaultTemplateOption = document.getElementById('invoice-default-amount-mode-template');
+    if (lineTemplateOption) lineTemplateOption.style.display = showTemplate ? '' : 'none';
+    if (defaultTemplateOption) defaultTemplateOption.style.display = showTemplate ? '' : 'none';
   }
 
   function updateInvoiceConfigNote() {
@@ -15645,6 +15949,14 @@ function getCachedIncomeSummary(monthKey) {
     if (!folderConfigured) parts.push('choose an output folder path');
     invoiceConfigNote.style.display = 'block';
     invoiceConfigNote.innerHTML = `Finish setup in Settings: ${parts.join(' and ')}.`;
+  }
+
+  function updateInvoiceHoursLabels() {
+    const hoursLabel = state.settings.invoice_hours_label || 'Hours';
+    const lineHoursLabel = document.querySelector('label[for="invoice-line-hours"]');
+    const defaultHoursLabel = document.querySelector('label[for="invoice-default-hours"]');
+    if (lineHoursLabel) lineHoursLabel.textContent = hoursLabel;
+    if (defaultHoursLabel) defaultHoursLabel.textContent = hoursLabel;
   }
 
   function renderInvoiceDefaults() {
@@ -15704,6 +16016,7 @@ function getCachedIncomeSummary(monthKey) {
     invoiceDetailEmpty.style.display = 'none';
     invoiceDetail.style.display = 'block';
     const detail = state.invoiceDetail.invoice || {};
+    const isInvoiceLocked = invoiceIsLocked();
     if (invoiceSelector) {
       invoiceSelector.value = state.invoiceSelectedId || '';
       invoiceSelector.disabled = state.invoiceListLoading || getFilteredInvoices().length <= 1;
@@ -15714,7 +16027,7 @@ function getCachedIncomeSummary(monthKey) {
     const hasInvoice = !!state.invoiceDetail && !!state.invoiceDetail.invoice;
     if (btnInvoiceDelete) btnInvoiceDelete.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
     if (btnInvoiceSave) btnInvoiceSave.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
-    if (btnInvoiceAddLine) btnInvoiceAddLine.disabled = !hasInvoice || state.invoiceDetailLoading;
+    if (btnInvoiceAddLine) btnInvoiceAddLine.disabled = !hasInvoice || state.invoiceDetailLoading || isInvoiceLocked;
     if (btnInvoiceGenerate) {
       const templateConfigured = !!(state.settings.invoice_template_doc_id || state.settings.invoice_template_path || state.settings.invoice_template_reference);
       const folderConfigured = !!(state.settings.invoice_output_folder_id || state.settings.invoice_output_folder_path);
@@ -15724,7 +16037,8 @@ function getCachedIncomeSummary(monthKey) {
     if (invoiceLineSummary) {
       const countText = `${summary.lineCount} line${summary.lineCount === 1 ? '' : 's'}`;
       const hoursText = `${Number(summary.totalHours || 0).toFixed(2)} hrs`;
-      invoiceLineSummary.textContent = `${countText} • ${hoursText} • ${formatCurrency(summary.totalAmount || 0)}`;
+      const summaryText = `${countText} • ${hoursText} • ${formatCurrency(summary.totalAmount || 0)}`;
+      invoiceLineSummary.textContent = isInvoiceLocked ? `${summaryText} • Locked` : summaryText;
     }
     const subtotalAmount = Number(summary.totalAmount || 0);
     const gstAmount = summary.gstAmount != null ? Number(summary.gstAmount) : Math.round(subtotalAmount * GST_RATE * 100) / 100;
@@ -15740,12 +16054,17 @@ function getCachedIncomeSummary(monthKey) {
     }
     renderInvoiceLineItems();
     if (invoiceLineForm) {
-      mountInvoiceLineFormForMode();
-      if (state.invoiceLineForm.mode === 'hidden') {
+      if (isInvoiceLocked) {
+        state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: getDefaultInvoiceAmountMode() };
         invoiceLineForm.style.display = 'none';
       } else {
-        invoiceLineForm.style.display = 'block';
-        applyInvoiceLineDraftToForm(state.invoiceLineForm.draft || {});
+        mountInvoiceLineFormForMode();
+        if (state.invoiceLineForm.mode === 'hidden') {
+          invoiceLineForm.style.display = 'none';
+        } else {
+          invoiceLineForm.style.display = 'block';
+          applyInvoiceLineDraftToForm(state.invoiceLineForm.draft || {});
+        }
       }
     }
   }
@@ -15771,16 +16090,35 @@ function getCachedIncomeSummary(monthKey) {
     const amountValue = formatCurrency(item.amount != null ? item.amount : 0);
     const hoursValue = Number(item.hours);
     const hasHours = Number.isFinite(hoursValue) && hoursValue > 0;
+    const invoiceLocked = invoiceIsLocked();
+    const contractName = (item.contract_id ? getContractName(item.contract_id) : '') || item.contract_name_snapshot || '';
+    console.log('[Invoice Line Render]', {
+      id: item.id,
+      amount_mode: item.amount_mode,
+      hours: item.hours,
+      amount: item.amount,
+      contract_id: item.contract_id,
+      contract_name_snapshot: item.contract_name_snapshot,
+      resolved_contract_name: contractName,
+      invoice_locked: invoiceLocked
+    });
     const infoItems = [
       { label: 'Amount', value: amountValue, strong: true },
       { label: 'Date', value: item.line_date || '' },
       hasHours ? { label: 'Hours', value: `${hoursValue.toFixed(2)} hrs` } : null,
       hasHours && item.hour_type_name_snapshot ? { label: 'Hour type', value: item.hour_type_name_snapshot } : null,
-      item.contract_name_snapshot ? { label: 'Contract', value: item.contract_name_snapshot } : null
+      contractName ? { label: 'Contract', value: contractName } : null
     ].filter(Boolean);
 
     const hasEntry = !!item.timesheet_entry_id;
     const statusItems = [];
+    if (invoiceLocked) {
+      statusItems.push({
+        type: 'badge',
+        text: 'Locked',
+        variant: 'default'
+      });
+    }
     if (item.entry_pending) {
       statusItems.push({
         type: 'badge',
@@ -15810,13 +16148,16 @@ function getCachedIncomeSummary(monthKey) {
       statusItems.push({ type: 'note', text: `Seeded from: ${source}` });
     }
 
-    const actions = [
-      { label: 'Edit', action: 'edit-line', id: item.id },
-      { label: 'Delete', action: 'delete-line', id: item.id },
-      { label: 'Save as default', action: 'default-line', id: item.id }
-    ];
-    if (item.timesheet_entry_id) {
-      actions.push({ label: 'Refresh', action: 'refresh-line', id: item.id });
+    const actions = [];
+    if (!invoiceLocked) {
+      actions.push(
+        { label: 'Edit', action: 'edit-line', id: item.id },
+        { label: 'Delete', action: 'delete-line', id: item.id },
+        { label: 'Save as default', action: 'default-line', id: item.id }
+      );
+      if (item.timesheet_entry_id) {
+        actions.push({ label: 'Refresh', action: 'refresh-line', id: item.id });
+      }
     }
 
     return buildInvoiceCardLayout({
@@ -16145,6 +16486,20 @@ function getCachedIncomeSummary(monthKey) {
             lineItems: Array.isArray(detail.lineItems) ? detail.lineItems.slice() : [],
             summary: summary
           };
+          console.log('[Invoice Detail Loaded]', {
+            invoice_id: detail.invoice.id,
+            status: detail.invoice.status,
+            lineItems: (detail.lineItems || []).map((item) => ({
+              id: item.id,
+              desc: item.description,
+              amount_mode: item.amount_mode,
+              hours: item.hours,
+              amount: item.amount,
+              contract_id: item.contract_id,
+              contract_name_snapshot: item.contract_name_snapshot,
+              resolved_contract_name: item.contract_id ? getContractName(item.contract_id) : ''
+            }))
+          });
           const invoiceWithSummary = Object.assign({}, detail.invoice, { summary: summary });
           upsertInvoiceInState(invoiceWithSummary);
           if (Array.isArray(detail.defaults)) {
@@ -16163,10 +16518,12 @@ function getCachedIncomeSummary(monthKey) {
         renderBasInvoiceTable();
         saveCache();
       })
-      .withFailureHandler(() => {
+      .withFailureHandler((error) => {
         if (state.invoiceSelectedId !== invoiceId) return;
         state.invoiceDetailLoading = false;
-        setStatus('Failed to load invoice', 'error');
+        console.error('[Invoice Load Error]', error);
+        const errorMsg = error && error.message ? error.message : 'Failed to load invoice';
+        setStatus(errorMsg, 'error');
         renderInvoiceDetail();
       })
       .api_getInvoice(invoiceId);
@@ -16243,38 +16600,95 @@ function getCachedIncomeSummary(monthKey) {
 
   function populateInvoiceHourTypeOptions(selectEl, selectedId) {
     if (!selectEl) return;
-    const value = selectedId || '';
+    let value = selectedId || '';
     selectEl.innerHTML = '';
     const emptyOpt = document.createElement('option');
     emptyOpt.value = '';
-    emptyOpt.textContent = 'None';
+    emptyOpt.textContent = 'Select hour type...';
+    emptyOpt.style.fontStyle = 'italic';
     selectEl.appendChild(emptyOpt);
     const types = state.hourTypes && state.hourTypes.length ? state.hourTypes : [];
-    types.forEach((type) => {
+    const incomeTypes = types.filter((type) => type.contributes_to_income === true);
+    incomeTypes.forEach((type) => {
       const opt = document.createElement('option');
       opt.value = type.id;
       opt.textContent = type.name;
       selectEl.appendChild(opt);
     });
+    if (!value && incomeTypes.length === 1) {
+      value = incomeTypes[0].id;
+      if (selectEl === invoiceLineHourTypeSelect && state.invoiceLineForm && state.invoiceLineForm.draft) {
+        state.invoiceLineForm.draft.hour_type_id = value;
+      }
+      if (selectEl === invoiceDefaultHourTypeSelect && state.invoiceDefaultForm && state.invoiceDefaultForm.draft) {
+        state.invoiceDefaultForm.draft.hour_type_id = value;
+      }
+    }
     selectEl.value = value;
   }
 
   function populateContractOptions(selectEl, selectedId) {
     if (!selectEl) return;
-    const value = selectedId || '';
+    let value = selectedId || '';
     selectEl.innerHTML = '';
     const emptyOpt = document.createElement('option');
     emptyOpt.value = '';
-    emptyOpt.textContent = 'None';
+    emptyOpt.textContent = 'Select a contract...';
+    emptyOpt.style.fontStyle = 'italic';
     selectEl.appendChild(emptyOpt);
-    const contracts = state.contracts && state.contracts.length ? state.contracts : [];
-    contracts.forEach((contract) => {
+
+    const invoiceMonth = state.invoiceDetail && state.invoiceDetail.invoice ? state.invoiceDetail.invoice.month : null;
+    const invoiceYear = state.invoiceDetail && state.invoiceDetail.invoice ? state.invoiceDetail.invoice.year : null;
+    const invoiceDate = state.invoiceDetail && state.invoiceDetail.invoice ? state.invoiceDetail.invoice.invoice_date : null;
+
+    let contracts = state.contracts && state.contracts.length ? state.contracts : [];
+    let validContracts = contracts;
+
+    if (invoiceDate && invoiceMonth && invoiceYear) {
+      validContracts = contracts.filter((contract) => {
+        if (!contract.start_date) return false;
+        if (contract.end_date && contract.end_date < invoiceDate) return false;
+        if (contract.start_date > invoiceDate) return false;
+        return true;
+      });
+    }
+
+    const selectedContract = value ? contracts.find((c) => c.id === value) : null;
+    const isSelectedValid = selectedContract && validContracts.some((c) => c.id === value);
+
+    if (selectedContract && !isSelectedValid) {
+      const opt = document.createElement('option');
+      opt.value = selectedContract.id;
+      opt.textContent = `${selectedContract.name} (outside date range)`;
+      opt.style.color = 'var(--warning-color)';
+      selectEl.appendChild(opt);
+    }
+
+    validContracts.forEach((contract) => {
       const opt = document.createElement('option');
       opt.value = contract.id;
       opt.textContent = contract.name;
       selectEl.appendChild(opt);
     });
+
+    if (!value && validContracts.length === 1) {
+      value = validContracts[0].id;
+      if (selectEl === invoiceLineContractSelect && state.invoiceLineForm && state.invoiceLineForm.draft) {
+        state.invoiceLineForm.draft.contract_id = value;
+      }
+      if (selectEl === invoiceDefaultContractSelect && state.invoiceDefaultForm && state.invoiceDefaultForm.draft) {
+        state.invoiceDefaultForm.draft.contract_id = value;
+      }
+    }
+
     selectEl.value = value;
+
+    if (selectEl === invoiceLineContractSelect) {
+      populateInvoiceLineTemplateOptions();
+    }
+    if (selectEl === invoiceDefaultContractSelect) {
+      populateInvoiceDefaultTemplateOptions();
+    }
   }
 
   function getHourTypeName(hourTypeId) {
@@ -16529,23 +16943,35 @@ function getCachedIncomeSummary(monthKey) {
       amount: baseDraft && baseDraft.amount != null ? baseDraft.amount : '',
       hour_type_id: baseDraft && baseDraft.hour_type_id ? baseDraft.hour_type_id : '',
       contract_id: baseDraft && baseDraft.contract_id ? baseDraft.contract_id : '',
-      source_default_id: baseDraft && baseDraft.source_default_id ? baseDraft.source_default_id : ''
+      source_default_id: baseDraft && baseDraft.source_default_id ? baseDraft.source_default_id : '',
+      amount_mode: baseDraft && baseDraft.amount_mode ? baseDraft.amount_mode : '',
+      amount_provided: baseDraft && baseDraft.amount_provided ? baseDraft.amount_provided : false
     }, {});
-    const amountMode = determineInvoiceLineAmountMode(draft);
+    const amountMode = draft.amount_mode ? draft.amount_mode : determineInvoiceLineAmountMode(draft);
     state.invoiceLineForm = {
       mode: mode,
       editingId: mode === 'edit' ? draft.id : null,
       draft: draft,
       amountMode: amountMode
     };
+    console.log('[Invoice Line Form Open]', {
+      mode,
+      draft,
+      amountMode
+    });
     ensureInvoiceFormOptions();
     mountInvoiceLineFormForMode();
     applyInvoiceLineDraftToForm(draft);
     if (invoiceLineForm) invoiceLineForm.style.display = 'block';
   }
 
+  function getDefaultInvoiceAmountMode() {
+    const templateEnabled = getFeatureFlag('enable_contract_line_item_templates') && getFeatureFlag('enable_invoices');
+    return templateEnabled ? 'contract_template' : 'monthly_hour_type';
+  }
+
   function resetInvoiceLineForm() {
-    state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
+    state.invoiceLineForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: getDefaultInvoiceAmountMode() };
     mountInvoiceLineFormForMode();
     if (invoiceLineForm) invoiceLineForm.style.display = 'none';
     updateInvoiceLineAmountModeUI();
@@ -16563,36 +16989,87 @@ function getCachedIncomeSummary(monthKey) {
       if (mode === 'hours') {
         state.invoiceLineForm.draft.amount = '';
         if (invoiceLineAmountInput) invoiceLineAmountInput.value = '';
-      } else {
+      } else if (mode === 'amount') {
         state.invoiceLineForm.draft.hours = '';
         state.invoiceLineForm.draft.hour_type_id = '';
         if (invoiceLineHoursInput) invoiceLineHoursInput.value = '';
         if (invoiceLineHourTypeSelect) invoiceLineHourTypeSelect.value = '';
+      } else if (mode === 'monthly_hour_type') {
+        state.invoiceLineForm.draft.hours = '';
+        state.invoiceLineForm.draft.amount = '';
+        if (invoiceLineHoursInput) invoiceLineHoursInput.value = '';
+        if (invoiceLineAmountInput) invoiceLineAmountInput.value = '';
+      } else if (mode === 'contract_template') {
+        state.invoiceLineForm.draft.hours = '';
+        state.invoiceLineForm.draft.amount = '';
+        if (invoiceLineHoursInput) invoiceLineHoursInput.value = '';
+        if (invoiceLineAmountInput) invoiceLineAmountInput.value = '';
       }
     }
     updateInvoiceLineAmountModeUI();
   }
 
+  function handleInvoiceLineContractChange() {
+    const contractId = invoiceLineContractSelect ? invoiceLineContractSelect.value : '';
+    if (state.invoiceLineForm && state.invoiceLineForm.draft) {
+      state.invoiceLineForm.draft.contract_id = contractId;
+    }
+    populateInvoiceLineTemplateOptions();
+  }
+
+  function handleInvoiceLineTemplateChange() {
+    const templateIndex = invoiceLineTemplateSelect ? invoiceLineTemplateSelect.value : '';
+    if (templateIndex === '') return;
+    const contractId = invoiceLineContractSelect ? invoiceLineContractSelect.value : '';
+    if (!contractId) return;
+    const contract = state.contracts.find(c => c.id === contractId);
+    if (!contract) return;
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    const template = templates[Number(templateIndex)];
+    if (!template) return;
+    const templateAmount = Number(template.amount) || 0;
+    if (invoiceLineDescriptionInput) invoiceLineDescriptionInput.value = template.description || '';
+    if (invoiceLineAmountInput) invoiceLineAmountInput.value = templateAmount;
+    if (state.invoiceLineForm && state.invoiceLineForm.draft) {
+      state.invoiceLineForm.draft.description = template.description || '';
+      state.invoiceLineForm.draft.amount = templateAmount;
+    }
+  }
+
   function determineInvoiceLineAmountMode(draft) {
-    if (!draft) return 'hours';
+    if (!draft) return getDefaultInvoiceAmountMode();
+    if (draft.amount_mode) {
+      return draft.amount_mode;
+    }
     if (draft.hours != null && draft.hours !== '' && Number(draft.hours) > 0) {
       return 'hours';
     }
     if (draft.amount != null && draft.amount !== '' && Number(draft.amount) > 0) {
       return 'amount';
     }
-    return 'hours';
+    return getDefaultInvoiceAmountMode();
   }
 
   function updateInvoiceLineAmountModeUI() {
-    const mode = state.invoiceLineForm && state.invoiceLineForm.amountMode ? state.invoiceLineForm.amountMode : 'hours';
+    const mode = state.invoiceLineForm && state.invoiceLineForm.amountMode ? state.invoiceLineForm.amountMode : getDefaultInvoiceAmountMode();
     if (invoiceLineAmountModeSelect) invoiceLineAmountModeSelect.value = mode;
     const showHours = mode === 'hours';
+    const showMonthlyHourType = mode === 'monthly_hour_type';
+    const showTemplate = mode === 'contract_template';
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
+
     if (invoiceLineContractCol) invoiceLineContractCol.style.display = '';
-    if (invoiceLineAmountCol) invoiceLineAmountCol.style.display = showHours ? 'none' : '';
+    if (invoiceLineAmountCol) invoiceLineAmountCol.style.display = (showHours || showMonthlyHourType || showTemplate) ? 'none' : '';
     if (invoiceLineHoursCol) invoiceLineHoursCol.style.display = showHours ? '' : 'none';
-    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = showHours && hourTypesEnabled ? '' : 'none';
+    if (invoiceLineHourTypeCol) invoiceLineHourTypeCol.style.display = (showHours && hourTypesEnabled) || showMonthlyHourType ? '' : 'none';
+    if (invoiceLineTemplateCol) invoiceLineTemplateCol.style.display = showTemplate ? '' : 'none';
+
     if (invoiceLineHoursInput) {
       if (!showHours) {
         invoiceLineHoursInput.value = '';
@@ -16600,29 +17077,43 @@ function getCachedIncomeSummary(monthKey) {
       invoiceLineHoursInput.disabled = !showHours;
     }
     if (invoiceLineHourTypeSelect) {
-      if (!showHours || !hourTypesEnabled) {
+      if (!showHours && !showMonthlyHourType) {
         invoiceLineHourTypeSelect.value = '';
       }
-      invoiceLineHourTypeSelect.disabled = !showHours || !hourTypesEnabled;
+      invoiceLineHourTypeSelect.disabled = !(showHours && hourTypesEnabled) && !showMonthlyHourType;
     }
     if (invoiceLineAmountInput) {
-      invoiceLineAmountInput.disabled = showHours;
+      const amountReadOnly = showHours || showMonthlyHourType || showTemplate;
+      invoiceLineAmountInput.disabled = amountReadOnly;
+      invoiceLineAmountInput.readOnly = amountReadOnly;
       invoiceLineAmountInput.style.display = showHours ? 'none' : 'block';
-      if (showHours) {
+      if (showHours && !showMonthlyHourType && !showTemplate) {
         invoiceLineAmountInput.value = '';
       }
+    }
+    if (showTemplate) {
+      populateInvoiceLineTemplateOptions();
     }
   }
 
   function determineInvoiceDefaultAmountMode(draft) {
-    if (!draft) return 'hours';
+    if (!draft) return getDefaultInvoiceAmountMode();
+    if (draft.amount_mode === 'monthly_hour_type') {
+      return 'monthly_hour_type';
+    }
+    if (draft.amount_mode === 'contract_template') {
+      return 'contract_template';
+    }
+    if (draft.amount_mode === 'amount') {
+      return 'amount';
+    }
     if (draft.hours != null && draft.hours !== '' && Number(draft.hours) > 0) {
       return 'hours';
     }
     if (draft.amount != null && draft.amount !== '' && Number(draft.amount) > 0) {
       return 'amount';
     }
-    return 'hours';
+    return getDefaultInvoiceAmountMode();
   }
 
   function handleInvoiceDefaultAmountModeChange() {
@@ -16635,25 +17126,73 @@ function getCachedIncomeSummary(monthKey) {
       if (mode === 'hours') {
         state.invoiceDefaultForm.draft.amount = '';
         if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = '';
-      } else {
+      } else if (mode === 'amount') {
         state.invoiceDefaultForm.draft.hours = '';
         state.invoiceDefaultForm.draft.hour_type_id = '';
         if (invoiceDefaultHoursInput) invoiceDefaultHoursInput.value = '';
         if (invoiceDefaultHourTypeSelect) invoiceDefaultHourTypeSelect.value = '';
+      } else if (mode === 'monthly_hour_type') {
+        state.invoiceDefaultForm.draft.hours = '';
+        state.invoiceDefaultForm.draft.amount = '';
+        if (invoiceDefaultHoursInput) invoiceDefaultHoursInput.value = '';
+        if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = '';
+      } else if (mode === 'contract_template') {
+        state.invoiceDefaultForm.draft.hours = '';
+        state.invoiceDefaultForm.draft.amount = '';
+        if (invoiceDefaultHoursInput) invoiceDefaultHoursInput.value = '';
+        if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = '';
       }
     }
     updateInvoiceDefaultAmountModeUI();
   }
 
+  function handleInvoiceDefaultContractChange() {
+    const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
+    if (state.invoiceDefaultForm && state.invoiceDefaultForm.draft) {
+      state.invoiceDefaultForm.draft.contract_id = contractId;
+    }
+    populateInvoiceDefaultTemplateOptions();
+  }
+
+  function handleInvoiceDefaultTemplateChange() {
+    const templateIndex = invoiceDefaultTemplateSelect ? invoiceDefaultTemplateSelect.value : '';
+    if (templateIndex === '') return;
+    const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
+    if (!contractId) return;
+    const contract = state.contracts.find(c => c.id === contractId);
+    if (!contract) return;
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    const template = templates[Number(templateIndex)];
+    if (!template) return;
+    const templateAmount = Number(template.amount) || 0;
+    if (invoiceDefaultDescriptionInput) invoiceDefaultDescriptionInput.value = template.description || '';
+    if (invoiceDefaultAmountInput) invoiceDefaultAmountInput.value = templateAmount;
+    if (state.invoiceDefaultForm && state.invoiceDefaultForm.draft) {
+      state.invoiceDefaultForm.draft.description = template.description || '';
+      state.invoiceDefaultForm.draft.amount = templateAmount;
+    }
+  }
+
   function updateInvoiceDefaultAmountModeUI() {
-    const mode = state.invoiceDefaultForm && state.invoiceDefaultForm.amountMode ? state.invoiceDefaultForm.amountMode : 'hours';
+    const mode = state.invoiceDefaultForm && state.invoiceDefaultForm.amountMode ? state.invoiceDefaultForm.amountMode : getDefaultInvoiceAmountMode();
     if (invoiceDefaultAmountModeSelect) invoiceDefaultAmountModeSelect.value = mode;
     const showHours = mode === 'hours';
+    const showMonthlyHourType = mode === 'monthly_hour_type';
+    const showTemplate = mode === 'contract_template';
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes && state.hourTypes.length > 0;
+
     if (invoiceDefaultContractCol) invoiceDefaultContractCol.style.display = '';
-    if (invoiceDefaultAmountCol) invoiceDefaultAmountCol.style.display = showHours ? 'none' : '';
+    if (invoiceDefaultAmountCol) invoiceDefaultAmountCol.style.display = (showHours || showMonthlyHourType || showTemplate) ? 'none' : '';
     if (invoiceDefaultHoursCol) invoiceDefaultHoursCol.style.display = showHours ? '' : 'none';
-    if (invoiceDefaultHourTypeCol) invoiceDefaultHourTypeCol.style.display = showHours && hourTypesEnabled ? '' : 'none';
+    if (invoiceDefaultHourTypeCol) invoiceDefaultHourTypeCol.style.display = (showHours && hourTypesEnabled) || showMonthlyHourType ? '' : 'none';
+    if (invoiceDefaultTemplateCol) invoiceDefaultTemplateCol.style.display = showTemplate ? '' : 'none';
+
     if (invoiceDefaultHoursInput) {
       if (!showHours) {
         invoiceDefaultHoursInput.value = '';
@@ -16661,24 +17200,75 @@ function getCachedIncomeSummary(monthKey) {
       invoiceDefaultHoursInput.disabled = !showHours;
     }
     if (invoiceDefaultHourTypeSelect) {
-      if (!showHours || !hourTypesEnabled) {
+      if (!showHours && !showMonthlyHourType) {
         invoiceDefaultHourTypeSelect.value = '';
       }
-      invoiceDefaultHourTypeSelect.disabled = !showHours || !hourTypesEnabled;
+      invoiceDefaultHourTypeSelect.disabled = !(showHours && hourTypesEnabled) && !showMonthlyHourType;
     }
     if (invoiceDefaultAmountInput) {
-      invoiceDefaultAmountInput.disabled = showHours;
+      const amountReadOnly = showHours || showMonthlyHourType || showTemplate;
+      invoiceDefaultAmountInput.disabled = amountReadOnly;
+      invoiceDefaultAmountInput.readOnly = amountReadOnly;
       invoiceDefaultAmountInput.style.display = showHours ? 'none' : 'block';
-      if (showHours) {
+      if (showHours && !showMonthlyHourType && !showTemplate) {
         invoiceDefaultAmountInput.value = '';
       }
     }
+    if (showTemplate) {
+      populateInvoiceDefaultTemplateOptions();
+    }
+  }
+
+  function populateInvoiceLineTemplateOptions() {
+    if (!invoiceLineTemplateSelect) return;
+    const contractId = invoiceLineContractSelect ? invoiceLineContractSelect.value : '';
+    invoiceLineTemplateSelect.innerHTML = '<option value="">Select a template...</option>';
+    if (!contractId) return;
+    const contract = state.contracts.find(c => c.id === contractId);
+    if (!contract) return;
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    templates.forEach((template, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      const amount = Number(template.amount) || 0;
+      option.textContent = `${template.label} ($${amount.toFixed(2)})`;
+      invoiceLineTemplateSelect.appendChild(option);
+    });
+  }
+
+  function populateInvoiceDefaultTemplateOptions() {
+    if (!invoiceDefaultTemplateSelect) return;
+    const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
+    invoiceDefaultTemplateSelect.innerHTML = '<option value="">Select a template...</option>';
+    if (!contractId) return;
+    const contract = state.contracts.find(c => c.id === contractId);
+    if (!contract) return;
+    let templates = [];
+    try {
+      templates = contract.line_item_templates_json ? JSON.parse(contract.line_item_templates_json) : [];
+      if (!Array.isArray(templates)) templates = [];
+    } catch (e) {
+      templates = [];
+    }
+    templates.forEach((template, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      const amount = Number(template.amount) || 0;
+      option.textContent = `${template.label} ($${amount.toFixed(2)})`;
+      invoiceDefaultTemplateSelect.appendChild(option);
+    });
   }
 
   function applyInvoiceLineDraftToForm(draft) {
     ensureInvoiceFormOptions();
     if (state.invoiceLineForm) {
-      const inferredMode = state.invoiceLineForm.amountMode || determineInvoiceLineAmountMode(draft);
+      const inferredMode = (draft && draft.amount_mode) ? draft.amount_mode : determineInvoiceLineAmountMode(draft);
       state.invoiceLineForm.amountMode = inferredMode;
     }
     updateInvoiceLineAmountModeUI();
@@ -16704,7 +17294,7 @@ function getCachedIncomeSummary(monthKey) {
     const lineDate = invoiceLineDateInput.value || '';
     const description = invoiceLineDescriptionInput.value.trim();
     const hoursValue = amountMode === 'hours' && invoiceLineHoursInput && invoiceLineHoursInput.value !== '' ? Number(invoiceLineHoursInput.value) : null;
-    const amountProvided = amountMode === 'amount' && invoiceLineAmountInput && invoiceLineAmountInput.value !== '';
+    const amountProvided = (amountMode === 'amount' || amountMode === 'contract_template') && invoiceLineAmountInput && invoiceLineAmountInput.value !== '';
     const amountValue = amountProvided ? Number(invoiceLineAmountInput.value) : null;
     const hourTypeId = invoiceLineHourTypeSelect ? invoiceLineHourTypeSelect.value : '';
     const contractId = invoiceLineContractSelect ? invoiceLineContractSelect.value : '';
@@ -16715,6 +17305,7 @@ function getCachedIncomeSummary(monthKey) {
       hours: hoursValue,
       amount: amountValue,
       amountProvided: amountProvided,
+      amountMode: amountMode,
       hour_type_id: hourTypeId,
       contract_id: contractId,
       source_default_id: base.source_default_id || ''
@@ -16722,22 +17313,47 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function handleInvoiceLineSave(event) {
+    console.log('[Invoice Line Save] Starting save process');
     if (event) event.preventDefault();
-    if (!state.invoiceDetail || !state.invoiceDetail.invoice) return;
+    if (!state.invoiceDetail || !state.invoiceDetail.invoice) {
+      console.log('[Invoice Line Save] No invoice detail or invoice found');
+      return;
+    }
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and cannot be edited.', 'warn');
+      resetInvoiceLineForm();
+      return;
+    }
     const draft = buildInvoiceLineDraftFromForm();
-    if (!draft) return;
+    console.log('[Invoice Line Save] Draft built:', draft);
+    if (!draft) {
+      console.log('[Invoice Line Save] Draft is null, returning');
+      return;
+    }
     if (!draft.description) {
+      console.log('[Invoice Line Save] Description missing');
       setStatus('Line item description is required.', 'warn');
       return;
     }
     if (!draft.contract_id) {
+      console.log('[Invoice Line Save] Contract ID missing');
       setStatus('Select a contract for this line item.', 'warn');
       return;
     }
     const hasHours = draft.hours != null && draft.hours !== '' && Number.isFinite(Number(draft.hours)) && Number(draft.hours) > 0;
     const amountInputValid = draft.amountProvided && draft.amount != null && !Number.isNaN(Number(draft.amount));
-    if (!hasHours && !amountInputValid) {
+    const isMonthlyHourType = draft.amountMode === 'monthly_hour_type';
+    const isTemplate = draft.amountMode === 'contract_template';
+    if (!hasHours && !amountInputValid && !isMonthlyHourType && !isTemplate) {
       setStatus('Enter hours to auto-calculate or provide a raw amount.', 'warn');
+      return;
+    }
+    if (isMonthlyHourType && !draft.hour_type_id) {
+      setStatus('Select an hour type for monthly total calculation.', 'warn');
+      return;
+    }
+    if (isTemplate && (!Number.isFinite(draft.amount) || draft.amount < 0)) {
+      setStatus('Select a template to set the amount.', 'warn');
       return;
     }
     if (draft.amountProvided && (draft.amount == null || Number.isNaN(Number(draft.amount)))) {
@@ -16753,29 +17369,43 @@ function getCachedIncomeSummary(monthKey) {
         setStatus('Contract rate missing. Enter an amount manually.', 'warn');
         return;
       }
+    } else if (isMonthlyHourType) {
+      if (!(contractRate > 0)) {
+        setStatus('Contract rate is required for monthly hour type calculation.', 'warn');
+        return;
+      }
+      amount = 0;
+    } else if (isTemplate) {
+      amount = draft.amount ? Number(draft.amount) : 0;
     }
     draft.hours = hasHours ? Number(draft.hours) : null;
-    if (amount === null || Number.isNaN(amount)) {
+    if (!isMonthlyHourType && !isTemplate && (amount === null || Number.isNaN(amount))) {
       setStatus('Enter a valid amount for this line item.', 'warn');
       return;
     }
     amount = Math.round(Number(amount) * 100) / 100;
+    console.log('[Invoice Line Save] Final amount calculated:', amount);
     const lineItems = state.invoiceDetail.lineItems || [];
     const hourTypeName = draft.hour_type_id ? getHourTypeName(draft.hour_type_id) : '';
+    const contractName = draft.contract_id ? getContractName(draft.contract_id) : '';
     const payload = {
       invoice_id: state.invoiceDetail.invoice.id,
       line_date: draft.line_date || state.invoiceDetail.invoice.invoice_date || todayIso(),
       description: draft.description,
       hours: draft.hours != null ? Number(draft.hours) : 0,
       amount: Number(amount),
+      amount_mode: draft.amountMode || 'hours',
       hour_type_id: draft.hour_type_id || '',
       hour_type_name_snapshot: hourTypeName,
       contract_id: draft.contract_id || '',
+      contract_name_snapshot: contractName,
       source_default_id: draft.source_default_id || ''
     };
     payload.amount_provided = draft.amountProvided === true || !hasHours;
     const isEdit = state.invoiceLineForm.mode === 'edit' && state.invoiceLineForm.editingId;
     if (isEdit) payload.id = state.invoiceLineForm.editingId;
+    console.log('[Invoice Line Save] Payload prepared:', payload);
+    console.log('[Invoice Line Save] Is edit mode:', isEdit);
     const tempId = isEdit ? state.invoiceLineForm.editingId : generateTempId('invoice-line');
     const position = isEdit
       ? (lineItems.find((item) => item.id === state.invoiceLineForm.editingId)?.position || 0)
@@ -16790,15 +17420,16 @@ function getCachedIncomeSummary(monthKey) {
       description: payload.description,
       hours: payload.hours,
       amount: payload.amount,
+      amount_mode: payload.amount_mode,
+      amount_provided: payload.amount_provided,
       hour_type_id: payload.hour_type_id,
       hour_type_name_snapshot: hourTypeName,
       contract_id: payload.contract_id,
-      contract_name_snapshot: getContractName(payload.contract_id),
+      contract_name_snapshot: contractName,
       timesheet_entry_id: isEdit ? (lineItems.find((item) => item.id === payload.id)?.timesheet_entry_id || '') : '',
       entry_modified: false,
       entry_state: null,
       source_default_id: payload.source_default_id || '',
-      amount_provided: payload.amount_provided ? true : false,
       entry_pending: hasHours
     };
     if (isEdit) {
@@ -16807,19 +17438,23 @@ function getCachedIncomeSummary(monthKey) {
       mergeLineItemIntoDetail(optimisticItem);
       updateInvoiceSummaryAndRender();
       setStatus('Saving line item...', 'warn');
+      console.log('[Invoice Line Save] Calling api_upsertInvoiceLineItem (edit mode) with payload:', payload);
       google.script.run
         .withSuccessHandler((saved) => {
+          console.log('[Invoice Line Save] SUCCESS (edit mode) - Received:', saved);
           if (saved && saved.id) {
             mergeLineItemIntoDetail(saved);
             updateInvoiceSummaryAndRender();
             setStatus('Line item saved', 'success');
           } else if (previousSnapshot) {
+            console.log('[Invoice Line Save] No valid saved object, reverting to snapshot');
             mergeLineItemIntoDetail(previousSnapshot);
             updateInvoiceSummaryAndRender();
             setStatus('Failed to save line item', 'error');
           }
         })
-        .withFailureHandler(() => {
+        .withFailureHandler((error) => {
+          console.error('[Invoice Line Save] FAILURE (edit mode):', error);
           if (previousSnapshot) {
             mergeLineItemIntoDetail(previousSnapshot);
             updateInvoiceSummaryAndRender();
@@ -16831,8 +17466,10 @@ function getCachedIncomeSummary(monthKey) {
       mergeLineItemIntoDetail(optimisticItem);
       updateInvoiceSummaryAndRender();
       setStatus('Saving line item...', 'warn');
+      console.log('[Invoice Line Save] Calling api_upsertInvoiceLineItem (create mode) with payload:', payload);
       google.script.run
         .withSuccessHandler((saved) => {
+          console.log('[Invoice Line Save] SUCCESS (create mode) - Received:', saved);
           if (saved && saved.id) {
             if (tempId && tempId !== saved.id) {
               removeLineItemFromDetail(tempId);
@@ -16841,18 +17478,21 @@ function getCachedIncomeSummary(monthKey) {
             updateInvoiceSummaryAndRender();
             setStatus('Line item saved', 'success');
           } else {
+            console.log('[Invoice Line Save] No valid saved object, removing temp item');
             removeLineItemFromDetail(tempId);
             updateInvoiceSummaryAndRender();
             setStatus('Failed to save line item', 'error');
           }
         })
-        .withFailureHandler(() => {
+        .withFailureHandler((error) => {
+          console.error('[Invoice Line Save] FAILURE (create mode):', error);
           removeLineItemFromDetail(tempId);
           updateInvoiceSummaryAndRender();
           setStatus('Failed to save line item', 'error');
         })
         .api_upsertInvoiceLineItem(payload);
     }
+    console.log('[Invoice Line Save] Resetting form');
     resetInvoiceLineForm();
   }
 
@@ -16862,6 +17502,10 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function handleInvoiceLineItemAction(event) {
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and line items are locked.', 'warn');
+      return;
+    }
     const button = event.target instanceof HTMLElement ? event.target.closest('button[data-action]') : null;
     if (!button) return;
     const action = button.dataset.action;
@@ -16886,6 +17530,10 @@ function getCachedIncomeSummary(monthKey) {
 
   async function handleInvoiceLineDelete(lineId) {
     if (!state.invoiceDetail) return;
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and line items are locked.', 'warn');
+      return;
+    }
     const lineItem = state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === lineId) : null;
     if (!lineItem) return;
     const confirmed = await customConfirm('Delete this line item?', { danger: true, okText: 'Delete' });
@@ -16913,6 +17561,10 @@ function getCachedIncomeSummary(monthKey) {
 
   function handleInvoiceLineRefresh(lineId) {
     if (!state.invoiceDetail) return;
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and line items are locked.', 'warn');
+      return;
+    }
     const lineItem = state.invoiceDetail.lineItems ? state.invoiceDetail.lineItems.find((item) => item.id === lineId) : null;
     if (!lineItem) return;
     setStatus('Refreshing entry status...', 'info');
@@ -17011,6 +17663,10 @@ function getCachedIncomeSummary(monthKey) {
       setStatus('Select an invoice before adding a default line.', 'warn');
       return;
     }
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and cannot be modified.', 'warn');
+      return;
+    }
     const def = state.invoiceDefaultMap[defaultId];
     if (!def) {
       setStatus('Default line not found', 'error');
@@ -17040,7 +17696,7 @@ function getCachedIncomeSummary(monthKey) {
         hour_type_id: '',
         contract_id: ''
       },
-      amountMode: 'hours'
+      amountMode: getDefaultInvoiceAmountMode()
     };
     ensureInvoiceFormOptions();
     renderInvoiceDefaults();
@@ -17048,7 +17704,7 @@ function getCachedIncomeSummary(monthKey) {
 
   function handleInvoiceDefaultCancel(event) {
     if (event) event.preventDefault();
-    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: 'hours' };
+    state.invoiceDefaultForm = { mode: 'hidden', editingId: null, draft: {}, amountMode: getDefaultInvoiceAmountMode() };
     renderInvoiceDefaults();
   }
 
@@ -17062,19 +17718,22 @@ function getCachedIncomeSummary(monthKey) {
     }
     const description = invoiceDefaultDescriptionInput ? invoiceDefaultDescriptionInput.value : '';
     const amountMode = state.invoiceDefaultForm && state.invoiceDefaultForm.amountMode ? state.invoiceDefaultForm.amountMode : 'hours';
+    const isMonthlyHourType = amountMode === 'monthly_hour_type';
+    const isTemplate = amountMode === 'contract_template';
     const hoursValue = amountMode === 'hours' && invoiceDefaultHoursInput && invoiceDefaultHoursInput.value !== ''
       ? Number(invoiceDefaultHoursInput.value)
       : null;
-    const amountValue = amountMode === 'amount' && invoiceDefaultAmountInput && invoiceDefaultAmountInput.value !== ''
+    const amountValue = (amountMode === 'amount' || isTemplate) && invoiceDefaultAmountInput && invoiceDefaultAmountInput.value !== ''
       ? Number(invoiceDefaultAmountInput.value)
       : null;
-    const hourTypeId = amountMode === 'hours' && invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : '';
+    const hourTypeId = (amountMode === 'hours' || isMonthlyHourType) && invoiceDefaultHourTypeSelect ? invoiceDefaultHourTypeSelect.value : '';
     const hourTypeName = hourTypeId ? getHourTypeName(hourTypeId) : '';
     const contractId = invoiceDefaultContractSelect ? invoiceDefaultContractSelect.value : '';
     if (!contractId) {
       setStatus('Select a contract for this default line.', 'warn');
       return;
     }
+    const contractName = contractId ? getContractName(contractId) : '';
     const contractRate = getContractRate(contractId);
     let resolvedHours = 0;
     let amount = null;
@@ -17089,6 +17748,24 @@ function getCachedIncomeSummary(monthKey) {
       }
       resolvedHours = Number(hoursValue);
       amount = Math.round(resolvedHours * contractRate * 100) / 100;
+    } else if (isMonthlyHourType) {
+      if (!hourTypeId) {
+        setStatus('Select an hour type for monthly total calculation.', 'warn');
+        return;
+      }
+      if (!(contractRate > 0)) {
+        setStatus('Contract rate is required for monthly hour type calculation.', 'warn');
+        return;
+      }
+      amount = 0;
+      resolvedHours = 0;
+    } else if (isTemplate) {
+      if (amountValue == null || !Number.isFinite(amountValue) || amountValue < 0) {
+        setStatus('Select a template to set the amount.', 'warn');
+        return;
+      }
+      amount = Math.round(Number(amountValue) * 100) / 100;
+      resolvedHours = 0;
     } else {
       if (amountValue == null || !Number.isFinite(amountValue) || amountValue <= 0) {
         setStatus('Enter a valid amount for this default.', 'warn');
@@ -17096,7 +17773,7 @@ function getCachedIncomeSummary(monthKey) {
       }
       amount = Math.round(Number(amountValue) * 100) / 100;
     }
-    if (amount == null || Number.isNaN(amount)) {
+    if (!isMonthlyHourType && !isTemplate && (amount == null || Number.isNaN(amount))) {
       setStatus('Enter a valid amount for this default.', 'warn');
       return;
     }
@@ -17105,9 +17782,11 @@ function getCachedIncomeSummary(monthKey) {
       description: description,
       hours: amountMode === 'hours' ? resolvedHours : 0,
       amount: Number(amount),
-      hour_type_id: amountMode === 'hours' ? (hourTypeId || '') : '',
-      hour_type_name_snapshot: amountMode === 'hours' ? hourTypeName : '',
-      contract_id: contractId || ''
+      amount_mode: amountMode,
+      hour_type_id: (amountMode === 'hours' || isMonthlyHourType) ? (hourTypeId || '') : '',
+      hour_type_name_snapshot: (amountMode === 'hours' || isMonthlyHourType) ? hourTypeName : '',
+      contract_id: contractId || '',
+      contract_name_snapshot: contractName
     };
     const isEdit = state.invoiceDefaultForm.mode === 'edit' && state.invoiceDefaultForm.editingId;
     if (isEdit) payload.id = state.invoiceDefaultForm.editingId;
@@ -17263,6 +17942,10 @@ function getCachedIncomeSummary(monthKey) {
 
   function handleInvoiceAddLine(event) {
     if (event) event.preventDefault();
+    if (invoiceIsLocked()) {
+      setStatus('This invoice has been published and line items are locked.', 'warn');
+      return;
+    }
     openInvoiceLineForm('create', {});
   }
 

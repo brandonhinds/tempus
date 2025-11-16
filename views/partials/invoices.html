@@ -78,8 +78,10 @@
             <div class="ts-col" style="flex:0 0 180px;">
               <label for="invoice-line-amount-mode">Amount input method</label>
               <select id="invoice-line-amount-mode">
-                <option value="hours">Number of Hours</option>
+                <option value="contract_template" id="invoice-line-amount-mode-template" style="display:none;">Contract Template</option>
+                <option value="monthly_hour_type">Total Hours</option>
                 <option value="amount">Raw Amount</option>
+                <option value="hours">Number of Hours</option>
               </select>
             </div>
           </div>
@@ -94,11 +96,17 @@
             </div>
             <div class="ts-col" id="invoice-line-hours-col" style="flex:1 1 0; min-width:140px;">
               <label for="invoice-line-hours">Hours</label>
-              <input id="invoice-line-hours" type="number" min="0" step="0.25" />
+              <input id="invoice-line-hours" type="number" min="0" step="0.0001" />
             </div>
             <div class="ts-col" id="invoice-line-hour-type-col" style="flex:1 1 0; min-width:160px;">
               <label for="invoice-line-hour-type">Hour type</label>
               <select id="invoice-line-hour-type"></select>
+            </div>
+            <div class="ts-col" id="invoice-line-template-col" style="flex:1 1 0; min-width:200px; display:none;">
+              <label for="invoice-line-template">Template</label>
+              <select id="invoice-line-template">
+                <option value="">Select a template...</option>
+              </select>
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
@@ -157,8 +165,10 @@
           <div class="ts-col" style="flex:0 0 180px;">
             <label for="invoice-default-amount-mode">Amount input method</label>
             <select id="invoice-default-amount-mode">
-              <option value="hours">Number of Hours</option>
+              <option value="contract_template" id="invoice-default-amount-mode-template" style="display:none;">Contract Template</option>
+              <option value="monthly_hour_type">Total Hours</option>
               <option value="amount">Raw Amount</option>
+              <option value="hours">Number of Hours</option>
             </select>
           </div>
         </div>
@@ -173,11 +183,17 @@
           </div>
           <div class="ts-col" id="invoice-default-hours-col" style="flex:1 1 0; min-width:140px;">
             <label for="invoice-default-hours">Hours</label>
-            <input id="invoice-default-hours" type="number" min="0" step="0.25" />
+            <input id="invoice-default-hours" type="number" min="0" step="0.0001" />
           </div>
           <div class="ts-col" id="invoice-default-hour-type-col" style="flex:1 1 0; min-width:160px;">
             <label for="invoice-default-hour-type">Hour type</label>
             <select id="invoice-default-hour-type"></select>
+          </div>
+          <div class="ts-col" id="invoice-default-template-col" style="flex:1 1 0; min-width:200px; display:none;">
+            <label for="invoice-default-template">Template</label>
+            <select id="invoice-default-template">
+              <option value="">Select a template...</option>
+            </select>
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px;">

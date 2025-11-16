@@ -87,7 +87,7 @@ function getOrCreateSheet(name) {
         'updated_at'
       ]]);
     } else if (name === 'invoice_line_items') {
-      sh.getRange(1,1,1,19).setValues([[
+      sh.getRange(1,1,1,20).setValues([[
         'id',
         'invoice_id',
         'is_default',
@@ -99,6 +99,7 @@ function getOrCreateSheet(name) {
         'hour_type_id',
         'hour_type_name_snapshot',
         'amount',
+        'amount_mode',
         'contract_id',
         'contract_name_snapshot',
         'timesheet_entry_id',

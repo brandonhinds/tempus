@@ -110,7 +110,9 @@ Contracts describe a billable agreement and govern whether time can be logged fo
 | `end_date` | string (ISO) | Last day the contract is valid. Blank indicates open-ended. | `2025-12-31` |
 | `hourly_rate` | number | Billing rate in the sheet's currency units. | `125.00` |
 | `total_hours` | number | Optional cap on total hours allowed for the engagement. `0` means unlimited. | `160.0` |
+| `standard_hours_per_day` | number | Expected hours per working day, used for projections and capacity calculations. Defaults to `7.5`. | `7.5` |
 | `include_weekends` | boolean/string | `TRUE`/`FALSE` indicating whether weekends should count toward expected averages and projections. | `FALSE` |
+| `line_item_templates_json` | string (JSON) | JSON array of reusable line item templates with predefined descriptions and amounts. | `[{"label":"Standard","description":"Standard assessment","amount":150}]` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the contract row was created server-side. | `2024-05-06T10:15:00Z` |
 
 ### Suggested improvements
@@ -281,10 +283,11 @@ Persists both invoice-specific line items and shared defaults. Defaults live alo
 | `position` | number | Order index (per invoice or default list). | `3` |
 | `line_date` | string (ISO date) | Date associated with the line item. | `2025-05-30` |
 | `description` | string | Service description shown on the invoice. | `Consulting services` |
-| `hours` | number | Optional hours quantity (decimal). | `7.5` |
+| `hours` | number | Optional hours quantity (decimal, up to 4 decimal places). | `7.5` |
 | `hour_type_id` | string | References the hour type applied when creating a linked timesheet entry. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
 | `hour_type_name_snapshot` | string | Cached hour type name for rendering even if the original name changes. | `Work` |
 | `amount` | number | Final amount displayed for the line; auto-calculated from contract × hours when left blank. | `1350` |
+| `amount_mode` | string | Calculation method: `hours` (manual hours × rate), `amount` (raw amount), or `monthly_hour_type` (monthly total of hour type × rate). Defaults to `hours`. | `hours` |
 | `contract_id` | string | Required contract id linked to the timesheet entry or billing amount. | `c3fe8b9e-07b4-4625-9b51-62b99a6189e8` |
 | `contract_name_snapshot` | string | Cached contract name for display. | `Acme Retainer` |
 | `timesheet_entry_id` | string | When hours > 0, the associated basic timesheet entry id. Blank for defaults or amount-only lines. | `3f2a7cd5-4d46-4d03-8fbc-2a32d31b33aa` |
@@ -299,6 +302,8 @@ Persists both invoice-specific line items and shared defaults. Defaults live alo
 - When `hours` and `hour_type_id` are supplied we create or update a `timesheet_entries` row immediately. The latest entry snapshot is stored so the UI can flag when the entry diverges.
 - Defaults reuse the same schema so inserting a default simply copies the template fields into a new invoice row while keeping a `source_default_id` link for auditing.
 - Line rate placeholders in generated documents are derived on the fly from `amount ÷ hours` rather than stored in the sheet.
+- `contract_name_snapshot` is refreshed from the Contracts sheet each time we recalculate invoice lines so the UI always shows a friendly contract name even if the ID changes.
+- Rows with `amount_mode = 'hours'` or `amount_mode = 'monthly_hour_type'` stay dynamic while the parent invoice is a draft; the backend recomputes `amount` on every load. As soon as the invoice status becomes `generated` (or the document is published) the row is recalculated one last time and switched to `amount_mode = 'amount'` so the values remain locked.
 
 ## public_holidays
 Stores fetched public holiday data from the Nager.Date API. This sheet caches holiday information to minimize API calls and allows offline access to previously fetched holidays.

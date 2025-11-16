@@ -14,6 +14,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `expected_monthly_hours` | Disabled | Shows a calendar badge that projects contract hours for the active month and highlights whether you are ahead or behind the target. |
 | `contract_rate_preview` | Disabled | Enables the dedicated rate preview page for modeling hourly rate changes against historical contract hours. |
 | `enable_invoices` | Disabled | Enables invoice management, default line items, and document generation from a Google Docs template. |
+| `enable_contract_line_item_templates` | Disabled | Allows defining reusable line item templates with predefined descriptions and amounts on each contract. Only visible when invoices are enabled. |
 | `xero_payroll_helper` | Disabled | Adds a modal that slices the active month into Xero's fixed weekly ranges with cumulative hour totals. |
 | `myob_payroll_helper` | Disabled | Adds a modal that groups the active month into weekly MYOB-ready totals with a monthly cross-check. |
 | `enable_monthly_print_view` | Disabled | Adds a printable calendar showing hour breakdowns by type that fits on one A4 page for timesheets or records. |

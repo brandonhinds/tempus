@@ -3,6 +3,28 @@ var INVOICE_SHEET_NAME = 'invoices';
 var INVOICE_LINE_ITEM_SHEET_NAME = 'invoice_line_items';
 var INVOICE_CACHE_PREFIX = 'invoices_v1_';
 var INVOICE_DEFAULT_CACHE_KEY = 'invoice_defaults_v1';
+var INVOICE_LINE_ITEM_HEADERS = [
+  'id',
+  'invoice_id',
+  'is_default',
+  'default_label',
+  'position',
+  'line_date',
+  'description',
+  'hours',
+  'hour_type_id',
+  'hour_type_name_snapshot',
+  'amount',
+  'amount_mode',
+  'contract_id',
+  'contract_name_snapshot',
+  'timesheet_entry_id',
+  'entry_snapshot_json',
+  'last_synced_at',
+  'source_default_id',
+  'created_at',
+  'updated_at'
+];
 var INVOICE_SHEET_TZ = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
 var INVOICE_HOUR_TYPE_LOOKUP_CACHE = 'invoice_hour_type_lookup';
 var INVOICE_CONTRACT_LOOKUP_CACHE = 'invoice_contract_lookup';
@@ -74,8 +96,185 @@ function getInvoiceSheet() {
   return getOrCreateSheet(INVOICE_SHEET_NAME);
 }
 
+function ensureInvoiceLineItemSchema(sh) {
+  ensureInvoiceLineItemSchemaInternal(sh, false);
+}
+
+function ensureInvoiceLineItemSchemaInternal(sh, attemptedRepair) {
+  if (!sh) return;
+
+  var expectedHeaders = INVOICE_LINE_ITEM_HEADERS;
+  var expectedColumnCount = expectedHeaders.length;
+
+  function resetHeaders() {
+    var maxColumns = sh.getMaxColumns();
+    if (maxColumns < expectedColumnCount) {
+      sh.insertColumnsAfter(maxColumns, expectedColumnCount - maxColumns);
+    } else if (maxColumns > expectedColumnCount) {
+      sh.deleteColumns(expectedColumnCount + 1, maxColumns - expectedColumnCount);
+    }
+    sh.getRange(1, 1, 1, expectedColumnCount).setValues([expectedHeaders]);
+  }
+
+  var lastRow = sh.getLastRow();
+  var lastColumn = sh.getLastColumn();
+
+  if (lastRow === 0 || lastColumn === 0) {
+    resetHeaders();
+    return;
+  }
+
+  var headerRange = sh.getRange(1, 1, 1, lastColumn);
+  var headers = headerRange.getValues()[0];
+  var normalizedHeaders = headers.map(function(value) {
+    return String(value || '').trim();
+  });
+  Logger.log('[Invoice Schema] Current headers: ' + JSON.stringify(normalizedHeaders));
+  var headerOrderMatches = expectedHeaders.every(function(name, idx) {
+    return normalizedHeaders[idx] === name;
+  });
+  var hasHeaderContent = normalizedHeaders.some(function(value) { return value !== ''; });
+
+  if (!hasHeaderContent) {
+    resetHeaders();
+    return;
+  }
+
+  var hasDataRows = lastRow > 1;
+  var amountIndex = normalizedHeaders.indexOf('amount');
+  var amountModeIndex = normalizedHeaders.indexOf('amount_mode');
+
+  if (amountIndex === -1 && amountModeIndex !== -1) {
+    sh.insertColumnBefore(amountModeIndex + 1);
+    amountIndex = amountModeIndex;
+    amountModeIndex = amountModeIndex + 1;
+    sh.getRange(1, amountIndex + 1).setValue('amount');
+    var dataRowsToFill = sh.getLastRow() - 1;
+    if (dataRowsToFill > 0) {
+      var zeroRows = [];
+      for (var z = 0; z < dataRowsToFill; z++) {
+        zeroRows.push([0]);
+      }
+      sh.getRange(2, amountIndex + 1, dataRowsToFill, 1).setValues(zeroRows);
+    }
+    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
+    headers = headerRange.getValues()[0];
+    normalizedHeaders = headers.map(function(value) {
+      return String(value || '').trim();
+    });
+  }
+
+  if (amountIndex !== -1 && amountModeIndex === -1) {
+    var insertPosition = amountIndex + 1; // 1-based column for amount
+    sh.insertColumnAfter(insertPosition);
+    var amountModeColumn = insertPosition + 1;
+    sh.getRange(1, amountModeColumn).setValue('amount_mode');
+    var dataRows = sh.getLastRow() - 1;
+    if (dataRows > 0) {
+      var defaultValues = [];
+      for (var i = 0; i < dataRows; i++) {
+        defaultValues.push(['hours']);
+      }
+      sh.getRange(2, amountModeColumn, dataRows, 1).setValues(defaultValues);
+    }
+    headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
+    headers = headerRange.getValues()[0];
+    normalizedHeaders = headers.map(function(value) {
+      return String(value || '').trim();
+    });
+  }
+
+  var headerSet = {};
+  var hasDuplicates = false;
+  normalizedHeaders.forEach(function(header) {
+    if (!header) return;
+    if (headerSet[header]) {
+      hasDuplicates = true;
+    } else {
+      headerSet[header] = true;
+    }
+  });
+  var missingHeaders = expectedHeaders.filter(function(header) {
+    return normalizedHeaders.indexOf(header) === -1;
+  });
+
+  var hasExtraColumns = lastColumn > expectedColumnCount;
+
+  if ((missingHeaders.length || hasDuplicates || hasExtraColumns) && !hasDataRows) {
+    resetHeaders();
+    return;
+  }
+
+  if (missingHeaders.length || hasDuplicates || hasExtraColumns || (!headerOrderMatches && hasDataRows)) {
+    if (!attemptedRepair && hasDataRows) {
+      rebuildInvoiceLineItemSheet(sh, expectedHeaders, normalizedHeaders);
+      ensureInvoiceLineItemSchemaInternal(sh, true);
+      return;
+    }
+    throw new Error('SCHEMA ERROR: invoice_line_items sheet is corrupted. Please delete the sheet and refresh the page to recreate it with the correct schema.');
+  }
+}
+
+function rebuildInvoiceLineItemSheet(sh, expectedHeaders, normalizedHeaders) {
+  var values = sh.getDataRange().getValues();
+  var expectedColumnCount = expectedHeaders.length;
+  if (!values.length) {
+    ensureInvoiceLineItemSheetCapacity(sh, 1, expectedColumnCount);
+    sh.clearContents();
+    sh.getRange(1, 1, 1, expectedColumnCount).setValues([expectedHeaders]);
+    return;
+  }
+
+  var headerMap = {};
+  for (var i = 0; i < normalizedHeaders.length; i++) {
+    var key = normalizedHeaders[i];
+    if (!key) continue;
+    if (headerMap.hasOwnProperty(key)) continue;
+    headerMap[key] = i;
+  }
+
+  var rebuilt = [];
+  rebuilt.push(expectedHeaders);
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex++) {
+    var row = values[rowIndex];
+    var newRow = expectedHeaders.map(function(header) {
+      var sourceIdx = headerMap.hasOwnProperty(header) ? headerMap[header] : -1;
+      if (sourceIdx === -1) {
+        return header === 'amount_mode' ? 'hours' : '';
+      }
+      var value = row[sourceIdx];
+      if (value === null || value === undefined || value === '') {
+        return header === 'amount_mode' ? 'hours' : '';
+      }
+      return value;
+    });
+    rebuilt.push(newRow);
+  }
+
+  ensureInvoiceLineItemSheetCapacity(sh, rebuilt.length, expectedColumnCount);
+  var currentMaxColumns = sh.getMaxColumns();
+  if (currentMaxColumns > expectedColumnCount) {
+    sh.deleteColumns(expectedColumnCount + 1, currentMaxColumns - expectedColumnCount);
+  }
+  sh.clearContents();
+  sh.getRange(1, 1, rebuilt.length, expectedColumnCount).setValues(rebuilt);
+}
+
+function ensureInvoiceLineItemSheetCapacity(sh, minRows, minColumns) {
+  var currentRows = sh.getMaxRows();
+  if (currentRows < minRows) {
+    sh.insertRowsAfter(currentRows, minRows - currentRows);
+  }
+  var currentColumns = sh.getMaxColumns();
+  if (currentColumns < minColumns) {
+    sh.insertColumnsAfter(currentColumns, minColumns - currentColumns);
+  }
+}
+
 function getInvoiceLineItemSheet() {
-  return getOrCreateSheet(INVOICE_LINE_ITEM_SHEET_NAME);
+  var sh = getOrCreateSheet(INVOICE_LINE_ITEM_SHEET_NAME);
+  ensureInvoiceLineItemSchema(sh);
+  return sh;
 }
 
 function normalizeInvoiceRow(headers, row) {
@@ -125,6 +324,7 @@ function normalizeLineItemRow(headers, row) {
     hour_type_id: cell('hour_type_id') || '',
     hour_type_name_snapshot: cell('hour_type_name_snapshot') || '',
     amount: amount,
+    amount_mode: cell('amount_mode') || 'hours',
     contract_id: cell('contract_id') || '',
     contract_name_snapshot: cell('contract_name_snapshot') || '',
     timesheet_entry_id: cell('timesheet_entry_id') || '',
@@ -238,7 +438,7 @@ function summarizeInvoiceLineItems(items) {
     totals.totalHours += invoiceParseNumber(items[i].hours, 0);
   }
   totals.totalAmount = Math.round(totals.totalAmount * 100) / 100;
-  totals.totalHours = Math.round(totals.totalHours * 1000) / 1000;
+  totals.totalHours = Math.round(totals.totalHours * 10000) / 10000;
   totals.gstAmount = Math.round(totals.totalAmount * INVOICE_GST_RATE * 100) / 100;
   totals.totalWithGst = Math.round((totals.totalAmount + totals.gstAmount) * 100) / 100;
   return totals;
@@ -247,6 +447,11 @@ function summarizeInvoiceLineItems(items) {
 function clearInvoiceCaches() {
   cacheClearPrefix(INVOICE_CACHE_PREFIX);
   cacheClearPrefix(INVOICE_DEFAULT_CACHE_KEY);
+}
+
+function api_clearInvoiceCaches() {
+  clearInvoiceCaches();
+  return { success: true };
 }
 
 function api_listInvoices(filters) {
@@ -305,6 +510,8 @@ function api_getInvoice(id) {
   if (!id) throw new Error('Invoice id is required');
   var invoice = findInvoiceById(id);
   if (!invoice) throw new Error('Invoice not found');
+  var invoiceLocked = String(invoice.status || 'draft').toLowerCase() === 'generated';
+  recalculateInvoiceLineAmounts(invoice, { lock: invoiceLocked });
   var items = listInvoiceLineItemsByInvoiceId(id);
   var defaults = listDefaultInvoiceLineItems();
   var enrichedItems = enrichLineItemsWithEntryState(items);
@@ -485,7 +692,12 @@ function buildInvoiceRow(headers, invoice) {
 }
 
 function buildInvoiceLineItemRow(headers, item) {
-  return headers.map(function(header) {
+  var headerList = INVOICE_LINE_ITEM_HEADERS;
+  var matching = Array.isArray(headers) && headers.length === headerList.length && headers.every(function(h, idx) {
+    return String(h || '').trim() === headerList[idx];
+  });
+  var headersToUse = matching ? headers : headerList;
+  return headersToUse.map(function(header) {
     switch (header) {
       case 'id':
         return item.id || '';
@@ -509,6 +721,8 @@ function buildInvoiceLineItemRow(headers, item) {
         return item.hour_type_name_snapshot || '';
       case 'amount':
         return invoiceParseNumber(item.amount, 0);
+      case 'amount_mode':
+        return item.amount_mode || 'hours';
       case 'contract_id':
         return item.contract_id || '';
       case 'contract_name_snapshot':
@@ -597,6 +811,7 @@ function updateLineItemRecord(lineItemId, updates) {
   var rowIndex = getLineItemRowIndexById(lineItemId);
   if (rowIndex === -1) throw new Error('Invoice line item row not found');
   var headers = getInvoiceLineItemHeaders();
+  Logger.log('[Backend] invoice_line_items headers: ' + JSON.stringify(headers));
   var sh = getInvoiceLineItemSheet();
   var currentRow = sh.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
   var currentItem = normalizeLineItemRow(headers, currentRow);
@@ -761,10 +976,12 @@ function api_upsertInvoice(payload) {
 
   var sh = getInvoiceSheet();
   var invoiceId = payload && payload.id ? payload.id : '';
+  var previousStatus = 'draft';
   var rowValues;
   if (isUpdate) {
     var existing = findInvoiceById(payload.id);
     if (!existing) throw new Error('Invoice not found');
+    previousStatus = String(existing.status || 'draft');
     if (!sequence || sequence <= 0 || existing.year !== targetYear || existing.month !== targetMonth) {
       sequence = getNextInvoiceSequence(targetYear, targetMonth);
     }
@@ -821,7 +1038,13 @@ function api_upsertInvoice(payload) {
   }
 
   clearInvoiceCaches();
-  return findInvoiceById(invoiceId);
+  var savedInvoice = findInvoiceById(invoiceId);
+  var savedStatus = String(savedInvoice && savedInvoice.status ? savedInvoice.status : 'draft');
+  if (savedInvoice && savedStatus.toLowerCase() === 'generated' && savedStatus.toLowerCase() !== String(previousStatus || 'draft').toLowerCase()) {
+    recalculateInvoiceLineAmounts(savedInvoice, { lock: true });
+    savedInvoice = findInvoiceById(invoiceId);
+  }
+  return savedInvoice;
 }
 
 function api_deleteInvoice(id, options) {
@@ -914,7 +1137,9 @@ function formatCurrencyForTemplate(amount) {
 
 function formatHoursForTemplate(hours) {
   var num = invoiceParseNumber(hours, 0);
-  return num.toFixed(2);
+  var formatted = num.toFixed(4);
+  formatted = formatted.replace(/\.?0+$/, '');
+  return formatted === '' ? '0' : formatted;
 }
 
 function buildInvoiceReplacementData(invoice, lineItems, lineLimit) {
@@ -1115,6 +1340,7 @@ function api_generateInvoiceDocument(payload) {
   }
   var templateResolution = resolveInvoiceTemplate(templateId, templatePath);
   var folderResolution = resolveInvoiceOutputFolder(outputFolderId, outputFolderPath);
+  recalculateInvoiceLineAmounts(invoice, { lock: true });
   var lineItems = listInvoiceLineItemsByInvoiceId(invoice.id);
   var lineLimitSetting = payload.line_item_limit || settings.invoice_line_item_limit;
   var lineLimit = invoiceParseNumber(lineLimitSetting, lineItems.length);
@@ -1135,7 +1361,8 @@ function api_generateInvoiceDocument(payload) {
     template_doc_id: templateResolution.id,
     template_doc_path: templateResolution.path,
     output_folder_id: folderResolution.id,
-    output_folder_path: folderResolution.path
+    output_folder_path: folderResolution.path,
+    status: 'generated'
   };
   updateInvoiceRecord(invoice.id, metadataUpdates);
   return {
@@ -1269,24 +1496,173 @@ function syncTimesheetEntryForLineItem(lineItem, invoice, existing) {
   };
 }
 
+function calculateMonthlyHourTypeTotal(year, month, hourTypeId, contractId) {
+  if (!hourTypeId) return 0;
+  var sh = getOrCreateSheet('timesheet_entries');
+  var values = sh.getDataRange().getValues();
+  if (!values.length) return 0;
+  var headers = values[0];
+  var dateIdx = headers.indexOf('date');
+  var durationIdx = headers.indexOf('duration_minutes');
+  var hourTypeIdx = headers.indexOf('hour_type_id');
+  var contractIdx = headers.indexOf('contract_id');
+  if (dateIdx === -1 || durationIdx === -1 || hourTypeIdx === -1) return 0;
+  var totalMinutes = 0;
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    var entryDate = invoiceToIsoDate(row[dateIdx]);
+    if (!entryDate) continue;
+    var parts = entryDate.split('-');
+    if (parts.length < 3) continue;
+    var entryYear = invoiceParseNumber(parts[0]);
+    var entryMonth = invoiceParseNumber(parts[1]);
+    if (entryYear !== year || entryMonth !== month) continue;
+    var entryHourTypeId = row[hourTypeIdx] || '';
+    if (entryHourTypeId !== hourTypeId) continue;
+    if (contractIdx !== -1 && contractId) {
+      var entryContractId = row[contractIdx] || '';
+      if (entryContractId !== contractId) continue;
+    }
+    var duration = invoiceParseNumber(row[durationIdx], 0);
+    totalMinutes += duration;
+  }
+  return Math.round((totalMinutes / 60) * 10000) / 10000;
+}
+
+function recalculateInvoiceLineAmounts(invoiceOrId, options) {
+  if (!invoiceOrId) return 0;
+  var invoice = invoiceOrId;
+  if (typeof invoiceOrId === 'string') {
+    invoice = findInvoiceById(invoiceOrId);
+  }
+  if (!invoice || !invoice.id) return 0;
+  var sh = getInvoiceLineItemSheet();
+  var values = sh.getDataRange().getValues();
+  if (!values.length) return 0;
+  var headers = values[0];
+  var expectedColumns = ['id', 'invoice_id', 'is_default', 'amount_mode', 'hours', 'hour_type_id', 'contract_id', 'amount', 'contract_name_snapshot'];
+  var missingRequired = expectedColumns.some(function(name) {
+    return headers.indexOf(name) === -1;
+  });
+  if (missingRequired) return 0;
+
+  var lockRequested = options && invoiceParseBoolean(options.lock);
+  var invoiceLocked = String(invoice.status || 'draft').toLowerCase() === 'generated';
+  var shouldLock = lockRequested || invoiceLocked;
+  var updatedCount = 0;
+
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex++) {
+    var normalized = normalizeLineItemRow(headers, values[rowIndex]);
+    if (!normalized.id) continue;
+    if (normalized.is_default) continue;
+    if (normalized.invoice_id !== invoice.id) continue;
+    var changed = false;
+    var contractId = normalized.contract_id || '';
+    var originalAmountMode = normalized.amount_mode || '';
+    var amountMode = originalAmountMode;
+    var contractName = contractId ? getContractNameById(contractId) : '';
+    if (contractName && contractName !== normalized.contract_name_snapshot) {
+      normalized.contract_name_snapshot = contractName;
+      changed = true;
+    }
+    var contractRate = contractId ? getContractRateById(contractId) : 0;
+    var hoursValue = isFinite(normalized.hours) ? normalized.hours : 0;
+    if (hoursValue < 0) {
+      hoursValue = 0;
+      if (normalized.hours !== hoursValue) {
+        normalized.hours = hoursValue;
+        changed = true;
+      }
+    }
+
+    if (!amountMode) {
+      if (normalized.hour_type_id && hoursValue === 0 && invoiceParseNumber(normalized.amount, 0) === 0) {
+        amountMode = 'monthly_hour_type';
+        normalized.amount_mode = amountMode;
+        changed = true;
+      } else {
+        amountMode = 'hours';
+        normalized.amount_mode = amountMode;
+        changed = true;
+      }
+    }
+    if (amountMode === 'hours' && normalized.hour_type_id && hoursValue === 0 && invoiceParseNumber(normalized.amount, 0) === 0) {
+      amountMode = 'monthly_hour_type';
+      normalized.amount_mode = amountMode;
+      changed = true;
+    }
+
+    if (amountMode === 'hours' && hoursValue >= 0) {
+      if (contractRate > 0) {
+        var computedAmount = Math.round(hoursValue * contractRate * 100) / 100;
+        if (Math.abs(computedAmount - invoiceParseNumber(normalized.amount, 0)) > 0.0001) {
+          normalized.amount = computedAmount;
+          changed = true;
+        }
+      }
+    } else if (amountMode === 'monthly_hour_type' && contractRate > 0 && normalized.hour_type_id) {
+      var invoiceYear = invoiceParseNumber(invoice.year);
+      var invoiceMonth = invoiceParseNumber(invoice.month);
+      var monthlyHours = calculateMonthlyHourTypeTotal(invoiceYear, invoiceMonth, normalized.hour_type_id, contractId);
+      var computedMonthlyAmount = Math.round(monthlyHours * contractRate * 100) / 100;
+      if (Math.abs(computedMonthlyAmount - invoiceParseNumber(normalized.amount, 0)) > 0.0001) {
+        normalized.amount = computedMonthlyAmount;
+        changed = true;
+      }
+      if (normalized.hours !== 0) {
+        normalized.hours = 0;
+        changed = true;
+      }
+    }
+
+    if (shouldLock && amountMode !== 'amount') {
+      normalized.amount_mode = 'amount';
+      changed = true;
+    }
+
+    if (changed) {
+      normalized.updated_at = invoiceToIsoDateTime(new Date());
+      var updatedRow = buildInvoiceLineItemRow(headers, normalized);
+      sh.getRange(rowIndex + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
+      Logger.log('[Invoice Line Recalc] invoice=%s row=%s mode:%s->%s hours:%s amount:%s contract:%s contractName:%s lock:%s', invoice.id, normalized.id, originalAmountMode || '(blank)', normalized.amount_mode, normalized.hours, normalized.amount, normalized.contract_id, normalized.contract_name_snapshot, shouldLock);
+      updatedCount++;
+    } else {
+      Logger.log('[Invoice Line Recalc] invoice=%s row=%s unchanged mode:%s hours:%s amount:%s contract:%s contractName:%s lock:%s', invoice.id, normalized.id, amountMode || '(blank)', normalized.hours, normalized.amount, normalized.contract_id, normalized.contract_name_snapshot, shouldLock);
+    }
+  }
+
+  if (updatedCount > 0) {
+    clearInvoiceCaches();
+  }
+  return updatedCount;
+}
+
 function api_upsertInvoiceLineItem(payload) {
+  Logger.log('[Backend] api_upsertInvoiceLineItem called with payload: ' + JSON.stringify(payload));
   if (!payload) throw new Error('Line item payload is required');
   var isDefault = invoiceParseBoolean(payload.is_default);
   var invoiceId = isDefault ? '' : (payload.invoice_id || '');
+  Logger.log('[Backend] isDefault: ' + isDefault + ', invoiceId: ' + invoiceId);
   var invoice = null;
   if (!isDefault) {
     if (!invoiceId) {
+      Logger.log('[Backend] ERROR: invoice_id is required but not provided');
       throw new Error('invoice_id is required for invoice line items');
     }
     invoice = findInvoiceById(invoiceId);
+    Logger.log('[Backend] Invoice found: ' + (invoice ? 'yes' : 'no'));
     if (!invoice) {
       throw new Error('Invoice not found');
+    }
+    if (String(invoice.status || 'draft').toLowerCase() === 'generated') {
+      throw new Error('Generated invoices are read-only.');
     }
   }
 
   var now = new Date();
   var nowIso = invoiceToIsoDateTime(now);
   var headers = getInvoiceLineItemHeaders();
+  var headerSnapshot = headers.slice();
   var sh = getInvoiceLineItemSheet();
   var isUpdate = payload.id ? getLineItemRowIndexById(payload.id) !== -1 : false;
   var existing = isUpdate ? findLineItemById(payload.id) : null;
@@ -1301,7 +1677,7 @@ function api_upsertInvoiceLineItem(payload) {
   }
   var description = payload.description != null ? String(payload.description) : (existing ? existing.description : '');
   var hoursRaw = payload.hours != null ? payload.hours : (existing ? existing.hours : 0);
-  var hours = Math.max(0, Math.round(invoiceParseNumber(hoursRaw, 0) * 1000) / 1000);
+  var hours = Math.max(0, Math.round(invoiceParseNumber(hoursRaw, 0) * 10000) / 10000);
   var amountRaw = payload.amount != null ? payload.amount : (existing ? existing.amount : 0);
   var amount = invoiceParseNumber(amountRaw, 0);
   var amountProvided = invoiceParseBoolean(payload.amount_provided);
@@ -1323,11 +1699,28 @@ function api_upsertInvoiceLineItem(payload) {
   if (!contractId) {
     throw new Error('Contract is required for invoice line items.');
   }
-  if (!contractName && contractId) {
-    contractName = getContractNameById(contractId);
+  var resolvedContractName = getContractNameById(contractId);
+  if (resolvedContractName) {
+    contractName = resolvedContractName;
+  } else if (!contractName) {
+    contractName = '';
   }
   var contractRate = contractId ? getContractRateById(contractId) : 0;
-  if (!amountProvided && hours > 0 && contractRate > 0) {
+  var amountMode = payload.amount_mode || (existing ? existing.amount_mode : 'hours');
+
+  var invoiceStatus = invoice ? (invoice.status || 'draft') : 'draft';
+  var shouldRecalculate = invoiceStatus !== 'generated';
+
+  if (amountMode === 'monthly_hour_type' && hourTypeId && invoice && shouldRecalculate) {
+    var invoiceYear = invoiceParseNumber(invoice.year);
+    var invoiceMonth = invoiceParseNumber(invoice.month);
+    var monthlyHours = calculateMonthlyHourTypeTotal(invoiceYear, invoiceMonth, hourTypeId, contractId);
+    amount = Math.round(monthlyHours * contractRate * 100) / 100;
+    hours = 0;
+  } else if (amountMode === 'monthly_hour_type' && !shouldRecalculate && existing) {
+    amount = existing.amount || 0;
+    hours = 0;
+  } else if (!amountProvided && hours > 0 && contractRate > 0) {
     amount = Math.round(hours * contractRate * 100) / 100;
   }
   if (!amount && amount !== 0) amount = 0;
@@ -1375,6 +1768,7 @@ function api_upsertInvoiceLineItem(payload) {
     hour_type_id: hourTypeId,
     hour_type_name_snapshot: hourTypeName,
     amount: amount,
+    amount_mode: amountMode,
     contract_id: contractId,
     contract_name_snapshot: contractName,
     timesheet_entry_id: timesheetEntryId,
@@ -1386,19 +1780,41 @@ function api_upsertInvoiceLineItem(payload) {
   };
 
   var row = buildInvoiceLineItemRow(headers, record);
+  Logger.log('[Backend] Row prepared, isUpdate: ' + isUpdate);
   if (isUpdate) {
     var rowIndex = getLineItemRowIndexById(lineId);
+    Logger.log('[Backend] Update mode, rowIndex: ' + rowIndex);
     if (rowIndex === -1) throw new Error('Line item row not found');
     sh.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+    Logger.log('[Backend] Row updated in sheet');
   } else {
     sh.appendRow(row);
+    Logger.log('[Backend] Row appended to sheet');
   }
 
   clearInvoiceCaches();
+  Logger.log('[Backend] Caches cleared');
   var refreshed = findLineItemById(lineId);
+  Logger.log('[Backend] Line item refreshed from sheet: ' + (refreshed ? 'yes' : 'no'));
+
+  var storedHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var storedRowRange = refreshed ? getLineItemRowIndexById(lineId) : -1;
+  var storedRowValues = storedRowRange !== -1 ? sh.getRange(storedRowRange, 1, 1, sh.getLastColumn()).getValues()[0] : [];
+  var storedNormalized = (storedRowValues && storedRowValues.length) ? normalizeLineItemRow(storedHeaders, storedRowValues) : null;
+  Logger.log('[Backend Debug] headerSnapshot=' + JSON.stringify(headerSnapshot) + ' storedHeaders=' + JSON.stringify(storedHeaders));
+  Logger.log('[Backend Debug] storedRowValues=' + JSON.stringify(storedRowValues));
+  Logger.log('[Backend Debug] storedNormalized=' + JSON.stringify(storedNormalized));
+
   if (refreshed && !refreshed.is_default) {
     refreshed = enrichLineItemWithEntryState(refreshed);
+    Logger.log('[Backend] Line item enriched with entry state');
   }
+  if (refreshed) {
+    refreshed._debug_headers = storedHeaders;
+    refreshed._debug_row_values = storedRowValues;
+    refreshed._debug_normalized = storedNormalized;
+  }
+  Logger.log('[Backend] Returning line item: ' + JSON.stringify(refreshed));
   return refreshed;
 }
 
@@ -1406,6 +1822,12 @@ function api_deleteInvoiceLineItem(id, options) {
   if (!id) throw new Error('Line item id is required');
   var item = findLineItemById(id);
   if (!item) throw new Error('Line item not found');
+  if (!item.is_default && item.invoice_id) {
+    var parentInvoice = findInvoiceById(item.invoice_id);
+    if (parentInvoice && String(parentInvoice.status || 'draft').toLowerCase() === 'generated') {
+      throw new Error('Generated invoices are read-only.');
+    }
+  }
   var sh = getInvoiceLineItemSheet();
   var rowIndex = getLineItemRowIndexById(id);
   if (rowIndex === -1) throw new Error('Line item row not found');
