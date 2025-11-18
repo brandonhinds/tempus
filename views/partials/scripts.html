@@ -706,6 +706,7 @@ let ratePreviewInputSyncing = false;
 
   const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'settings', 'about'];
   const LAST_PAGE_KEY = 'ts_last_page';
+  const SCRIPT_ID_CACHE_KEY = 'ts_script_id';
 
   function persistLastPage(page) {
     if (!PAGE_KEYS.includes(page)) return;
@@ -786,21 +787,46 @@ let ratePreviewInputSyncing = false;
     const scriptIdDisplay = document.getElementById('script-id-display');
     const scriptIdValue = document.getElementById('script-id-value');
     const scriptIdUpdate = document.getElementById('script-id-update');
+    const scriptIdClone = document.getElementById('script-id-clone');
 
-    if (!scriptIdDisplay && !scriptIdValue && !scriptIdUpdate) {
+    if (!scriptIdDisplay && !scriptIdValue && !scriptIdUpdate && !scriptIdClone) {
       return;
     }
 
+    const applyScriptId = (id) => {
+      if (scriptIdDisplay) scriptIdDisplay.textContent = id;
+      if (scriptIdValue) scriptIdValue.textContent = id;
+      if (scriptIdUpdate) scriptIdUpdate.textContent = id;
+      if (scriptIdClone) scriptIdClone.textContent = id;
+    };
+
+    const cachedId = (() => {
+      try {
+        return localStorage.getItem(SCRIPT_ID_CACHE_KEY);
+      } catch (e) {
+        return null;
+      }
+    })();
+
+    if (cachedId) applyScriptId(cachedId);
+
     google.script.run
       .withSuccessHandler((scriptId) => {
-        if (scriptIdDisplay) scriptIdDisplay.textContent = scriptId;
-        if (scriptIdValue) scriptIdValue.textContent = scriptId;
-        if (scriptIdUpdate) scriptIdUpdate.textContent = scriptId;
+        if (scriptId && typeof scriptId === 'string') {
+          applyScriptId(scriptId);
+          try {
+            localStorage.setItem(SCRIPT_ID_CACHE_KEY, scriptId);
+          } catch (e) {}
+        }
       })
       .withFailureHandler(() => {
-        if (scriptIdDisplay) scriptIdDisplay.textContent = '[Error loading Script ID]';
-        if (scriptIdValue) scriptIdValue.textContent = 'Unable to load';
-        if (scriptIdUpdate) scriptIdUpdate.textContent = '[Error loading Script ID]';
+        if (!cachedId) {
+          const fallback = '[Error loading Script ID]';
+          if (scriptIdDisplay) scriptIdDisplay.textContent = fallback;
+          if (scriptIdValue) scriptIdValue.textContent = 'Unable to load';
+          if (scriptIdUpdate) scriptIdUpdate.textContent = fallback;
+          if (scriptIdClone) scriptIdClone.textContent = fallback;
+        }
       })
       .api_getScriptId();
   }
@@ -2466,10 +2492,12 @@ let ratePreviewInputSyncing = false;
    * Apply exceptions to occurrence dates
    * Returns array of occurrence objects with exception info
    */
-  function applyExceptionsToOccurrences(occurrenceDates, deductionId, rangeStart, rangeEnd) {
+  function applyExceptionsToOccurrences(occurrenceDates, deductionId, rangeStart, rangeEnd, exceptionsOverride) {
     const startIso = rangeStart ? isoDate(rangeStart) : null;
     const endIso = rangeEnd ? isoDate(rangeEnd) : null;
-    const exceptions = getDeductionExceptions(deductionId);
+    const exceptions = Array.isArray(exceptionsOverride)
+      ? exceptionsOverride
+      : getDeductionExceptions(deductionId);
 
     const result = [];
     const seenKeys = new Set();
@@ -2552,14 +2580,14 @@ let ratePreviewInputSyncing = false;
    * Get deduction occurrences with exceptions applied
    * Returns array of occurrence objects
    */
-  function getDeductionOccurrencesWithExceptions(deduction, rangeStart, rangeEnd, limit) {
+  function getDeductionOccurrencesWithExceptions(deduction, rangeStart, rangeEnd, limit, exceptionsOverride) {
     if (!deduction) return [];
 
     // Get base occurrences
     const baseOccurrences = getDeductionOccurrencesBetween(deduction, rangeStart, rangeEnd, limit);
 
     // Apply exceptions
-    return applyExceptionsToOccurrences(baseOccurrences, deduction.id, rangeStart, rangeEnd);
+    return applyExceptionsToOccurrences(baseOccurrences, deduction.id, rangeStart, rangeEnd, exceptionsOverride);
   }
 
   function formatDeductionAmount(deduction) {
@@ -5428,7 +5456,6 @@ function updateDeductionFormVisibility() {
     const revertOptimisticSplit = () => {
       state.deductions = previousList.slice();
       state.deductions = dedupeById(state.deductions);
-      markAllIncomeSummariesDirty();
       saveCache();
       renderDeductionsList();
       renderIncomeSummary();
@@ -5441,6 +5468,15 @@ function updateDeductionFormVisibility() {
       ...newDeduction,
       id: optimisticNewId
     });
+    const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
+    const extraMonthKeys = [
+      monthKeyFromDateIso(originalDeduction.start_date),
+      monthKeyFromDateIso(originalDeduction.end_date),
+      monthKeyFromDateIso(lastPastDate),
+      monthKeyFromDateIso(nextFutureDate),
+      monthKeyFromDateIso(newDeduction.start_date),
+      monthKeyFromDateIso(newDeduction.end_date)
+    ];
 
     const originalIndex = state.deductions.findIndex((item) => item.id === originalDeduction.id);
     if (originalIndex !== -1) {
@@ -5450,7 +5486,8 @@ function updateDeductionFormVisibility() {
     }
     state.deductions.push(optimisticNew);
     state.deductions = dedupeById(state.deductions);
-    markAllIncomeSummariesDirty();
+    markIncomeMonthsDirtyForDeductionChange(originalDeduction, optimisticOriginal, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
+    markIncomeMonthsDirtyForDeductionChange(null, optimisticNew, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
@@ -5467,8 +5504,23 @@ function updateDeductionFormVisibility() {
                 // Reload deductions
                 google.script.run
                   .withSuccessHandler((deductions) => {
-                    state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
-                    markAllIncomeSummariesDirty();
+                    const nextList = dedupeById((deductions || []).map(sanitizeDeduction));
+                    const prevMap = new Map(previousList.map((d) => [d.id, d]));
+                    const nextMap = new Map(nextList.map((d) => [d.id, d]));
+                    const changedIds = new Set([originalDeduction.id]);
+                    nextMap.forEach((val, id) => {
+                      if (!prevMap.has(id)) changedIds.add(id);
+                    });
+                    changedIds.forEach((id) => {
+                      markIncomeMonthsDirtyForDeductionChange(
+                        prevMap.get(id),
+                        nextMap.get(id),
+                        exceptionsSnapshot,
+                        exceptionsSnapshot,
+                        extraMonthKeys
+                      );
+                    });
+                    state.deductions = nextList;
                     saveCache();
                     renderDeductionsList();
                     renderIncomeSummary();
@@ -5531,6 +5583,7 @@ function updateDeductionFormVisibility() {
   function saveDeductionDirectly(payload, existing) {
     const isEdit = !!existing;
     const previousList = state.deductions.slice();
+    const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
     const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
     const optimisticId = isEdit ? payload.id : `temp_${Date.now()}`;
     const optimisticDeduction = buildOptimisticDeduction({ ...payload, id: optimisticId }, existing);
@@ -5542,6 +5595,13 @@ function updateDeductionFormVisibility() {
     }
 
     state.deductions = dedupeById(state.deductions);
+    const extraMonthKeys = [
+      monthKeyFromDateIso(payload.start_date),
+      monthKeyFromDateIso(payload.end_date),
+      monthKeyFromDateIso(existing ? existing.start_date : null),
+      monthKeyFromDateIso(existing ? existing.end_date : null)
+    ];
+    markIncomeMonthsDirtyForDeductionChange(existing, optimisticDeduction, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
@@ -5564,7 +5624,6 @@ function updateDeductionFormVisibility() {
             state.deductions.push(updated);
           }
           state.deductions = dedupeById(state.deductions);
-          markAllIncomeSummariesDirty();
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
@@ -5573,26 +5632,24 @@ function updateDeductionFormVisibility() {
             loadAnnualData();
           }
           setStatus('Deduction saved', 'success');
-        } else {
+          } else {
+            state.deductions = previousList;
+            state.deductions = dedupeById(state.deductions);
+            saveCache();
+            renderDeductionsList();
+            renderIncomeSummary();
+            renderAnnualCategorySection();
+            setStatus('Deduction save failed', 'error');
+        }
+        })
+        .withFailureHandler(() => {
           state.deductions = previousList;
           state.deductions = dedupeById(state.deductions);
-          markAllIncomeSummariesDirty();
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
           renderAnnualCategorySection();
           setStatus('Deduction save failed', 'error');
-        }
-      })
-      .withFailureHandler(() => {
-        state.deductions = previousList;
-        state.deductions = dedupeById(state.deductions);
-        markAllIncomeSummariesDirty();
-        saveCache();
-        renderDeductionsList();
-        renderIncomeSummary();
-        renderAnnualCategorySection();
-        setStatus('Deduction save failed', 'error');
       })
       .api_upsertDeduction(serverPayload);
   }
@@ -5609,7 +5666,12 @@ function updateDeductionFormVisibility() {
     const existing = existingIndex !== -1 ? state.deductions[existingIndex] : null;
 
     // Check if we need to show the split dialog
-    if (isEdit && existing && deductionHasPastOccurrences(existing)) {
+    const categoryOnlyChange = isEdit && existing && Object.keys(payload).every((key) => {
+      if (key === 'category_id') return true;
+      return payload[key] === existing[key];
+    });
+
+    if (isEdit && existing && deductionHasPastOccurrences(existing) && !categoryOnlyChange) {
       // Store the payload and original for later
       pendingDeductionPayload = payload;
       originalDeductionForSplit = existing;
@@ -5635,10 +5697,15 @@ function updateDeductionFormVisibility() {
       setStatus('Enable company tracking to modify company deductions.', 'warn');
       return;
     }
+    const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
+    const extraMonthKeys = [
+      monthKeyFromDateIso(deduction.start_date),
+      monthKeyFromDateIso(deduction.end_date)
+    ];
+    markIncomeMonthsDirtyForDeductionChange(deduction, null, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
     const previousList = state.deductions.slice();
     state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
     state.deductions = dedupeById(state.deductions);
-    markAllIncomeSummariesDirty();
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
@@ -5654,7 +5721,6 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(() => {
         state.deductions = previousList;
         state.deductions = dedupeById(state.deductions);
-        markAllIncomeSummariesDirty();
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
@@ -7883,8 +7949,20 @@ function updateDeductionFormVisibility() {
 
   let queuedEntryFocus = null;
   let queuedFocusTimer = null;
+  let entryFieldFocusSuppressed = false;
+
+  function withEntryFocusSuppressed(fn) {
+    const previous = entryFieldFocusSuppressed;
+    entryFieldFocusSuppressed = true;
+    try {
+      return fn();
+    } finally {
+      entryFieldFocusSuppressed = previous;
+    }
+  }
 
   function queueEntryFieldFocus(target) {
+    if (entryFieldFocusSuppressed) return;
     queuedEntryFocus = target;
     if (queuedFocusTimer) clearTimeout(queuedFocusTimer);
     queuedFocusTimer = setTimeout(() => {
@@ -7895,6 +7973,10 @@ function updateDeductionFormVisibility() {
 
   function applyQueuedEntryFocus() {
     if (!queuedEntryFocus) return;
+    if (entryFieldFocusSuppressed) {
+      queuedEntryFocus = null;
+      return;
+    }
     const target = queuedEntryFocus;
     queuedEntryFocus = null;
     if (target.mode === 'manual') {
@@ -7922,6 +8004,7 @@ function updateDeductionFormVisibility() {
   }
 
   function focusDefaultEntryField() {
+    if (entryFieldFocusSuppressed) return;
     if (state.currentTab === 'manual') {
       if (manualHoursInput) queueEntryFieldFocus({ mode: 'manual' });
       return;
@@ -8473,16 +8556,13 @@ function updateDeductionFormVisibility() {
   const incomeActualTaxValueEl = document.getElementById('income-actual-tax-value');
   const incomeActualNetValueEl = document.getElementById('income-actual-net-value');
   const potentialNetDivider = document.getElementById('potential-net-divider');
+  const incomeProjectionsHeader = document.getElementById('income-projections-header');
   const incomePotentialNetRow = document.getElementById('income-potential-net-row');
   const incomeEstimatedStandardRow = document.getElementById('income-estimated-standard-row');
   const incomeEstimatedProjectedRow = document.getElementById('income-estimated-projected-row');
-  const incomeHoursBalanceStandardRow = document.getElementById('income-hours-balance-standard-row');
-  const incomeHoursBalanceProjectedRow = document.getElementById('income-hours-balance-projected-row');
   const incomePotentialNetEl = document.getElementById('income-potential-net');
   const incomeEstimatedStandardNetEl = document.getElementById('income-estimated-standard-net');
   const incomeEstimatedProjectedNetEl = document.getElementById('income-estimated-projected-net');
-  const incomeHoursBalanceStandardEl = document.getElementById('income-hours-balance-standard');
-  const incomeHoursBalanceProjectedEl = document.getElementById('income-hours-balance-projected');
   const btnCompanyExpensesDetails = document.getElementById('btn-company-expenses-details');
   const btnDeductionsDetails = document.getElementById('btn-deductions-details');
   const modalMonthlyDeductions = document.getElementById('modal-monthly-deductions');
@@ -10944,6 +11024,48 @@ function markAllIncomeSummariesDirty() {
   keys.forEach((key) => markMonthDirty(key));
 }
 
+function getTrackedIncomeMonthKeys(extraKeys = []) {
+  ensureIncomeCacheStructures();
+  const keys = new Set([
+    ...Object.keys(state.incomeSummaryCache || {}),
+    ...Object.keys(state.incomeCacheMetadata || {})
+  ]);
+  if (state.calendar && Number.isInteger(state.calendar.year) && Number.isInteger(state.calendar.month)) {
+    keys.add(monthKeyFor(state.calendar.year, state.calendar.month));
+  }
+  (extraKeys || []).forEach((key) => {
+    if (key) keys.add(key);
+  });
+  return Array.from(keys);
+}
+
+function deductionHasOccurrenceInMonth(deduction, monthKey, exceptionsSnapshot) {
+  if (!deduction || !monthKey) return false;
+  const coords = parseMonthKey(monthKey);
+  if (!coords) return false;
+  const monthStart = startOfDay(new Date(coords.year, coords.month, 1));
+  const monthEnd = startOfDay(new Date(coords.year, coords.month + 1, 0));
+  const occurrences = getDeductionOccurrencesWithExceptions(
+    deduction,
+    monthStart,
+    monthEnd,
+    undefined,
+    exceptionsSnapshot
+  );
+  return Array.isArray(occurrences) && occurrences.length > 0;
+}
+
+function markIncomeMonthsDirtyForDeductionChange(prevDeduction, nextDeduction, prevExceptions, nextExceptions, extraMonthKeys = []) {
+  const monthsToCheck = getTrackedIncomeMonthKeys(extraMonthKeys);
+  monthsToCheck.forEach((monthKey) => {
+    const hadBefore = deductionHasOccurrenceInMonth(prevDeduction, monthKey, prevExceptions);
+    const hasAfter = deductionHasOccurrenceInMonth(nextDeduction, monthKey, nextExceptions);
+    if (hadBefore || hasAfter) {
+      markIncomeMonthDirty(monthKey);
+    }
+  });
+}
+
 function buildEntryHashPayload(entry) {
   if (!entry) return '';
   const punches = Array.isArray(entry.punches)
@@ -12462,10 +12584,14 @@ function getCachedIncomeSummary(monthKey) {
     const isDirty = state.dirtyIncomeMonths && state.dirtyIncomeMonths.has(monthKey);
     if (!isDirty && state.potentialIncomeCache && state.potentialIncomeCache[contextKey]) {
       const cached = state.potentialIncomeCache[contextKey];
+      const cachedScenarios = cached.scenarios ? JSON.parse(JSON.stringify(cached.scenarios)) : {};
+      const hasCachedScenarios = cachedScenarios && Object.keys(cachedScenarios).length > 0;
       state.potentialIncomeStats = cached.stats || null;
-      state.potentialIncomeScenarios = cached.scenarios ? JSON.parse(JSON.stringify(cached.scenarios)) : {};
-      renderPotentialIncomeFromState();
-      return;
+      state.potentialIncomeScenarios = cachedScenarios;
+      if (hasCachedScenarios) {
+        renderPotentialIncomeFromState();
+        return;
+      }
     }
     const stats = buildPotentialIncomeStats(contract, summary, year, month);
     state.potentialIncomeStats = stats;
@@ -12485,11 +12611,10 @@ function getCachedIncomeSummary(monthKey) {
     state.potentialIncomeStats = null;
     const rows = [
       potentialNetDivider,
+      incomeProjectionsHeader,
       incomePotentialNetRow,
       incomeEstimatedStandardRow,
-      incomeEstimatedProjectedRow,
-      incomeHoursBalanceStandardRow,
-      incomeHoursBalanceProjectedRow
+      incomeEstimatedProjectedRow
     ];
     rows.forEach((row) => {
       if (row) row.hidden = true;
@@ -12497,9 +12622,7 @@ function getCachedIncomeSummary(monthKey) {
     const placeholders = [
       incomePotentialNetEl,
       incomeEstimatedStandardNetEl,
-      incomeEstimatedProjectedNetEl,
-      incomeHoursBalanceStandardEl,
-      incomeHoursBalanceProjectedEl
+      incomeEstimatedProjectedNetEl
     ];
     placeholders.forEach((el) => {
       if (el) el.textContent = '--';
@@ -12575,8 +12698,6 @@ function getCachedIncomeSummary(monthKey) {
 
     const standardScenarioHours = actualIncomeHours + remainingStandardHours;
     const projectedScenarioHours = actualIncomeHours + projectedRemainingHours;
-    const standardHoursBalance = standardScenarioHours - standardPotentialHours;
-    const projectedHoursBalance = projectedScenarioHours - projectedPotentialHours;
 
     return {
       standardHoursPerDay,
@@ -12586,8 +12707,6 @@ function getCachedIncomeSummary(monthKey) {
       projectedRemainingHours,
       standardScenarioHours,
       projectedScenarioHours,
-      standardHoursBalance,
-      projectedHoursBalance,
       actualIncomeHours,
       periodStart: monthStart
     };
@@ -12784,19 +12903,12 @@ function getCachedIncomeSummary(monthKey) {
         scenarioState.pendingRequestId = null;
       }
     });
-    if (incomeHoursBalanceStandardEl) {
-      incomeHoursBalanceStandardEl.textContent = formatSignedHours(stats.standardHoursBalance);
-    }
-    if (incomeHoursBalanceProjectedEl) {
-      incomeHoursBalanceProjectedEl.textContent = formatSignedHours(stats.projectedHoursBalance);
-    }
     const rowsToShow = [
       potentialNetDivider,
+      incomeProjectionsHeader,
       incomePotentialNetRow,
       incomeEstimatedStandardRow,
-      incomeEstimatedProjectedRow,
-      incomeHoursBalanceStandardRow,
-      incomeHoursBalanceProjectedRow
+      incomeEstimatedProjectedRow
     ];
     rowsToShow.forEach((row) => {
       if (row) row.hidden = false;
@@ -13458,7 +13570,7 @@ function getCachedIncomeSummary(monthKey) {
         if (Math.abs(roundedDiff) >= 0.01) {
           const diffEl = document.createElement('span');
           const isPositive = roundedDiff >= 0;
-          diffEl.style.color = isPositive ? 'var(--success)' : 'var(--danger)';
+          diffEl.style.color = isPositive ? 'var(--danger)' : 'var(--success)';
           diffEl.style.whiteSpace = 'nowrap';
           const arrow = isPositive ? '↑' : '↓';
           const diffValue = `${formatDecimalHours(Math.abs(roundedDiff))} hrs`;
@@ -13514,7 +13626,7 @@ function getCachedIncomeSummary(monthKey) {
       projectedAverage: 'The projected daily trend, based on your selected calculation method.',
       totalProjected: 'Hours logged to date plus the remaining business days multiplied by the projected average daily hours.',
       targetContract: 'Average contract hours per month (total contract hours ÷ contract duration).',
-      targetBusiness: 'Business days in this month × standard hours per day, minus any full non-income day deductions.',
+      targetBusiness: '(Business days in this month - business days the user takes leave) × standard hours per day.',
       expectedHoursRemaining: 'Projected hours still needed to hit this month’s target after accounting for logged/projected time.',
       businessDaysRemaining: 'Business days left in the current month (includes upcoming leave as deductions).'
     };
@@ -14100,11 +14212,15 @@ function getCachedIncomeSummary(monthKey) {
     // Check if there's an existing entry for this date
     const existingEntries = state.entries.filter(entry => entry.date === dateIso);
     const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+    const defaultHourTypeId = getDefaultHourTypeId();
 
     if (existingEntries.length > 0) {
       let existingEntry = null;
       if (targetHourTypeId && hourTypesEnabled) {
         existingEntry = existingEntries.find(entry => (entry.hour_type_id || getDefaultHourTypeId()) === targetHourTypeId) || null;
+      }
+      if (!existingEntry && hourTypesEnabled) {
+        existingEntry = existingEntries.find(entry => (entry.hour_type_id || defaultHourTypeId) === defaultHourTypeId) || null;
       }
       if (!existingEntry) existingEntry = existingEntries[0];
 
@@ -14160,6 +14276,7 @@ function getCachedIncomeSummary(monthKey) {
       loadPublicHolidays(true); // Re-render after load when year changes
     }
     renderCalendar();
+    renderIncomeSummary();
     onCalendarMonthChange();
   }
   document.getElementById('calendar-prev').onclick = () => changeCalendarMonth(-1);
@@ -14223,6 +14340,7 @@ function getCachedIncomeSummary(monthKey) {
         state.calendar.month = selectedMonth;
         state.calendar.year = monthPickerState.year;
         renderCalendar();
+        renderIncomeSummary();
         onCalendarMonthChange();
         closeMonthPicker();
       };
@@ -15035,6 +15153,20 @@ function getCachedIncomeSummary(monthKey) {
     processMonthCalculationQueue();
   }
 
+  function preloadPotentialIncomeStats(year, month, summary) {
+    if (!summary) return;
+    const contract = getSelectedPotentialContract();
+    if (!contract || !(Number(contract.hourly_rate) > 0)) return;
+    const stats = buildPotentialIncomeStats(contract, summary, year, month);
+    if (!stats) return;
+    ensurePotentialIncomeState();
+    const contextKey = `${year}-${month}-${contract.id}`;
+    state.potentialIncomeCache[contextKey] = {
+      stats,
+      scenarios: {}
+    };
+  }
+
   function seedMonthCalculationQueue() {
     ensureCalendarState();
     resetLazyLoadQueue();
@@ -15113,6 +15245,7 @@ function getCachedIncomeSummary(monthKey) {
         if (shouldRecalculateMonth(year, month)) {
           const summary = buildIncomeSummary(year, month);
           cacheIncomeSummary(monthKey, summary);
+          preloadPotentialIncomeStats(year, month, summary);
           // Lazy load tax estimate in background if pending
           if (summary.taxStatus === 'pending') {
             requestTaxEstimate(summary);
@@ -15575,6 +15708,18 @@ function getCachedIncomeSummary(monthKey) {
       state.deductionExceptions.push(optimisticException);
     }
 
+    const extraMonthKeys = [
+      monthKeyFromDateIso(adjustingOriginalDate),
+      monthKeyFromDateIso(payload.new_date)
+    ];
+    markIncomeMonthsDirtyForDeductionChange(
+      adjustingDeduction,
+      adjustingDeduction,
+      previousExceptions,
+      state.deductionExceptions,
+      extraMonthKeys
+    );
+
     saveCache();
     renderIncomeSummary();
     renderAnnualCategorySection();
@@ -15640,6 +15785,19 @@ function getCachedIncomeSummary(monthKey) {
 
     const previousExceptions = state.deductionExceptions.slice();
     state.deductionExceptions = state.deductionExceptions.filter(ex => ex.id !== existingException.id);
+
+    const extraMonthKeys = [
+      monthKeyFromDateIso(adjustingOriginalDate),
+      monthKeyFromDateIso(existingException.new_date)
+    ];
+    markIncomeMonthsDirtyForDeductionChange(
+      adjustingDeduction,
+      adjustingDeduction,
+      previousExceptions,
+      state.deductionExceptions,
+      extraMonthKeys
+    );
+
     saveCache();
     renderIncomeSummary();
     renderAnnualCategorySection();
@@ -18991,37 +19149,39 @@ function getCachedIncomeSummary(monthKey) {
 
   function insertDefaultEntryForDate(dateIso, defaultData, type) {
     if (!dateIso || !defaultData) return;
-    ensureCalendarState();
-    state.selectedCalendarDate = dateIso;
-    renderCalendar();
+    withEntryFocusSuppressed(() => {
+      ensureCalendarState();
+      state.selectedCalendarDate = dateIso;
+      renderCalendar();
 
-    if (type === 'basic') {
-      if (state.editingEntryId) clearManualEditing();
-      setManualDate(dateIso);
-      applyDefaultToForm(defaultData, 'basic');
-      if (!manualSaveBtn) {
-        setStatus('Manual entry form is unavailable.', 'error');
-        return;
-      }
-      if (!manualSaveBtn.disabled) {
-        manualSaveBtn.click();
+      if (type === 'basic') {
+        if (state.editingEntryId) clearManualEditing();
+        setManualDate(dateIso);
+        applyDefaultToForm(defaultData, 'basic');
+        if (!manualSaveBtn) {
+          setStatus('Manual entry form is unavailable.', 'error');
+          return;
+        }
+        if (!manualSaveBtn.disabled) {
+          manualSaveBtn.click();
+        } else {
+          setStatus('Select a contract before applying this default.', 'warn');
+        }
       } else {
-      setStatus('Select a contract before applying this default.', 'warn');
+        setPunchDate(dateIso);
+        ensurePunchDraft();
+        applyDefaultToForm(defaultData, 'advanced');
+        if (!punchSaveBtn) {
+          setStatus('Advanced entry form is unavailable.', 'error');
+          return;
+        }
+        if (!punchSaveBtn.disabled) {
+          punchSaveBtn.click();
+        } else {
+          setStatus('Select a contract before applying this default.', 'warn');
+        }
       }
-    } else {
-      setPunchDate(dateIso);
-      ensurePunchDraft();
-      applyDefaultToForm(defaultData, 'advanced');
-      if (!punchSaveBtn) {
-        setStatus('Advanced entry form is unavailable.', 'error');
-        return;
-      }
-      if (!punchSaveBtn.disabled) {
-        punchSaveBtn.click();
-      } else {
-        setStatus('Select a contract before applying this default.', 'warn');
-      }
-    }
+    });
   }
 
   if (calendarGridEl) {
