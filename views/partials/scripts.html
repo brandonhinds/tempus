@@ -7616,21 +7616,6 @@ function updateDeductionFormVisibility() {
     const hourTypeId = punchHourType ? punchHourType.value : getDefaultHourTypeId();
     const selectedHourType = state.hourTypeMap[hourTypeId];
 
-    // Check for duplicate hour type on the same date (when not editing)
-    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
-    if (hourTypesEnabled && draft && !draft.entryId) {
-      const duplicateEntry = state.entries.find(e =>
-        e.date === draft.date &&
-        (e.hour_type_id || getDefaultHourTypeId()) === hourTypeId &&
-        e.id !== draft.entryId
-      );
-      if (duplicateEntry) {
-        const hourTypeName = selectedHourType?.name || 'Work';
-        customAlert(`An entry with hour type "${hourTypeName}" already exists for ${draft.date}. Please switch to that hour type to edit it.`);
-        return;
-      }
-    }
-
     // Validate contract based on hour type
     if (selectedHourType && selectedHourType.requires_contract) {
       if (!draft || !draft.contractId) {
@@ -7658,6 +7643,11 @@ function updateDeductionFormVisibility() {
     };
     if (draft.entryId) payload.id = draft.entryId;
 
+    const lockResult = checkEntryDuplicateAndLock(payload, draft.entryId);
+    if (lockResult.blocked) return;
+    const inFlightKey = lockResult.key;
+    const inFlightId = draft.entryId || payload.id || 'new';
+
     // Optimistic update: Add entry to UI immediately for new entries
     let optimisticEntry = null;
     if (!draft.entryId) {
@@ -7679,6 +7669,18 @@ function updateDeductionFormVisibility() {
     renderPunchDraft();
 
     const onSuccess = (res) => {
+      if (handleDuplicateConflictResponse(res)) {
+        if (optimisticEntry) {
+          const dupIdx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+          if (dupIdx > -1) state.entries.splice(dupIdx, 1);
+          resolvePendingEntryAdd(optimisticEntry.id);
+          saveCache();
+          renderEntries();
+        }
+        renderPunchDraft();
+        releaseEntryLock(inFlightKey, inFlightId);
+        return;
+      }
       if (res && res.success && res.entry) {
         const sanitized = sanitizeEntry(res.entry);
         if (optimisticEntry) {
@@ -7715,6 +7717,7 @@ function updateDeductionFormVisibility() {
         saveCache();
         renderEntries();
         setStatus('Punches saved', 'success');
+        releaseEntryLock(inFlightKey, inFlightId);
       } else {
         // Remove optimistic entry on failure
         if (optimisticEntry) {
@@ -7728,6 +7731,7 @@ function updateDeductionFormVisibility() {
           resolvePendingEntryAdd(optimisticEntry.id);
         }
         setStatus('Punch save failed', 'error');
+        releaseEntryLock(inFlightKey, inFlightId);
       }
       renderPunchDraft();
     };
@@ -7746,6 +7750,7 @@ function updateDeductionFormVisibility() {
       }
       setStatus('Punch save failed', 'error');
       renderPunchDraft();
+      releaseEntryLock(inFlightKey, inFlightId);
     };
 
     if (draft.entryId) {
@@ -7818,7 +7823,12 @@ function updateDeductionFormVisibility() {
 
     // Optimistic delete: Remove from local state immediately
     const idx = state.entries.findIndex(e => e.id === entryId);
-    if (idx === -1) return;
+    if (idx === -1) {
+      // If the entry isn't in local state (e.g. temp or already removed), just clear draft
+      state.punchDraft = null;
+      ensurePunchDraft();
+      return;
+    }
 
     const backup = state.entries[idx];
     state.entries.splice(idx, 1);
@@ -7840,7 +7850,19 @@ function updateDeductionFormVisibility() {
         if (!entriesSyncInFlight) resolvePendingEntryDelete(entryId);
         setStatus('Entry deleted', 'success');
       })
-      .withFailureHandler(() => {
+      .withFailureHandler((error) => {
+        console.error('Failed to delete punch entry', { entryId, error });
+        const message = (error && error.message) ? String(error.message) : String(error || '');
+        const notFound = /entry not found/i.test(message);
+        if (notFound || entryId.startsWith('temp_')) {
+          // Treat as already removed
+          resolvePendingEntryDelete(entryId);
+          saveCache();
+          renderEntries();
+          updateTabStates();
+          setStatus('Entry already removed', 'success');
+          return;
+        }
         // Rollback: restore the entry
         state.entries.splice(idx, 0, backup);
         markIncomeSummaryDirtyForEntry(backup);
@@ -7950,6 +7972,8 @@ function updateDeductionFormVisibility() {
   let queuedEntryFocus = null;
   let queuedFocusTimer = null;
   let entryFieldFocusSuppressed = false;
+  const entrySaveInFlight = new Map();
+  let duplicateCleanupPromptShown = false;
 
   function withEntryFocusSuppressed(fn) {
     const previous = entryFieldFocusSuppressed;
@@ -7989,6 +8013,227 @@ function updateDeductionFormVisibility() {
       const punchInput = punchList.querySelector(selector) || punchList.querySelector('input[type="time"]');
       if (punchInput) punchInput.focus();
     }
+  }
+
+  function entryCompositeKey(dateIso, hourTypeId, contractId) {
+    const typeId = hourTypeId || getDefaultHourTypeId() || '';
+    return [dateIso || '', String(typeId || ''), contractId || ''].join('|');
+  }
+
+  function findDuplicateEntryInState(dateIso, hourTypeId, contractId, excludeId) {
+    const targetKey = entryCompositeKey(dateIso, hourTypeId, contractId);
+    return state.entries.find((entry) => {
+      if (!entry || entry.id === excludeId) return false;
+      const key = entryCompositeKey(entry.date, entry.hour_type_id || getDefaultHourTypeId(), entry.contract_id || '');
+      return key === targetKey;
+    }) || null;
+  }
+
+  function findDuplicateGroups(entries) {
+    const map = new Map();
+    (entries || []).forEach((entry) => {
+      if (!entry || !entry.date) return;
+      const key = entryCompositeKey(entry.date, entry.hour_type_id || getDefaultHourTypeId(), entry.contract_id || '');
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(entry);
+    });
+    return Array.from(map.entries()).map(([key, list]) => ({ key, entries: list })).filter((g) => g.entries.length > 1);
+  }
+
+  function openExistingEntry(entry) {
+    if (!entry) return;
+    const entryType = resolveEntryType(entry);
+    if (entryType === 'basic') {
+      populateManualForm(entry, true);
+    } else {
+      state.currentTab = 'punch';
+      state.editingEntryType = entryType;
+      activateTab('punch');
+      if (punchDate) punchDate.value = entry.date;
+      ensurePunchDraft(entry.contract_id);
+      if (state.punchDraft) {
+        state.punchDraft.entryId = entry.id;
+        state.punchDraft.contractId = entry.contract_id;
+        state.punchDraft.date = entry.date;
+        state.punchDraft.punches = clonePunches(entry.punches || []);
+        state.punchDraft.dirty = false;
+        renderPunchDraft();
+      }
+    }
+  }
+
+  function checkEntryDuplicateAndLock(payload, editingId) {
+    const key = entryCompositeKey(payload.date, payload.hour_type_id, payload.contract_id);
+    const duplicate = findDuplicateEntryInState(payload.date, payload.hour_type_id, payload.contract_id, editingId);
+    if (duplicate) {
+      const hourTypeName = (state.hourTypeMap[payload.hour_type_id] || {}).name || 'Work';
+      setStatus(`An entry for ${hourTypeName} already exists on ${payload.date}.`, 'error');
+      openExistingEntry(duplicate);
+      return { blocked: true };
+    }
+    const currentId = editingId || payload.id || 'new';
+    const existingLock = entrySaveInFlight.get(key);
+    if (existingLock && existingLock !== currentId) {
+      setStatus('Another save for this date and hour type is in progress. Please wait.', 'warn');
+      return { blocked: true };
+    }
+    entrySaveInFlight.set(key, currentId);
+    return { blocked: false, key };
+  }
+
+  function releaseEntryLock(key, currentId) {
+    if (!key) return;
+    const existing = entrySaveInFlight.get(key);
+    if (!existing || (currentId && existing !== currentId)) return;
+    entrySaveInFlight.delete(key);
+  }
+
+  function handleDuplicateConflictResponse(res) {
+    if (res && res.error === 'duplicate_entry') {
+      setStatus('An entry already exists for this date and hour type.', 'error');
+      if (res.entry) {
+        openExistingEntry(sanitizeEntry(res.entry));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function buildDuplicateCleanupModal() {
+    let modal = document.getElementById('duplicate-cleanup-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'duplicate-cleanup-modal';
+    modal.className = 'ts-modal';
+    modal.style.display = 'none';
+    modal.innerHTML = `
+      <div class="ts-modal-content" style="max-width:680px;">
+        <div class="ts-modal-header">
+          <h3>Resolve duplicate entries</h3>
+          <button class="ts-modal-close">&times;</button>
+        </div>
+        <div class="ts-modal-body">
+          <p id="duplicate-cleanup-summary" style="margin-top:0;"></p>
+          <div id="duplicate-cleanup-list" class="ts-list" style="max-height:240px; overflow:auto;"></div>
+          <p class="ts-note" style="margin-top:12px;">Select the entry to keep. All other entries for this date and hour type will be deleted.</p>
+        </div>
+        <div class="ts-modal-footer">
+          <button class="ghost" id="duplicate-cleanup-cancel">Cancel</button>
+          <button id="duplicate-cleanup-confirm">Keep selected &amp; delete others</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const closeBtn = modal.querySelector('.ts-modal-close');
+    if (closeBtn) closeBtn.onclick = () => hideModal(modal);
+    const cancelBtn = modal.querySelector('#duplicate-cleanup-cancel');
+    if (cancelBtn) cancelBtn.onclick = () => hideModal(modal);
+    return modal;
+  }
+
+  function populateDuplicateCleanupModal(group) {
+    const modal = buildDuplicateCleanupModal();
+    const summary = modal.querySelector('#duplicate-cleanup-summary');
+    const listEl = modal.querySelector('#duplicate-cleanup-list');
+    const confirmBtn = modal.querySelector('#duplicate-cleanup-confirm');
+    if (!listEl || !confirmBtn || !summary) return null;
+    const sample = group.entries[0] || {};
+    const hourType = state.hourTypeMap[sample.hour_type_id || getDefaultHourTypeId()];
+    const contractName = sample.contract_id ? (state.contractMap[sample.contract_id]?.name || 'Unknown contract') : 'No contract';
+    summary.textContent = `Date: ${sample.date} • Hour type: ${hourType ? hourType.name : 'Default'} • Contract: ${contractName}`;
+    listEl.innerHTML = '';
+    group.entries.forEach((entry, idx) => {
+      const item = document.createElement('label');
+      item.className = 'ts-list-item';
+      item.style.display = 'flex';
+      item.style.alignItems = 'center';
+      item.style.gap = '8px';
+      item.innerHTML = `
+        <input type="radio" name="duplicate-keep" value="${entry.id}" ${idx === 0 ? 'checked' : ''} />
+        <div style="flex:1;">
+          <div><strong>${entry.duration_minutes || 0} min</strong> (${entry.entry_type || 'basic'})</div>
+          <div style="color:var(--muted); font-size:12px;">Created: ${entry.created_at || ''} • Id: ${entry.id}</div>
+        </div>
+      `;
+      listEl.appendChild(item);
+    });
+    return { modal, confirmBtn };
+  }
+
+  function deleteEntriesById(ids) {
+    const results = [];
+    const run = (id) => new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler(() => resolve({ id, success: true }))
+        .withFailureHandler((error) => {
+          const message = (error && error.message) ? String(error.message) : String(error || '');
+          const notFound = /entry not found/i.test(message);
+          if (notFound || (id && String(id).startsWith('temp_'))) {
+            resolve({ id, success: true, warning: 'not_found' });
+            return;
+          }
+          resolve({ id, success: false, error });
+        })
+        .api_deleteEntry(id);
+    });
+    const seq = async () => {
+      for (const id of ids) {
+        // Remove locally optimistically; rollback handled by refresh on failure
+        const idx = state.entries.findIndex((e) => e.id === id);
+        if (idx > -1) {
+          const removed = state.entries.splice(idx, 1)[0];
+          markIncomeSummaryDirtyForEntry(removed);
+        }
+        const res = await run(id);
+        results.push(res);
+      }
+      return results;
+    };
+    return seq();
+  }
+
+  function promptDuplicateCleanup(group) {
+    const populated = populateDuplicateCleanupModal(group);
+    if (!populated) return;
+    const { modal, confirmBtn } = populated;
+    const listEl = modal.querySelector('#duplicate-cleanup-list');
+    const onConfirm = async () => {
+      if (!listEl) return;
+      const selected = listEl.querySelector('input[name="duplicate-keep"]:checked');
+      const keepId = selected ? selected.value : null;
+      if (!keepId) {
+        setStatus('Select an entry to keep.', 'warn');
+        return;
+      }
+      const toDelete = group.entries.map((e) => e.id).filter((id) => id !== keepId);
+      if (!toDelete.length) {
+        hideModal(modal);
+        return;
+      }
+      setStatus('Deleting duplicate entries...', 'warn');
+      const results = await deleteEntriesById(toDelete);
+      const failed = results.filter((r) => !r.success);
+      if (failed.length) {
+        console.error('Failed to delete some duplicates', failed);
+        setStatus(`Failed to delete ${failed.length} duplicate(s).`, 'error');
+      } else {
+        setStatus('Duplicates deleted', 'success');
+      }
+      saveCache();
+      renderEntries();
+      renderCalendar();
+      hideModal(modal);
+    };
+    confirmBtn.onclick = onConfirm;
+    showModal(modal);
+  }
+
+  function maybePromptDuplicateCleanup() {
+    if (duplicateCleanupPromptShown) return;
+    const groups = findDuplicateGroups(state.entries);
+    if (!groups.length) return;
+    duplicateCleanupPromptShown = true;
+    promptDuplicateCleanup(groups[0]);
   }
 
   function determinePunchFocusTarget(punches) {
@@ -8210,21 +8455,6 @@ function updateDeductionFormVisibility() {
     const hourTypeId = manualHourType ? manualHourType.value : getDefaultHourTypeId();
     const selectedHourType = state.hourTypeMap[hourTypeId];
 
-    // Check for duplicate hour type on the same date (when not editing)
-    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
-    if (hourTypesEnabled && !state.editingEntryId) {
-      const duplicateEntry = state.entries.find(e =>
-        e.date === date &&
-        (e.hour_type_id || getDefaultHourTypeId()) === hourTypeId &&
-        e.id !== state.editingEntryId
-      );
-      if (duplicateEntry) {
-        const hourTypeName = selectedHourType?.name || 'Work';
-        customAlert(`An entry with hour type "${hourTypeName}" already exists for ${date}. Please switch to that hour type to edit it.`);
-        return null;
-      }
-    }
-
     // Validate contract based on hour type
     const contractId = manualContract ? manualContract.value : '';
     if (selectedHourType && selectedHourType.requires_contract) {
@@ -8259,9 +8489,16 @@ function updateDeductionFormVisibility() {
   manualSaveBtn.onclick = function () {
     const payload = getManualPayload();
     if (!payload) return;
+    const lockResult = checkEntryDuplicateAndLock(payload, state.editingEntryId);
+    if (lockResult.blocked) return;
+    const inFlightKey = lockResult.key;
+    const inFlightId = state.editingEntryId || payload.id || 'new';
     if (state.editingEntryId) {
       const idx = state.entries.findIndex((e) => e.id === state.editingEntryId);
-      if (idx === -1) return;
+      if (idx === -1) {
+        releaseEntryLock(inFlightKey, inFlightId);
+        return;
+      }
       const backup = { ...state.entries[idx] };
       const update = { id: state.editingEntryId, ...payload };
       const optimisticUpdate = sanitizeEntry({ ...backup, ...update });
@@ -8274,6 +8511,15 @@ function updateDeductionFormVisibility() {
       setStatus('Saving...', 'warn');
       google.script.run
         .withSuccessHandler((res) => {
+          if (handleDuplicateConflictResponse(res)) {
+            state.entries[idx] = backup;
+            markIncomeSummaryDirtyForEntry(backup);
+            resolvePendingEntryUpdate(state.editingEntryId);
+            saveCache();
+            renderEntries();
+            releaseEntryLock(inFlightKey, inFlightId);
+            return;
+          }
           if (res && res.success) {
             const confirmed = sanitizeEntry(res.entry);
             state.entries[idx] = confirmed;
@@ -8294,6 +8540,7 @@ function updateDeductionFormVisibility() {
             renderEntries();
             setStatus('Save failed', 'error');
           }
+          releaseEntryLock(inFlightKey, inFlightId);
         })
         .withFailureHandler(() => {
           state.entries[idx] = backup;
@@ -8302,6 +8549,7 @@ function updateDeductionFormVisibility() {
           saveCache();
           renderEntries();
           setStatus('Save failed', 'error');
+          releaseEntryLock(inFlightKey, inFlightId);
         })
         .api_updateEntry(update);
     } else {
@@ -8322,6 +8570,18 @@ function updateDeductionFormVisibility() {
       setStatus('Saving...', 'warn');
       google.script.run
         .withSuccessHandler((res) => {
+          if (handleDuplicateConflictResponse(res)) {
+            resolvePendingEntryAdd(optimisticEntry.id);
+            // Remove optimistic entry since it conflicts
+            const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+            if (idx > -1) {
+              state.entries.splice(idx, 1);
+              saveCache();
+              renderEntries();
+            }
+            releaseEntryLock(inFlightKey, inFlightId);
+            return;
+          }
           if (res && res.success) {
             const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
             if (idx > -1) {
@@ -8339,12 +8599,26 @@ function updateDeductionFormVisibility() {
           } else {
             resolvePendingEntryAdd(optimisticEntry.id);
             setStatus('Save failed', 'error');
+            const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+            if (idx > -1) {
+              state.entries.splice(idx, 1);
+              saveCache();
+              renderEntries();
+            }
           }
+          releaseEntryLock(inFlightKey, inFlightId);
         })
         .withFailureHandler(() => {
           resolvePendingEntryAdd(optimisticEntry.id);
           markIncomeSummaryDirtyForEntry(optimisticEntry);
           setStatus('Save failed (offline?)', 'error');
+          const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
+          if (idx > -1) {
+            state.entries.splice(idx, 1);
+            saveCache();
+            renderEntries();
+          }
+          releaseEntryLock(inFlightKey, inFlightId);
         })
         .api_addEntry(entry);
     }
@@ -8372,7 +8646,12 @@ function updateDeductionFormVisibility() {
 
       // Optimistic delete: Remove from local state immediately
       const idx = state.entries.findIndex(e => e.id === entryId);
-      if (idx === -1) return;
+      if (idx === -1) {
+        // If it's already gone locally, skip server delete
+        resolvePendingEntryDelete(entryId);
+        setStatus('Entry already removed', 'success');
+        return;
+      }
 
       const backup = state.entries[idx];
       state.entries.splice(idx, 1);
@@ -8393,7 +8672,18 @@ function updateDeductionFormVisibility() {
           if (!entriesSyncInFlight) resolvePendingEntryDelete(entryId);
           setStatus('Entry deleted', 'success');
         })
-        .withFailureHandler(() => {
+        .withFailureHandler((error) => {
+          console.error('Failed to delete manual entry', { entryId, error });
+          const message = (error && error.message) ? String(error.message) : String(error || '');
+          const notFound = /entry not found/i.test(message);
+          if (notFound || entryId.startsWith('temp_')) {
+            resolvePendingEntryDelete(entryId);
+            setStatus('Entry already removed', 'success');
+            saveCache();
+            renderEntries();
+            updateTabStates();
+            return;
+          }
           // Rollback: restore the entry
           state.entries.splice(idx, 0, backup);
           markIncomeSummaryDirtyForEntry(backup);
@@ -14736,6 +15026,7 @@ function getCachedIncomeSummary(monthKey) {
           saveCache();
           renderEntries();
           updateTabStates();
+          maybePromptDuplicateCleanup();
         ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
         setStatus('Synced', 'success');
         renderBasReporting();

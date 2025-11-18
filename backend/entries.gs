@@ -224,6 +224,8 @@ function api_getEntries(filters) {
 }
 
 function api_addEntry(entry) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
   var sh = getOrCreateSheet('timesheet_entries');
   var id = Utilities.getUuid();
   var now = new Date();
@@ -236,61 +238,81 @@ function api_addEntry(entry) {
     punches: entry && entry.punches,
     punches_json: entry && entry.punches_json,
     entry_type: entry && entry.entry_type,
-    hour_type_id: entry && entry.hour_type_id,
+    hour_type_id: entry && entry.hour_type_id ? entry.hour_type_id : getDefaultHourTypeId(),
     recurrence_id: entry && entry.recurrence_id
   });
   normalized.id = normalized.id || id;
   normalized.date = normalized.date || toIsoDate(now);
   normalized.contract_id = normalized.contract_id || '';
   normalized.created_at = normalized.created_at || toIsoDateTime(now);
-  var row = buildEntryRow(normalized, normalized.created_at);
-  sh.appendRow(row);
-  cacheClearPrefix(ENTRY_CACHE_PREFIX);
-  return { success: true, entry: normalizeEntryObject({
-    id: row[0],
-    date: row[1],
-    duration_minutes: row[2],
-    contract_id: row[3],
-    created_at: row[4],
-    punches_json: row[5],
-    entry_type: row[6],
-    hour_type_id: row[7],
-    recurrence_id: row[8]
-  }) };
+  normalized.hour_type_id = normalized.hour_type_id || getDefaultHourTypeId();
+  try {
+    var duplicate = findDuplicateEntryForKey(sh, normalized, null);
+    if (duplicate) {
+      return { success: false, error: 'duplicate_entry', entry: duplicate };
+    }
+    var row = buildEntryRow(normalized, normalized.created_at);
+    sh.appendRow(row);
+    cacheClearPrefix(ENTRY_CACHE_PREFIX);
+    return { success: true, entry: normalizeEntryObject({
+      id: row[0],
+      date: row[1],
+      duration_minutes: row[2],
+      contract_id: row[3],
+      created_at: row[4],
+      punches_json: row[5],
+      entry_type: row[6],
+      hour_type_id: row[7],
+      recurrence_id: row[8]
+    }) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function api_updateEntry(update) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
   var sh = getOrCreateSheet('timesheet_entries');
   var values = sh.getDataRange().getValues();
-  for (var i=1; i<values.length; i++) {
-    if (values[i][0] === update.id) {
-      var originalCreated = values[i][4];
-      var payload = update || {};
-      if (payload.punches == null && payload.punches_json == null) {
-        payload = Object.assign({}, payload, { punches_json: values[i][5] || '[]' });
+  try {
+    for (var i=1; i<values.length; i++) {
+      if (values[i][0] === update.id) {
+        var originalCreated = values[i][4];
+        var payload = update || {};
+        if (payload.punches == null && payload.punches_json == null) {
+          payload = Object.assign({}, payload, { punches_json: values[i][5] || '[]' });
+        }
+        if (!payload.entry_type && values[i][6] != null) {
+          payload = Object.assign({}, payload, { entry_type: values[i][6] });
+        }
+        if (!payload.hour_type_id && values[i][7] != null) {
+          payload = Object.assign({}, payload, { hour_type_id: values[i][7] });
+        }
+        if (!payload.hasOwnProperty('recurrence_id') && values[i][8] != null) {
+          payload = Object.assign({}, payload, { recurrence_id: values[i][8] });
+        }
+        if (payload.recurrence_id == null && update.recurrence_id != null) {
+          payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
+        }
+        var normalized = normalizeEntryObject(payload);
+        normalized.id = update.id;
+        normalized.created_at = toIsoDateTime(originalCreated);
+        normalized.hour_type_id = normalized.hour_type_id || getDefaultHourTypeId();
+        var duplicate = findDuplicateEntryForKey(sh, normalized, update.id);
+        if (duplicate) {
+          return { success: false, error: 'duplicate_entry', entry: duplicate };
+        }
+        var newRow = buildEntryRow(normalized, normalized.created_at);
+        sh.getRange(i+1,1,1,newRow.length).setValues([newRow]);
+        cacheClearPrefix(ENTRY_CACHE_PREFIX);
+        return { success: true, entry: normalized };
       }
-      if (!payload.entry_type && values[i][6] != null) {
-        payload = Object.assign({}, payload, { entry_type: values[i][6] });
-      }
-      if (!payload.hour_type_id && values[i][7] != null) {
-        payload = Object.assign({}, payload, { hour_type_id: values[i][7] });
-      }
-      if (!payload.hasOwnProperty('recurrence_id') && values[i][8] != null) {
-        payload = Object.assign({}, payload, { recurrence_id: values[i][8] });
-      }
-      if (payload.recurrence_id == null && update.recurrence_id != null) {
-        payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
-      }
-      var normalized = normalizeEntryObject(payload);
-      normalized.id = update.id;
-      normalized.created_at = toIsoDateTime(originalCreated);
-      var newRow = buildEntryRow(normalized, normalized.created_at);
-      sh.getRange(i+1,1,1,newRow.length).setValues([newRow]);
-      cacheClearPrefix(ENTRY_CACHE_PREFIX);
-      return { success: true, entry: normalized };
     }
+    throw new Error('Entry not found');
+  } finally {
+    lock.releaseLock();
   }
-  throw new Error('Entry not found');
 }
 
 function api_deleteEntry(id) {
@@ -304,4 +326,36 @@ function api_deleteEntry(id) {
     }
   }
   throw new Error('Entry not found');
+}
+
+function entryCompositeKey(dateIso, hourTypeId, contractId) {
+  var typeId = hourTypeId || getDefaultHourTypeId() || '';
+  return [dateIso || '', String(typeId || ''), contractId || ''].join('|');
+}
+
+function findDuplicateEntryForKey(sh, normalizedEntry, excludeId) {
+  if (!sh || !normalizedEntry || !normalizedEntry.date) return null;
+  var values = sh.getDataRange().getValues();
+  if (!values || values.length < 2) return null;
+  var targetKey = entryCompositeKey(normalizedEntry.date, normalizedEntry.hour_type_id, normalizedEntry.contract_id);
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    var rowObj = normalizeEntryObject({
+      id: row[0],
+      date: row[1],
+      duration_minutes: row[2],
+      contract_id: row[3],
+      created_at: row[4],
+      punches_json: row[5],
+      entry_type: row[6],
+      hour_type_id: row[7],
+      recurrence_id: row[8]
+    });
+    if (rowObj.id === excludeId) continue;
+    var key = entryCompositeKey(rowObj.date, rowObj.hour_type_id, rowObj.contract_id);
+    if (key === targetKey) {
+      return rowObj;
+    }
+  }
+  return null;
 }
