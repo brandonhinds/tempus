@@ -176,12 +176,18 @@
         <span class="ts-income-row-est" id="income-potential-net">--</span>
       </div>
       <div class="ts-income-row income-potential-row" id="income-estimated-standard-row" hidden>
-        <span class="ts-income-row-label">Estimated net income (standard hours)</span>
+        <span class="ts-income-row-label">
+          Estimated net income (standard hours)
+          <span class="ts-info-icon" id="income-estimated-standard-info" title="Hours used: --">i</span>
+        </span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-estimated-standard-net">--</span>
       </div>
       <div class="ts-income-row income-potential-row" id="income-estimated-projected-row" hidden>
-        <span class="ts-income-row-label">Estimated net income (projected hours)</span>
+        <span class="ts-income-row-label">
+          Estimated net income (projected hours)
+          <span class="ts-info-icon" id="income-estimated-projected-info" title="Hours used: --">i</span>
+        </span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-estimated-projected-net">--</span>
       </div>
@@ -607,10 +613,25 @@
               <p class="ts-note" id="bulk-form-subtitle" style="margin:4px 0 0;">Fill a date range with matching entries.</p>
             </div>
             <div class="ts-warning" id="bulk-form-warning" style="display:none;"></div>
-            <label>Name<input type="text" id="bulk-name" placeholder="e.g., Overseas Holiday" /></label>
+            <div class="ts-grid ts-grid--gap-md" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:flex-end;">
+              <div>
+                <label>Name<input type="text" id="bulk-name" placeholder="e.g., Overseas Holiday" /></label>
+              </div>
+              <div>
+                <label>Distribution
+                  <select id="bulk-distribution-mode">
+                    <option value="daily">Hours each day</option>
+                    <option value="monthly">Hours over the month</option>
+                  </select>
+                </label>
+              </div>
+            </div>
             <div class="ts-grid ts-grid--gap-md">
               <div class="ts-col-span-6">
-                <label>Hours per day<input type="number" id="bulk-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" /></label>
+                <label id="bulk-hours-label">
+                  <span id="bulk-hours-label-text">Hours per day</span>
+                  <input type="number" id="bulk-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" />
+                </label>
               </div>
               <div class="ts-col-span-6">
                 <label>Contract
@@ -623,11 +644,25 @@
                 <select id="bulk-hour-type"></select>
               </label>
             </div>
-            <div class="ts-grid ts-grid--gap-md">
-              <div class="ts-col-span-6">
+            <div id="bulk-month-wrapper" style="display:none;">
+              <div class="ts-field-group">
+                <label>Month</label>
+                <input type="hidden" id="bulk-month" />
+                <div class="ts-month-picker-card" style="border:1px solid var(--border); border-radius:12px; padding:12px;">
+                  <div class="ts-month-picker-header" style="margin-bottom:12px;">
+                    <button type="button" class="ghost small" id="bulk-month-year-prev">◀</button>
+                    <div id="bulk-month-year" class="ts-month-picker-year" style="font-size:16px;">2025</div>
+                    <button type="button" class="ghost small" id="bulk-month-year-next">▶</button>
+                  </div>
+                  <div class="ts-month-picker-grid" id="bulk-month-grid"></div>
+                </div>
+              </div>
+            </div>
+            <div class="ts-grid ts-grid--gap-md" id="bulk-date-range-row">
+              <div class="ts-col-span-6" id="bulk-start-date-wrapper">
                 <label>Start date<input type="date" id="bulk-start-date" /></label>
               </div>
-              <div class="ts-col-span-6">
+              <div class="ts-col-span-6" id="bulk-end-date-wrapper">
                 <label>End date<input type="date" id="bulk-end-date" /></label>
               </div>
             </div>

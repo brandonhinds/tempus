@@ -25,10 +25,10 @@
       Time entries rounding (minutes)
      </label>
      <div class="ts-note">
-      Time entries are automatically rounded to intervals of this many minutes (e.g. "15" rounds time entries to quarters of hours). Set to 0 to disable rounding.
+      Time entries are automatically rounded to intervals of this many minutes (0-60). Enter 0 to disable rounding entirely.
      </div>
      <div class="ts-settings-field ts-settings-control">
-      <input id="set-round" min="0" step="1" type="number"/>
+      <input id="set-round" min="0" max="60" step="1" type="number"/>
      </div>
     </div>
     <div class="ts-settings-item" data-setting-key="theme">

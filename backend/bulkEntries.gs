@@ -12,10 +12,19 @@ var BULK_ENTRY_HEADERS = [
   'last_synced_at',
   'last_synced_count',
   'warning_message',
+  'distribution_mode',
+  'monthly_total_minutes',
   'created_at',
   'updated_at'
 ];
 var BULK_MAX_RANGE_DAYS = 366; // inclusive days (roughly 1 year)
+
+function clampRoundInterval(value) {
+  var num = Number(value);
+  if (!isFinite(num) || num <= 0) return 0;
+  if (num > 60) return 60;
+  return num;
+}
 
 function getBulkEntriesSheet() {
   var sh = getOrCreateSheet(BULK_SHEET_NAME);
@@ -77,6 +86,8 @@ function normalizeBulkEntryRow(entry) {
     last_synced_at: toIsoDateTime(entry.last_synced_at),
     last_synced_count: parsePositiveInteger(entry.last_synced_count, 0),
     warning_message: entry.warning_message ? String(entry.warning_message).trim() : '',
+    distribution_mode: entry.distribution_mode === 'monthly' ? 'monthly' : 'daily',
+    monthly_total_minutes: normalizeDurationMinutes(entry.monthly_total_minutes),
     created_at: toIsoDateTime(entry.created_at),
     updated_at: toIsoDateTime(entry.updated_at)
   };
@@ -89,10 +100,21 @@ function normalizeBulkPayload(payload) {
   normalized.label = payload.label ? String(payload.label).trim() : '';
   if (!normalized.label) throw new Error('Name is required.');
   var durationMinutes = normalizeDurationMinutes(payload.duration_minutes != null ? payload.duration_minutes : payload.durationMinutes);
-  if (!durationMinutes || durationMinutes <= 0) {
-    throw new Error('Duration must be greater than zero minutes.');
+  var monthlyMinutes = normalizeDurationMinutes(payload.monthly_total_minutes != null ? payload.monthly_total_minutes : payload.monthlyMinutes);
+  normalized.distribution_mode = payload.distribution_mode === 'monthly' ? 'monthly' : 'daily';
+  if (normalized.distribution_mode === 'monthly') {
+    if (!monthlyMinutes || monthlyMinutes <= 0) {
+      throw new Error('Monthly hours must be greater than zero minutes.');
+    }
+    normalized.monthly_total_minutes = monthlyMinutes;
+    normalized.duration_minutes = durationMinutes > 0 ? durationMinutes : 0;
+  } else {
+    if (!durationMinutes || durationMinutes <= 0) {
+      throw new Error('Duration must be greater than zero minutes.');
+    }
+    normalized.duration_minutes = durationMinutes;
+    normalized.monthly_total_minutes = 0;
   }
-  normalized.duration_minutes = durationMinutes;
   normalized.contract_id = payload.contract_id ? String(payload.contract_id).trim() : '';
   if (!normalized.contract_id) {
     throw new Error('Select a contract.');
@@ -138,6 +160,8 @@ function persistBulkEntry(entry) {
     entry.last_synced_at,
     entry.last_synced_count,
     entry.warning_message,
+    entry.distribution_mode,
+    entry.monthly_total_minutes,
     entry.created_at,
     entry.updated_at
   ];
@@ -275,6 +299,8 @@ function syncBulkTimeEntries(options) {
     // hour types optional
   }
   var existingEntryCache = buildBulkExistingEntryCache();
+  var settings = api_getSettings();
+  var roundInterval = clampRoundInterval(settings && settings.round_to_nearest);
   var context = {
     contracts: contractMap,
     hourTypes: hourTypeMap,
@@ -283,7 +309,8 @@ function syncBulkTimeEntries(options) {
     totalCreates: 0,
     totalUpdates: 0,
     totalDeletes: 0,
-    existingEntries: existingEntryCache
+    existingEntries: existingEntryCache,
+    roundInterval: roundInterval
   };
   var summaries = [];
   entries.forEach(function(entry) {
@@ -343,11 +370,24 @@ function processBulkEntry(entry, context) {
     return { summary: summary, entryChanged: entryChanged };
   }
   var desiredDates = collectBulkDates(startBound, endBound, entry, context);
+  var durationResult = buildBulkDateDurations(entry, desiredDates, context);
+  if (durationResult.error) {
+    summary.warning = durationResult.error;
+    if ((entry.warning_message || '') !== summary.warning) {
+      entry.warning_message = summary.warning;
+      entryChanged = true;
+    }
+    return { summary: summary, entryChanged: entryChanged };
+  }
+  var dayMinutesMap = durationResult.durations || {};
   var desiredMap = {};
-  desiredDates.forEach(function(d) { desiredMap[d] = true; });
+  desiredDates.forEach(function(d) {
+    if ((dayMinutesMap[d] || 0) > 0) {
+      desiredMap[d] = true;
+    }
+  });
   var existingEntries = context.existingEntries[entry.id] || {};
   context.existingEntries[entry.id] = existingEntries;
-  // Remove entries outside desired window
   Object.keys(existingEntries).forEach(function(dateIso) {
     if (!desiredMap[dateIso]) {
       var record = existingEntries[dateIso];
@@ -362,15 +402,17 @@ function processBulkEntry(entry, context) {
     }
   });
   desiredDates.forEach(function(dateIso) {
+    var minutesForDay = dayMinutesMap[dateIso] || 0;
+    if (minutesForDay <= 0) return;
     var existing = existingEntries[dateIso];
     if (!existing) {
-      var createdEntry = createBulkEntryInstance(entry, dateIso);
+      var createdEntry = createBulkEntryInstance(entry, dateIso, minutesForDay);
       if (createdEntry) {
         summary.created += 1;
         context.totalCreates += 1;
         existingEntries[dateIso] = {
           id: createdEntry.id,
-          duration_minutes: entry.duration_minutes,
+          duration_minutes: minutesForDay,
           contract_id: entry.contract_id,
           hour_type_id: entry.hour_type_id || ''
         };
@@ -379,17 +421,17 @@ function processBulkEntry(entry, context) {
     }
     var targetHourType = entry.hour_type_id || '';
     var existingHourType = existing.hour_type_id || '';
-    var needsUpdate = existing.duration_minutes !== entry.duration_minutes ||
+    var needsUpdate = existing.duration_minutes !== minutesForDay ||
       existing.contract_id !== entry.contract_id ||
       existingHourType !== targetHourType;
     if (!needsUpdate) return;
     var updatePayload = {
       id: existing.id,
-      duration_minutes: entry.duration_minutes,
+      duration_minutes: minutesForDay,
       contract_id: entry.contract_id,
       hour_type_id: targetHourType,
       entry_type: 'basic',
-      punches: buildBasicPunches(entry.duration_minutes),
+      punches: buildBasicPunches(minutesForDay),
       recurrence_id: entry.id,
       date: dateIso
     };
@@ -397,21 +439,25 @@ function processBulkEntry(entry, context) {
       api_updateEntry(updatePayload);
       summary.updated += 1;
       context.totalUpdates += 1;
-      existing.duration_minutes = entry.duration_minutes;
+      existing.duration_minutes = minutesForDay;
       existing.contract_id = entry.contract_id;
       existing.hour_type_id = targetHourType || '';
     } catch (e) {}
   });
   var warning = '';
-  if (!desiredDates.length) {
+  if (!Object.keys(desiredMap).length) {
     warning = 'No days met the selected filters.';
   }
+  if (durationResult.warning) {
+    warning = warning ? warning + ' ' + durationResult.warning : durationResult.warning;
+  }
+  summary.warning = warning;
   if ((entry.warning_message || '') !== warning) {
     entry.warning_message = warning;
     entryChanged = true;
   }
   entry.last_synced_at = toIsoDateTime(new Date());
-  entry.last_synced_count = desiredDates.length;
+  entry.last_synced_count = Object.keys(desiredMap).length;
   entry.updated_at = entry.last_synced_at;
   if (!entryChanged && (summary.created || summary.updated || summary.deleted)) {
     entryChanged = true;
@@ -444,6 +490,76 @@ function collectBulkDates(startIso, endIso, entry, context) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return result;
+}
+
+function buildBulkDateDurations(entry, dates, context) {
+  var map = {};
+  if (!dates || !dates.length) {
+    return { durations: map };
+  }
+  if (entry.distribution_mode === 'monthly') {
+    return distributeMonthlyDurations(entry, dates, context);
+  }
+  var minutes = Number(entry.duration_minutes) || 0;
+  if (minutes <= 0) {
+    return { error: 'Hours per day must be greater than zero minutes.' };
+  }
+  dates.forEach(function(dateIso) {
+    map[dateIso] = minutes;
+  });
+  return { durations: map };
+}
+
+function distributeMonthlyDurations(entry, dates, context) {
+  var map = {};
+  var totalMinutes = Number(entry.monthly_total_minutes) || 0;
+  if (totalMinutes <= 0) {
+    return { error: 'Monthly hours must be greater than zero minutes.' };
+  }
+  if (!dates || !dates.length) {
+    return { durations: map, warning: 'No days met the selected filters.' };
+  }
+  var interval = clampRoundInterval(context.roundInterval);
+  var quantum = interval > 0 ? interval : 1;
+  var totalUnits = Math.round(totalMinutes / quantum);
+  if (totalUnits <= 0) {
+    return { error: 'Monthly hours must be greater than zero minutes.' };
+  }
+  var days = dates.length;
+  var perDayUnits = Math.max(0, Math.round(totalUnits / days));
+  var allocations = [];
+  for (var i = 0; i < days - 1; i++) {
+    allocations.push(perDayUnits);
+  }
+  var lastUnits = totalUnits - perDayUnits * (days - 1);
+  var adjustments = 0;
+  if (lastUnits <= 0) {
+    for (var j = allocations.length - 1; j >= 0 && lastUnits <= 0; j--) {
+      if (allocations[j] > 0) {
+        allocations[j] -= 1;
+        lastUnits += 1;
+        adjustments += 1;
+      }
+    }
+    if (lastUnits <= 0) {
+      lastUnits = 0;
+    }
+  }
+  allocations.push(lastUnits);
+  var warningParts = [];
+  if (adjustments > 0) {
+    warningParts.push('Adjusted earlier days to keep the last day above zero hours.');
+  }
+  var zeroCount = 0;
+  allocations.forEach(function(units, idx) {
+    var minutes = units * quantum;
+    if (minutes <= 0) zeroCount += 1;
+    map[dates[idx]] = minutes;
+  });
+  if (zeroCount > 0) {
+    warningParts.push('Some days were skipped because the monthly hours are lower than the selected rounding interval.');
+  }
+  return { durations: map, warning: warningParts.join(' ') };
 }
 
 function getHolidaySetForRange(startIso, endIso, context) {
@@ -514,15 +630,17 @@ function buildBulkExistingEntryCache() {
   return map;
 }
 
-function createBulkEntryInstance(entry, dateIso) {
+function createBulkEntryInstance(entry, dateIso, durationMinutes) {
   try {
+    var minutes = durationMinutes != null ? durationMinutes : entry.duration_minutes;
+    if (!minutes || minutes <= 0) return null;
     var payload = {
       date: dateIso,
-      duration_minutes: entry.duration_minutes,
+      duration_minutes: minutes,
       contract_id: entry.contract_id,
       entry_type: 'basic',
       hour_type_id: entry.hour_type_id,
-      punches: buildBasicPunches(entry.duration_minutes),
+      punches: buildBasicPunches(minutes),
       recurrence_id: entry.id
     };
     var res = api_addEntry(payload);

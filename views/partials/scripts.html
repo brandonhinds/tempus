@@ -57,6 +57,10 @@
   const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const BULK_DEFAULT_DAILY_HOURS = 7.5;
+  const BULK_DEFAULT_MONTHLY_HOURS = 150;
+  const BULK_DEFAULT_DAILY_MINUTES = Math.round(BULK_DEFAULT_DAILY_HOURS * 60);
+  const BULK_DEFAULT_MONTHLY_MINUTES = Math.round(BULK_DEFAULT_MONTHLY_HOURS * 60);
 
   const formatMonthShortYear = (dateObj) => {
     if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
@@ -289,6 +293,7 @@ let ratePreviewInputSyncing = false;
       draft: null,
       deleteConfirm: false
     },
+    bulkEntriesSyncingEntryId: '',
     deductions: [],
     deductionCategories: [],
     deductionCategoryMap: {},
@@ -1728,11 +1733,13 @@ let ratePreviewInputSyncing = false;
     if (denominator <= 0) return total;
     return total / denominator;
   };
-
-  const getRoundInterval = () => {
-    const value = Number(state.settings.round_to_nearest);
-    return Number.isFinite(value) && value > 1 ? value : 0;
+  const clampRoundIntervalValue = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return Math.min(60, Math.max(0, num));
   };
+
+  const getRoundInterval = () => clampRoundIntervalValue(state.settings ? state.settings.round_to_nearest : 0);
 
   const getTrendMethod = () => {
     const value = state.settings ? state.settings.monthly_insights_trend_method : undefined;
@@ -2024,8 +2031,21 @@ let ratePreviewInputSyncing = false;
     const clone = { ...entry };
     clone.id = clone.id ? String(clone.id) : '';
     clone.label = clone.label ? String(clone.label).trim() : '';
+    clone.distribution_mode = clone.distribution_mode === 'monthly' ? 'monthly' : 'daily';
+    const monthlyTotal = Number(clone.monthly_total_minutes);
+    clone.monthly_total_minutes = Number.isFinite(monthlyTotal) && monthlyTotal > 0 ? Math.floor(monthlyTotal) : 0;
     const duration = Number(clone.duration_minutes);
-    clone.duration_minutes = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0;
+    const normalizedDuration = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0;
+    if (clone.distribution_mode === 'monthly') {
+      clone.duration_minutes = normalizedDuration > 0 && clone.monthly_total_minutes <= 0 ? normalizedDuration : 0;
+      if (clone.monthly_total_minutes <= 0 && normalizedDuration > 0) {
+        clone.monthly_total_minutes = normalizedDuration;
+        clone.duration_minutes = 0;
+      }
+    } else {
+      clone.duration_minutes = normalizedDuration;
+      clone.monthly_total_minutes = 0;
+    }
     clone.contract_id = clone.contract_id ? String(clone.contract_id) : '';
     clone.hour_type_id = clone.hour_type_id ? String(clone.hour_type_id) : '';
     clone.start_date = clone.start_date || '';
@@ -2141,7 +2161,9 @@ let ratePreviewInputSyncing = false;
     return {
       id: '',
       label: '',
-      duration_minutes: 450,
+      duration_minutes: BULK_DEFAULT_DAILY_MINUTES,
+      monthly_total_minutes: BULK_DEFAULT_MONTHLY_MINUTES,
+      distribution_mode: 'daily',
       contract_id: '',
       hour_type_id: getDefaultHourTypeId() || '',
       start_date: today,
@@ -2185,10 +2207,120 @@ let ratePreviewInputSyncing = false;
 
   function describeBulkEntry(entry) {
     if (!entry) return '';
+    if (entry.distribution_mode === 'monthly' && entry.start_date) {
+      const monthDate = parseIsoDate(entry.start_date);
+      if (monthDate) {
+        return formatMonthShortYear(monthDate);
+      }
+    }
     const start = entry.start_date ? formatFriendlyDate(entry.start_date) : '';
     const end = entry.end_date ? formatFriendlyDate(entry.end_date) : '';
     if (start && end) return `${start} → ${end}`;
     return start || end || '';
+  }
+
+  function getMonthBoundsFromValue(value) {
+    if (!value || !/^\d{4}-\d{2}$/.test(value)) return null;
+    const parts = value.split('-');
+    const year = Number(parts[0]);
+    const monthIndex = Number(parts[1]) - 1;
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return null;
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 0);
+    return { start: isoDate(start), end: isoDate(end) };
+  }
+
+  function getDefaultBulkMonthValue(draft) {
+    const source = draft && draft.start_date ? draft.start_date : todayIso();
+    return source ? source.slice(0, 7) : todayIso().slice(0, 7);
+  }
+
+  function applyBulkMonthSelection(value, updateDraftDates = true) {
+    if (!value) return;
+    if (bulkMonthInput) bulkMonthInput.value = value;
+    const bounds = getMonthBoundsFromValue(value);
+    if (!bounds) return;
+    const parts = value.split('-');
+    const year = Number(parts[0]);
+    if (Number.isFinite(year)) {
+      bulkMonthPickerState.year = year;
+    }
+    if (bulkStartDateInput) bulkStartDateInput.value = bounds.start;
+    if (bulkEndDateInput) bulkEndDateInput.value = bounds.end;
+    if (updateDraftDates && state.bulkEntryForm.draft) {
+      state.bulkEntryForm.draft.start_date = bounds.start;
+      state.bulkEntryForm.draft.end_date = bounds.end;
+    }
+    populateBulkContractOptions(bulkContractSelect ? bulkContractSelect.value : '');
+    renderBulkMonthPicker(value);
+  }
+
+  function syncBulkMonthInputFromDates() {
+    if (!bulkMonthInput || !bulkStartDateInput) return;
+    const start = bulkStartDateInput.value;
+    if (start && start.length >= 7) {
+      const value = start.slice(0, 7);
+      bulkMonthInput.value = value;
+      const year = Number(value.split('-')[0]);
+      if (Number.isFinite(year)) {
+        bulkMonthPickerState.year = year;
+      }
+      renderBulkMonthPicker(value);
+    }
+  }
+
+  function updateBulkDistributionUI(draft) {
+    const mode = draft && draft.distribution_mode ? draft.distribution_mode : (bulkHoursModeSelect ? bulkHoursModeSelect.value : 'daily');
+    if (bulkHoursModeSelect && bulkHoursModeSelect.value !== mode) {
+      bulkHoursModeSelect.value = mode;
+    }
+    const isMonthly = mode === 'monthly';
+    if (bulkHoursLabelText) bulkHoursLabelText.textContent = isMonthly ? 'Monthly hours' : 'Hours per day';
+    if (bulkMonthWrapper) bulkMonthWrapper.style.display = isMonthly ? 'block' : 'none';
+    if (bulkDateRangeRow) bulkDateRangeRow.style.display = isMonthly ? 'none' : 'grid';
+    if (bulkStartDateWrapper) bulkStartDateWrapper.style.display = isMonthly ? 'none' : 'block';
+    if (bulkEndDateWrapper) bulkEndDateWrapper.style.display = isMonthly ? 'none' : 'block';
+    if (isMonthly) {
+      let monthValue = bulkMonthInput && bulkMonthInput.value ? bulkMonthInput.value : '';
+      if (!monthValue) {
+        monthValue = getDefaultBulkMonthValue(draft);
+      }
+      applyBulkMonthSelection(monthValue, !!draft);
+    } else {
+      renderBulkMonthPicker('');
+    }
+    const desiredContract = state.bulkEntryForm && state.bulkEntryForm.draft
+      ? state.bulkEntryForm.draft.contract_id
+      : (bulkContractSelect ? bulkContractSelect.value : '');
+    populateBulkContractOptions(desiredContract);
+  }
+
+  function renderBulkMonthPicker(selectedValue) {
+    if (!bulkMonthGrid || !bulkMonthYearDisplay) return;
+    const currentYear = Number.isFinite(bulkMonthPickerState.year) ? bulkMonthPickerState.year : (new Date()).getFullYear();
+    bulkMonthPickerState.year = currentYear;
+    const selection = selectedValue && /^\d{4}-\d{2}$/.test(selectedValue)
+      ? selectedValue
+      : (bulkMonthInput && /^\d{4}-\d{2}$/.test(bulkMonthInput.value) ? bulkMonthInput.value : '');
+    const selectedParts = selection ? selection.split('-') : null;
+    const selectedYear = selectedParts ? Number(selectedParts[0]) : null;
+    const selectedMonth = selectedParts ? Number(selectedParts[1]) - 1 : null;
+    bulkMonthYearDisplay.textContent = currentYear;
+    bulkMonthGrid.innerHTML = '';
+    for (let i = 0; i < MONTH_ABBREVIATIONS.length; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ts-month-picker-cell';
+      btn.textContent = MONTH_ABBREVIATIONS[i];
+      if (selectedYear === currentYear && selectedMonth === i) {
+        btn.classList.add('active');
+      }
+      btn.addEventListener('click', () => {
+        const value = `${bulkMonthPickerState.year}-${String(i + 1).padStart(2, '0')}`;
+        applyBulkMonthSelection(value, true);
+      });
+      bulkMonthGrid.appendChild(btn);
+    }
   }
 
   function buildRecurringPreview(entry, limit = 5) {
@@ -8098,12 +8230,24 @@ function updateDeductionFormVisibility() {
   const bulkFormWarning = document.getElementById('bulk-form-warning');
   const bulkFormError = document.getElementById('bulk-form-error');
   const bulkNameInput = document.getElementById('bulk-name');
+  const bulkHoursModeSelect = document.getElementById('bulk-distribution-mode');
   const bulkHoursInput = document.getElementById('bulk-hours');
+  const bulkHoursLabelText = document.getElementById('bulk-hours-label-text');
   const bulkContractSelect = document.getElementById('bulk-contract');
   const bulkHourTypeRow = document.getElementById('bulk-hour-type-row');
   const bulkHourTypeSelect = document.getElementById('bulk-hour-type');
   const bulkStartDateInput = document.getElementById('bulk-start-date');
   const bulkEndDateInput = document.getElementById('bulk-end-date');
+  const bulkMonthWrapper = document.getElementById('bulk-month-wrapper');
+  const bulkMonthInput = document.getElementById('bulk-month');
+  const bulkMonthYearDisplay = document.getElementById('bulk-month-year');
+  const bulkMonthPrevBtn = document.getElementById('bulk-month-year-prev');
+  const bulkMonthNextBtn = document.getElementById('bulk-month-year-next');
+  const bulkMonthGrid = document.getElementById('bulk-month-grid');
+  const bulkMonthPickerState = { year: (new Date()).getFullYear() };
+  const bulkDateRangeRow = document.getElementById('bulk-date-range-row');
+  const bulkStartDateWrapper = document.getElementById('bulk-start-date-wrapper');
+  const bulkEndDateWrapper = document.getElementById('bulk-end-date-wrapper');
   const bulkSkipWeekendsToggle = document.getElementById('bulk-skip-weekends');
   const bulkSkipHolidaysToggle = document.getElementById('bulk-skip-holidays');
   const bulkGeneratedSummary = document.getElementById('bulk-generated-summary');
@@ -8957,6 +9101,37 @@ function updateDeductionFormVisibility() {
     });
   }
 
+  if (bulkHoursModeSelect) {
+    bulkHoursModeSelect.addEventListener('change', () => {
+      const draft = state.bulkEntryForm.draft || defaultBulkDraft();
+      const mode = bulkHoursModeSelect.value || 'daily';
+      draft.distribution_mode = mode;
+      if (mode === 'monthly') {
+        draft.monthly_total_minutes = BULK_DEFAULT_MONTHLY_MINUTES;
+        draft.duration_minutes = 0;
+        if (bulkHoursInput) bulkHoursInput.value = formatDecimalHours(BULK_DEFAULT_MONTHLY_HOURS);
+        const defaultMonth = getDefaultBulkMonthValue(draft);
+        applyBulkMonthSelection(defaultMonth, true);
+      } else {
+        draft.duration_minutes = BULK_DEFAULT_DAILY_MINUTES;
+        draft.monthly_total_minutes = 0;
+        if (bulkHoursInput) bulkHoursInput.value = formatDecimalHours(BULK_DEFAULT_DAILY_HOURS);
+      }
+      updateBulkDistributionUI(draft);
+    });
+  }
+  if (bulkMonthPrevBtn) {
+    bulkMonthPrevBtn.addEventListener('click', () => {
+      bulkMonthPickerState.year -= 1;
+      renderBulkMonthPicker(bulkMonthInput ? bulkMonthInput.value : '');
+    });
+  }
+  if (bulkMonthNextBtn) {
+    bulkMonthNextBtn.addEventListener('click', () => {
+      bulkMonthPickerState.year += 1;
+      renderBulkMonthPicker(bulkMonthInput ? bulkMonthInput.value : '');
+    });
+  }
   if (bulkManageBtn) {
     bulkManageBtn.addEventListener('click', () => {
       const draft = state.bulkEntryForm.draft || defaultBulkDraft();
@@ -8967,6 +9142,16 @@ function updateDeductionFormVisibility() {
   if (bulkNewBtn) {
     bulkNewBtn.addEventListener('click', () => {
       setBulkFormDraft(defaultBulkDraft());
+    });
+  }
+  if (bulkStartDateInput) {
+    bulkStartDateInput.addEventListener('change', () => {
+      handleBulkRangeChange();
+    });
+  }
+  if (bulkEndDateInput) {
+    bulkEndDateInput.addEventListener('change', () => {
+      handleBulkRangeChange();
     });
   }
   if (bulkCancelBtn) {
@@ -8983,6 +9168,19 @@ function updateDeductionFormVisibility() {
   }
   if (bulkDeleteConfirmBtn) {
     bulkDeleteConfirmBtn.addEventListener('click', handleBulkDelete);
+  }
+  if (bulkMonthInput) {
+    bulkMonthInput.addEventListener('change', () => {
+      applyBulkMonthSelection(bulkMonthInput.value, true);
+    });
+  }
+  if (bulkContractSelect) {
+    bulkContractSelect.addEventListener('change', () => {
+      if (state.bulkEntryForm.draft) {
+        state.bulkEntryForm.draft.contract_id = bulkContractSelect.value || '';
+      }
+      evaluateBulkContractWarning();
+    });
   }
 
   if (manualHourType) {
@@ -9025,6 +9223,8 @@ function updateDeductionFormVisibility() {
   const incomePotentialNetEl = document.getElementById('income-potential-net');
   const incomeEstimatedStandardNetEl = document.getElementById('income-estimated-standard-net');
   const incomeEstimatedProjectedNetEl = document.getElementById('income-estimated-projected-net');
+  const incomeEstimatedStandardInfo = document.getElementById('income-estimated-standard-info');
+  const incomeEstimatedProjectedInfo = document.getElementById('income-estimated-projected-info');
   const btnCompanyExpensesDetails = document.getElementById('btn-company-expenses-details');
   const btnDeductionsDetails = document.getElementById('btn-deductions-details');
   const modalMonthlyDeductions = document.getElementById('modal-monthly-deductions');
@@ -13071,6 +13271,26 @@ function getCachedIncomeSummary(monthKey) {
     placeholders.forEach((el) => {
       if (el) el.textContent = '--';
     });
+    resetPotentialIncomeInfoIcons();
+  }
+
+  function setPotentialHoursTooltip(el, breakdown) {
+    if (!el) return;
+    if (!breakdown || !Number.isFinite(breakdown.logged) || !Number.isFinite(breakdown.extra)) {
+      el.title = 'Hours used: --';
+      return;
+    }
+    const loggedMinutes = breakdown.logged * 60;
+    const extraMinutes = breakdown.extra * 60;
+    const totalMinutes = (breakdown.logged + breakdown.extra) * 60;
+    const extraLabel = breakdown.extraLabel ? ` (${breakdown.extraLabel})` : '';
+    const loggedLabel = breakdown.loggedLabel ? ` (${breakdown.loggedLabel})` : ' (logged)';
+    el.title = `Hours used: ${formatHours(loggedMinutes)}h${loggedLabel} + ${formatHours(extraMinutes)}h${extraLabel} = ${formatHours(totalMinutes)}h`;
+  }
+
+  function resetPotentialIncomeInfoIcons() {
+    setPotentialHoursTooltip(incomeEstimatedStandardInfo, null);
+    setPotentialHoursTooltip(incomeEstimatedProjectedInfo, null);
   }
 
   function buildPotentialIncomeStats(contract, summary, year, month) {
@@ -13389,6 +13609,29 @@ function getCachedIncomeSummary(monthKey) {
         el.textContent = '--';
       }
     });
+    updatePotentialIncomeInfoIcons();
+  }
+
+  function updatePotentialIncomeInfoIcons() {
+    const stats = state.potentialIncomeStats;
+    if (!stats) {
+      resetPotentialIncomeInfoIcons();
+      return;
+    }
+    const standardBreakdown = {
+      logged: Math.max(0, stats.actualIncomeHours || 0),
+      extra: Math.max(0, stats.remainingStandardHours || 0),
+      loggedLabel: 'logged',
+      extraLabel: 'standard remainder'
+    };
+    const projectedBreakdown = {
+      logged: Math.max(0, stats.actualIncomeHours || 0),
+      extra: Math.max(0, stats.projectedRemainingHours || 0),
+      loggedLabel: 'logged',
+      extraLabel: 'projected'
+    };
+    setPotentialHoursTooltip(incomeEstimatedStandardInfo, standardBreakdown);
+    setPotentialHoursTooltip(incomeEstimatedProjectedInfo, projectedBreakdown);
   }
   function handleTaxSuccess(requestId, monthKey, taxValue) {
     const targetMonthKey = monthKey;
@@ -14738,8 +14981,6 @@ function getCachedIncomeSummary(monthKey) {
     year: null
   };
 
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
   function openMonthPicker() {
     if (!state.calendar) return;
     monthPickerState.year = state.calendar.year;
@@ -14766,7 +15007,7 @@ function getCachedIncomeSummary(monthKey) {
     for (var i = 0; i < 12; i++) {
       var btn = document.createElement('button');
       btn.className = 'ts-month-picker-cell';
-      btn.textContent = monthNames[i];
+      btn.textContent = MONTH_ABBREVIATIONS[i];
       btn.dataset.month = i;
 
       // Highlight current month
@@ -14929,8 +15170,8 @@ function getCachedIncomeSummary(monthKey) {
       section: 'core',
       order: 10,
       element: () => roundInput,
-      getValue: (el) => parseInt(el.value, 10) || 0,
-      setValue: (el, val) => el.value = val || 0,
+      getValue: (el) => clampRoundIntervalValue(el.value),
+      setValue: (el, val) => el.value = clampRoundIntervalValue(val || 0),
       defaultValue: 0,
       event: 'input'
     },
@@ -19860,7 +20101,9 @@ function getCachedIncomeSummary(monthKey) {
       summary.textContent = describeRecurringEntry(sanitized);
       const meta = document.createElement('p');
       meta.className = 'ts-note';
-      const hoursText = `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs`;
+      const hoursText = sanitized.distribution_mode === 'monthly'
+        ? `${formatDecimalHours((sanitized.monthly_total_minutes || 0) / 60)} hrs / month`
+        : `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs / day`;
       const contractName = getContractName(sanitized.contract_id) || 'No contract';
       const hourTypeName = sanitized.hour_type_id ? getHourTypeName(sanitized.hour_type_id) : 'Default hour type';
       meta.textContent = `${hoursText} • ${contractName} • ${hourTypeName}`;
@@ -19977,7 +20220,9 @@ function getCachedIncomeSummary(monthKey) {
       summary.textContent = describeBulkEntry(sanitized);
       const meta = document.createElement('p');
       meta.className = 'ts-note';
-      const hoursText = `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs`;
+      const hoursText = sanitized.distribution_mode === 'monthly'
+        ? `${formatDecimalHours((sanitized.monthly_total_minutes || 0) / 60)} hrs / month`
+        : `${formatDecimalHours((sanitized.duration_minutes || 0) / 60)} hrs / day`;
       const contractName = getContractName(sanitized.contract_id) || 'No contract';
       const hourTypeName = sanitized.hour_type_id ? getHourTypeName(sanitized.hour_type_id) : 'Default hour type';
       const weekendText = sanitized.include_weekends ? 'Includes weekends' : 'Skips weekends';
@@ -20009,6 +20254,7 @@ function getCachedIncomeSummary(monthKey) {
       statusEl.className = 'recurring-entry-status ts-note';
       statusEl.style.flex = '1';
       statusEl.style.display = state.bulkEntriesSyncing ? 'block' : 'none';
+      statusEl.dataset.entryId = sanitized.id || '';
       statusEl.textContent = state.bulkEntriesSyncing ? 'Syncing…' : '';
 
       const syncBtn = document.createElement('button');
@@ -20031,10 +20277,13 @@ function getCachedIncomeSummary(monthKey) {
   function updateBulkSyncStatus() {
     if (!bulkList) return;
     const cards = bulkList.querySelectorAll('.bulk-entry-card .recurring-entry-status');
+    const syncingId = state.bulkEntriesSyncingEntryId || '';
     cards.forEach((statusEl) => {
       if (!statusEl) return;
-      statusEl.textContent = state.bulkEntriesSyncing ? 'Syncing…' : '';
-      statusEl.style.display = state.bulkEntriesSyncing ? 'block' : 'none';
+      const entryId = statusEl.dataset.entryId || '';
+      const shouldShow = state.bulkEntriesSyncing && (!syncingId || syncingId === entryId);
+      statusEl.textContent = shouldShow ? 'Syncing…' : '';
+      statusEl.style.display = shouldShow ? 'block' : 'none';
     });
   }
 
@@ -20092,13 +20341,18 @@ function getCachedIncomeSummary(monthKey) {
   function populateBulkContractOptions(selectedId) {
     if (!bulkContractSelect) return;
     bulkContractSelect.innerHTML = '';
-    const contracts = (state.contracts || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    const range = getCurrentBulkRange();
+    const contracts = getContractsCoveringRange(range);
     if (!contracts.length) {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'Add a contract first';
+      opt.textContent = range ? 'No contracts cover selected range' : 'Add a contract first';
       bulkContractSelect.appendChild(opt);
       bulkContractSelect.disabled = true;
+      bulkContractSelect.value = '';
+      if (state.bulkEntryForm && state.bulkEntryForm.draft) {
+        state.bulkEntryForm.draft.contract_id = '';
+      }
       return;
     }
     bulkContractSelect.disabled = false;
@@ -20112,8 +20366,17 @@ function getCachedIncomeSummary(monthKey) {
       opt.textContent = contract.name;
       bulkContractSelect.appendChild(opt);
     });
-    const resolved = selectedId && state.contractMap[selectedId] ? selectedId : '';
+    let resolved = '';
+    if (contracts.length === 1) {
+      resolved = contracts[0].id;
+    } else if (selectedId && contracts.some((contract) => contract.id === selectedId)) {
+      resolved = selectedId;
+    }
     bulkContractSelect.value = resolved;
+    if (state.bulkEntryForm && state.bulkEntryForm.draft) {
+      state.bulkEntryForm.draft.contract_id = bulkContractSelect.value || '';
+    }
+    evaluateBulkContractWarning();
   }
 
   function populateBulkHourTypeOptions(selectedId) {
@@ -20147,8 +20410,73 @@ function getCachedIncomeSummary(monthKey) {
     if (bulkHourTypeSelect) bulkHourTypeSelect.disabled = !hourTypesEnabled;
   }
 
+  function getCurrentBulkRange() {
+    const start = bulkStartDateInput ? bulkStartDateInput.value : '';
+    const end = bulkEndDateInput ? bulkEndDateInput.value : '';
+    if (!start || !end) return null;
+    if (end < start) return null;
+    return { start, end };
+  }
+
+  function contractCoversRange(contract, rangeStart, rangeEnd) {
+    if (!contract || !rangeStart || !rangeEnd) return false;
+    if (!contract.start_date || contract.start_date > rangeStart) return false;
+    if (!contract.end_date || contract.end_date < rangeEnd) return false;
+    return true;
+  }
+
+  function getContractsCoveringRange(range) {
+    const contracts = (state.contracts || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (!range) return contracts;
+    return contracts.filter((contract) => contractCoversRange(contract, range.start, range.end));
+  }
+
+  function handleBulkRangeChange() {
+    if (!state.bulkEntryForm.draft) return;
+    if (bulkStartDateInput) state.bulkEntryForm.draft.start_date = bulkStartDateInput.value || '';
+    if (bulkEndDateInput) state.bulkEntryForm.draft.end_date = bulkEndDateInput.value || '';
+    populateBulkContractOptions(bulkContractSelect ? bulkContractSelect.value : '');
+  }
+
+  function evaluateBulkContractWarning() {
+    const range = getCurrentBulkRange();
+    const selectedId = bulkContractSelect ? bulkContractSelect.value : '';
+    let message = '';
+    if (selectedId && range) {
+      const contract = state.contractMap[selectedId];
+      if (!contract || !contractCoversRange(contract, range.start, range.end)) {
+        message = 'Selected contract does not cover the entire date range.';
+        if (bulkContractSelect) bulkContractSelect.value = '';
+        if (state.bulkEntryForm.draft) state.bulkEntryForm.draft.contract_id = '';
+      }
+    }
+    if ((!selectedId || message) && range) {
+      const validContracts = getContractsCoveringRange(range);
+      if (!validContracts.length) {
+        message = 'No contracts cover the selected date range.';
+      }
+    }
+    setBulkUiWarning(message);
+  }
+
   function setBulkFormDraft(draft) {
     const sanitized = sanitizeBulkEntry(draft || defaultBulkDraft());
+    if (sanitized.distribution_mode === 'monthly') {
+      if (!sanitized.monthly_total_minutes || sanitized.monthly_total_minutes <= 0) {
+        sanitized.monthly_total_minutes = BULK_DEFAULT_MONTHLY_MINUTES;
+      }
+      sanitized.duration_minutes = 0;
+    } else {
+      sanitized.distribution_mode = 'daily';
+      if (!sanitized.duration_minutes || sanitized.duration_minutes <= 0) {
+        sanitized.duration_minutes = BULK_DEFAULT_DAILY_MINUTES;
+      }
+      sanitized.monthly_total_minutes = 0;
+    }
+    const seedDate = sanitized.start_date ? parseIsoDate(sanitized.start_date) : parseIsoDate(todayIso());
+    if (seedDate && !Number.isNaN(seedDate.getTime())) {
+      bulkMonthPickerState.year = seedDate.getFullYear();
+    }
     state.bulkEntryForm.draft = sanitized;
     state.bulkEntryForm.editingId = sanitized.id || '';
     state.bulkEntryForm.deleteConfirm = false;
@@ -20159,35 +20487,66 @@ function getCachedIncomeSummary(monthKey) {
     if (bulkDeleteBtn) bulkDeleteBtn.style.display = sanitized.id ? 'inline-flex' : 'none';
     if (bulkSaveBtn) bulkSaveBtn.textContent = sanitized.id ? 'Update Range' : 'Save Range';
     if (bulkNameInput) bulkNameInput.value = sanitized.label || '';
+    if (bulkHoursModeSelect) bulkHoursModeSelect.value = sanitized.distribution_mode || 'daily';
+    const isMonthlyMode = sanitized.distribution_mode === 'monthly';
+    const minutesSource = isMonthlyMode ? sanitized.monthly_total_minutes : sanitized.duration_minutes;
     if (bulkHoursInput) {
-      bulkHoursInput.value = sanitized.duration_minutes
-        ? formatDecimalHours((sanitized.duration_minutes || 0) / 60)
-        : '';
+      bulkHoursInput.value = minutesSource
+        ? formatDecimalHours((minutesSource || 0) / 60)
+        : formatDecimalHours(isMonthlyMode ? BULK_DEFAULT_MONTHLY_HOURS : BULK_DEFAULT_DAILY_HOURS);
     }
-    populateBulkContractOptions(sanitized.contract_id);
-    populateBulkHourTypeOptions(sanitized.hour_type_id);
-    updateBulkHourTypeVisibility();
     if (bulkStartDateInput) bulkStartDateInput.value = sanitized.start_date || todayIso();
     if (bulkEndDateInput) bulkEndDateInput.value = sanitized.end_date || sanitized.start_date || todayIso();
+    if (bulkMonthInput) {
+      bulkMonthInput.value = isMonthlyMode && sanitized.start_date ? sanitized.start_date.slice(0, 7) : '';
+    }
+    populateBulkHourTypeOptions(sanitized.hour_type_id);
+    updateBulkHourTypeVisibility();
     if (bulkSkipWeekendsToggle) bulkSkipWeekendsToggle.checked = !sanitized.include_weekends;
     if (bulkSkipHolidaysToggle) bulkSkipHolidaysToggle.checked = sanitized.skip_public_holidays !== false;
+    setBulkUiWarning('');
     setBulkWarning(sanitized.warning_message || '');
     updateBulkGeneratedSummary(sanitized);
+    updateBulkDistributionUI(sanitized);
+    renderBulkMonthPicker(bulkMonthInput ? bulkMonthInput.value : '');
     toggleBulkDeleteConfirm(false);
     setBulkFormError('');
   }
 
   function getBulkFormValues() {
     const hoursValue = bulkHoursInput ? Number(bulkHoursInput.value) : 0;
-    const durationMinutes = Number.isFinite(hoursValue) && hoursValue > 0 ? Math.round(hoursValue * 60) : 0;
+    const rawMinutes = Number.isFinite(hoursValue) && hoursValue > 0 ? Math.round(hoursValue * 60) : 0;
+    const roundedMinutes = rawMinutes > 0 ? roundDuration(rawMinutes) : 0;
+    const mode = bulkHoursModeSelect ? bulkHoursModeSelect.value : 'daily';
+    const monthValue = bulkMonthInput ? bulkMonthInput.value : '';
+    let startDate = bulkStartDateInput ? bulkStartDateInput.value : '';
+    let endDate = bulkEndDateInput ? bulkEndDateInput.value : '';
+    let durationMinutes = roundedMinutes;
+    let monthlyTotalMinutes = 0;
+    if (mode === 'monthly') {
+      monthlyTotalMinutes = roundedMinutes;
+      durationMinutes = 0;
+      if (monthValue) {
+        const bounds = getMonthBoundsFromValue(monthValue);
+        if (bounds) {
+          startDate = bounds.start;
+          endDate = bounds.end;
+        } else {
+          startDate = '';
+          endDate = '';
+        }
+      }
+    }
     return {
       id: state.bulkEntryForm.editingId || '',
       label: bulkNameInput ? bulkNameInput.value : '',
       duration_minutes: durationMinutes,
+      monthly_total_minutes: monthlyTotalMinutes,
+      distribution_mode: mode,
       contract_id: bulkContractSelect ? bulkContractSelect.value : '',
       hour_type_id: bulkHourTypeSelect ? bulkHourTypeSelect.value : '',
-      start_date: bulkStartDateInput ? bulkStartDateInput.value : '',
-      end_date: bulkEndDateInput ? bulkEndDateInput.value : '',
+      start_date: startDate,
+      end_date: endDate,
       include_weekends: bulkSkipWeekendsToggle ? !bulkSkipWeekendsToggle.checked : false,
       skip_public_holidays: bulkSkipHolidaysToggle ? !!bulkSkipHolidaysToggle.checked : true,
       last_synced_at: state.bulkEntryForm.draft ? state.bulkEntryForm.draft.last_synced_at : '',
@@ -20196,10 +20555,24 @@ function getCachedIncomeSummary(monthKey) {
     };
   }
 
-  function setBulkWarning(message) {
+  let bulkServerWarning = '';
+  let bulkUiWarning = '';
+
+  function updateBulkWarningMessage() {
     if (!bulkFormWarning) return;
+    const message = [bulkServerWarning, bulkUiWarning].filter(Boolean).join(' ');
     bulkFormWarning.style.display = message ? 'block' : 'none';
     bulkFormWarning.textContent = message || '';
+  }
+
+  function setBulkWarning(message) {
+    bulkServerWarning = message || '';
+    updateBulkWarningMessage();
+  }
+
+  function setBulkUiWarning(message) {
+    bulkUiWarning = message || '';
+    updateBulkWarningMessage();
   }
 
   function setBulkFormError(message) {
@@ -20234,7 +20607,13 @@ function getCachedIncomeSummary(monthKey) {
 
   function validateBulkForm(draft) {
     if (!draft.label) return 'Name is required.';
-    if (!draft.duration_minutes || draft.duration_minutes <= 0) return 'Hours must be greater than zero.';
+    if (draft.distribution_mode === 'monthly') {
+      if (!draft.monthly_total_minutes || draft.monthly_total_minutes <= 0) {
+        return 'Monthly hours must be greater than zero.';
+      }
+    } else if (!draft.duration_minutes || draft.duration_minutes <= 0) {
+      return 'Hours must be greater than zero.';
+    }
     if (!draft.contract_id) return 'Select a contract.';
     if (!draft.start_date) return 'Start date is required.';
     if (!draft.end_date) return 'End date is required.';
@@ -20266,9 +20645,11 @@ function getCachedIncomeSummary(monthKey) {
     updateBulkSyncStatus();
     if (!opts.silent) setStatus('Syncing bulk entries...', 'warn');
     const payload = opts.entryId ? { entryId: opts.entryId } : {};
+    state.bulkEntriesSyncingEntryId = payload.entryId || '';
     google.script.run
       .withSuccessHandler((res) => {
         state.bulkEntriesSyncing = false;
+        state.bulkEntriesSyncingEntryId = '';
         updateBulkSyncStatus();
         const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
         state.bulkEntries = entries;
@@ -20296,6 +20677,7 @@ function getCachedIncomeSummary(monthKey) {
       })
       .withFailureHandler((error) => {
         state.bulkEntriesSyncing = false;
+        state.bulkEntriesSyncingEntryId = '';
         updateBulkSyncStatus();
         const message = error && error.message ? error.message : 'Failed to sync bulk entries.';
         if (typeof opts.onError === 'function') {

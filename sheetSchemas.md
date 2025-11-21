@@ -96,6 +96,8 @@ Stores bulk entry ranges that fill every eligible day between two dates with ide
 | `last_synced_at` | string (ISO datetime, UTC) | Timestamp of the last successful sync. | `2024-12-15T00:00:00Z` |
 | `last_synced_count` | number | Count of dates synced during the last run. | `15` |
 | `warning_message` | string | Most recent warning (e.g., missing contract dates). Displayed in the UI. | `No working days matched the selected filters.` |
+| `distribution_mode` | string | `daily` to apply fixed hours each day or `monthly` to spread a total across the month. | `monthly` |
+| `monthly_total_minutes` | number | Total minutes to distribute when `distribution_mode` is `monthly`. Stored as minutes rounded to the user's rounding interval. | `6000` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp when the bulk range was created. | `2024-11-30T11:20:00Z` |
 | `updated_at` | string (ISO datetime, UTC) | Timestamp when it was last modified. | `2024-12-02T08:05:00Z` |
 
