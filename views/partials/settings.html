@@ -4,8 +4,23 @@
    <h3 style="margin-top:0;">
     Settings
    </h3>
-   <div class="ts-settings-grid">
-    <div>
+   <div class="ts-toolbar" id="settings-section-collapse-controls" style="display:none; margin:12px 0;">
+    <div class="ts-note" style="margin:0;">
+     Expand or collapse all sections to scan settings quickly.
+    </div>
+    <div style="display:flex; gap:8px;">
+     <button class="ghost small" id="btn-expand-all-settings-sections">
+      Expand all
+     </button>
+     <button class="ghost small" id="btn-collapse-all-settings-sections">
+      Collapse all
+     </button>
+    </div>
+   </div>
+   <div id="settings-section-list">
+   </div>
+   <div id="settings-field-templates" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="round_to_nearest">
      <label class="ts-settings-label" for="set-round">
       Time entries rounding (minutes)
      </label>
@@ -16,7 +31,7 @@
       <input id="set-round" min="0" step="1" type="number"/>
      </div>
     </div>
-    <div>
+    <div class="ts-settings-item" data-setting-key="theme">
      <label class="ts-settings-label" for="set-theme">
       Theme
      </label>
@@ -63,7 +78,7 @@
       </div>
      </div>
     </div>
-    <div>
+    <div class="ts-settings-item" data-setting-key="status_notification_mode">
      <label class="ts-settings-label" for="set-status-notifications">
       Status notifications
      </label>
@@ -84,7 +99,7 @@
       </select>
      </div>
     </div>
-    <div id="lost-super-recovery-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="lost_super_recovery_mode" id="lost-super-recovery-col">
      <label class="ts-settings-label" for="set-lost-super-recovery-mode">
       Lost super recovery method
       <span class="ts-info-icon" title="How the superannuation normally lost to deductions being reclaimed. Options include adding the amount back to superannuation as an extra contribution, or adding it to income so it flows through tax and net income.">
@@ -105,7 +120,7 @@
       </select>
      </div>
     </div>
-    <div id="payg-rate-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="payg_instalment_rate" id="payg-rate-col">
      <label class="ts-settings-label" for="set-payg-rate">
       PAYG instalment rate (%)
      </label>
@@ -116,7 +131,7 @@
       <input id="set-payg-rate" max="100" min="0" step="0.1" type="number"/>
      </div>
     </div>
-    <div id="public-holiday-state-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="public_holiday_state" id="public-holiday-state-col">
      <label class="ts-settings-label" for="set-public-holiday-state">
       Public holidays state/territory
      </label>
@@ -152,7 +167,7 @@
       </select>
      </div>
     </div>
-    <div id="minimum-end-time-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="minimum_end_time" id="minimum-end-time-col">
      <label class="ts-settings-label" for="set-minimum-end-time">
       Suggested minimum end time
      </label>
@@ -163,7 +178,7 @@
       <input id="set-minimum-end-time" type="time"/>
      </div>
     </div>
-    <div id="monthly-insights-trend-method-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="monthly_insights_trend_method" id="monthly-insights-trend-method-col">
      <label class="ts-settings-label" for="set-monthly-insights-trend-method">
       Monthly insights trend calculation
      </label>
@@ -190,7 +205,7 @@
       </select>
      </div>
     </div>
-    <div id="projections-variance-value-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="projections_variance_value" id="projections-variance-value-col">
      <label class="ts-settings-label" for="set-projections-variance-value">
       Projections variance badge value
      </label>
@@ -214,7 +229,7 @@
       </select>
      </div>
     </div>
-    <div id="invoice-template-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="invoice_template_reference" id="invoice-template-col">
      <label class="ts-settings-label" for="set-invoice-template">
       Invoice template (Doc ID or path)
      </label>
@@ -225,7 +240,7 @@
       <input id="set-invoice-template" placeholder="Document ID or path" type="text"/>
      </div>
     </div>
-    <div id="invoice-output-folder-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="invoice_output_folder_path" id="invoice-output-folder-col">
      <label class="ts-settings-label" for="set-invoice-output-folder">
       Invoice output folder path
      </label>
@@ -236,7 +251,7 @@
       <input id="set-invoice-output-folder" placeholder="Folder path" type="text"/>
      </div>
     </div>
-    <div id="invoice-line-limit-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="invoice_line_item_limit" id="invoice-line-limit-col">
      <label class="ts-settings-label" for="set-invoice-line-limit">
       Invoice line placeholder limit
      </label>
@@ -247,7 +262,7 @@
       <input id="set-invoice-line-limit" min="1" step="1" type="number"/>
      </div>
     </div>
-    <div id="invoice-hours-label-col" style="display:none;">
+    <div class="ts-settings-item" data-setting-key="invoice_hours_label" id="invoice-hours-label-col">
      <label class="ts-settings-label" for="set-invoice-hours-label">
       Hours field label
      </label>
@@ -259,10 +274,7 @@
      </div>
     </div>
    </div>
-   <div style="margin-top:8px; text-align:right; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-    <button class="secondary" id="btn-super-guarantee-rates" style="white-space: nowrap;" type="button">
-     Super Guarantee Percentages
-    </button>
+   <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
     <div style="display:flex; gap:8px;">
      <button class="ghost" id="btn-discard-settings" style="display:none;">
       Discard Changes
@@ -294,12 +306,14 @@
     </div>
     <div id="feature-flags-list" style="margin-top:12px;">
     </div>
-    <div id="clear-cache-wrapper" style="margin-top:16px; display:none;">
-     <button class="danger" id="btn-clear-cache">
-      Clear Local Cache
+    <div id="actions-after-flags" style="margin-top:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+     <button class="secondary" id="btn-super-guarantee-rates" style="white-space: nowrap;" type="button">
+      Super Guarantee Percentages
      </button>
-     <div class="ts-note">
-      Removes cached entries, settings, and remembered pages from this browser.
+     <div id="clear-cache-wrapper" style="display:none;">
+      <button class="danger" id="btn-clear-cache">
+       Clear Local Cache
+      </button>
      </div>
     </div>
    </div>

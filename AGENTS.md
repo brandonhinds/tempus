@@ -22,6 +22,10 @@
 - Configurable UI toggles must use the `.ts-toggle` switch styling; do not introduce plain checkboxes for binary settings.
 - Layout containers: stick with the 1280px-capped `.ts-container`; reach for `.ts-container--fluid` only in rare cases where a page (e.g., BAS reporting) genuinely needs the extra width.
 - When presenting destructive actions inside modals, confirmations must be handled inline within the modal content (e.g., swap the button row for confirm/cancel). Opening another modal on top of a modal is not allowed.
+- The Settings page is rendered from the hidden form templates in `views/partials/settings.html` and the metadata in `SETTINGS_CONFIG`. Every entry defines a `section`:
+  * `core` entries are always visible.
+  * Any other value must match the feature-flag identifier that gates those controls; the UI automatically surfaces the section (with its own expand/collapse state) when the flag is enabled.
+  Add new settings by inserting a template block with `data-setting-key` in the hidden container and registering it in `SETTINGS_CONFIG` with the correct `section` id rather than manually dropping markup into the visible grid.
 
 ## Testing Guidelines
 - No automated suite exists. Verify manually in the deployed preview: create, edit, and delete entries, and confirm cached UI state stays in sync after page reloads.

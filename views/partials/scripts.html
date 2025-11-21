@@ -194,10 +194,6 @@ const invoiceDefaultEmpty = document.getElementById('invoice-default-empty');
   const invoiceOutputFolderInput = document.getElementById('set-invoice-output-folder');
   const invoiceLineLimitInput = document.getElementById('set-invoice-line-limit');
   const invoiceHoursLabelInput = document.getElementById('set-invoice-hours-label');
-  const invoiceTemplateCol = document.getElementById('invoice-template-col');
-  const invoiceOutputFolderCol = document.getElementById('invoice-output-folder-col');
-  const invoiceLineLimitCol = document.getElementById('invoice-line-limit-col');
-  const invoiceHoursLabelCol = document.getElementById('invoice-hours-label-col');
   const invoiceMonthPickerModal = document.getElementById('modal-invoice-month-picker');
   const invoiceMonthPickerYearDisplay = document.getElementById('invoice-month-picker-year-display');
   const invoiceMonthPickerYearPrev = document.getElementById('invoice-month-picker-year-prev');
@@ -297,6 +293,7 @@ let ratePreviewInputSyncing = false;
     deductionCategories: [],
     deductionCategoryMap: {},
     deductionCategoryCollapse: {},
+    settingsSectionCollapse: {},
     featureFlagCollapse: {},
     deductionExceptions: [],
     deductionExceptionsMap: {},
@@ -6780,6 +6777,150 @@ function updateDeductionFormVisibility() {
     renderFeatureFlags();
   }
 
+  function getSettingsSectionGroups() {
+    const groups = {};
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const sectionId = config && config.section ? config.section : 'core';
+      if (!groups[sectionId]) groups[sectionId] = [];
+      groups[sectionId].push(key);
+    });
+    return groups;
+  }
+
+  function ensureSettingsSectionCollapseState(sectionId) {
+    if (!state.settingsSectionCollapse || typeof state.settingsSectionCollapse !== 'object') {
+      state.settingsSectionCollapse = {};
+    }
+    if (!state.settingsSectionCollapse.hasOwnProperty(sectionId)) {
+      state.settingsSectionCollapse[sectionId] = sectionId === 'core' ? false : true;
+    }
+  }
+
+  function setAllSettingsSectionCollapse(collapsed) {
+    if (!state.settingsSectionCollapse || typeof state.settingsSectionCollapse !== 'object') {
+      state.settingsSectionCollapse = {};
+    }
+    const groups = getSettingsSectionGroups();
+    Object.keys(groups).forEach((sectionId) => {
+      state.settingsSectionCollapse[sectionId] = collapsed;
+    });
+    saveCache();
+    renderSettingsSections();
+  }
+
+  function formatSettingsSectionTitle(sectionId) {
+    if (sectionId === 'core') return 'Core';
+    const meta = DEFAULT_FEATURE_FLAGS[sectionId];
+    if (meta && meta.name) return meta.name;
+    return sectionId.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  }
+
+  function renderSettingsSections() {
+    if (!settingsSectionListEl) return;
+    if (!state.settingsSectionCollapse || typeof state.settingsSectionCollapse !== 'object') {
+      state.settingsSectionCollapse = {};
+    }
+    if (settingsFieldTemplates) {
+      Object.keys(settingsFieldBlocks).forEach((key) => {
+        const block = settingsFieldBlocks[key];
+        if (block && block.parentElement !== settingsFieldTemplates) {
+          settingsFieldTemplates.appendChild(block);
+        }
+      });
+    }
+    const groups = getSettingsSectionGroups();
+    const sections = Object.keys(groups).map((sectionId) => {
+      const items = groups[sectionId].slice().sort((a, b) => {
+        const orderA = SETTINGS_CONFIG[a] && SETTINGS_CONFIG[a].order != null ? SETTINGS_CONFIG[a].order : 0;
+        const orderB = SETTINGS_CONFIG[b] && SETTINGS_CONFIG[b].order != null ? SETTINGS_CONFIG[b].order : 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.localeCompare(b);
+      });
+      const sectionOrder = items.reduce((min, key) => {
+        const value = SETTINGS_CONFIG[key] && SETTINGS_CONFIG[key].order != null ? SETTINGS_CONFIG[key].order : min;
+        return value < min ? value : min;
+      }, Number.POSITIVE_INFINITY);
+      return { id: sectionId, items, order: sectionOrder === Number.POSITIVE_INFINITY ? 0 : sectionOrder };
+    }).sort((a, b) => {
+      if (a.id === 'core') return -1;
+      if (b.id === 'core') return 1;
+      if (a.order !== b.order) return a.order - b.order;
+      return formatSettingsSectionTitle(a.id).localeCompare(formatSettingsSectionTitle(b.id));
+    });
+    settingsSectionListEl.innerHTML = '';
+    let visibleSections = 0;
+    sections.forEach((section) => {
+      const isCore = section.id === 'core';
+      const featureMeta = !isCore ? (state.featureFlags[section.id] || DEFAULT_FEATURE_FLAGS[section.id] || {}) : null;
+      const enabled = isCore ? true : !!featureMeta.enabled;
+      if (!enabled) return;
+      visibleSections += 1;
+      ensureSettingsSectionCollapseState(section.id);
+      const collapsed = !!state.settingsSectionCollapse[section.id];
+      const container = document.createElement('div');
+      container.className = 'ts-flag-group ts-settings-section';
+      const header = document.createElement('div');
+      header.className = 'ts-flag-group-header';
+      header.setAttribute('role', 'button');
+      header.setAttribute('tabindex', '0');
+      header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      const titleWrapper = document.createElement('div');
+      titleWrapper.className = 'ts-flag-group-header-title';
+      const title = document.createElement('span');
+      title.textContent = formatSettingsSectionTitle(section.id);
+      titleWrapper.appendChild(title);
+      const count = document.createElement('span');
+      count.className = 'ts-flag-group-count';
+      count.textContent = `${section.items.length} setting${section.items.length === 1 ? '' : 's'}`;
+      titleWrapper.appendChild(count);
+      const toggle = document.createElement('span');
+      toggle.className = 'ts-flag-group-toggle';
+      toggle.textContent = collapsed ? '▶' : '▼';
+      header.appendChild(titleWrapper);
+      header.appendChild(toggle);
+      const bodyId = `settings-section-${section.id}`;
+      header.setAttribute('aria-controls', bodyId);
+      const toggleSection = () => {
+        state.settingsSectionCollapse[section.id] = !state.settingsSectionCollapse[section.id];
+        saveCache();
+        renderSettingsSections();
+      };
+      header.addEventListener('click', toggleSection);
+      header.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleSection();
+        }
+      });
+      container.appendChild(header);
+      const body = document.createElement('div');
+      body.className = 'ts-flag-group-body ts-settings-section-body';
+      body.id = bodyId;
+      body.style.display = collapsed ? 'none' : 'block';
+      if (!isCore && featureMeta && featureMeta.description) {
+        const desc = document.createElement('div');
+        desc.className = 'ts-note';
+        desc.style.marginBottom = '12px';
+        desc.textContent = featureMeta.description;
+        body.appendChild(desc);
+      }
+      const grid = document.createElement('div');
+      grid.className = 'ts-settings-grid';
+      section.items.forEach((key) => {
+        const block = settingsFieldBlocks[key];
+        if (!block) return;
+        grid.appendChild(block);
+      });
+      body.appendChild(grid);
+      container.appendChild(body);
+      settingsSectionListEl.appendChild(container);
+    });
+    if (settingsSectionControls) {
+      settingsSectionControls.style.display = visibleSections > 1 ? 'flex' : 'none';
+    }
+  }
+
   const contractIsValid = (contract, dateIso) => {
     if (!contract || !dateIso) return false;
     if (contract.start_date && contract.start_date > dateIso) return false;
@@ -6846,6 +6987,9 @@ function updateDeductionFormVisibility() {
       state.deductionCategories = Array.isArray(obj.deductionCategories) ? obj.deductionCategories.map(sanitizeDeductionCategory) : [];
       state.deductionCategoryCollapse = obj.deductionCategoryCollapse && typeof obj.deductionCategoryCollapse === 'object'
         ? { ...obj.deductionCategoryCollapse }
+        : {};
+      state.settingsSectionCollapse = obj.settingsSectionCollapse && typeof obj.settingsSectionCollapse === 'object'
+        ? { ...obj.settingsSectionCollapse }
         : {};
       state.featureFlagCollapse = obj.featureFlagCollapse && typeof obj.featureFlagCollapse === 'object'
         ? { ...obj.featureFlagCollapse }
@@ -6960,6 +7104,7 @@ function updateDeductionFormVisibility() {
         deductions: state.deductions.map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
+        settingsSectionCollapse: state.settingsSectionCollapse,
         featureFlagCollapse: state.featureFlagCollapse,
         deductionExceptions: state.deductionExceptions.map(sanitizeDeductionException),
         annualCategoryFilters: state.annualCategoryFilters,
@@ -8960,21 +9105,29 @@ function updateDeductionFormVisibility() {
   const btnExpandAllFeatureFlags = document.getElementById('btn-expand-all-feature-flags');
   const btnCollapseAllFeatureFlags = document.getElementById('btn-collapse-all-feature-flags');
   const featureFlagsListEl = document.getElementById('feature-flags-list');
+  const settingsSectionControls = document.getElementById('settings-section-collapse-controls');
+  const btnExpandAllSettingsSections = document.getElementById('btn-expand-all-settings-sections');
+  const btnCollapseAllSettingsSections = document.getElementById('btn-collapse-all-settings-sections');
+  const settingsSectionListEl = document.getElementById('settings-section-list');
+  const settingsFieldTemplates = document.getElementById('settings-field-templates');
+  const settingsFieldBlocks = {};
+  if (settingsFieldTemplates) {
+    settingsFieldTemplates.querySelectorAll('[data-setting-key]').forEach((node) => {
+      const key = node.getAttribute('data-setting-key');
+      if (key) {
+        settingsFieldBlocks[key] = node;
+      }
+    });
+  }
   const roundInput = document.getElementById('set-round');
   const themeSelect = document.getElementById('set-theme');
   const statusNotificationSelect = document.getElementById('set-status-notifications');
   const paygRateInput = document.getElementById('set-payg-rate');
-  const paygRateCol = document.getElementById('payg-rate-col');
   const publicHolidayStateSelect = document.getElementById('set-public-holiday-state');
-  const publicHolidayStateCol = document.getElementById('public-holiday-state-col');
   const minimumEndTimeInput = document.getElementById('set-minimum-end-time');
-  const minimumEndTimeCol = document.getElementById('minimum-end-time-col');
   const monthlyInsightsTrendMethodSelect = document.getElementById('set-monthly-insights-trend-method');
-  const monthlyInsightsTrendMethodCol = document.getElementById('monthly-insights-trend-method-col');
   const projectionsVarianceValueSelect = document.getElementById('set-projections-variance-value');
-  const projectionsVarianceValueCol = document.getElementById('projections-variance-value-col');
   const lostSuperRecoveryModeSelect = document.getElementById('set-lost-super-recovery-mode');
-  const lostSuperRecoveryCol = document.getElementById('lost-super-recovery-col');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
   const discardSettingsBtn = document.getElementById('btn-discard-settings');
   if (btnExpandAllFeatureFlags) {
@@ -8982,6 +9135,12 @@ function updateDeductionFormVisibility() {
   }
   if (btnCollapseAllFeatureFlags) {
     btnCollapseAllFeatureFlags.addEventListener('click', () => setAllFeatureFlagCollapse(true));
+  }
+  if (btnExpandAllSettingsSections) {
+    btnExpandAllSettingsSections.addEventListener('click', () => setAllSettingsSectionCollapse(false));
+  }
+  if (btnCollapseAllSettingsSections) {
+    btnCollapseAllSettingsSections.addEventListener('click', () => setAllSettingsSectionCollapse(true));
   }
   if (statusNotificationSelect) {
     statusNotificationSelect.addEventListener('change', applyStatusDisplay);
@@ -11068,10 +11227,6 @@ function updateDeductionFormVisibility() {
     if (navInvoicesBtn) {
       navInvoicesBtn.style.display = invoicesFlag.enabled ? 'block' : 'none';
     }
-    if (invoiceTemplateCol) invoiceTemplateCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
-    if (invoiceOutputFolderCol) invoiceOutputFolderCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
-    if (invoiceLineLimitCol) invoiceLineLimitCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
-    if (invoiceHoursLabelCol) invoiceHoursLabelCol.classList.toggle('ts-hidden', !invoicesFlag.enabled);
     if (!invoicesFlag.enabled && state.currentPage === 'invoices') {
       showPage('time');
     }
@@ -11083,37 +11238,8 @@ function updateDeductionFormVisibility() {
 
     // Show/hide public holidays state setting
     const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
-    if (publicHolidayStateCol) {
-      publicHolidayStateCol.classList.toggle('ts-hidden', !publicHolidaysFlag.enabled);
-    }
     if (publicHolidaysFlag.enabled) {
       loadPublicHolidays();
-    }
-
-    // Show/hide PAYG rate setting (only for sole traders)
-    const soleTraderFlag = state.featureFlags.is_sole_trader || DEFAULT_FEATURE_FLAGS.is_sole_trader || { enabled: false };
-    if (paygRateCol) {
-      paygRateCol.classList.toggle('ts-hidden', !soleTraderFlag.enabled);
-    }
-
-    // Show/hide minimum end time setting
-    const suggestEndTimeFlag = state.featureFlags.suggest_end_time || DEFAULT_FEATURE_FLAGS.suggest_end_time || { enabled: false };
-    if (minimumEndTimeCol) {
-      minimumEndTimeCol.classList.toggle('ts-hidden', !suggestEndTimeFlag.enabled);
-    }
-
-    // Show/hide monthly insights trend method setting
-    if (monthlyInsightsTrendMethodCol) {
-      monthlyInsightsTrendMethodCol.classList.toggle('ts-hidden', !expectedMonthlyFlag.enabled);
-    }
-    if (projectionsVarianceValueCol) {
-      projectionsVarianceValueCol.classList.toggle('ts-hidden', !expectedMonthlyFlag.enabled);
-    }
-
-    // Show/hide lost super recovery mode setting
-    const noLostSuperFlag = state.featureFlags.no_lost_super_to_deductions || DEFAULT_FEATURE_FLAGS.no_lost_super_to_deductions || { enabled: false };
-    if (lostSuperRecoveryCol) {
-      lostSuperRecoveryCol.classList.toggle('ts-hidden', !noLostSuperFlag.enabled);
     }
 
     // Show/hide colorblind theme options
@@ -11125,6 +11251,7 @@ function updateDeductionFormVisibility() {
 
     // Update custom theme availability and controls
     updateCustomThemeControls();
+    renderSettingsSections();
   }
 
   function handleFeatureFlagDataLoad(featureKey, enabled) {
@@ -14799,6 +14926,8 @@ function getCachedIncomeSummary(monthKey) {
   // Settings configuration - add new settings here
   const SETTINGS_CONFIG = {
     round_to_nearest: {
+      section: 'core',
+      order: 10,
       element: () => roundInput,
       getValue: (el) => parseInt(el.value, 10) || 0,
       setValue: (el, val) => el.value = val || 0,
@@ -14806,6 +14935,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     theme: {
+      section: 'core',
+      order: 20,
       element: () => themeSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || 'dark',
@@ -14813,6 +14944,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     status_notification_mode: {
+      section: 'core',
+      order: 30,
       element: () => statusNotificationSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => { if (el) el.value = val || 'status_bar'; },
@@ -14820,6 +14953,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     payg_instalment_rate: {
+      section: 'is_sole_trader',
+      order: 50,
       element: () => paygRateInput,
       getValue: (el) => parseFloat(el.value) || 2,
       setValue: (el, val) => el.value = String(val || 2),
@@ -14827,6 +14962,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     public_holiday_state: {
+      section: 'enable_public_holidays',
+      order: 60,
       element: () => publicHolidayStateSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || 'ACT',
@@ -14834,6 +14971,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     minimum_end_time: {
+      section: 'suggest_end_time',
+      order: 70,
       element: () => minimumEndTimeInput,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || '17:00',
@@ -14841,6 +14980,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     lost_super_recovery_mode: {
+      section: 'no_lost_super_to_deductions',
+      order: 40,
       element: () => lostSuperRecoveryModeSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || 'extra_contribution',
@@ -14848,6 +14989,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     monthly_insights_trend_method: {
+      section: 'expected_monthly_hours',
+      order: 80,
       element: () => monthlyInsightsTrendMethodSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || 'standard_contract_hours',
@@ -14855,6 +14998,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     projections_variance_value: {
+      section: 'expected_monthly_hours',
+      order: 90,
       element: () => projectionsVarianceValueSelect,
       getValue: (el) => el.value,
       setValue: (el, val) => el.value = val || 'monthly_capacity',
@@ -14862,6 +15007,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'change'
     },
     invoice_template_reference: {
+      section: 'enable_invoices',
+      order: 100,
       element: () => invoiceTemplateInput,
       getValue: (el) => el.value.trim(),
       setValue: (el, val) => { el.value = val || ''; },
@@ -14869,6 +15016,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     invoice_output_folder_path: {
+      section: 'enable_invoices',
+      order: 110,
       element: () => invoiceOutputFolderInput,
       getValue: (el) => el.value.trim(),
       setValue: (el, val) => { el.value = val || ''; },
@@ -14876,6 +15025,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     invoice_line_item_limit: {
+      section: 'enable_invoices',
+      order: 120,
       element: () => invoiceLineLimitInput,
       getValue: (el) => {
         const val = el.value.trim();
@@ -14888,6 +15039,8 @@ function getCachedIncomeSummary(monthKey) {
       event: 'input'
     },
     invoice_hours_label: {
+      section: 'enable_invoices',
+      order: 130,
       element: () => invoiceHoursLabelInput,
       getValue: (el) => el.value.trim(),
       setValue: (el, val) => { el.value = val || ''; },

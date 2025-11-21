@@ -77,6 +77,7 @@ The core system supports two modes:
 - Layout containers: default to the 1280px `.ts-container`; apply `.ts-container--fluid` only when content truly needs to be extra wide (currently just BAS reporting).
 - The BAS screen includes a secondary invoice summary table (when invoices are enabled) that lists every invoice in the selected financial year with line counts, hours, and GST-inclusive totals to support reconciliation.
 - Deletion confirmations inside modals must be implemented inline within that modal's content; never spawn a secondary modal on top of an existing modal for confirmation.
+- Settings UI is data-driven: every control lives in the hidden template bank inside `views/partials/settings.html` and is registered in `SETTINGS_CONFIG`. Set `section: 'core'` for always-on settings; to gate a control behind a feature flag, set `section` to that flag's identifier so the renderer automatically creates a collapsible section that appears only when the flag is enabled. Do not hand-code new settings outside this structure.
 
 ### Data Handling
 - Dates: ISO format `yyyy-MM-dd`
