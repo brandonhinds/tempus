@@ -8116,6 +8116,7 @@ function updateDeductionFormVisibility() {
           <p id="duplicate-cleanup-summary" style="margin-top:0;"></p>
           <div id="duplicate-cleanup-list" class="ts-list" style="max-height:240px; overflow:auto;"></div>
           <p class="ts-note" style="margin-top:12px;">Select the entry to keep. All other entries for this date and hour type will be deleted.</p>
+          <p id="duplicate-cleanup-progress" class="ts-note duplicate-cleanup-progress">Deleting duplicates...</p>
         </div>
         <div class="ts-modal-footer">
           <button class="ghost" id="duplicate-cleanup-cancel">Cancel</button>
@@ -8136,7 +8137,16 @@ function updateDeductionFormVisibility() {
     const summary = modal.querySelector('#duplicate-cleanup-summary');
     const listEl = modal.querySelector('#duplicate-cleanup-list');
     const confirmBtn = modal.querySelector('#duplicate-cleanup-confirm');
+    const progressEl = modal.querySelector('#duplicate-cleanup-progress');
     if (!listEl || !confirmBtn || !summary) return null;
+    if (!confirmBtn.dataset.defaultText) {
+      confirmBtn.dataset.defaultText = confirmBtn.textContent || 'Keep selected & delete others';
+    }
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = confirmBtn.dataset.defaultText;
+    confirmBtn.dataset.busy = 'false';
+    modal.classList.remove('duplicate-cleanup-busy');
+    if (progressEl) progressEl.textContent = 'Deleting duplicates...';
     const sample = group.entries[0] || {};
     const hourType = state.hourTypeMap[sample.hour_type_id || getDefaultHourTypeId()];
     const contractName = sample.contract_id ? (state.contractMap[sample.contract_id]?.name || 'Unknown contract') : 'No contract';
@@ -8147,13 +8157,15 @@ function updateDeductionFormVisibility() {
       item.className = 'ts-list-item';
       item.style.display = 'flex';
       item.style.alignItems = 'center';
-      item.style.gap = '8px';
+      item.style.justifyContent = 'space-between';
+      item.style.gap = '16px';
       item.innerHTML = `
-        <input type="radio" name="duplicate-keep" value="${entry.id}" ${idx === 0 ? 'checked' : ''} />
-        <div style="flex:1;">
-          <div><strong>${entry.duration_minutes || 0} min</strong> (${entry.entry_type || 'basic'})</div>
-          <div style="color:var(--muted); font-size:12px;">Created: ${entry.created_at || ''} • Id: ${entry.id}</div>
+        <div style="flex:1; display:flex; flex-direction:column; gap:4px;">
+          <div style="font-size:16px;"><strong>${entry.duration_minutes || 0} min</strong> <span style="color:var(--muted);">(${entry.entry_type || 'basic'})</span></div>
+          <div style="color:var(--muted); font-size:12px;">Created: ${entry.created_at || ''}</div>
+          <div style="color:var(--muted); font-size:12px; word-break:break-all;">Id: ${entry.id}</div>
         </div>
+        <input type="radio" name="duplicate-keep" value="${entry.id}" ${idx === 0 ? 'checked' : ''} style="width:auto; flex-shrink:0;" />
       `;
       listEl.appendChild(item);
     });
@@ -8197,8 +8209,10 @@ function updateDeductionFormVisibility() {
     if (!populated) return;
     const { modal, confirmBtn } = populated;
     const listEl = modal.querySelector('#duplicate-cleanup-list');
+    const progressEl = modal.querySelector('#duplicate-cleanup-progress');
     const onConfirm = async () => {
       if (!listEl) return;
+      if (confirmBtn.dataset.busy === 'true') return;
       const selected = listEl.querySelector('input[name="duplicate-keep"]:checked');
       const keepId = selected ? selected.value : null;
       if (!keepId) {
@@ -8210,19 +8224,32 @@ function updateDeductionFormVisibility() {
         hideModal(modal);
         return;
       }
-      setStatus('Deleting duplicate entries...', 'warn');
-      const results = await deleteEntriesById(toDelete);
-      const failed = results.filter((r) => !r.success);
-      if (failed.length) {
-        console.error('Failed to delete some duplicates', failed);
-        setStatus(`Failed to delete ${failed.length} duplicate(s).`, 'error');
-      } else {
-        setStatus('Duplicates deleted', 'success');
+      const defaultText = confirmBtn.dataset.defaultText || confirmBtn.textContent || 'Keep selected & delete others';
+      confirmBtn.dataset.busy = 'true';
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Deleting duplicates...';
+      modal.classList.add('duplicate-cleanup-busy');
+      if (progressEl) progressEl.textContent = 'Deleting duplicates...';
+      try {
+        setStatus('Deleting duplicate entries...', 'warn');
+        const results = await deleteEntriesById(toDelete);
+        const failed = results.filter((r) => !r.success);
+        if (failed.length) {
+          console.error('Failed to delete some duplicates', failed);
+          setStatus(`Failed to delete ${failed.length} duplicate(s).`, 'error');
+        } else {
+          setStatus('Duplicates deleted', 'success');
+        }
+        saveCache();
+        renderEntries();
+        renderCalendar();
+        hideModal(modal);
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = defaultText;
+        confirmBtn.dataset.busy = 'false';
+        modal.classList.remove('duplicate-cleanup-busy');
       }
-      saveCache();
-      renderEntries();
-      renderCalendar();
-      hideModal(modal);
     };
     confirmBtn.onclick = onConfirm;
     showModal(modal);

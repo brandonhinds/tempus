@@ -808,6 +808,10 @@
   .ts-modal-close:hover { color:var(--text); }
   .ts-modal-body { padding:24px; overflow-y:auto; }
   .ts-modal-footer { display:flex; justify-content:flex-end; gap:var(--space-2); padding:16px 24px; border-top:1px solid var(--border); background:var(--panel); position:sticky; bottom:0; z-index:1; }
+  .ts-modal.duplicate-cleanup-busy .ts-modal-body,
+  .ts-modal.duplicate-cleanup-busy .ts-modal-footer { opacity:0.45; pointer-events:none; }
+  .duplicate-cleanup-progress { display:none; }
+  .ts-modal.duplicate-cleanup-busy .duplicate-cleanup-progress { display:block; color:var(--muted); font-size:13px; margin-top:12px; }
   .ts-default-list { display:flex; flex-direction:column; gap:8px; }
   .ts-edit-defaults-list { display:flex; flex-direction:column; gap:8px; }
   .ts-default-item { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; transition:background-color 0.2s; }
