@@ -13966,10 +13966,13 @@ function getCachedIncomeSummary(monthKey) {
         const dateObj = parseIsoDate(dateIso);
         if (!dateObj || Number.isNaN(dateObj.getTime())) return;
 
-        daysWithEntriesCount++;
-
         const incomeHours = dayData.income;
         const nonIncomeHours = dayData.nonIncome;
+
+        // Count days that consume a business day: any income OR non-income >= standard hours
+        if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
+          daysWithEntriesCount++;
+        }
 
         // If a day has non-income hours >= standard hours, it's a full non-income day
         if (nonIncomeHours >= standardHoursPerDay) {
@@ -13982,11 +13985,16 @@ function getCachedIncomeSummary(monthKey) {
       });
       actualAverageDailyHours = incomeEntryDaysCount > 0 ? totalIncomeHoursToDate / incomeEntryDaysCount : 0;
 
+      // Calculate total income hours for the entire month (including future entries)
+      let totalIncomeHoursThisMonth = 0;
+      dailyHours.forEach((dayData) => {
+        totalIncomeHoursThisMonth += dayData.income;
+      });
+
       // Calculate business days elapsed to date
       const businessDaysElapsed = collectBusinessDays(periodStart, today < periodEnd ? today : periodEnd, includeWeekends).length;
 
-      // FIELD 1: Contract Pace Comparison
-      // Calculate number of months in contract
+      // Calculate number of months in contract (needed for both capacity and contract pace calculations)
       let contractMonths = 12; // default
       if (hasBaseline && contractStart && boundedContractEnd) {
         const startYear = contractStart.getFullYear();
@@ -13996,59 +14004,14 @@ function getCachedIncomeSummary(monthKey) {
         contractMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
       }
 
-      const monthlyPace = hasBaseline ? (Number(contract.total_hours || 0) / contractMonths) : null;
-      let contractPaceComparison = null;
-      if (monthlyPace !== null && monthBusinessDays > 0) {
-        const proRatedPace = monthlyPace * (businessDaysElapsed / monthBusinessDays);
-        contractPaceComparison = proRatedPace - totalIncomeHoursToDate;
-      }
-
-      // FIELD 2: Capacity Comparison (with projection)
-      // Adjusted expected = total expected - full non-income days
-      const totalExpected = monthBusinessDays * standardHoursPerDay;
-      const adjustedExpected = totalExpected - (fullNonIncomeDays * standardHoursPerDay);
-
-      // Remaining days = business days without any entries yet
-      const remainingDays = Math.max(0, monthBusinessDays - daysWithEntriesCount);
-      const projectedHoursThisMonth = totalIncomeHoursToDate + (remainingDays * projectedAverageDailyHours);
-
-      // Projected = income logged + (remaining days × standard hours)
-      const projectedTotal = totalIncomeHoursToDate + (remainingDays * standardHoursPerDay);
-
-      // Balance
-      const capacityComparison = adjustedExpected - projectedTotal;
-      const projectedVsContractAverage = averageContractHoursThisMonth != null
-        ? projectedHoursThisMonth - averageContractHoursThisMonth
-        : null;
-      const projectedVsStandard = projectedHoursThisMonth - adjustedExpected;
-
-      aggregatedIncomeHoursToDate += totalIncomeHoursToDate;
-      aggregatedProjectedHoursThisMonth += projectedHoursThisMonth;
-      aggregatedStandardHoursBasedOnBusinessDays += adjustedExpected;
-      aggregatedProjectedVsStandardHours += projectedVsStandard;
-      if (typeof capacityComparison === 'number') {
-        aggregatedCapacityComparisonTotal += capacityComparison;
-      }
-      if (contractPaceComparison !== null && contractPaceComparison !== undefined) {
-        aggregatedContractPaceComparisonTotal += contractPaceComparison;
-        aggregatedContractPaceComparisonCount++;
-      }
-      if (projectedVsContractAverage !== null) {
-        aggregatedProjectedVsContractAverage += projectedVsContractAverage;
-        aggregatedProjectedVsContractAverageCount++;
-      }
-
-      // FIELD 3 & 4: Cumulative comparisons (sum across all months)
-      let cumulativeCapacityComparison = 0;
-      let cumulativeContractPaceComparison = 0;
-      const contractStartMonth = contractStart.getMonth();
-      const contractStartYear = contractStart.getFullYear();
+      // FIELD 1: Capacity Comparison - Calculate for ALL months from contract start to current viewing month
+      // This ensures monthly and cumulative values use the same calculation
+      const monthlyCapacityValues = [];
+      let iterMonth = contractStart.getMonth();
+      let iterYear = contractStart.getFullYear();
       const currentMonth = month;
       const currentYear = year;
 
-      // Iterate through all months from contract start to current viewing month
-      let iterMonth = contractStartMonth;
-      let iterYear = contractStartYear;
       while (iterYear < currentYear || (iterYear === currentYear && iterMonth <= currentMonth)) {
         const iterMonthStart = startOfDay(new Date(iterYear, iterMonth, 1));
         const iterMonthEnd = startOfDay(new Date(iterYear, iterMonth + 1, 0));
@@ -14056,6 +14019,8 @@ function getCachedIncomeSummary(monthKey) {
         // Calculate period bounds for this iteration month
         const iterPeriodStart = contractStart > iterMonthStart ? contractStart : iterMonthStart;
         const iterPeriodEnd = boundedContractEnd && boundedContractEnd < iterMonthEnd ? boundedContractEnd : iterMonthEnd;
+
+        let iterCapacityComparison = 0;
 
         if (iterPeriodEnd >= iterPeriodStart) {
           // Calculate business days for this month period
@@ -14074,13 +14039,15 @@ function getCachedIncomeSummary(monthKey) {
             return entryDateIso >= iterPeriodStartIso && entryDateIso <= iterPeriodEndIso;
           });
 
-          // Determine cutoff date for this iteration month (today for current month, end of month for past)
-          const isCurrentIterationMonth = (iterYear === currentYear && iterMonth === currentMonth);
+          // Determine if this iteration month is TODAY'S actual current month (not the viewing month)
+          const todayMonth = today.getMonth();
+          const todayYear = today.getFullYear();
+          const isCurrentIterationMonth = (iterYear === todayYear && iterMonth === todayMonth);
           const iterCutoffDate = isCurrentIterationMonth ? today : iterMonthEnd;
 
-          // Group by date and calculate days/hours to date
+          // Group by date and calculate hours
           const iterDailyHours = new Map();
-          let iterTotalIncomeHoursToDate = 0;
+          let iterTotalIncomeHoursThisMonth = 0;
 
           iterMonthEntries.forEach((entry) => {
             const entryDateIso = getEntryDateIso(entry);
@@ -14088,11 +14055,12 @@ function getCachedIncomeSummary(monthKey) {
             const entryDateObj = parseIsoDate(entryDateIso);
             if (!entryDateObj || Number.isNaN(entryDateObj.getTime())) return;
 
-            // Only count entries up to cutoff date
-            if (entryDateObj > iterCutoffDate) return;
-
             const hours = (Number(entry.duration_minutes) || 0) / 60;
             if (hours <= 0) return;
+
+            // For current month, include all entries; for past months, only up to end of month
+            const includeInMap = isCurrentIterationMonth || entryDateObj <= iterCutoffDate;
+            if (!includeInMap) return;
 
             if (!iterDailyHours.has(entryDateIso)) {
               iterDailyHours.set(entryDateIso, { income: 0, nonIncome: 0 });
@@ -14101,49 +14069,74 @@ function getCachedIncomeSummary(monthKey) {
             const dayData = iterDailyHours.get(entryDateIso);
             if (entryContributesToIncome(entry)) {
               dayData.income += hours;
-              iterTotalIncomeHoursToDate += hours;
+              iterTotalIncomeHoursThisMonth += hours;
             } else {
               dayData.nonIncome += hours;
             }
           });
 
           // Count full non-income days and days with entries
-          let iterFullNonIncomeDaysToDate = 0;
+          let iterFullNonIncomeDays = 0;
           let iterDaysWithEntriesCount = 0;
           iterDailyHours.forEach((dayData, dateIso) => {
             const dateObj = parseIsoDate(dateIso);
-            if (!dateObj || dateObj > iterCutoffDate) return;
+            if (!dateObj) return;
 
-            iterDaysWithEntriesCount++;
-
+            const incomeHours = dayData.income;
             const nonIncomeHours = dayData.nonIncome;
+
+            // Count days that consume a business day: any income OR non-income >= standard hours
+            if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
+              iterDaysWithEntriesCount++;
+            }
+
             if (nonIncomeHours >= standardHoursPerDay) {
-              iterFullNonIncomeDaysToDate++;
+              iterFullNonIncomeDays++;
             }
           });
 
-          // Calculate Field 1 for this iteration month
-          const iterMonthlyPace = hasBaseline ? (Number(contract.total_hours || 0) / contractMonths) : null;
-          let iterContractPaceComparison = null;
-          if (iterMonthlyPace !== null && iterBusinessDays > 0) {
-            const iterBusinessDaysElapsed = collectBusinessDays(iterPeriodStart, iterCutoffDate < iterPeriodEnd ? iterCutoffDate : iterPeriodEnd, includeWeekends).length;
-            const iterProRatedPace = iterMonthlyPace * (iterBusinessDaysElapsed / iterBusinessDays);
-            iterContractPaceComparison = iterProRatedPace - iterTotalIncomeHoursToDate;
-          }
-
-          // Calculate Field 2 for this iteration month using same formula
+          // Calculate capacity comparison for this month
           const iterTotalExpected = iterBusinessDays * standardHoursPerDay;
-          const iterAdjustedExpected = iterTotalExpected - (iterFullNonIncomeDaysToDate * standardHoursPerDay);
-          const iterRemainingDays = Math.max(0, iterBusinessDays - iterDaysWithEntriesCount);
-          const iterProjectedTotal = iterTotalIncomeHoursToDate + (iterRemainingDays * standardHoursPerDay);
-          const iterCapacityComparison = iterAdjustedExpected - iterProjectedTotal;
+          const iterAdjustedExpected = iterTotalExpected - (iterFullNonIncomeDays * standardHoursPerDay);
 
-          // Add to cumulative totals
-          cumulativeCapacityComparison += iterCapacityComparison;
-          if (iterContractPaceComparison !== null) {
-            cumulativeContractPaceComparison += iterContractPaceComparison;
+          // Calculate remaining days: only count future business days without entries
+          let iterRemainingDays = 0;
+          if (isCurrentIterationMonth) {
+            // For current month, calculate future business days
+            const iterTomorrow = new Date(today);
+            iterTomorrow.setDate(iterTomorrow.getDate() + 1);
+            const iterFutureBusinessDays = collectBusinessDays(
+              iterTomorrow > iterPeriodEnd ? iterPeriodEnd : iterTomorrow,
+              iterPeriodEnd,
+              includeWeekends
+            );
+            const iterFutureDaysTotal = iterFutureBusinessDays.length;
+
+            // Count how many future days already have entries
+            let iterFutureDaysWithEntries = 0;
+            iterDailyHours.forEach((dayData, dateIso) => {
+              const dateObj = parseIsoDate(dateIso);
+              if (!dateObj || dateObj <= today) return;
+              const incomeHours = dayData.income;
+              const nonIncomeHours = dayData.nonIncome;
+              if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
+                iterFutureDaysWithEntries++;
+              }
+            });
+
+            iterRemainingDays = Math.max(0, iterFutureDaysTotal - iterFutureDaysWithEntries);
           }
+          // For past months, iterRemainingDays stays 0
+
+          const iterProjectedTotal = iterTotalIncomeHoursThisMonth + (iterRemainingDays * standardHoursPerDay);
+          iterCapacityComparison = iterAdjustedExpected - iterProjectedTotal;
         }
+
+        monthlyCapacityValues.push({
+          month: iterMonth,
+          year: iterYear,
+          capacityComparison: iterCapacityComparison
+        });
 
         // Move to next month
         iterMonth++;
@@ -14151,6 +14144,148 @@ function getCachedIncomeSummary(monthKey) {
           iterMonth = 0;
           iterYear++;
         }
+      }
+
+      // Extract current month's capacity from the calculated values
+      const currentMonthCapacity = monthlyCapacityValues.find(m => m.month === month && m.year === year);
+      const capacityComparison = currentMonthCapacity ? currentMonthCapacity.capacityComparison : 0;
+
+      // Calculate cumulative as simple sum of all monthly values
+      const cumulativeCapacityComparison = monthlyCapacityValues.reduce((sum, m) => sum + m.capacityComparison, 0);
+
+      // Still need these for other calculations
+      const totalExpected = monthBusinessDays * standardHoursPerDay;
+      const adjustedExpected = totalExpected - (fullNonIncomeDays * standardHoursPerDay);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const futureBusinessDays = collectBusinessDays(
+        tomorrow > periodEnd ? periodEnd : tomorrow,
+        periodEnd,
+        includeWeekends
+      );
+      const futureDaysTotal = futureBusinessDays.length;
+      let futureDaysWithEntries = 0;
+      dailyHours.forEach((dayData, dateIso) => {
+        const dateObj = parseIsoDate(dateIso);
+        if (!dateObj || dateObj <= today) return;
+        const incomeHours = dayData.income;
+        const nonIncomeHours = dayData.nonIncome;
+        if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
+          futureDaysWithEntries++;
+        }
+      });
+      const remainingDays = Math.max(0, futureDaysTotal - futureDaysWithEntries);
+      const projectedHoursThisMonth = totalIncomeHoursToDate + (remainingDays * projectedAverageDailyHours);
+      const projectedVsContractAverage = averageContractHoursThisMonth != null
+        ? projectedHoursThisMonth - averageContractHoursThisMonth
+        : null;
+      const projectedVsStandard = projectedHoursThisMonth - adjustedExpected;
+
+      // FIELD 2: Contract Pace Comparison - Calculate for ALL months from contract start to current viewing month
+      // This ensures monthly and cumulative values use the same calculation
+      const monthlyContractPaceValues = [];
+      let iterMonth2 = contractStart.getMonth();
+      let iterYear2 = contractStart.getFullYear();
+
+      while (iterYear2 < currentYear || (iterYear2 === currentYear && iterMonth2 <= currentMonth)) {
+        const iterMonthStart = startOfDay(new Date(iterYear2, iterMonth2, 1));
+        const iterMonthEnd = startOfDay(new Date(iterYear2, iterMonth2 + 1, 0));
+
+        // Calculate period bounds for this iteration month
+        const iterPeriodStart = contractStart > iterMonthStart ? contractStart : iterMonthStart;
+        const iterPeriodEnd = boundedContractEnd && boundedContractEnd < iterMonthEnd ? boundedContractEnd : iterMonthEnd;
+
+        let iterContractPaceComparison = null;
+
+        if (iterPeriodEnd >= iterPeriodStart && hasBaseline) {
+          // Calculate business days for this month period
+          const iterBusinessDaysList = collectBusinessDays(iterPeriodStart, iterPeriodEnd, includeWeekends);
+          const iterBusinessDays = iterBusinessDaysList.length;
+
+          // Get all entries for this contract in this month period
+          const iterPeriodStartIso = isoDate(iterPeriodStart);
+          const iterPeriodEndIso = isoDate(iterPeriodEnd);
+          const iterMonthEntries = state.entries.filter((e) => {
+            if (!e) return false;
+            const resolvedId = e._resolvedContract?.id || e.contract_id;
+            if (resolvedId !== contract.id) return false;
+            const entryDateIso = getEntryDateIso(e);
+            if (!entryDateIso) return false;
+            return entryDateIso >= iterPeriodStartIso && entryDateIso <= iterPeriodEndIso;
+          });
+
+          // Determine if this iteration month is TODAY'S actual current month (not the viewing month)
+          const todayMonth = today.getMonth();
+          const todayYear = today.getFullYear();
+          const isCurrentIterationMonth = (iterYear2 === todayYear && iterMonth2 === todayMonth);
+          const iterCutoffDate = isCurrentIterationMonth ? today : iterMonthEnd;
+
+          // Calculate total income hours to date (up to cutoff)
+          let iterTotalIncomeHoursToDate = 0;
+          iterMonthEntries.forEach((entry) => {
+            const entryDateIso = getEntryDateIso(entry);
+            if (!entryDateIso) return;
+            const entryDateObj = parseIsoDate(entryDateIso);
+            if (!entryDateObj || Number.isNaN(entryDateObj.getTime())) return;
+
+            // Only count entries up to cutoff
+            if (entryDateObj > iterCutoffDate) return;
+
+            const hours = (Number(entry.duration_minutes) || 0) / 60;
+            if (hours <= 0) return;
+
+            if (entryContributesToIncome(entry)) {
+              iterTotalIncomeHoursToDate += hours;
+            }
+          });
+
+          // Calculate contract pace comparison
+          const iterMonthlyPace = Number(contract.total_hours || 0) / contractMonths;
+          if (iterBusinessDays > 0) {
+            const iterBusinessDaysElapsed = collectBusinessDays(iterPeriodStart, iterCutoffDate < iterPeriodEnd ? iterCutoffDate : iterPeriodEnd, includeWeekends).length;
+            const iterProRatedPace = iterMonthlyPace * (iterBusinessDaysElapsed / iterBusinessDays);
+            iterContractPaceComparison = iterProRatedPace - iterTotalIncomeHoursToDate;
+          }
+        }
+
+        monthlyContractPaceValues.push({
+          month: iterMonth2,
+          year: iterYear2,
+          contractPaceComparison: iterContractPaceComparison
+        });
+
+        // Move to next month
+        iterMonth2++;
+        if (iterMonth2 > 11) {
+          iterMonth2 = 0;
+          iterYear2++;
+        }
+      }
+
+      // Extract current month's contract pace from the calculated values
+      const currentMonthContractPace = monthlyContractPaceValues.find(m => m.month === month && m.year === year);
+      const contractPaceComparison = currentMonthContractPace ? currentMonthContractPace.contractPaceComparison : null;
+
+      // Calculate cumulative as simple sum of all monthly values (only for non-null values)
+      const cumulativeContractPaceComparison = monthlyContractPaceValues
+        .filter(m => m.contractPaceComparison !== null)
+        .reduce((sum, m) => sum + m.contractPaceComparison, 0);
+
+      // Aggregate values for multi-contract summaries
+      aggregatedIncomeHoursToDate += totalIncomeHoursToDate;
+      aggregatedProjectedHoursThisMonth += projectedHoursThisMonth;
+      aggregatedStandardHoursBasedOnBusinessDays += adjustedExpected;
+      aggregatedProjectedVsStandardHours += projectedVsStandard;
+      if (typeof capacityComparison === 'number') {
+        aggregatedCapacityComparisonTotal += capacityComparison;
+      }
+      if (contractPaceComparison !== null && contractPaceComparison !== undefined) {
+        aggregatedContractPaceComparisonTotal += contractPaceComparison;
+        aggregatedContractPaceComparisonCount++;
+      }
+      if (projectedVsContractAverage !== null) {
+        aggregatedProjectedVsContractAverage += projectedVsContractAverage;
+        aggregatedProjectedVsContractAverageCount++;
       }
 
       contractSummaries.push({
