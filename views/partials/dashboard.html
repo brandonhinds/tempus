@@ -238,6 +238,7 @@
       <button class="ghost" id="btn-manage-recurring" type="button" style="display:none;">Reoccurring Entries</button>
       <button class="ghost" id="btn-manage-bulk" type="button" style="display:none;">Bulk Entries</button>
       <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print Monthly Hours</button>
+      <button class="ghost" id="btn-timesheet1-importer" type="button" style="display:none;">Import Timesheet 1.0</button>
     </div>
   </div>
 </section>
@@ -280,6 +281,61 @@
       <button class="ghost" id="btn-delete-actual-income" style="display:none; margin-right:auto;">Delete</button>
       <button class="ghost" id="btn-cancel-actual-income">Cancel</button>
       <button id="btn-save-actual-income">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Timesheet 1.0 Importer Modal -->
+<div class="ts-modal" id="modal-timesheet1-importer" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 720px;">
+    <div class="ts-modal-header">
+      <h3>Timesheet 1.0 Importer</h3>
+      <button class="ts-modal-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <p class="ts-note" style="margin-bottom:12px;">
+        Paste the Google Sheets file ID for your legacy Timesheet 1.0 workbook. You can copy it from the Drive URL: the long string between <code>/d/</code> and <code>/edit</code>.
+      </p>
+      <label>Spreadsheet File ID</label>
+      <input type="text" id="timesheet1-file-id" placeholder="e.g. 1AbC2dEf3GhijkLMNOP4qr5stUV6wxYZ" />
+      <div class="ts-note" id="timesheet1-status" style="margin:8px 0 12px 0;"></div>
+      <div class="ts-inline-actions" style="gap:8px; flex-wrap:wrap;">
+        <button class="ghost" id="btn-timesheet1-preview">Preview Import</button>
+        <button class="primary" id="btn-timesheet1-run" disabled>Import Entries</button>
+        <button class="ghost" id="btn-timesheet1-cancel">Close</button>
+      </div>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:8px;">
+        <label class="ts-toggle">
+          <input type="checkbox" id="timesheet1-skip-holidays" checked />
+          <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+        </label>
+        <div>
+          <div style="font-weight:600;">Skip public holidays</div>
+          <div class="ts-note">Exclude entries on public holidays (will fetch holidays for the relevant years if missing).</div>
+        </div>
+      </div>
+      <div id="timesheet1-mapping-section" style="margin-top:16px; display:none;">
+        <div class="ts-section-header">
+          <h4>Hour Type Mapping</h4>
+          <div class="ts-note">Match hour type labels in the legacy sheet to current hour types.</div>
+        </div>
+        <div id="timesheet1-mapping-list" class="ts-stack ts-stack--sm"></div>
+      </div>
+      <div id="timesheet1-contract-section" style="margin-top:16px; display:none;">
+        <div class="ts-section-header">
+          <h4>Contract Selection</h4>
+          <div class="ts-note">For hour types that require contracts, pick the contract to use for the entire month.</div>
+        </div>
+        <div id="timesheet1-contract-list" class="ts-stack ts-stack--sm"></div>
+      </div>
+      <div id="timesheet1-preview-section" style="margin-top:16px; display:none;">
+        <div class="ts-section-header">
+          <h4>Preview</h4>
+          <div class="ts-note">Counts exclude day/hour type combinations that already exist in Tempus.</div>
+        </div>
+        <div id="timesheet1-preview-summary"></div>
+      </div>
+      <div id="timesheet1-import-summary" style="margin-top:12px; display:none;"></div>
     </div>
   </div>
 </div>

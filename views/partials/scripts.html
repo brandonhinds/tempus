@@ -6313,6 +6313,12 @@ function updateDeductionFormVisibility() {
       order: 270,
       group: 'time_entries'
     },
+    enable_timesheet1_importer: {
+      name: 'Enable Timesheet 1.0 importer',
+      description: 'Adds an importer on the Time Entries page to pull legacy spreadsheet hours with mapping, contract checks, and duplicate detection.',
+      order: 280,
+      group: 'time_entries'
+    },
     enable_company_tracking_features: {
       name: 'Enable company income tracking',
       description: 'Unlocks company-focused features including company deductions, BAS reporting, and invoice tooling.',
@@ -9409,6 +9415,21 @@ function updateDeductionFormVisibility() {
   const btnCancelPrintView = document.getElementById('btn-cancel-print-view');
   const btnGeneratePrintView = document.getElementById('btn-generate-print-view');
   const btnUnselectAllOther = document.getElementById('btn-unselect-all-other');
+  const timesheet1Btn = document.getElementById('btn-timesheet1-importer');
+  const timesheet1Modal = document.getElementById('modal-timesheet1-importer');
+  const timesheet1FileInput = document.getElementById('timesheet1-file-id');
+  const timesheet1Status = document.getElementById('timesheet1-status');
+  const timesheet1PreviewBtn = document.getElementById('btn-timesheet1-preview');
+  const timesheet1RunBtn = document.getElementById('btn-timesheet1-run');
+  const timesheet1CancelBtn = document.getElementById('btn-timesheet1-cancel');
+  const timesheet1SkipHolidaysToggle = document.getElementById('timesheet1-skip-holidays');
+  const timesheet1MappingSection = document.getElementById('timesheet1-mapping-section');
+  const timesheet1MappingList = document.getElementById('timesheet1-mapping-list');
+  const timesheet1ContractSection = document.getElementById('timesheet1-contract-section');
+  const timesheet1ContractList = document.getElementById('timesheet1-contract-list');
+  const timesheet1PreviewSection = document.getElementById('timesheet1-preview-section');
+  const timesheet1PreviewSummary = document.getElementById('timesheet1-preview-summary');
+  const timesheet1ImportSummary = document.getElementById('timesheet1-import-summary');
 
   const DECIMAL_HOURS_FORMATTER = new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 0,
@@ -9428,6 +9449,13 @@ function updateDeductionFormVisibility() {
     year: 'numeric'
   });
   const FINANCIAL_YEAR_START_MONTH = 6; // July (0-indexed)
+  const MONTH_ORDER = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  let timesheet1State = {
+    mapping: {},
+    contractSelections: {},
+    preview: null,
+    skipPublicHolidays: true
+  };
 
   function financialYearLabel(startYear) {
     const endYear = startYear + 1;
@@ -11587,6 +11615,29 @@ function updateDeductionFormVisibility() {
   if (btnUnselectAllOther) {
     btnUnselectAllOther.addEventListener('click', unselectAllOtherHourTypes);
   }
+  if (timesheet1Btn) {
+    timesheet1Btn.addEventListener('click', openTimesheet1Importer);
+  }
+  if (timesheet1PreviewBtn) {
+    timesheet1PreviewBtn.addEventListener('click', previewTimesheet1Import);
+  }
+  if (timesheet1RunBtn) {
+    timesheet1RunBtn.addEventListener('click', runTimesheet1Import);
+  }
+  if (timesheet1CancelBtn) {
+    timesheet1CancelBtn.addEventListener('click', closeTimesheet1Importer);
+  }
+  if (timesheet1SkipHolidaysToggle) {
+    timesheet1SkipHolidaysToggle.addEventListener('change', () => {
+      timesheet1State.skipPublicHolidays = !!timesheet1SkipHolidaysToggle.checked;
+      if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+      setTimesheet1Status('Skip holidays setting changed. Run preview again to refresh totals.', 'warn');
+    });
+  }
+  if (timesheet1Modal) {
+    const closeBtn = timesheet1Modal.querySelector('.ts-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeTimesheet1Importer);
+  }
 
   // Entries & KPIs
   function minutesForDate(date) {
@@ -12144,6 +12195,11 @@ function getCachedIncomeSummary(monthKey) {
       printMonthlyBtn.style.display = visible ? 'inline-flex' : 'none';
       printMonthlyBtn.title = 'Generate printable monthly hours view';
     }
+    if (timesheet1Btn) {
+      const visible = getFeatureFlag('enable_timesheet1_importer');
+      timesheet1Btn.style.display = visible ? 'inline-flex' : 'none';
+      timesheet1Btn.title = 'Import legacy Timesheet 1.0 hours from Google Sheets';
+    }
   }
 
   // Actual Income Functions
@@ -12286,6 +12342,418 @@ function getCachedIncomeSummary(monthKey) {
     state.actualIncome.forEach(item => {
       state.actualIncomeMap[item.month] = item;
     });
+  }
+
+  // Timesheet 1.0 Importer
+  function resetTimesheet1State() {
+    timesheet1State = { mapping: {}, contractSelections: {}, preview: null, skipPublicHolidays: true };
+    if (timesheet1Status) {
+      timesheet1Status.className = 'ts-note';
+      timesheet1Status.textContent = '';
+    }
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+    if (timesheet1MappingSection) timesheet1MappingSection.style.display = 'none';
+    if (timesheet1MappingList) timesheet1MappingList.innerHTML = '';
+    if (timesheet1ContractSection) timesheet1ContractSection.style.display = 'none';
+    if (timesheet1ContractList) timesheet1ContractList.innerHTML = '';
+    if (timesheet1PreviewSection) timesheet1PreviewSection.style.display = 'none';
+    if (timesheet1PreviewSummary) timesheet1PreviewSummary.innerHTML = '';
+    if (timesheet1ImportSummary) {
+      timesheet1ImportSummary.style.display = 'none';
+      timesheet1ImportSummary.innerHTML = '';
+    }
+    if (timesheet1SkipHolidaysToggle) timesheet1SkipHolidaysToggle.checked = true;
+  }
+
+  function setTimesheet1Status(message, tone) {
+    if (!timesheet1Status) return;
+    timesheet1Status.className = (tone === 'error' || tone === 'warn') ? 'ts-warning' : 'ts-note';
+    timesheet1Status.textContent = message || '';
+  }
+
+  function openTimesheet1Importer() {
+    if (!timesheet1Modal) return;
+    resetTimesheet1State();
+    showModal(timesheet1Modal);
+    if (timesheet1FileInput) timesheet1FileInput.focus();
+  }
+
+  function closeTimesheet1Importer() {
+    if (!timesheet1Modal) return;
+    hideModal(timesheet1Modal);
+  }
+
+  function formatMonthLabel(monthKey, fallback) {
+    if (!monthKey) return fallback || '';
+    const parts = monthKey.split('-');
+    if (parts.length !== 2) return fallback || monthKey;
+    const year = Number(parts[0]);
+    const month = Number(parts[1]) - 1;
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return fallback || monthKey;
+    const date = new Date(year, month, 1);
+    if (Number.isNaN(date.getTime())) return fallback || monthKey;
+    return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+
+  function monthOrderIndex(monthKey, sheetName) {
+    if (monthKey) {
+      const parts = monthKey.split('-');
+      if (parts.length === 2) {
+        const monthNum = Number(parts[1]);
+        if (monthNum >= 1 && monthNum <= 12) return monthNum - 1;
+      }
+    }
+    const name = (sheetName || '').toLowerCase();
+    const idx = MONTH_ORDER.indexOf(name);
+    return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+  }
+
+  function onTimesheet1MappingChange(event) {
+    const select = event.target;
+    const label = select.dataset.label;
+    if (!label) return;
+    const value = select.value;
+    timesheet1State.mapping[label] = value || '';
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+    setTimesheet1Status('Mapping updated. Run preview again to refresh totals.', 'warn');
+  }
+
+  function renderTimesheet1Mapping(mapping) {
+    if (!timesheet1MappingList || !timesheet1MappingSection) return;
+    const labels = Object.keys(mapping || {});
+    if (!labels.length) {
+      timesheet1MappingSection.style.display = 'none';
+      timesheet1MappingList.innerHTML = '';
+      return;
+    }
+    timesheet1MappingSection.style.display = 'block';
+    labels.sort((a, b) => a.localeCompare(b));
+    timesheet1MappingList.innerHTML = '';
+
+    labels.forEach((label) => {
+      const item = mapping[label] || {};
+      const row = document.createElement('div');
+      row.className = 'ts-grid ts-grid--gap-sm';
+      row.style.alignItems = 'center';
+
+      const labelCell = document.createElement('div');
+      labelCell.className = 'ts-col-span-4';
+      labelCell.style.fontWeight = '600';
+      labelCell.textContent = label;
+
+      const selectCell = document.createElement('div');
+      selectCell.className = 'ts-col-span-8';
+      const select = document.createElement('select');
+      select.dataset.label = label;
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select hour type';
+      select.appendChild(placeholder);
+      state.hourTypes.forEach((ht) => {
+        const opt = document.createElement('option');
+        opt.value = ht.id;
+        opt.textContent = ht.name;
+        if (item.hour_type_id === ht.id) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', onTimesheet1MappingChange);
+      selectCell.appendChild(select);
+
+      row.appendChild(labelCell);
+      row.appendChild(selectCell);
+      timesheet1MappingList.appendChild(row);
+
+      // Persist mapping state
+      timesheet1State.mapping[label] = item.hour_type_id || '';
+    });
+  }
+
+  function onTimesheet1ContractChange(event) {
+    const select = event.target;
+    const selectionKey = select.dataset.selectionKey;
+    if (!selectionKey) return;
+    const value = select.value;
+    timesheet1State.contractSelections[selectionKey] = value || '';
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+    setTimesheet1Status('Contract selection changed. Run preview again to refresh totals.', 'warn');
+  }
+
+  function renderTimesheet1Contracts(months) {
+    if (!timesheet1ContractList || !timesheet1ContractSection) return;
+    const pending = [];
+    const missing = [];
+    (months || []).forEach((month) => {
+      (month.needsContractSelection || []).forEach((item) => {
+        pending.push({
+          month: month.month,
+          sheetName: month.sheetName,
+          hourTypeId: item.hourTypeId,
+          hourTypeName: item.hourTypeName,
+          selectionKey: item.selectionKey,
+          options: item.options || []
+        });
+      });
+      if (month.missingContracts && month.missingContracts.length) {
+        missing.push(month);
+      }
+    });
+
+    // Sort pending by calendar order
+    pending.sort((a, b) => monthOrderIndex(a.month, a.sheetName) - monthOrderIndex(b.month, b.sheetName));
+
+    if (!pending.length && !missing.length) {
+      timesheet1ContractSection.style.display = 'none';
+      timesheet1ContractList.innerHTML = '';
+      return;
+    }
+
+    timesheet1ContractSection.style.display = 'block';
+    timesheet1ContractList.innerHTML = '';
+
+    if (missing.length) {
+      const missingNote = document.createElement('div');
+      missingNote.className = 'ts-warning';
+      const seen = new Set();
+      const monthList = missing
+        .map((m) => formatMonthLabel(m.month, m.sheetName || m.month || 'Unknown'))
+        .filter((label) => {
+          if (seen.has(label)) return false;
+          seen.add(label);
+          return true;
+        })
+        .join(', ');
+      missingNote.textContent = `No valid contract covers: ${monthList}. Add or update contracts to cover those months before importing.`;
+      timesheet1ContractList.appendChild(missingNote);
+    }
+
+    pending.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'ts-grid ts-grid--gap-sm';
+      row.style.alignItems = 'center';
+
+      const label = document.createElement('div');
+      label.className = 'ts-col-span-4';
+      const monthLabel = formatMonthLabel(item.month, item.month);
+      label.innerHTML = `<div style="font-weight:600;">${item.hourTypeName}</div><div class="ts-note">${monthLabel}</div>`;
+
+      const selectCell = document.createElement('div');
+      selectCell.className = 'ts-col-span-8';
+      const select = document.createElement('select');
+      select.dataset.selectionKey = item.selectionKey;
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select contract';
+      select.appendChild(placeholder);
+
+      item.options.forEach((opt) => {
+        const option = document.createElement('option');
+        option.value = opt.id;
+        const end = opt.end_date ? ` to ${opt.end_date}` : '';
+        option.textContent = `${opt.name} (${opt.start_date}${end || ''})`;
+        if (timesheet1State.contractSelections[item.selectionKey] === opt.id) option.selected = true;
+        select.appendChild(option);
+      });
+
+      // Auto-select when only one option exists and none chosen yet
+      if (!timesheet1State.contractSelections[item.selectionKey] && item.options.length === 1) {
+        timesheet1State.contractSelections[item.selectionKey] = item.options[0].id;
+        select.value = item.options[0].id;
+      }
+
+      select.addEventListener('change', onTimesheet1ContractChange);
+      selectCell.appendChild(select);
+
+      row.appendChild(label);
+      row.appendChild(selectCell);
+      timesheet1ContractList.appendChild(row);
+    });
+  }
+
+  function renderTimesheet1Preview(preview) {
+    if (!timesheet1PreviewSection || !timesheet1PreviewSummary) return;
+    if (!preview || !preview.success) {
+      resetTimesheet1State();
+      return;
+    }
+
+    renderTimesheet1Mapping(preview.mapping || {});
+    renderTimesheet1Contracts(preview.months || []);
+
+    const monthsSorted = (preview.months || []).slice().sort((a, b) => {
+      return monthOrderIndex(a.month, a.sheetName) - monthOrderIndex(b.month, b.sheetName);
+    });
+
+    const totalImportable = preview.totals ? (preview.totals.importable || 0) : 0;
+    const totalDuplicates = preview.totals ? (preview.totals.duplicates || 0) : 0;
+    const totalSkippedHolidays = preview.totals ? (preview.totals.skippedPublicHolidays || 0) : 0;
+    const totalUnmapped = preview.totals ? (preview.totals.unmapped || 0) : 0;
+    const hasMissingContracts = monthsSorted.some((m) => (m.missingContracts || []).length > 0);
+    const needsContractSelection = monthsSorted.some((m) => (m.needsContractSelection || []).length > 0);
+
+    const rows = monthsSorted.map((month) => {
+      const monthLabel = formatMonthLabel(month.month, month.sheetName || month.month || 'Unknown month');
+      const totals = (month.totalsByHourType || []).map((t) => {
+        const hours = (t.minutes || 0) / 60;
+        return `<div class="ts-preview-row"><span>${t.hourTypeName}</span><span>${hours.toFixed(2)} hrs (${t.entries} entries)</span></div>`;
+      }).join('') || '<div class="ts-note">No importable entries</div>';
+
+      const dupes = (month.duplicateExamples || []).slice(0, 3).map((d) => {
+        return `<div class="ts-note">Duplicate on ${d.date} (${d.hourTypeName})</div>`;
+      }).join('');
+
+      const unmapped = (month.unmapped || []).length
+        ? `<div class="ts-warning">${month.unmapped.length} entries need hour type mapping.</div>`
+        : '';
+      const missingContracts = (month.missingContracts || []).length
+        ? `<div class="ts-warning">${month.missingContracts.length} contract gaps detected.</div>`
+        : '';
+
+      return `
+        <div class="ts-panel" style="padding:12px;">
+          <div style="font-weight:700; margin-bottom:6px;">${monthLabel}</div>
+          ${totals}
+          ${dupes}
+          ${unmapped}
+          ${missingContracts}
+        </div>
+      `;
+    }).join('');
+
+    timesheet1PreviewSection.style.display = 'block';
+    timesheet1PreviewSummary.innerHTML = `
+      <div class="ts-grid ts-grid--gap-sm" style="margin-bottom:12px;">
+        <div class="ts-col-span-6"><strong>Importable entries</strong><div>${totalImportable}</div></div>
+        <div class="ts-col-span-6"><strong>Already in Tempus</strong><div>${totalDuplicates}</div></div>
+        ${totalSkippedHolidays ? `<div class="ts-col-span-6"><strong>Skipped public holidays</strong><div>${totalSkippedHolidays}</div></div>` : ''}
+      </div>
+      ${rows}
+    `;
+
+    const blocking = totalUnmapped > 0 || hasMissingContracts || needsContractSelection || totalImportable === 0;
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = blocking;
+
+    if (totalUnmapped > 0) {
+      setTimesheet1Status('Map hour types before importing.', 'warn');
+    } else if (hasMissingContracts) {
+      setTimesheet1Status('Add contracts covering these dates before importing.', 'warn');
+    } else if (needsContractSelection) {
+      setTimesheet1Status('Select a contract for each hour type/month before importing.', 'warn');
+    } else if (totalImportable === 0) {
+      setTimesheet1Status('No new entries to import (all duplicates).', 'warn');
+    } else {
+      setTimesheet1Status('Preview ready. Review and click Import.', 'success');
+    }
+
+    if (timesheet1ImportSummary) {
+      timesheet1ImportSummary.style.display = 'none';
+      timesheet1ImportSummary.innerHTML = '';
+    }
+  }
+
+  function previewTimesheet1Import() {
+    if (!timesheet1FileInput) return;
+    const spreadsheetId = timesheet1FileInput.value.trim();
+    if (!spreadsheetId) {
+      setTimesheet1Status('Enter the Google Sheets file ID to preview.', 'error');
+      return;
+    }
+    setTimesheet1Status('Loading preview...', 'warn');
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+
+    const payload = {
+      spreadsheetId,
+      hourTypeMapping: timesheet1State.mapping,
+      contractSelections: timesheet1State.contractSelections,
+      skipPublicHolidays: timesheet1SkipHolidaysToggle ? !!timesheet1SkipHolidaysToggle.checked : true
+    };
+
+    timesheet1State.skipPublicHolidays = payload.skipPublicHolidays;
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        console.log('[Timesheet1] Preview response', res);
+        if (res && res.success) {
+          timesheet1State.preview = res;
+          timesheet1State.mapping = res.mapping || {};
+          renderTimesheet1Preview(res);
+        } else {
+          const message = res && (res.message || res.error) ? `Preview failed: ${res.message || res.error}` : 'Preview failed. Please check the file ID.';
+          setTimesheet1Status(message, 'error');
+        }
+      })
+      .withFailureHandler((err) => {
+        console.log('[Timesheet1] Preview failed', err);
+        const message = err && err.message ? err.message : 'Preview failed. Please check the file ID.';
+        setTimesheet1Status(message, 'error');
+      })
+      .api_previewTimesheet1Import(payload);
+  }
+
+  function runTimesheet1Import() {
+    if (!timesheet1State.preview || !timesheet1State.preview.success) {
+      setTimesheet1Status('Run a preview before importing.', 'error');
+      return;
+    }
+    if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
+    setTimesheet1Status('Importing entries...', 'warn');
+
+    const payload = {
+      spreadsheetId: timesheet1State.preview.spreadsheetId,
+      hourTypeMapping: timesheet1State.mapping,
+      contractSelections: timesheet1State.contractSelections,
+      skipPublicHolidays: timesheet1State.skipPublicHolidays
+    };
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        console.log('[Timesheet1] Import response', res);
+        if (res && res.success) {
+          timesheet1State.preview = res;
+          renderTimesheet1Preview(res);
+          if (timesheet1ImportSummary && res.importSummary && res.importSummary.length) {
+            // Group summary by month if provided, otherwise show flat list
+            const byMonth = {};
+            (res.importSummary || []).forEach((item) => {
+              const key = item.month || 'unknown';
+              if (!byMonth[key]) byMonth[key] = [];
+              byMonth[key].push(item);
+            });
+
+            const monthBlocks = Object.keys(byMonth).map((monthKey) => {
+              const label = formatMonthLabel(monthKey, monthKey === 'unknown' ? 'Imported entries' : monthKey);
+              const lines = byMonth[monthKey].map((item) => {
+                const hours = (item.minutes || 0) / 60;
+                return `<div>${item.hourTypeName}, ${hours.toFixed(2)} hrs (${item.entries} entries)</div>`;
+              }).join('');
+              return `
+                <div class="ts-panel" style="padding:12px;">
+                  <div style="font-weight:700; margin-bottom:6px;">${label}</div>
+                  ${lines}
+                </div>
+              `;
+            }).join('');
+
+            timesheet1ImportSummary.innerHTML = `
+              <div style="font-weight:700; margin-bottom:6px;">Import complete</div>
+              ${monthBlocks}
+            `;
+            timesheet1ImportSummary.style.display = 'block';
+          }
+          refreshEntriesFromServer(() => {
+            setStatus(`Imported ${res.imported || 0} entries (skipped ${res.skippedDuplicates || 0} duplicates).`, 'success');
+          });
+          setTimesheet1Status(`Import complete. Imported ${res.imported || 0} entries (skipped ${res.skippedDuplicates || 0} duplicates). It is recommended you browser refresh Tempus to ensure the new data is synced.`, 'success');
+        } else {
+          const message = res && (res.message || res.error) ? `Import failed: ${res.message || res.error}` : 'Import failed. Resolve blocking issues and try again.';
+          setTimesheet1Status(message, 'error');
+        }
+      })
+      .withFailureHandler((err) => {
+        console.log('[Timesheet1] Import failed', err);
+        const message = err && err.message ? err.message : 'Import failed. Resolve blocking issues and try again.';
+        setTimesheet1Status(message, 'error');
+      })
+      .api_runTimesheet1Import(payload);
   }
 
   // Monthly Print View Functions

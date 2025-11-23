@@ -18,6 +18,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `xero_payroll_helper` | Disabled | Adds a modal that slices the active month into Xero's fixed weekly ranges with cumulative hour totals. |
 | `myob_payroll_helper` | Disabled | Adds a modal that groups the active month into weekly MYOB-ready totals with a monthly cross-check. |
 | `enable_monthly_print_view` | Disabled | Adds a printable calendar showing hour breakdowns by type that fits on one A4 page for timesheets or records. |
+| `enable_timesheet1_importer` | Disabled | Adds a modal on the Time Entries page to import legacy Timesheet 1.0 spreadsheets from Drive with hour-type mapping, contract validation, and duplicate checks. |
 | `enable_company_tracking_features` | Disabled | Unlocks company-focused fields, including company deduction categories. |
 | `enable_deduction_categories` | Disabled | Adds category management for deductions with colour-coded grouping and annual category breakdowns. |
 | `enable_company_quarterly_bas` | Disabled | Switches BAS reporting to quarterly totals (only available when company tracking is enabled). |
