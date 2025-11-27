@@ -3,6 +3,13 @@ var ENTRY_SHEET_TZ = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZon
 var ENTRY_TZ_UTC = 'UTC';
 var ENTRY_CACHE_PREFIX = 'entries_v2_';
 
+function resolveDefaultHourTypeId(defaultHourTypeId) {
+  var resolved = defaultHourTypeId;
+  if (!resolved) resolved = getDefaultHourTypeId();
+  if (resolved && typeof resolved === 'object') resolved = resolved.id || '';
+  return resolved || '';
+}
+
 function toIsoDate(value) {
   if (!value) return '';
   if (Object.prototype.toString.call(value) === '[object Date]') {
@@ -146,7 +153,7 @@ function punchesLatest(punches) {
   return latest;
 }
 
-function normalizeEntryObject(entry) {
+function normalizeEntryObject(entry, defaultHourTypeId) {
   if (!entry) return entry;
   var punches = normalizePunches(entry.punches != null ? entry.punches : (entry.punches_json || entry.punchesJson));
   var roundInterval = normalizeDurationMinutes(entry.round_interval);
@@ -164,9 +171,8 @@ function normalizeEntryObject(entry) {
 
   // Handle hour_type_id - default to work hour type if not provided or empty
   var hourTypeId = entry.hour_type_id || entry.hourTypeId || '';
-  if (!hourTypeId) {
-    hourTypeId = getDefaultHourTypeId();
-  }
+  if (hourTypeId && typeof hourTypeId === 'object') hourTypeId = hourTypeId.id || '';
+  if (!hourTypeId) hourTypeId = resolveDefaultHourTypeId(defaultHourTypeId);
 
   return {
     id: entry.id || '',
@@ -182,8 +188,8 @@ function normalizeEntryObject(entry) {
   };
 }
 
-function buildEntryRow(entry, createdAt) {
-  var normalized = normalizeEntryObject(entry || {});
+function buildEntryRow(entry, createdAt, defaultHourTypeId) {
+  var normalized = normalizeEntryObject(entry || {}, defaultHourTypeId);
   return [
     normalized.id,
     normalized.date,
@@ -201,6 +207,7 @@ function api_getEntries(filters) {
   var key = ENTRY_CACHE_PREFIX + JSON.stringify(filters || {});
   var cached = cacheGet(key);
   if (cached) return cached;
+  var defaultHourTypeId = resolveDefaultHourTypeId();
   var sh = getOrCreateSheet('timesheet_entries');
   var values = sh.getDataRange().getValues();
   if (!values.length) return [];
@@ -208,7 +215,7 @@ function api_getEntries(filters) {
   var rows = values.slice(1).map(function(r){
     var o = {};
     headers.forEach(function(h,i){ o[h] = r[i]; });
-    return normalizeEntryObject(o);
+    return normalizeEntryObject(o, defaultHourTypeId);
   });
   var out = rows;
   if (filters && filters.startDate) {
@@ -226,6 +233,7 @@ function api_getEntries(filters) {
 function api_addEntry(entry) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  var defaultHourTypeId = resolveDefaultHourTypeId();
   var sh = getOrCreateSheet('timesheet_entries');
   var id = Utilities.getUuid();
   var now = new Date();
@@ -238,20 +246,20 @@ function api_addEntry(entry) {
     punches: entry && entry.punches,
     punches_json: entry && entry.punches_json,
     entry_type: entry && entry.entry_type,
-    hour_type_id: entry && entry.hour_type_id ? entry.hour_type_id : getDefaultHourTypeId(),
+    hour_type_id: entry && entry.hour_type_id ? entry.hour_type_id : defaultHourTypeId,
     recurrence_id: entry && entry.recurrence_id
-  });
+  }, defaultHourTypeId);
   normalized.id = normalized.id || id;
   normalized.date = normalized.date || toIsoDate(now);
   normalized.contract_id = normalized.contract_id || '';
   normalized.created_at = normalized.created_at || toIsoDateTime(now);
-  normalized.hour_type_id = normalized.hour_type_id || getDefaultHourTypeId();
+  normalized.hour_type_id = normalized.hour_type_id || defaultHourTypeId;
   try {
-    var duplicate = findDuplicateEntryForKey(sh, normalized, null);
+    var duplicate = findDuplicateEntryForKey(sh, normalized, null, null, defaultHourTypeId);
     if (duplicate) {
       return { success: false, error: 'duplicate_entry', entry: duplicate };
     }
-    var row = buildEntryRow(normalized, normalized.created_at);
+    var row = buildEntryRow(normalized, normalized.created_at, defaultHourTypeId);
     sh.appendRow(row);
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
     return { success: true, entry: normalizeEntryObject({
@@ -273,6 +281,7 @@ function api_addEntry(entry) {
 function api_updateEntry(update) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  var defaultHourTypeId = resolveDefaultHourTypeId();
   var sh = getOrCreateSheet('timesheet_entries');
   var values = sh.getDataRange().getValues();
   try {
@@ -295,15 +304,15 @@ function api_updateEntry(update) {
         if (payload.recurrence_id == null && update.recurrence_id != null) {
           payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
         }
-        var normalized = normalizeEntryObject(payload);
+        var normalized = normalizeEntryObject(payload, defaultHourTypeId);
         normalized.id = update.id;
         normalized.created_at = toIsoDateTime(originalCreated);
-        normalized.hour_type_id = normalized.hour_type_id || getDefaultHourTypeId();
-        var duplicate = findDuplicateEntryForKey(sh, normalized, update.id);
+        normalized.hour_type_id = normalized.hour_type_id || defaultHourTypeId;
+        var duplicate = findDuplicateEntryForKey(sh, normalized, update.id, values, defaultHourTypeId);
         if (duplicate) {
           return { success: false, error: 'duplicate_entry', entry: duplicate };
         }
-        var newRow = buildEntryRow(normalized, normalized.created_at);
+        var newRow = buildEntryRow(normalized, normalized.created_at, defaultHourTypeId);
         sh.getRange(i+1,1,1,newRow.length).setValues([newRow]);
         cacheClearPrefix(ENTRY_CACHE_PREFIX);
         return { success: true, entry: normalized };
@@ -316,45 +325,68 @@ function api_updateEntry(update) {
 }
 
 function api_deleteEntry(id) {
-  var sh = getOrCreateSheet('timesheet_entries');
-  var values = sh.getDataRange().getValues();
-  for (var i=1; i<values.length; i++) {
-    if (values[i][0] === id) {
-      sh.deleteRow(i+1);
-      cacheClearPrefix(ENTRY_CACHE_PREFIX);
-      return { success: true };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = getOrCreateSheet('timesheet_entries');
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) throw new Error('Entry not found');
+    var ids = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i][0] === id) {
+        sh.deleteRow(i + 2); // +2 accounts for 1-based indexing and header row
+        cacheClearPrefix(ENTRY_CACHE_PREFIX);
+        return { success: true };
+      }
     }
+    throw new Error('Entry not found');
+  } finally {
+    lock.releaseLock();
   }
-  throw new Error('Entry not found');
 }
 
-function entryCompositeKey(dateIso, hourTypeId, contractId) {
-  var typeId = hourTypeId || getDefaultHourTypeId() || '';
+function entryCompositeKey(dateIso, hourTypeId, contractId, defaultHourTypeId) {
+  var typeId = hourTypeId || resolveDefaultHourTypeId(defaultHourTypeId) || '';
+  if (typeId && typeof typeId === 'object') typeId = typeId.id || '';
   return [dateIso || '', String(typeId || ''), contractId || ''].join('|');
 }
 
-function findDuplicateEntryForKey(sh, normalizedEntry, excludeId) {
+function findDuplicateEntryForKey(sh, normalizedEntry, excludeId, values, defaultHourTypeId) {
   if (!sh || !normalizedEntry || !normalizedEntry.date) return null;
-  var values = sh.getDataRange().getValues();
-  if (!values || values.length < 2) return null;
-  var targetKey = entryCompositeKey(normalizedEntry.date, normalizedEntry.hour_type_id, normalizedEntry.contract_id);
-  for (var i = 1; i < values.length; i++) {
-    var row = values[i];
-    var rowObj = normalizeEntryObject({
-      id: row[0],
-      date: row[1],
-      duration_minutes: row[2],
-      contract_id: row[3],
-      created_at: row[4],
-      punches_json: row[5],
-      entry_type: row[6],
-      hour_type_id: row[7],
-      recurrence_id: row[8]
-    });
-    if (rowObj.id === excludeId) continue;
-    var key = entryCompositeKey(rowObj.date, rowObj.hour_type_id, rowObj.contract_id);
+  var data = values || sh.getDataRange().getValues();
+  if (!data || data.length < 2) return null;
+  var headers = data[0];
+  var idIdx = headers.indexOf('id');
+  var dateIdx = headers.indexOf('date');
+  var durationIdx = headers.indexOf('duration_minutes');
+  var contractIdx = headers.indexOf('contract_id');
+  var createdIdx = headers.indexOf('created_at');
+  var punchesIdx = headers.indexOf('punches_json');
+  var entryTypeIdx = headers.indexOf('entry_type');
+  var hourTypeIdx = headers.indexOf('hour_type_id');
+  var recurrenceIdx = headers.indexOf('recurrence_id');
+  var fallbackHourTypeId = resolveDefaultHourTypeId(defaultHourTypeId);
+  var targetKey = entryCompositeKey(normalizedEntry.date, normalizedEntry.hour_type_id, normalizedEntry.contract_id, fallbackHourTypeId);
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowId = idIdx === -1 ? '' : row[idIdx];
+    if (rowId === excludeId) continue;
+    var rowDate = dateIdx === -1 ? '' : toIsoDate(row[dateIdx]);
+    var rowHourType = hourTypeIdx === -1 ? '' : row[hourTypeIdx];
+    var rowContract = contractIdx === -1 ? '' : row[contractIdx];
+    var key = entryCompositeKey(rowDate, rowHourType, rowContract, fallbackHourTypeId);
     if (key === targetKey) {
-      return rowObj;
+      return normalizeEntryObject({
+        id: rowId,
+        date: rowDate,
+        duration_minutes: durationIdx === -1 ? '' : row[durationIdx],
+        contract_id: rowContract,
+        created_at: createdIdx === -1 ? '' : row[createdIdx],
+        punches_json: punchesIdx === -1 ? '[]' : row[punchesIdx],
+        entry_type: entryTypeIdx === -1 ? 'basic' : row[entryTypeIdx],
+        hour_type_id: rowHourType || fallbackHourTypeId,
+        recurrence_id: recurrenceIdx === -1 ? '' : row[recurrenceIdx]
+      }, fallbackHourTypeId);
     }
   }
   return null;
