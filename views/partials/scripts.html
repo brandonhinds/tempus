@@ -13263,7 +13263,10 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function buildIncomeSummary(year, month) {
-    const allEntries = entriesForMonth(year, month);
+    const allEntries = entriesForMonth(year, month).map(entry => {
+      const roundedMinutes = roundDuration(entry.duration_minutes);
+      return roundedMinutes === entry.duration_minutes ? entry : { ...entry, duration_minutes: roundedMinutes };
+    });
     // Filter to only include entries from hour types that contribute to income
     const entries = allEntries.filter(entry => {
       const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
@@ -15248,10 +15251,15 @@ function getCachedIncomeSummary(monthKey) {
     const activeHourTypeIds = state.calendarFilteredHourTypes || state.hourTypes.map(ht => ht.id);
 
     // Filter entries by active hour types
-    const filteredEntries = state.entries.filter(entry => {
-      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-      return activeHourTypeIds.includes(hourTypeId);
-    });
+    const filteredEntries = state.entries
+      .filter(entry => {
+        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+        return activeHourTypeIds.includes(hourTypeId);
+      })
+      .map(entry => {
+        const roundedMinutes = roundDuration(entry.duration_minutes);
+        return roundedMinutes === entry.duration_minutes ? entry : { ...entry, duration_minutes: roundedMinutes };
+      });
 
     // Calculate totals based on filtered entries
     const totals = filteredEntries.reduce((map, entry) => {
