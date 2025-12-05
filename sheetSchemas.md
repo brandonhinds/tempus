@@ -27,7 +27,7 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | --- | --- | --- | --- |
 | `id` | string (UUID) | Unique identifier generated server-side (`Utilities.getUuid`). | `19f40595-b8a0-489f-8ad8-ea3348593068` |
 | `date` | string (ISO) | Work date in `yyyy-MM-dd`. | `2025-09-30` |
-| `duration_minutes` | number | Sum of all closed punch ranges in whole minutes. Derived server-side to prevent tampering. | `525` |
+| `duration_minutes` | number | Rounded minutes recorded for the entry. Derived from `punches_json` using the active `round_to_nearest` setting; basic entries are rounded from their provided duration. | `525` |
 | `contract_id` | string (UUID) | References the contract active on the entry date. May be empty for hour types that don't require contracts. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the entry was created server-side. | `2025-09-30T09:29:58Z` |
 | `punches_json` | string (JSON) | JSON-encoded array of punch objects: `[{"in":"HH:mm","out":"HH:mm"}]`. `out` may be blank for an open punch. | `[{"in":"08:10","out":"12:05"},{"in":"12:40","out":"17:10"}]` |
@@ -37,7 +37,7 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 
 ### Suggested improvements
 - Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
-- Derive `duration_minutes` server-side from `punches_json` so edits through the UI remain authoritative even if cached data drifts.
+- Keep `duration_minutes` authoritative and rounded on save; treat `punches_json` as the raw source of truth when the rounding setting changes.
 - Validate that `contract_id` exists in the contracts sheet before persisting new rows.
 - Consider adding a separate audit sheet for punch adjustments if regulatory requirements demand a full punch history.
 

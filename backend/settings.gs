@@ -64,13 +64,27 @@ function api_updateSettings(settings) {
   var sh = getOrCreateSheet('user_settings');
   var values = sh.getDataRange().getValues();
   var map = {};
-  values.forEach(function(r,i){ if (i>0) map[r[0]] = i+1; });
+  var previousRoundInterval = null;
+  values.forEach(function(r,i){
+    if (i>0) {
+      map[r[0]] = i+1;
+      if (String(r[0] || '') === 'round_to_nearest') {
+        previousRoundInterval = r[1];
+      }
+    }
+  });
   Object.keys(settings).forEach(function(k){
     var v = settings[k];
     if (map[k]) { sh.getRange(map[k],2).setValue(v); sh.getRange(map[k],3).setValue(typeof v); }
     else { sh.appendRow([k, v, typeof v]); }
   });
   cacheClearPrefix('settings');
+  var newRoundInterval = settings.hasOwnProperty('round_to_nearest') ? settings.round_to_nearest : previousRoundInterval;
+  var previousClamped = clampRoundInterval(previousRoundInterval);
+  var newClamped = clampRoundInterval(newRoundInterval);
+  if (previousClamped !== newClamped) {
+    reroundTimesheetEntries(newClamped);
+  }
   return { success: true };
 }
 

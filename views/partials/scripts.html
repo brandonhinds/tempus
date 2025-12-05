@@ -3371,9 +3371,8 @@ function loadAnnualData() {
       if (!contractIncome[contractId]) contractIncome[contractId] = 0;
       contractIncome[contractId] += hours * rate;
     });
-    const roundedMinutes = roundDuration(totalMinutes);
-    const roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
-    const totalHours = roundedMinutes / 60;
+    const roundingScale = totalMinutes > 0 ? 1 : 0;
+    const totalHours = totalMinutes / 60;
     Object.keys(contractIncome).forEach((cid) => {
       contractIncome[cid] = contractIncome[cid] * roundingScale;
     });
@@ -3392,7 +3391,7 @@ function loadAnnualData() {
         rateCalcMinutes += minutes;
       }
     });
-    const rateCalcHours = roundDuration(rateCalcMinutes) / 60;
+    const rateCalcHours = rateCalcMinutes / 60;
 
     const monthStart = periodStart;
     const monthEnd = periodEnd;
@@ -13263,12 +13262,7 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function buildIncomeSummary(year, month) {
-    const allEntries = entriesForMonth(year, month).map(entry => {
-      const roundedMinutes = roundDuration(entry.duration_minutes);
-      return roundedMinutes === entry.duration_minutes ? entry : { ...entry, duration_minutes: roundedMinutes };
-    });
-    // Filter to only include entries from hour types that contribute to income
-    const entries = allEntries.filter(entry => {
+    const entries = entriesForMonth(year, month).filter(entry => {
       const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId];
       return hourType ? hourType.contributes_to_income : true; // Default to true for backwards compatibility
@@ -13283,9 +13277,8 @@ function getCachedIncomeSummary(monthKey) {
       totalMinutes = entries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
       totalHours = totalMinutes / 60;
     }
-    const roundedMinutes = roundDuration(totalMinutes);
-    const roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
-    const roundedHours = roundedMinutes / 60;
+    const roundingScale = totalMinutes > 0 ? 1 : 0;
+    const roundedHours = totalHours;
     const validContractsUsed = entries.reduce((set, entry) => {
       const contract = state.contractMap[entry.contract_id];
       if (contract && contractIsValid(contract, entry.date)) set.add(contract.id);
@@ -13329,14 +13322,13 @@ function getCachedIncomeSummary(monthKey) {
     const rateCalcHourType = Object.values(state.hourTypeMap).find(ht => ht && ht.use_for_rate_calculation);
     if (rateCalcHourType) {
       rateCalcHourTypeId = rateCalcHourType.id;
-      const matchingEntries = allEntries.filter(entry => {
+      const matchingEntries = entriesForMonth(year, month).filter(entry => {
         const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
         return hourTypeId === rateCalcHourType.id;
       });
 
       const rateCalcMinutes = matchingEntries.reduce((acc, entry) => acc + (Number(entry.duration_minutes) || 0), 0);
-      const roundedRateCalcMinutes = roundDuration(rateCalcMinutes);
-      rateCalcHours = roundedRateCalcMinutes / 60;
+      rateCalcHours = rateCalcMinutes / 60;
     }
 
     const deductionTotals = computeMonthlyDeductionTotals(year, month);
@@ -15251,15 +15243,10 @@ function getCachedIncomeSummary(monthKey) {
     const activeHourTypeIds = state.calendarFilteredHourTypes || state.hourTypes.map(ht => ht.id);
 
     // Filter entries by active hour types
-    const filteredEntries = state.entries
-      .filter(entry => {
-        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-        return activeHourTypeIds.includes(hourTypeId);
-      })
-      .map(entry => {
-        const roundedMinutes = roundDuration(entry.duration_minutes);
-        return roundedMinutes === entry.duration_minutes ? entry : { ...entry, duration_minutes: roundedMinutes };
-      });
+    const filteredEntries = state.entries.filter(entry => {
+      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+      return activeHourTypeIds.includes(hourTypeId);
+    });
 
     // Calculate totals based on filtered entries
     const totals = filteredEntries.reduce((map, entry) => {

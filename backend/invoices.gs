@@ -585,7 +585,7 @@ function findTimesheetEntryById(id) {
       headers.forEach(function(header, idx) {
         row[header] = values[i][idx];
       });
-      return normalizeEntryObject(row);
+      return normalizeEntryForRead(row);
     }
   }
   return null;
