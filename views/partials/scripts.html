@@ -2519,7 +2519,8 @@ let ratePreviewInputSyncing = false;
     while (current < targetDate && safety < 1000) {
       var next = nextOccurrenceDate(current, frequency);
       if (!next) return current;
-      if (endDate && next > endDate) return next;
+      // Stop if advancing would go past the configured end date—there are no later occurrences to include.
+      if (endDate && next > endDate) return null;
       if (next.getTime() === current.getTime()) return next;
       current = next;
       safety++;
