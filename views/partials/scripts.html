@@ -12042,8 +12042,13 @@ function getCachedIncomeSummary(monthKey) {
         if (!day.inMonth) th.classList.add('ts-payroll-outside');
         headRow.appendChild(th);
       });
+      const weekHead = document.createElement('th');
+      weekHead.textContent = 'Weekly total';
+      weekHead.classList.add('ts-payroll-divider');
+      headRow.appendChild(weekHead);
       const totalHead = document.createElement('th');
       totalHead.textContent = 'Month-to-date total';
+      totalHead.classList.add('ts-payroll-divider');
       headRow.appendChild(totalHead);
       thead.appendChild(headRow);
       table.appendChild(thead);
@@ -12062,10 +12067,17 @@ function getCachedIncomeSummary(monthKey) {
         }
         row.appendChild(td);
       });
+      const weekMinutes = week.weekMinutes || 0;
+      const roundedWeek = weekMinutes > 0 ? roundDuration(weekMinutes) : 0;
+      const weekCell = document.createElement('td');
+      weekCell.classList.add('ts-payroll-divider');
+      weekCell.textContent = formatDecimalHours(roundedWeek / 60);
+      row.appendChild(weekCell);
       const totalCell = document.createElement('td');
       const cumulativeMinutes = week.cumulativeMinutes || 0;
       const roundedTotal = cumulativeMinutes > 0 ? roundDuration(cumulativeMinutes) : 0;
       totalCell.textContent = formatDecimalHours(roundedTotal / 60);
+      totalCell.classList.add('ts-payroll-divider');
       row.appendChild(totalCell);
       tbody.appendChild(row);
       table.appendChild(tbody);
@@ -15268,6 +15280,20 @@ function getCachedIncomeSummary(monthKey) {
 
     const defaultHourType = getDefaultHourType();
     const defaultHourTypeId = defaultHourType?.id || getDefaultHourTypeId();
+    const hourTypeOrderIndex = (state.hourTypes || []).reduce((idxMap, ht, idx) => {
+      if (ht && ht.id) idxMap[ht.id] = idx;
+      return idxMap;
+    }, {});
+    const sortHourTypeIds = (ids) => {
+      return ids.slice().sort((a, b) => {
+        const orderA = Number.isInteger(hourTypeOrderIndex[a]) ? hourTypeOrderIndex[a] : Number.MAX_SAFE_INTEGER;
+        const orderB = Number.isInteger(hourTypeOrderIndex[b]) ? hourTypeOrderIndex[b] : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        const nameA = state.hourTypeMap[a]?.name || '';
+        const nameB = state.hourTypeMap[b]?.name || '';
+        return nameA.localeCompare(nameB);
+      });
+    };
     const grid = document.getElementById('calendar-grid');
     const label = document.getElementById('calendar-label');
     const monthTotalEl = document.getElementById('calendar-month-total');
@@ -15351,7 +15377,8 @@ function getCachedIncomeSummary(monthKey) {
           // Show other hour types as small colored indicators at top
           const otherTypesEl = document.createElement('div');
           otherTypesEl.className = 'ts-calendar-hour-types';
-          Object.keys(dayHourTypes).forEach(hourTypeId => {
+          const orderedOtherIds = sortHourTypeIds(Object.keys(dayHourTypes).filter(id => id !== defaultHourTypeId && dayHourTypes[id] > 0));
+          orderedOtherIds.forEach(hourTypeId => {
             if (hourTypeId !== defaultHourTypeId && dayHourTypes[hourTypeId] > 0) {
               const hourType = state.hourTypeMap[hourTypeId];
               if (hourType) {
@@ -15383,7 +15410,8 @@ function getCachedIncomeSummary(monthKey) {
           // Only non-default hours exist - show them at bottom
           const otherTypesEl = document.createElement('div');
           otherTypesEl.className = 'ts-calendar-hour-types';
-          Object.keys(dayHourTypes).forEach(hourTypeId => {
+          const orderedIds = sortHourTypeIds(Object.keys(dayHourTypes).filter(id => dayHourTypes[id] > 0));
+          orderedIds.forEach(hourTypeId => {
             if (dayHourTypes[hourTypeId] > 0) {
               const hourType = state.hourTypeMap[hourTypeId];
               if (hourType) {
