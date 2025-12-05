@@ -2480,7 +2480,7 @@ let ratePreviewInputSyncing = false;
     clone.id = clone.id ? String(clone.id) : '';
     clone.deduction_id = clone.deduction_id ? String(clone.deduction_id) : '';
     clone.original_date = clone.original_date ? String(clone.original_date) : '';
-    clone.exception_type = ['skip', 'move', 'adjust_amount'].includes(clone.exception_type)
+    clone.exception_type = ['skip', 'move', 'adjust_amount', 'move_and_adjust'].includes(clone.exception_type)
       ? clone.exception_type
       : 'skip';
     clone.new_date = clone.new_date ? String(clone.new_date) : '';
@@ -2628,6 +2628,8 @@ let ratePreviewInputSyncing = false;
     const exceptions = Array.isArray(exceptionsOverride)
       ? exceptionsOverride
       : getDeductionExceptions(deductionId);
+    const debugPrefix = '[deductionExceptions UI] ';
+    console.log(debugPrefix + 'applyExceptionsToOccurrences start deductionId=', deductionId, 'occurrences=', occurrenceDates ? occurrenceDates.length : 0, 'exceptions=', exceptions ? exceptions.length : 0, 'range=', startIso || '-', 'to', endIso || '-');
 
     const result = [];
     const seenKeys = new Set();
@@ -2640,6 +2642,7 @@ let ratePreviewInputSyncing = false;
       if (seenKeys.has(key)) return;
       seenKeys.add(key);
       result.push(occ);
+      console.log(debugPrefix + 'added occurrence', { deductionId, date: occ.date, original: occ.originalDate || '', amount: occ.amount, exceptionType: occ.exceptionType });
     };
 
     if (Array.isArray(occurrenceDates) && occurrenceDates.length) {
@@ -2647,6 +2650,7 @@ let ratePreviewInputSyncing = false;
       exceptions.forEach((ex) => {
         if (ex && ex.original_date) {
           exceptionMap[ex.original_date] = ex;
+          console.log(debugPrefix + 'register exception', { deductionId, original: ex.original_date, type: ex.exception_type, newDate: ex.new_date, amount: ex.new_amount });
         }
       });
 
@@ -2656,9 +2660,11 @@ let ratePreviewInputSyncing = false;
 
         if (exception) {
           if (exception.exception_type === 'skip') {
+            console.log(debugPrefix + 'apply skip', { deductionId, date: dateStr });
             return;
           }
           if (exception.exception_type === 'move' && exception.new_date) {
+            console.log(debugPrefix + 'apply move', { deductionId, from: dateStr, to: exception.new_date });
             addOccurrence({
               date: exception.new_date,
               originalDate: dateStr,
@@ -2668,7 +2674,19 @@ let ratePreviewInputSyncing = false;
             });
             return;
           }
+          if (exception.exception_type === 'move_and_adjust' && exception.new_date) {
+            console.log(debugPrefix + 'apply move_and_adjust', { deductionId, from: dateStr, to: exception.new_date, amount: exception.new_amount });
+            addOccurrence({
+              date: exception.new_date,
+              originalDate: dateStr,
+              amount: Number(exception.new_amount) || 0,
+              hasException: true,
+              exceptionType: 'move_and_adjust'
+            });
+            return;
+          }
           if (exception.exception_type === 'adjust_amount') {
+            console.log(debugPrefix + 'apply adjust_amount', { deductionId, date: dateStr, amount: exception.new_amount });
             addOccurrence({
               date: dateStr,
               amount: Number(exception.new_amount) || 0,
@@ -2677,6 +2695,7 @@ let ratePreviewInputSyncing = false;
             });
             return;
           }
+          console.log(debugPrefix + 'unhandled exception type', { deductionId, exception });
         }
 
         addOccurrence({
@@ -2691,18 +2710,21 @@ let ratePreviewInputSyncing = false;
     // Include moved occurrences whose original dates were outside the requested range
     if (Array.isArray(exceptions) && exceptions.length) {
       exceptions.forEach((ex) => {
-        if (!ex || ex.exception_type !== 'move' || !ex.new_date) return;
+        if (!ex || !ex.new_date) return;
+        if (ex.exception_type !== 'move' && ex.exception_type !== 'move_and_adjust') return;
+        console.log(debugPrefix + 'add moved occurrence outside window', { deductionId, original: ex.original_date || null, newDate: ex.new_date, type: ex.exception_type, amount: ex.new_amount });
         addOccurrence({
           date: ex.new_date,
           originalDate: ex.original_date || null,
-          amount: null,
+          amount: ex.exception_type === 'move_and_adjust' ? (Number(ex.new_amount) || 0) : null,
           hasException: true,
-          exceptionType: 'move'
+          exceptionType: ex.exception_type
         });
       });
     }
 
     result.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(debugPrefix + 'applyExceptionsToOccurrences result', { deductionId, result });
     return result;
   }
 

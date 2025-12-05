@@ -663,6 +663,12 @@ function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate
   // Apply exceptions
   var occurrencesWithExceptions = applyExceptionsToOccurrences(occurrenceDates, exceptions, periodStart, periodEnd);
 
+  try {
+    Logger.log('[deductionExceptions] getDeductionOccurrencesWithExceptions deductionId=' + deductionId + ' baseOccurrences=' + JSON.stringify(occurrenceDates) + ' exceptions=' + JSON.stringify(exceptions) + ' result=' + JSON.stringify(occurrencesWithExceptions));
+  } catch (e) {
+    Logger.log('[deductionExceptions] getDeductionOccurrencesWithExceptions deductionId=' + deductionId + ' baseOccurrences=' + occurrenceDates.length + ' exceptions=' + exceptions.length + ' result=' + occurrencesWithExceptions.length);
+  }
+
   return occurrencesWithExceptions;
 }
 

@@ -263,15 +263,36 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
   var seenKeys = {};
   var startIso = periodStart ? toIsoDate(periodStart) : null;
   var endIso = periodEnd ? toIsoDate(periodEnd) : null;
+  var deductionId = '';
+  if (exceptions && exceptions.length && exceptions[0].deduction_id) {
+    deductionId = exceptions[0].deduction_id;
+  } else if (Array.isArray(occurrences) && occurrences.length) {
+    deductionId = 'unknown';
+  }
+  var debugPrefix = '[deductionExceptions] ';
+  Logger.log(debugPrefix + 'applyExceptionsToOccurrences start deductionId=' + deductionId + ' occurrences=' + (occurrences ? occurrences.length : 0) + ' exceptions=' + (exceptions ? exceptions.length : 0) + ' window=' + (startIso || '-') + ' to ' + (endIso || '-'));
 
-  function addOccurrence(entry) {
-    if (!entry || !entry.date) return;
-    if (startIso && entry.date < startIso) return;
-    if (endIso && entry.date > endIso) return;
+  function addOccurrence(entry, source) {
+    if (!entry || !entry.date) {
+      Logger.log(debugPrefix + 'skip addOccurrence - missing date. source=' + (source || ''));
+      return;
+    }
+    if (startIso && entry.date < startIso) {
+      Logger.log(debugPrefix + 'skip addOccurrence - before period start. date=' + entry.date + ' source=' + (source || ''));
+      return;
+    }
+    if (endIso && entry.date > endIso) {
+      Logger.log(debugPrefix + 'skip addOccurrence - after period end. date=' + entry.date + ' source=' + (source || ''));
+      return;
+    }
     var key = entry.date + '|' + (entry.originalDate || '');
-    if (seenKeys[key]) return;
+    if (seenKeys[key]) {
+      Logger.log(debugPrefix + 'skip addOccurrence - duplicate key ' + key + ' source=' + (source || ''));
+      return;
+    }
     seenKeys[key] = true;
     result.push(entry);
+    Logger.log(debugPrefix + 'added occurrence date=' + entry.date + ' original=' + (entry.originalDate || '') + ' amount=' + (entry.amount || 'null') + ' exceptionType=' + (entry.exceptionType || 'none') + ' source=' + (source || 'base'));
   }
 
   var exceptionMap = {};
@@ -279,6 +300,7 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
     exceptions.forEach(function(ex) {
       if (ex && ex.original_date) {
         exceptionMap[ex.original_date] = ex;
+        Logger.log(debugPrefix + 'register exception original=' + ex.original_date + ' type=' + ex.exception_type + ' new=' + (ex.new_date || '') + ' amount=' + (ex.new_amount || ''));
       }
     });
   } else {
@@ -290,30 +312,36 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
       var exception = exceptionMap[date];
       if (exception) {
         if (exception.exception_type === 'skip') {
+          Logger.log(debugPrefix + 'apply skip for ' + date);
           return;
         } else if (exception.exception_type === 'move' && exception.new_date) {
+          Logger.log(debugPrefix + 'apply move for ' + date + ' -> ' + exception.new_date);
           addOccurrence({
             date: exception.new_date,
             originalDate: date,
             amount: null,
             hasException: true,
             exceptionType: 'move'
-          });
+          }, 'exception:move');
         } else if (exception.exception_type === 'adjust_amount') {
+          Logger.log(debugPrefix + 'apply adjust for ' + date + ' amount=' + exception.new_amount);
           addOccurrence({
             date: date,
             amount: exception.new_amount,
             hasException: true,
             exceptionType: 'adjust_amount'
-          });
+          }, 'exception:adjust_amount');
         } else if (exception.exception_type === 'move_and_adjust' && exception.new_date) {
+          Logger.log(debugPrefix + 'apply move_and_adjust for ' + date + ' -> ' + exception.new_date + ' amount=' + exception.new_amount);
           addOccurrence({
             date: exception.new_date,
             originalDate: date,
             amount: exception.new_amount,
             hasException: true,
             exceptionType: 'move_and_adjust'
-          });
+          }, 'exception:move_and_adjust');
+        } else {
+          Logger.log(debugPrefix + 'unhandled exception type=' + exception.exception_type + ' for date=' + date);
         }
       } else {
         addOccurrence({
@@ -321,7 +349,7 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
           amount: null,
           hasException: false,
           exceptionType: null
-        });
+        }, 'base');
       }
     });
   }
@@ -329,18 +357,25 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
   // Include moved occurrences whose originals were outside the occurrence window
   exceptions.forEach(function(ex) {
     if (!ex || (ex.exception_type !== 'move' && ex.exception_type !== 'move_and_adjust') || !ex.new_date) return;
+    Logger.log(debugPrefix + 'add moved exception outside window original=' + (ex.original_date || '') + ' new=' + ex.new_date + ' type=' + ex.exception_type + ' amount=' + (ex.new_amount || ''));
     addOccurrence({
       date: ex.new_date,
       originalDate: ex.original_date || null,
       amount: ex.exception_type === 'move_and_adjust' ? ex.new_amount : null,
       hasException: true,
       exceptionType: ex.exception_type
-    });
+    }, 'exception:moved_outside_window');
   });
 
   result.sort(function(a, b) {
     return a.date.localeCompare(b.date);
   });
+
+  try {
+    Logger.log(debugPrefix + 'applyExceptionsToOccurrences result count=' + result.length + ' dates=' + JSON.stringify(result));
+  } catch (e) {
+    Logger.log(debugPrefix + 'applyExceptionsToOccurrences result count=' + result.length);
+  }
 
   return result;
 }
