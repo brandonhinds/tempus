@@ -677,6 +677,25 @@
   .contract-burndown-table th, .contract-burndown-table td { padding:6px 8px; border:1px solid var(--border); text-align:right; }
   .contract-burndown-table th:first-child, .contract-burndown-table td:first-child { text-align:left; }
   .contract-burndown-empty { font-size:12px; color: var(--muted); margin-top:8px; }
+  .contract-hours-breakdown { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .contract-hours-breakdown-header { display:flex; align-items:center; gap:8px; }
+  .contract-hours-breakdown-title { font-weight:600; }
+  .contract-hours-breakdown-note { color: var(--muted); font-size:12px; }
+  .contract-hours-breakdown-cards { display:flex; flex-wrap:wrap; gap:12px; }
+  .contract-hours-breakdown-card { flex:1 1 220px; min-width:220px; background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .contract-hours-breakdown-card .label { font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color: var(--muted); margin-bottom:4px; }
+  .contract-hours-breakdown-card .value { font-size:18px; font-weight:600; }
+  .contract-hours-table { margin-top:4px; }
+  .contract-hours-filter-panel { border:1px solid var(--border); border-radius:12px; padding:12px; background: var(--bg); margin-bottom:12px; }
+  .contract-hours-filter-list { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start; }
+  .contract-hours-filter-item { display:grid; grid-template-columns:auto 1fr; align-items:center; column-gap:10px; row-gap:4px; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background: var(--panel); min-width:180px; max-width:260px; box-sizing:border-box; height:auto; }
+  .contract-hours-filter-item input { margin:0; width:16px; height:16px; align-self:center; }
+  .contract-hours-filter-item .content { display:flex; align-items:center; gap:8px; min-width:0; }
+  .contract-hours-filter-item .label { font-weight:700; line-height:1.2; white-space:normal; word-break:break-word; hyphens:auto; }
+  .contract-hours-filter-item .meta { color: var(--muted); font-size:12px; line-height:1.2; white-space:normal; }
+  .contract-hours-filter-item .swatch { width:10px; height:10px; border-radius:999px; display:inline-block; margin-top:2px; flex:0 0 auto; }
+  .contract-hours-filter-item .text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .contract-hours-filter-actions { display:flex; gap:8px; }
   .rate-preview-controls { margin-bottom:16px; }
   .rate-preview-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
   .rate-preview-card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:6px; }
@@ -779,6 +798,9 @@
   .ts-annual-stat-value { font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.02em; }
   .ts-annual-filter-panel { background: var(--panel); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin-bottom:var(--space-3); }
   .ts-annual-filter-list { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+  .ts-annual-filter-item { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background: var(--bg); cursor:pointer; }
+  .ts-annual-filter-item input { margin:0; }
+  .ts-annual-filter-swatch { width:10px; height:10px; border-radius:999px; display:inline-block; }
   .ts-month-picker-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-4); gap:var(--space-3); }
   .ts-month-picker-year { font-size:18px; font-weight:600; text-align:center; }
   .ts-month-picker-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--space-2); }

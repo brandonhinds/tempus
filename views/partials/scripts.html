@@ -2628,8 +2628,7 @@ let ratePreviewInputSyncing = false;
     const exceptions = Array.isArray(exceptionsOverride)
       ? exceptionsOverride
       : getDeductionExceptions(deductionId);
-    const debugPrefix = '[deductionExceptions UI] ';
-    console.log(debugPrefix + 'applyExceptionsToOccurrences start deductionId=', deductionId, 'occurrences=', occurrenceDates ? occurrenceDates.length : 0, 'exceptions=', exceptions ? exceptions.length : 0, 'range=', startIso || '-', 'to', endIso || '-');
+    const debugPrefix = '';
 
     const result = [];
     const seenKeys = new Set();
@@ -2642,7 +2641,6 @@ let ratePreviewInputSyncing = false;
       if (seenKeys.has(key)) return;
       seenKeys.add(key);
       result.push(occ);
-      console.log(debugPrefix + 'added occurrence', { deductionId, date: occ.date, original: occ.originalDate || '', amount: occ.amount, exceptionType: occ.exceptionType });
     };
 
     if (Array.isArray(occurrenceDates) && occurrenceDates.length) {
@@ -2650,7 +2648,6 @@ let ratePreviewInputSyncing = false;
       exceptions.forEach((ex) => {
         if (ex && ex.original_date) {
           exceptionMap[ex.original_date] = ex;
-          console.log(debugPrefix + 'register exception', { deductionId, original: ex.original_date, type: ex.exception_type, newDate: ex.new_date, amount: ex.new_amount });
         }
       });
 
@@ -2660,11 +2657,9 @@ let ratePreviewInputSyncing = false;
 
         if (exception) {
           if (exception.exception_type === 'skip') {
-            console.log(debugPrefix + 'apply skip', { deductionId, date: dateStr });
             return;
           }
           if (exception.exception_type === 'move' && exception.new_date) {
-            console.log(debugPrefix + 'apply move', { deductionId, from: dateStr, to: exception.new_date });
             addOccurrence({
               date: exception.new_date,
               originalDate: dateStr,
@@ -2675,7 +2670,6 @@ let ratePreviewInputSyncing = false;
             return;
           }
           if (exception.exception_type === 'move_and_adjust' && exception.new_date) {
-            console.log(debugPrefix + 'apply move_and_adjust', { deductionId, from: dateStr, to: exception.new_date, amount: exception.new_amount });
             addOccurrence({
               date: exception.new_date,
               originalDate: dateStr,
@@ -2686,7 +2680,6 @@ let ratePreviewInputSyncing = false;
             return;
           }
           if (exception.exception_type === 'adjust_amount') {
-            console.log(debugPrefix + 'apply adjust_amount', { deductionId, date: dateStr, amount: exception.new_amount });
             addOccurrence({
               date: dateStr,
               amount: Number(exception.new_amount) || 0,
@@ -2695,7 +2688,6 @@ let ratePreviewInputSyncing = false;
             });
             return;
           }
-          console.log(debugPrefix + 'unhandled exception type', { deductionId, exception });
         }
 
         addOccurrence({
@@ -2712,7 +2704,6 @@ let ratePreviewInputSyncing = false;
       exceptions.forEach((ex) => {
         if (!ex || !ex.new_date) return;
         if (ex.exception_type !== 'move' && ex.exception_type !== 'move_and_adjust') return;
-        console.log(debugPrefix + 'add moved occurrence outside window', { deductionId, original: ex.original_date || null, newDate: ex.new_date, type: ex.exception_type, amount: ex.new_amount });
         addOccurrence({
           date: ex.new_date,
           originalDate: ex.original_date || null,
@@ -2724,7 +2715,6 @@ let ratePreviewInputSyncing = false;
     }
 
     result.sort((a, b) => a.date.localeCompare(b.date));
-    console.log(debugPrefix + 'applyExceptionsToOccurrences result', { deductionId, result });
     return result;
   }
 
@@ -6491,6 +6481,7 @@ function updateDeductionFormVisibility() {
       if (activeContract) {
         const usage = computeContractUsage(activeContract);
         renderContractBurndown(activeContract, usage);
+        renderContractHoursBreakdown(activeContract, usage);
       }
     }
 
@@ -7598,9 +7589,10 @@ function updateDeductionFormVisibility() {
     updatePunchContractOptions(preferredContractId != null ? preferredContractId : (punchContract ? punchContract.value : ''));
   }
 
-  function ensurePunchDraft(preferredContractId) {
-    const selected = updatePunchContractOptions(preferredContractId);
-    const contractId = selected || '';
+  function ensurePunchDraft(preferredContractId, entryOverride) {
+    const preferred = preferredContractId != null ? preferredContractId : (entryOverride ? entryOverride.contract_id : undefined);
+    const selected = updatePunchContractOptions(preferred);
+    const contractId = selected || (preferred || '');
     const dateIso = currentPunchDate();
     
     // If we're switching dates and there's no contract selected, start fresh
@@ -7616,8 +7608,15 @@ function updateDeductionFormVisibility() {
       return;
     }
     
-    // Look for existing entry for this specific date and contract
-    const entry = state.entries.find((e) => e.date === dateIso && e.contract_id === contractId) || null;
+    // Look for existing entry for this specific date/contract (prefer entryOverride match)
+    var entry = null;
+    if (entryOverride && entryOverride.date === dateIso && (entryOverride.contract_id || '') === contractId) {
+      entry = entryOverride;
+    } else {
+      entry = state.entries.find((e) => e.date === dateIso && e.contract_id === contractId && (
+        !entryOverride || e.hour_type_id === entryOverride.hour_type_id || e.id === entryOverride.id
+      )) || state.entries.find((e) => e.date === dateIso && e.contract_id === contractId) || null;
+    }
     state.punchDraft = {
       entryId: entry ? entry.id : null,
       contractId,
@@ -7953,9 +7952,24 @@ function updateDeductionFormVisibility() {
     const inFlightKey = lockResult.key;
     const inFlightId = draft.entryId || payload.id || 'new';
 
-    // Optimistic update: Add entry to UI immediately for new entries
+    // Optimistic update
     let optimisticEntry = null;
-    if (!draft.entryId) {
+    let optimisticBackup = null;
+    const isUpdate = !!draft.entryId;
+    if (isUpdate) {
+      const idx = state.entries.findIndex((e) => e.id === draft.entryId);
+      if (idx !== -1) {
+        optimisticBackup = { ...state.entries[idx] };
+        const optimisticUpdate = sanitizeEntry({ ...optimisticBackup, ...payload, id: draft.entryId });
+        markIncomeSummaryDirtyForEntry(optimisticBackup);
+        state.entries[idx] = optimisticEntry = optimisticUpdate;
+        markIncomeSummaryDirtyForEntry(optimisticUpdate);
+        recordPendingEntryUpdate(draft.entryId, optimisticUpdate);
+        state.entries.sort(entrySort);
+        saveCache();
+        renderEntries();
+      }
+    } else {
       const pending = {
         id: 'temp_' + Date.now(),
         ...payload,
@@ -7977,8 +7991,20 @@ function updateDeductionFormVisibility() {
       if (handleDuplicateConflictResponse(res)) {
         if (optimisticEntry) {
           const dupIdx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
-          if (dupIdx > -1) state.entries.splice(dupIdx, 1);
-          resolvePendingEntryAdd(optimisticEntry.id);
+          if (dupIdx > -1) {
+            if (isUpdate && optimisticBackup) {
+              state.entries[dupIdx] = optimisticBackup;
+              markIncomeSummaryDirtyForEntry(optimisticBackup);
+            } else {
+              state.entries.splice(dupIdx, 1);
+              markIncomeSummaryDirtyForEntry(optimisticEntry);
+            }
+          }
+          if (isUpdate) {
+            resolvePendingEntryUpdate(draft.entryId);
+          } else {
+            resolvePendingEntryAdd(optimisticEntry.id);
+          }
           saveCache();
           renderEntries();
         }
@@ -7994,8 +8020,13 @@ function updateDeductionFormVisibility() {
           if (idx > -1) {
             state.entries[idx] = sanitized;
             markIncomeSummaryDirtyForEntry(sanitized);
-            updatePendingEntryAddId(optimisticEntry.id, sanitized);
-            if (!entriesSyncInFlight) resolvePendingEntryAdd(sanitized.id);
+            if (isUpdate) {
+              recordPendingEntryUpdate(sanitized.id, sanitized);
+              if (!entriesSyncInFlight) resolvePendingEntryUpdate(sanitized.id);
+            } else {
+              updatePendingEntryAddId(optimisticEntry.id, sanitized);
+              if (!entriesSyncInFlight) resolvePendingEntryAdd(sanitized.id);
+            }
             state.entries.sort(entrySort);
           }
         } else {
@@ -8028,12 +8059,21 @@ function updateDeductionFormVisibility() {
         if (optimisticEntry) {
           const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
           if (idx > -1) {
-            state.entries.splice(idx, 1);
-            markIncomeSummaryDirtyForEntry(optimisticEntry);
+            if (isUpdate && optimisticBackup) {
+              state.entries[idx] = optimisticBackup;
+              markIncomeSummaryDirtyForEntry(optimisticBackup);
+            } else {
+              state.entries.splice(idx, 1);
+              markIncomeSummaryDirtyForEntry(optimisticEntry);
+            }
             saveCache();
             renderEntries();
           }
-          resolvePendingEntryAdd(optimisticEntry.id);
+          if (isUpdate) {
+            resolvePendingEntryUpdate(draft.entryId);
+          } else {
+            resolvePendingEntryAdd(optimisticEntry.id);
+          }
         }
         setStatus('Punch save failed', 'error');
         releaseEntryLock(inFlightKey, inFlightId);
@@ -8046,12 +8086,21 @@ function updateDeductionFormVisibility() {
       if (optimisticEntry) {
         const idx = state.entries.findIndex((e) => e.id === optimisticEntry.id);
         if (idx > -1) {
-          state.entries.splice(idx, 1);
-          markIncomeSummaryDirtyForEntry(optimisticEntry);
+          if (isUpdate && optimisticBackup) {
+            state.entries[idx] = optimisticBackup;
+            markIncomeSummaryDirtyForEntry(optimisticBackup);
+          } else {
+            state.entries.splice(idx, 1);
+            markIncomeSummaryDirtyForEntry(optimisticEntry);
+          }
           saveCache();
           renderEntries();
         }
-        resolvePendingEntryAdd(optimisticEntry.id);
+        if (isUpdate) {
+          resolvePendingEntryUpdate(draft.entryId);
+        } else {
+          resolvePendingEntryAdd(optimisticEntry.id);
+        }
       }
       setStatus('Punch save failed', 'error');
       renderPunchDraft();
@@ -8367,13 +8416,17 @@ function updateDeductionFormVisibility() {
       state.editingEntryType = entryType;
       activateTab('punch');
       if (punchDate) punchDate.value = entry.date;
-      ensurePunchDraft(entry.contract_id);
+      ensurePunchDraft(entry.contract_id, entry);
       if (state.punchDraft) {
         state.punchDraft.entryId = entry.id;
         state.punchDraft.contractId = entry.contract_id;
         state.punchDraft.date = entry.date;
         state.punchDraft.punches = clonePunches(entry.punches || []);
         state.punchDraft.dirty = false;
+        if (punchHourType && entry.hour_type_id) {
+          punchHourType.value = entry.hour_type_id;
+          updatePunchContractVisibility();
+        }
         renderPunchDraft();
       }
     }
@@ -9389,6 +9442,7 @@ function updateDeductionFormVisibility() {
   const contractSelector = document.getElementById('contract-selector');
   const contractDetailEl = document.getElementById('contract-detail');
   const contractBurndownEl = document.getElementById('contract-burndown');
+  const contractHoursBreakdownEl = document.getElementById('contract-hours-breakdown');
   const contractUnlimitedNote = document.getElementById('contract-unlimited-note');
   const contractFormDefaultParent = contractFormContainer ? contractFormContainer.parentElement : null;
   const contractFormPlaceholder = contractFormContainer && contractFormDefaultParent
@@ -9709,18 +9763,74 @@ function updateDeductionFormVisibility() {
   }
 
   function computeContractUsage(contract) {
-    const monthlyHours = {};
-    let total = 0;
+    const incomeMonthlyHours = {};
+    const nonIncomeMonthlyHours = {};
+    const allMonthlyHours = {};
+    const hourTypeTotals = {};
+    let incomeTotal = 0;
+    let allTotal = 0;
     if (contract) {
       state.entries.forEach((entry) => {
         if (entry.contract_id !== contract.id || !entry.date) return;
         const monthKey = entry.date.slice(0, 7);
         const hours = (Number(entry.duration_minutes) || 0) / 60;
-        total += hours;
-        monthlyHours[monthKey] = (monthlyHours[monthKey] || 0) + hours;
+        const contributes = entryContributesToIncome(entry);
+        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+        if (!hourTypeTotals[hourTypeId]) {
+          const hourType = state.hourTypeMap ? state.hourTypeMap[hourTypeId] : null;
+          hourTypeTotals[hourTypeId] = {
+            hourTypeId,
+            name: hourType ? hourType.name : 'Unknown',
+            color: hourType ? (hourType.color || '#94a3b8') : '#94a3b8',
+            contributesToIncome: contributes,
+            totalHours: 0,
+            incomeHours: 0,
+            nonIncomeHours: 0,
+            monthlyHours: {},
+            monthlyIncomeHours: {},
+            monthlyNonIncomeHours: {}
+          };
+        }
+        allTotal += hours;
+        allMonthlyHours[monthKey] = (allMonthlyHours[monthKey] || 0) + hours;
+        if (contributes) {
+          incomeTotal += hours;
+          incomeMonthlyHours[monthKey] = (incomeMonthlyHours[monthKey] || 0) + hours;
+          hourTypeTotals[hourTypeId].incomeHours += hours;
+          hourTypeTotals[hourTypeId].monthlyIncomeHours[monthKey] = (hourTypeTotals[hourTypeId].monthlyIncomeHours[monthKey] || 0) + hours;
+        } else {
+          nonIncomeMonthlyHours[monthKey] = (nonIncomeMonthlyHours[monthKey] || 0) + hours;
+          hourTypeTotals[hourTypeId].nonIncomeHours += hours;
+          hourTypeTotals[hourTypeId].monthlyNonIncomeHours[monthKey] = (hourTypeTotals[hourTypeId].monthlyNonIncomeHours[monthKey] || 0) + hours;
+        }
+        hourTypeTotals[hourTypeId].totalHours += hours;
+        hourTypeTotals[hourTypeId].monthlyHours[monthKey] = (hourTypeTotals[hourTypeId].monthlyHours[monthKey] || 0) + hours;
       });
     }
-    return { totalHours: total, monthlyHours };
+    const nonIncomeTotal = Math.max(0, allTotal - incomeTotal);
+    const hourTypes = Object.keys(hourTypeTotals).reduce((acc, key) => {
+      const ht = hourTypeTotals[key];
+      const hourType = state.hourTypeMap ? state.hourTypeMap[key] : null;
+      acc[key] = {
+        ...ht,
+        name: hourType ? hourType.name : ht.name,
+        color: hourType && hourType.color ? hourType.color : ht.color,
+        contributesToIncome: hourType && Object.prototype.hasOwnProperty.call(hourType, 'contributes_to_income')
+          ? !!hourType.contributes_to_income
+          : ht.contributesToIncome
+      };
+      return acc;
+    }, {});
+    return {
+      totalHours: incomeTotal,
+      monthlyHours: incomeMonthlyHours,
+      breakdown: {
+        income: { totalHours: incomeTotal, monthlyHours: incomeMonthlyHours },
+        nonIncome: { totalHours: nonIncomeTotal, monthlyHours: nonIncomeMonthlyHours },
+        all: { totalHours: allTotal, monthlyHours: allMonthlyHours },
+        hourTypes
+      }
+    };
   }
 
   function contractMonthRange(contract) {
@@ -9750,6 +9860,7 @@ function updateDeductionFormVisibility() {
     if (!contractDetailEl) return;
     updatePotentialIncomeSection(state.incomeSummary);
     contractDetailEl.innerHTML = '';
+    if (contractHoursBreakdownEl) contractHoursBreakdownEl.innerHTML = '';
     if (state.contractFormMode === 'create') {
       if (contractSelector) contractSelector.value = '';
       if (contractBurndownEl) contractBurndownEl.innerHTML = '';
@@ -9800,6 +9911,7 @@ function updateDeductionFormVisibility() {
       contractDetailEl.appendChild(heading);
       contractDetailEl.appendChild(contractFormContainer);
       renderContractBurndown(contract, usage);
+      renderContractHoursBreakdown(contract, usage);
       return;
     }
 
@@ -9828,7 +9940,7 @@ function updateDeductionFormVisibility() {
     addDetail('Hourly rate', `${Number(contract.hourly_rate || 0).toFixed(2)} / hr`);
     addDetail('Total hours', totalHoursValue > 0 ? `${formatDecimalHours(totalHoursValue)} hrs` : 'Unlimited');
     addDetail('Weekends counted', contract.include_weekends ? 'Yes (all days)' : 'No (Mon-Fri)');
-    addDetail('Hours logged', `${formatDecimalHours(usage.totalHours)} hrs`);
+    addDetail('Income hours logged', `${formatDecimalHours(usage.totalHours)} hrs`);
 
     contractDetailEl.appendChild(grid);
 
@@ -9846,6 +9958,7 @@ function updateDeductionFormVisibility() {
     contractDetailEl.appendChild(actions);
 
     renderContractBurndown(contract, usage);
+    renderContractHoursBreakdown(contract, usage);
   }
 
   function renderContractBurndown(contract, usage) {
@@ -9860,17 +9973,17 @@ function updateDeductionFormVisibility() {
     if (totalHours <= 0) {
       if (contractUnlimitedNote) {
         contractUnlimitedNote.style.display = 'block';
-        contractUnlimitedNote.textContent = `This contract is unlimited. Hours logged so far: ${formatDecimalHours(usage.totalHours)} hrs. Burndown charts require a total hour cap.`;
+        contractUnlimitedNote.textContent = `This contract is unlimited. Income-generating hours logged so far: ${formatDecimalHours(usage.totalHours)} hrs. Burndown charts require a total hour cap.`;
       }
       const monthsEntries = Object.keys(usage.monthlyHours).sort();
       if (usage.totalHours > 0 && monthsEntries.length) {
         const heading = document.createElement('div');
         heading.className = 'ts-note';
-        heading.textContent = 'Monthly hours logged';
+        heading.textContent = 'Monthly income hours logged';
         contractBurndownEl.appendChild(heading);
         const table = document.createElement('table');
-        table.className = 'contract-burndown-table';
-        table.innerHTML = '<thead><tr><th>Month</th><th>Hours logged</th></tr></thead>';
+        table.className = 'contract-burndown-table contract-hours-table';
+        table.innerHTML = '<thead><tr><th>Month</th><th>Income hours logged</th></tr></thead>';
         const tbody = document.createElement('tbody');
         monthsEntries.forEach((monthKey) => {
           const tr = document.createElement('tr');
@@ -9941,6 +10054,10 @@ function updateDeductionFormVisibility() {
       }
       return 1;
     });
+    const projectionContributions = monthContributions.map((value, idx) => {
+      if (contractActive && idx === currentIdx) return 1;
+      return value;
+    });
 
     let actualConsumedForAverage = 0;
     let monthsContributionUsed = 0;
@@ -9966,34 +10083,50 @@ function updateDeductionFormVisibility() {
     });
 
     const avgActualMonthlyBurn = monthsContributionUsed > 0 ? actualConsumedForAverage / monthsContributionUsed : 0;
-    const totalContribution = monthContributions.reduce((sum, value) => sum + value, 0);
+    const totalContribution = projectionContributions.reduce((sum, value) => sum + value, 0);
     const actualAveragePoints = [{ label: 'Start', value: totalHours }];
     if (avgActualMonthlyBurn > 0) {
       let cumulativeContribution = 0;
       months.forEach((monthDate, idx) => {
-        cumulativeContribution += monthContributions[idx];
-        const projectedRemaining = Math.max(0, totalHours - avgActualMonthlyBurn * cumulativeContribution);
+        cumulativeContribution += projectionContributions[idx];
+        const projectedRemaining = totalHours - avgActualMonthlyBurn * cumulativeContribution;
         actualAveragePoints.push({ label: monthDate, value: projectedRemaining });
       });
     }
 
     const pointGroups = [expectedPoints, actualPathPoints];
     if (actualAveragePoints.length > 1) pointGroups.push(actualAveragePoints);
-    const maxValue = Math.max(totalHours, ...pointGroups.flat().map((p) => p.value));
+    const values = pointGroups.flat().map((p) => p.value);
+    const maxValue = Math.max(totalHours, ...values, 0);
+    const minValue = Math.min(0, ...values);
     const containerRect = contractBurndownEl.getBoundingClientRect();
     const detailRect = contractDetailEl ? contractDetailEl.getBoundingClientRect() : null;
     const measuredWidth = containerRect.width || (detailRect && detailRect.width) || 720;
     const width = Math.max(480, Math.floor(measuredWidth));
-    const height = 320;
-    const margin = { top: 20, right: 28, bottom: 44, left: 56 };
+    const height = 480;
+    const margin = { top: 20, right: 28, bottom: 44, left: 72 };
     const plotWidth = width - margin.left - margin.right;
     const plotHeight = height - margin.top - margin.bottom;
     const stepX = expectedPoints.length > 1 ? plotWidth / (expectedPoints.length - 1) : 0;
     const scaleX = (index) => margin.left + stepX * index;
     const scaleY = (value) => {
-      if (maxValue === 0) return margin.top + plotHeight;
-      return margin.top + plotHeight - (value / maxValue) * plotHeight;
+      if (maxValue === minValue) return margin.top + plotHeight;
+      const ratio = (value - minValue) / (maxValue - minValue);
+      return margin.top + plotHeight - ratio * plotHeight;
     };
+    const tickStep = (function buildTickStep(min, max) {
+      const span = max - min || 1;
+      const rough = span / 5;
+      const pow10 = Math.pow(10, Math.floor(Math.log10(rough)));
+      const niceSteps = [1, 2, 2.5, 5, 10].map((m) => m * pow10);
+      return niceSteps.find((s) => rough <= s) || niceSteps[niceSteps.length - 1];
+    })(minValue, maxValue);
+    const tickStart = Math.floor(minValue / tickStep) * tickStep;
+    const tickEnd = Math.ceil(maxValue / tickStep) * tickStep;
+    const ticks = [];
+    for (let v = tickStart; v <= tickEnd + tickStep / 2; v += tickStep) {
+      ticks.push(Math.round(v * 1000) / 1000);
+    }
     const buildPath = (points) => points.map((point, idx) => {
       const x = scaleX(idx).toFixed(2);
       const y = scaleY(point.value).toFixed(2);
@@ -10010,10 +10143,15 @@ function updateDeductionFormVisibility() {
     const expectedPath = buildPath(expectedPoints);
     const actualPath = buildPath(actualPathPoints);
     const actualAveragePath = actualAveragePoints.length > 1 ? buildPath(actualAveragePoints) : '';
-    const xAxisY = margin.top + plotHeight;
+    const xAxisY = scaleY(0);
     const svgParts = [];
     svgParts.push(`<path d="M${margin.left},${xAxisY} L${margin.left + plotWidth},${xAxisY}" stroke="${borderColor}" stroke-width="1" fill="none" />`);
-    svgParts.push(`<path d="M${margin.left},${margin.top} L${margin.left},${xAxisY}" stroke="${borderColor}" stroke-width="1" fill="none" />`);
+    svgParts.push(`<path d="M${margin.left},${margin.top} L${margin.left},${margin.top + plotHeight}" stroke="${borderColor}" stroke-width="1" fill="none" />`);
+    ticks.forEach((tick) => {
+      const y = scaleY(tick);
+      svgParts.push(`<path d="M${margin.left - 6},${y} L${margin.left},${y}" stroke="${borderColor}" stroke-width="1" />`);
+      svgParts.push(`<text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="${textColor}">${formatDecimalHours(tick)}</text>`);
+    });
     svgParts.push(`<path d="${expectedPath}" stroke="${mutedColor}" stroke-width="2" fill="none" />`);
     svgParts.push(`<path d="${actualPath}" stroke="${primaryColor}" stroke-width="2" fill="none" />`);
     if (actualAveragePath) svgParts.push(`<path d="${actualAveragePath}" stroke="${successColor}" stroke-width="2" fill="none" stroke-dasharray="6 4" />`);
@@ -10021,18 +10159,20 @@ function updateDeductionFormVisibility() {
     expectedPoints.forEach((point, idx) => {
       const x = scaleX(idx);
       const y = scaleY(point.value);
-      svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${mutedColor}" />`);
+      svgParts.push(`<circle data-series="expected" data-label="${typeof point.label === 'string' ? point.label : formatMonthShortYear(point.label)}" data-value="${formatDecimalHours(point.value)}" cx="${x}" cy="${y}" r="3" fill="${mutedColor}" />`);
     });
     actualPathPoints.forEach((point, idx) => {
       const x = scaleX(idx);
       const y = scaleY(point.value);
-      svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${primaryColor}" />`);
+      const label = typeof point.label === 'string' ? point.label : formatMonthShortYear(point.label);
+      svgParts.push(`<circle data-series="actual" data-label="${label}" data-value="${formatDecimalHours(point.value)}" cx="${x}" cy="${y}" r="3" fill="${primaryColor}" />`);
     });
     if (actualAveragePath) {
       actualAveragePoints.forEach((point, idx) => {
         const x = scaleX(idx);
         const y = scaleY(point.value);
-        svgParts.push(`<circle cx="${x}" cy="${y}" r="3" fill="${successColor}" />`);
+        const label = typeof point.label === 'string' ? point.label : formatMonthShortYear(point.label);
+        svgParts.push(`<circle data-series="projection" data-label="${label}" data-value="${formatSignedHours(point.value)}" cx="${x}" cy="${y}" r="3" fill="${successColor}" />`);
       });
     }
 
@@ -10042,13 +10182,17 @@ function updateDeductionFormVisibility() {
       return `<text x="${x}" y="${xAxisY + 18}" text-anchor="middle" font-size="11" fill="${textColor}">${label}</text>`;
     }).join('');
 
-    const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Contract burndown chart"><g>${svgParts.join('')} ${labelGroup}</g></svg>`;
+    const yLabelX = margin.left - 46;
+    const yLabelY = margin.top + plotHeight / 2;
+    svgParts.push(`<text x="${yLabelX}" y="${yLabelY}" text-anchor="middle" font-size="11" fill="${textColor}" transform="rotate(-90 ${yLabelX} ${yLabelY})">Hours remaining (income)</text>`);
+
+    const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Contract burndown chart with projection"><g>${svgParts.join('')} ${labelGroup}</g></svg>`;
 
     const avgSummary = document.createElement('div');
     avgSummary.className = 'ts-note contract-burndown-summary';
-    const summaryParts = [`Average burn required: ${formatDecimalHours(avgBurn)} hrs/month.`];
+    const summaryParts = [`Average burn required (income hours): ${formatDecimalHours(avgBurn)} hrs/month.`];
     if (avgActualMonthlyBurn > 0) {
-      summaryParts.push(`Actual average to date: ${formatDecimalHours(avgActualMonthlyBurn)} hrs/month (${monthsContributionUsed.toFixed(2)} months measured).`);
+      summaryParts.push(`Actual average to date (income hours): ${formatDecimalHours(avgActualMonthlyBurn)} hrs/month (${monthsContributionUsed.toFixed(2)} months measured).`);
     }
     avgSummary.textContent = summaryParts.join(' ');
     contractBurndownEl.appendChild(avgSummary);
@@ -10068,6 +10212,78 @@ function updateDeductionFormVisibility() {
     plotWrapper.className = 'contract-burndown-plot';
     plotWrapper.innerHTML = svg;
     contractBurndownEl.appendChild(plotWrapper);
+    const tooltip = document.createElement('div');
+    tooltip.style.position = 'absolute';
+    tooltip.style.pointerEvents = 'none';
+    tooltip.style.background = 'var(--panel)';
+    tooltip.style.border = '1px solid var(--border)';
+    tooltip.style.borderRadius = '8px';
+    tooltip.style.padding = '8px 10px';
+    tooltip.style.fontSize = '12px';
+    tooltip.style.boxShadow = '0 8px 20px rgba(0,0,0,0.25)';
+    tooltip.style.display = 'none';
+    plotWrapper.style.position = 'relative';
+    plotWrapper.appendChild(tooltip);
+    const circles = plotWrapper.querySelectorAll('circle[data-label]');
+    if (circles && circles.length) {
+      const circleMeta = Array.from(circles).map((circle) => {
+        return {
+          el: circle,
+          x: Number(circle.getAttribute('cx')),
+          y: Number(circle.getAttribute('cy')),
+          label: circle.getAttribute('data-label') || '',
+          value: circle.getAttribute('data-value') || '',
+          series: circle.getAttribute('data-series') || ''
+        };
+      });
+      const seriesLabel = {
+        expected: 'Expected remaining',
+        actual: 'Actual remaining',
+        projection: 'Projected remaining'
+      };
+      const buildTooltipContent = (label) => {
+        const items = circleMeta.filter((meta) => meta.label === label);
+        const rows = items.map((item) => {
+          return `<div style="display:flex; justify-content:space-between; gap:8px;"><span>${seriesLabel[item.series] || 'Value'}</span><strong>${item.value} hrs</strong></div>`;
+        }).join('');
+        return `<div style="font-weight:700; margin-bottom:4px;">${label}</div>${rows}`;
+      };
+      const handleMove = (evt) => {
+        const rect = plotWrapper.getBoundingClientRect();
+        const mouseX = evt.clientX - rect.left;
+        const mouseY = evt.clientY - rect.top;
+        let closest = null;
+        let minDist = 18;
+        circleMeta.forEach((meta) => {
+          const dx = meta.x - mouseX;
+          const dy = meta.y - mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDist) {
+            minDist = dist;
+            closest = meta;
+          }
+        });
+        if (!closest) {
+          tooltip.style.display = 'none';
+          return;
+        }
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = buildTooltipContent(closest.label);
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const wrapperRect = plotWrapper.getBoundingClientRect();
+        let left = closest.x + 12;
+        let top = closest.y - tooltipRect.height - 8;
+        if (left + tooltipRect.width > wrapperRect.width) {
+          left = closest.x - tooltipRect.width - 12;
+        }
+        if (left < 0) left = 4;
+        if (top < 0) top = closest.y + 12;
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+      };
+      plotWrapper.addEventListener('mousemove', handleMove);
+      plotWrapper.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    }
 
     const legend = document.createElement('div');
     legend.className = 'contract-burndown-legend';
@@ -10091,7 +10307,7 @@ function updateDeductionFormVisibility() {
       const datasets = [
         {
           type: 'bar',
-          label: 'Hours logged',
+          label: 'Income hours logged',
           data: monthlyHoursData,
           backgroundColor: colors.primary || '#3b82f6',
           borderColor: colors.primary || '#3b82f6',
@@ -10195,7 +10411,7 @@ function updateDeductionFormVisibility() {
 
     const table = document.createElement('table');
     table.className = 'contract-burndown-table';
-    table.innerHTML = '<thead><tr><th>Month</th><th>Hours logged</th><th>Expected remaining</th><th>Actual remaining</th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Month</th><th>Income hours logged</th><th>Expected remaining</th><th>Actual remaining</th><th>Hours balance</th></tr></thead>';
     const tbody = document.createElement('tbody');
     tableRows.forEach((row) => {
       const tr = document.createElement('tr');
@@ -10207,11 +10423,263 @@ function updateDeductionFormVisibility() {
       expectedCell.textContent = `${formatDecimalHours(row.expectedRemaining)} hrs`;
       const actualCell = document.createElement('td');
       actualCell.textContent = `${formatDecimalHours(row.actualRemaining)} hrs`;
-      tr.append(monthCell, loggedCell, expectedCell, actualCell);
+      const balanceCell = document.createElement('td');
+      const balance = row.actualRemaining - row.expectedRemaining;
+      if (row.hoursLogged <= 0) {
+        balanceCell.textContent = '—';
+      } else {
+        balanceCell.textContent = `${formatSignedHours(balance)} hrs`;
+      }
+      tr.append(monthCell, loggedCell, expectedCell, actualCell, balanceCell);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     contractBurndownEl.appendChild(table);
+  }
+
+  function renderContractHoursBreakdown(contract, usage) {
+    if (!contractHoursBreakdownEl) return;
+    contractHoursBreakdownEl.innerHTML = '';
+    if (!contract || !usage || !usage.breakdown) return;
+
+    const hourTypesMap = usage.breakdown.hourTypes || {};
+    const hourTypes = Object.values(hourTypesMap).filter((ht) => ht && ht.totalHours > 0);
+    const filterKey = contract && contract.id ? contract.id : '_contract';
+    if (!state.contractHourTypeFilters) state.contractHourTypeFilters = {};
+    if (!state.contractHourTypeFilters[filterKey]) state.contractHourTypeFilters[filterKey] = new Set();
+    const selected = state.contractHourTypeFilters[filterKey];
+    const availableIds = new Set(hourTypes.map((ht) => ht.hourTypeId));
+    Array.from(selected).forEach((id) => { if (!availableIds.has(id)) selected.delete(id); });
+    if (!selected.size && hourTypes.length) {
+      hourTypes.forEach((ht) => selected.add(ht.hourTypeId));
+    }
+    const isIncluded = (ht) => !selected.size || selected.has(ht.hourTypeId);
+    const filteredHourTypes = hourTypes.filter(isIncluded);
+
+    const aggregated = filteredHourTypes.reduce((acc, ht) => {
+      acc.income += ht.incomeHours || 0;
+      acc.nonIncome += ht.nonIncomeHours || 0;
+      acc.all += ht.totalHours || 0;
+      Object.keys(ht.monthlyIncomeHours || {}).forEach((key) => {
+        acc.monthlyIncome[key] = (acc.monthlyIncome[key] || 0) + ht.monthlyIncomeHours[key];
+      });
+      Object.keys(ht.monthlyNonIncomeHours || {}).forEach((key) => {
+        acc.monthlyNonIncome[key] = (acc.monthlyNonIncome[key] || 0) + ht.monthlyNonIncomeHours[key];
+      });
+      Object.keys(ht.monthlyHours || {}).forEach((key) => {
+        acc.monthlyAll[key] = (acc.monthlyAll[key] || 0) + ht.monthlyHours[key];
+      });
+      return acc;
+    }, { income: 0, nonIncome: 0, all: 0, monthlyIncome: {}, monthlyNonIncome: {}, monthlyAll: {} });
+
+    const monthKeys = Object.keys(aggregated.monthlyAll).sort();
+    const hasEntries = Number(aggregated.all || 0) > 0;
+
+    const header = document.createElement('div');
+    header.className = 'contract-hours-breakdown-header';
+    const title = document.createElement('div');
+    title.className = 'contract-hours-breakdown-title';
+    title.textContent = 'All logged hours (informational)';
+    const note = document.createElement('div');
+    note.className = 'contract-hours-breakdown-note';
+    note.textContent = 'Income-generating hours drive the calculations above; non-income hours are shown here for visibility only. Use the filters to hide hour types—totals update to match.';
+    header.append(title);
+
+    const filterPanel = document.createElement('div');
+    filterPanel.className = 'contract-hours-filter-panel';
+    const filterHeader = document.createElement('div');
+    filterHeader.className = 'ts-flex-between ts-flex-wrap';
+    filterHeader.style.marginBottom = '8px';
+    const filterLabel = document.createElement('span');
+    filterLabel.style.fontSize = '13px';
+    filterLabel.style.fontWeight = '600';
+    filterLabel.textContent = 'Filter hour types';
+    const filterActions = document.createElement('div');
+    filterActions.className = 'contract-hours-filter-actions';
+    const btnSelectAll = document.createElement('button');
+    btnSelectAll.className = 'ghost small';
+    btnSelectAll.textContent = 'Select all';
+    btnSelectAll.onclick = () => {
+      selected.clear();
+      hourTypes.forEach((ht) => selected.add(ht.hourTypeId));
+      renderContractHoursBreakdown(contract, usage);
+    };
+    const btnClear = document.createElement('button');
+    btnClear.className = 'ghost small';
+    btnClear.textContent = 'Clear';
+    btnClear.onclick = () => {
+      selected.clear();
+      renderContractHoursBreakdown(contract, usage);
+    };
+    filterActions.append(btnSelectAll, btnClear);
+    filterHeader.append(filterLabel, filterActions);
+
+    const filterList = document.createElement('div');
+    filterList.className = 'contract-hours-filter-list';
+    if (!hourTypes.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ts-note';
+      empty.textContent = 'No hour types logged yet.';
+      filterPanel.append(filterHeader, empty);
+    } else {
+      hourTypes
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((ht) => {
+          const row = document.createElement('label');
+          row.className = 'contract-hours-filter-item';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = selected.has(ht.hourTypeId);
+          checkbox.onchange = () => {
+            if (checkbox.checked) {
+              selected.add(ht.hourTypeId);
+            } else {
+              selected.delete(ht.hourTypeId);
+            }
+            renderContractHoursBreakdown(contract, usage);
+          };
+          const content = document.createElement('div');
+          content.className = 'content';
+          const swatch = document.createElement('span');
+          swatch.className = 'swatch';
+          swatch.style.backgroundColor = ht.color || '#94a3b8';
+          const textWrap = document.createElement('div');
+          textWrap.className = 'text';
+          const labelText = document.createElement('span');
+          labelText.className = 'label';
+          labelText.textContent = ht.name || 'Unknown';
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = ht.contributesToIncome ? 'Income' : 'Non-income';
+          textWrap.append(labelText, meta);
+          content.append(swatch, textWrap);
+          row.append(checkbox, content);
+          filterList.appendChild(row);
+        });
+      filterPanel.append(filterHeader, filterList);
+    }
+
+    const cards = document.createElement('div');
+    cards.className = 'contract-hours-breakdown-cards';
+    const addCard = (label, value) => {
+      const card = document.createElement('div');
+      card.className = 'contract-hours-breakdown-card';
+      const labelEl = document.createElement('div');
+      labelEl.className = 'label';
+      labelEl.textContent = label;
+      const valueEl = document.createElement('div');
+      valueEl.className = 'value';
+      valueEl.textContent = `${formatDecimalHours(value)} hrs`;
+      card.append(labelEl, valueEl);
+      cards.appendChild(card);
+    };
+    addCard('Income hours (used in calculations)', aggregated.income);
+    addCard('Non-income hours', aggregated.nonIncome);
+    addCard('All hours logged', aggregated.all);
+
+    contractHoursBreakdownEl.append(header, note, filterPanel, cards);
+
+    if (!hasEntries) {
+      const empty = document.createElement('div');
+      empty.className = 'contract-burndown-empty';
+      empty.textContent = 'No time has been logged for this contract yet or no hour types are selected.';
+      contractHoursBreakdownEl.appendChild(empty);
+      return;
+    }
+
+    const typeTable = document.createElement('table');
+    typeTable.className = 'contract-burndown-table contract-hours-table';
+    typeTable.innerHTML = '<thead><tr><th>Hour type</th><th>Income?</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Share</th></tr></thead>';
+    const typeBody = document.createElement('tbody');
+    if (!filteredHourTypes.length) {
+      const emptyRow = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 4;
+      cell.style.textAlign = 'center';
+      cell.textContent = 'Select at least one hour type to see the breakdown.';
+      emptyRow.appendChild(cell);
+      typeBody.appendChild(emptyRow);
+    } else {
+      filteredHourTypes
+        .sort((a, b) => b.totalHours - a.totalHours)
+        .forEach((ht) => {
+          const tr = document.createElement('tr');
+          const nameCell = document.createElement('td');
+          nameCell.style.display = 'flex';
+          nameCell.style.alignItems = 'center';
+          nameCell.style.gap = '8px';
+          const swatch = document.createElement('span');
+          swatch.style.display = 'inline-block';
+          swatch.style.width = '10px';
+          swatch.style.height = '10px';
+          swatch.style.borderRadius = '999px';
+          swatch.style.backgroundColor = ht.color || '#94a3b8';
+          nameCell.append(swatch, document.createTextNode(ht.name || 'Unknown'));
+          const incomeCell = document.createElement('td');
+          incomeCell.textContent = ht.contributesToIncome ? 'Income' : 'Non-income';
+          const valueCell = document.createElement('td');
+          valueCell.textContent = `${formatDecimalHours(ht.totalHours)} hrs`;
+          valueCell.style.textAlign = 'right';
+          const shareCell = document.createElement('td');
+          shareCell.style.textAlign = 'right';
+          const share = aggregated.all > 0 ? (ht.totalHours / aggregated.all) * 100 : null;
+          shareCell.textContent = share !== null ? `${share.toFixed(1)}%` : '--';
+          tr.append(nameCell, incomeCell, valueCell, shareCell);
+          typeBody.appendChild(tr);
+        });
+      const totalRow = document.createElement('tr');
+      const totalLabelCell = document.createElement('td');
+      totalLabelCell.textContent = 'Total (filtered)';
+      const totalIncomeCell = document.createElement('td');
+      totalIncomeCell.textContent = '';
+      const totalHoursCell = document.createElement('td');
+      totalHoursCell.style.textAlign = 'right';
+      totalHoursCell.textContent = `${formatDecimalHours(aggregated.all)} hrs`;
+      const totalShareCell = document.createElement('td');
+      totalShareCell.style.textAlign = 'right';
+      totalShareCell.textContent = aggregated.all > 0 ? '100%' : '--';
+      totalRow.append(totalLabelCell, totalIncomeCell, totalHoursCell, totalShareCell);
+      typeBody.appendChild(totalRow);
+    }
+    typeTable.appendChild(typeBody);
+
+    const monthTable = document.createElement('table');
+    monthTable.className = 'contract-burndown-table contract-hours-table';
+    monthTable.innerHTML = '<thead><tr><th>Month</th><th>Income hours</th><th>Non-income hours</th><th>All hours</th></tr></thead>';
+    const monthBody = document.createElement('tbody');
+    monthKeys.forEach((monthKey) => {
+      const parts = monthKey.split('-');
+      const dateObj = parts.length === 2 ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1) : null;
+      const monthLabel = dateObj && !Number.isNaN(dateObj.getTime()) ? formatMonthShortYear(dateObj) : monthKey;
+      const incomeHours = aggregated.monthlyIncome[monthKey] || 0;
+      const nonIncomeHours = aggregated.monthlyNonIncome[monthKey] || 0;
+      const totalHours = aggregated.monthlyAll[monthKey] || 0;
+      const tr = document.createElement('tr');
+      const monthCell = document.createElement('td');
+      monthCell.textContent = monthLabel;
+      const incomeCell = document.createElement('td');
+      incomeCell.textContent = `${formatDecimalHours(incomeHours)} hrs`;
+      const nonIncomeCell = document.createElement('td');
+      nonIncomeCell.textContent = `${formatDecimalHours(nonIncomeHours)} hrs`;
+      const totalCell = document.createElement('td');
+      totalCell.textContent = `${formatDecimalHours(totalHours)} hrs`;
+      tr.append(monthCell, incomeCell, nonIncomeCell, totalCell);
+      monthBody.appendChild(tr);
+    });
+    const totalRow = document.createElement('tr');
+    const totalLabelCell = document.createElement('td');
+    totalLabelCell.textContent = 'Total (filtered)';
+    const totalIncomeCell = document.createElement('td');
+    totalIncomeCell.textContent = `${formatDecimalHours(aggregated.income)} hrs`;
+    const totalNonIncomeCell = document.createElement('td');
+    totalNonIncomeCell.textContent = `${formatDecimalHours(aggregated.nonIncome)} hrs`;
+    const totalAllCell = document.createElement('td');
+    totalAllCell.textContent = `${formatDecimalHours(aggregated.all)} hrs`;
+    totalRow.append(totalLabelCell, totalIncomeCell, totalNonIncomeCell, totalAllCell);
+    monthBody.appendChild(totalRow);
+    monthTable.appendChild(monthBody);
+
+    contractHoursBreakdownEl.append(typeTable, monthTable);
   }
 
   function isRatePreviewEnabled() {
@@ -15567,19 +16035,23 @@ function getCachedIncomeSummary(monthKey) {
         populateManualForm(existingEntry, true);
       } else {
         // For advanced entries, switch to advanced tab and populate
-        state.currentTab = 'punch';
-        state.editingEntryType = entryType;
-        activateTab('punch');
-        if (punchDate) punchDate.value = existingEntry.date;
-        ensurePunchDraft(existingEntry.contract_id);
-        if (state.punchDraft) {
-          state.punchDraft.entryId = existingEntry.id;
-          state.punchDraft.contractId = existingEntry.contract_id;
-          state.punchDraft.date = existingEntry.date;
-          state.punchDraft.punches = clonePunches(existingEntry.punches || []);
-          state.punchDraft.dirty = false;
-          renderPunchDraft();
+      state.currentTab = 'punch';
+      state.editingEntryType = entryType;
+      activateTab('punch');
+      if (punchDate) punchDate.value = existingEntry.date;
+      ensurePunchDraft(existingEntry.contract_id, existingEntry);
+      if (state.punchDraft) {
+        state.punchDraft.entryId = existingEntry.id;
+        state.punchDraft.contractId = existingEntry.contract_id;
+        state.punchDraft.date = existingEntry.date;
+        state.punchDraft.punches = clonePunches(existingEntry.punches || []);
+        state.punchDraft.dirty = false;
+        if (punchHourType && existingEntry.hour_type_id) {
+          punchHourType.value = existingEntry.hour_type_id;
+          updatePunchContractVisibility();
         }
+        renderPunchDraft();
+      }
       }
     } else {
       // No existing entry, keep current tab but clear editing state
@@ -17611,16 +18083,6 @@ function getCachedIncomeSummary(monthKey) {
     const hasHours = Number.isFinite(hoursValue) && hoursValue > 0;
     const invoiceLocked = invoiceIsLocked();
     const contractName = (item.contract_id ? getContractName(item.contract_id) : '') || item.contract_name_snapshot || '';
-    console.log('[Invoice Line Render]', {
-      id: item.id,
-      amount_mode: item.amount_mode,
-      hours: item.hours,
-      amount: item.amount,
-      contract_id: item.contract_id,
-      contract_name_snapshot: item.contract_name_snapshot,
-      resolved_contract_name: contractName,
-      invoice_locked: invoiceLocked
-    });
     const infoItems = [
       { label: 'Amount', value: amountValue, strong: true },
       { label: 'Date', value: item.line_date || '' },

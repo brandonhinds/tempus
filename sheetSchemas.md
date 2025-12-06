@@ -161,7 +161,6 @@ Stores configured deductions that affect monthly income calculations. Deductions
 | `display_order` | number | Optional numeric rank that controls the predicate order used by drag-and-drop reordering. | `1` |
 
 ### Suggested improvements
-- Store an attachment reference once file uploads are supported for deductions.
 - Track audit metadata (user, change reason) when collaborative workflows are introduced.
 
 ## deduction_categories
