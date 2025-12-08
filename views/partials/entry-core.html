@@ -1,0 +1,165 @@
+<script>
+  // Shared entry helpers for desktop and mobile views.
+  window.entryCore = (function () {
+    const TIME_PATTERN = /^\d{2}:\d{2}$/;
+
+    const clampRoundInterval = (value) => {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return 0;
+      return Math.min(60, Math.max(0, Math.round(num)));
+    };
+
+    const todayIso = () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const isoDateTime = (date = new Date()) => date.toISOString();
+
+    const timeToMinutes = (time) => {
+      if (!time || !TIME_PATTERN.test(time)) return null;
+      const [h, m] = time.split(':').map((n) => Number(n));
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+      return h * 60 + m;
+    };
+
+    const minutesToTime = (minutes) => {
+      const total = Math.max(0, Math.round(Number(minutes) || 0));
+      const hrs = Math.floor(total / 60);
+      const mins = total % 60;
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    };
+
+    const normalizeTimeValue = (value) => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (TIME_PATTERN.test(trimmed)) return trimmed;
+        const parsed = new Date(`1970-01-01T${trimmed}:00`);
+        if (!Number.isNaN(parsed.getTime())) return parsed.toTimeString().slice(0, 5);
+      } else if (value instanceof Date) {
+        return value.toTimeString().slice(0, 5);
+      }
+      const coerced = new Date(value);
+      if (!Number.isNaN(coerced.getTime())) return coerced.toTimeString().slice(0, 5);
+      return '';
+    };
+
+    const normalizePunchList = (source) => {
+      if (!source) return [];
+      let punches = source;
+      if (typeof punches === 'string') {
+        try {
+          punches = JSON.parse(punches);
+        } catch (e) {
+          punches = [];
+        }
+      }
+      if (!Array.isArray(punches)) punches = punches ? [punches] : [];
+      const list = punches.reduce((acc, raw) => {
+        if (!raw) return acc;
+        const start = normalizeTimeValue(raw.in || raw.start || raw.start_time || raw.startTime);
+        if (!start) return acc;
+        let end = normalizeTimeValue(raw.out || raw.stop || raw.end || raw.end_time || raw.endTime);
+        if (end && timeToMinutes(end) !== null && timeToMinutes(start) !== null && timeToMinutes(end) < timeToMinutes(start)) {
+          end = '';
+        }
+        acc.push({ in: start, out: end || '' });
+        return acc;
+      }, []);
+      list.sort((a, b) => {
+        if (a.in === b.in) return (a.out || '').localeCompare(b.out || '');
+        return a.in.localeCompare(b.in);
+      });
+      return list;
+    };
+
+    const summarizePunches = (punches) => {
+      if (!Array.isArray(punches) || !punches.length) {
+        return { totalMinutes: 0, earliest: '', latest: '', openCount: 0 };
+      }
+      let earliest = '';
+      let latest = '';
+      let total = 0;
+      let openCount = 0;
+      punches.forEach((punch) => {
+        if (!punch || !punch.in) return;
+        if (!earliest || punch.in < earliest) earliest = punch.in;
+        if (punch.out) {
+          if (!latest || punch.out > latest) latest = punch.out;
+          const startMinutes = timeToMinutes(punch.in);
+          const endMinutes = timeToMinutes(punch.out);
+          if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+            total += endMinutes - startMinutes;
+          }
+        } else {
+          openCount += 1;
+        }
+      });
+      return { totalMinutes: total, earliest, latest, openCount };
+    };
+
+    const roundDuration = (minutes, interval) => {
+      const base = Math.max(0, Math.round(Number(minutes) || 0));
+      const quantum = clampRoundInterval(interval);
+      if (!quantum) return base;
+      const rounded = Math.round(base / quantum) * quantum;
+      return Math.max(0, rounded);
+    };
+
+    const sanitizeEntry = (entry) => {
+      if (!entry) return entry;
+      const clone = { ...entry };
+      const punches = normalizePunchList(clone.punches != null ? clone.punches : clone.punches_json);
+      clone.punches = punches.map((p) => ({ in: p.in, out: p.out }));
+      clone.punches_json = JSON.stringify(clone.punches);
+      const summary = summarizePunches(clone.punches);
+      clone.duration_minutes = Math.max(0, Math.round(Number(clone.duration_minutes) || summary.totalMinutes || 0));
+      clone.open_punch_count = summary.openCount || 0;
+      const contractId = clone.contract_id || clone.contractId || '';
+      clone.contract_id = contractId ? String(contractId).trim() : '';
+      delete clone.contractId;
+      const recurrenceId = clone.recurrence_id || clone.recurrenceId || '';
+      clone.recurrence_id = recurrenceId ? String(recurrenceId).trim() : '';
+      delete clone.recurrenceId;
+      if (clone.entry_type) clone.entry_type = String(clone.entry_type).trim();
+      return clone;
+    };
+
+    const contractIsValid = (contract, dateIso) => {
+      if (!contract || !dateIso) return false;
+      const target = new Date(dateIso);
+      if (Number.isNaN(target.getTime())) return false;
+      if (contract.start_date) {
+        const start = new Date(contract.start_date);
+        if (!Number.isNaN(start.getTime()) && target < start) return false;
+      }
+      if (contract.end_date) {
+        const end = new Date(contract.end_date);
+        if (!Number.isNaN(end.getTime()) && target > end) return false;
+      }
+      return true;
+    };
+
+    const entryCompositeKey = (dateIso, hourTypeId, contractId) => {
+      return [dateIso || '', hourTypeId || '', contractId || ''].join('|');
+    };
+
+    return {
+      clampRoundInterval,
+      contractIsValid,
+      entryCompositeKey,
+      isoDateTime,
+      minutesToTime,
+      normalizePunchList,
+      roundDuration,
+      sanitizeEntry,
+      summarizePunches,
+      timeToMinutes,
+      todayIso
+    };
+  })();
+</script>

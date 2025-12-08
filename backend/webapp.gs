@@ -1,6 +1,8 @@
 /** Web entry + HTML includes */
 function doGet(e) {
-  var tpl = HtmlService.createTemplateFromFile('views/index');
+  var view = e && e.parameter && e.parameter.view ? String(e.parameter.view).toLowerCase() : '';
+  var templateName = view === 'mobile' ? 'views/mobile' : 'views/index';
+  var tpl = HtmlService.createTemplateFromFile(templateName);
   var html = tpl.evaluate()
     .setFaviconUrl('https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/images/favicon.ico')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

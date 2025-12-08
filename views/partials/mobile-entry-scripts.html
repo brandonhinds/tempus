@@ -1,0 +1,477 @@
+<script>
+  (function () {
+    const {
+      clampRoundInterval,
+      contractIsValid,
+      entryCompositeKey,
+      isoDateTime,
+      minutesToTime,
+      normalizePunchList,
+      roundDuration,
+      sanitizeEntry,
+      summarizePunches,
+      timeToMinutes,
+      todayIso
+    } = window.entryCore || {};
+
+    const dom = {
+      status: document.getElementById('mobile-status'),
+      date: document.getElementById('mobile-date'),
+      datePrev: document.getElementById('mobile-date-prev'),
+      dateNext: document.getElementById('mobile-date-next'),
+      dateToday: document.getElementById('mobile-date-today'),
+      tabManual: document.getElementById('mobile-tab-manual'),
+      tabPunch: document.getElementById('mobile-tab-punch'),
+      hourTypeRow: document.getElementById('mobile-hour-type-row'),
+      hourType: document.getElementById('mobile-hour-type'),
+      contract: document.getElementById('mobile-contract'),
+      contractWarning: document.getElementById('mobile-contract-warning'),
+      panelManual: document.getElementById('mobile-panel-manual'),
+      panelPunch: document.getElementById('mobile-panel-punch'),
+      hours: document.getElementById('mobile-hours'),
+      punchList: document.getElementById('mobile-punch-list'),
+      punchSummary: document.getElementById('mobile-punch-summary'),
+      punchWarning: document.getElementById('mobile-punch-warning'),
+      punchSuggestion: document.getElementById('mobile-punch-suggestion'),
+      addPunch: document.getElementById('mobile-add-punch'),
+      reset: document.getElementById('mobile-reset'),
+      save: document.getElementById('mobile-save'),
+      deleteBtn: document.getElementById('mobile-delete')
+    };
+
+    const state = {
+      currentDate: todayIso(),
+      mode: 'manual',
+      settings: {},
+      contracts: [],
+      hourTypes: [],
+      hourTypeMap: {},
+      entries: [],
+      draftHours: '',
+      draftPunches: [{ in: '', out: '' }],
+      currentEntry: null,
+      loading: false,
+      staticLoaded: false
+    };
+
+    const setStatus = (message, tone = 'info') => {
+      if (!dom.status) return;
+      dom.status.textContent = message || '';
+      dom.status.className = 'ts-mobile-row ts-mobile-status';
+      if (tone === 'error') dom.status.classList.add('ts-warning');
+      else if (tone === 'success') dom.status.classList.add('ts-note');
+      else dom.status.classList.add('ts-note');
+    };
+
+    const run = (fn, payload) => new Promise((resolve) => {
+      const handler = (res) => resolve(res);
+      const runner = google.script.run.withSuccessHandler(handler).withFailureHandler(() => resolve(null));
+      if (typeof runner[fn] === 'function') {
+        runner[fn](payload);
+      } else {
+        resolve(null);
+      }
+    });
+
+    const defaultHourTypeId = () => {
+      if (!state.hourTypes.length) return '';
+      const preferred = state.hourTypes.find((ht) => ht.is_default);
+      return (preferred || state.hourTypes[0]).id;
+    };
+
+    const roundInterval = () => clampRoundInterval(state.settings ? state.settings.round_to_nearest : 0);
+
+    const renderHourTypes = () => {
+      if (!dom.hourType) return;
+      dom.hourType.innerHTML = '';
+      state.hourTypes.forEach((ht) => {
+        const opt = document.createElement('option');
+        opt.value = ht.id;
+        opt.textContent = ht.name || 'Work';
+        dom.hourType.appendChild(opt);
+      });
+      dom.hourTypeRow.style.display = state.hourTypes.length > 1 ? 'block' : 'none';
+      dom.hourType.value = state.currentEntry?.hour_type_id || defaultHourTypeId();
+    };
+
+    const validContractsForDate = (dateIso) => {
+      return state.contracts.filter((c) => contractIsValid(c, dateIso));
+    };
+
+    const renderContracts = () => {
+      if (!dom.contract) return;
+      const dateIso = state.currentDate;
+      const hourType = state.hourTypeMap[dom.hourType.value] || {};
+      const requiresContract = !!hourType.requires_contract;
+      const valid = validContractsForDate(dateIso);
+      dom.contract.innerHTML = '';
+      if (!requiresContract) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = valid.length ? 'No contract (optional)' : 'Not required';
+        dom.contract.appendChild(opt);
+      } else {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Select contract';
+        dom.contract.appendChild(opt);
+      }
+      valid.forEach((c) => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        dom.contract.appendChild(opt);
+      });
+      const preferred = state.currentEntry ? state.currentEntry.contract_id : '';
+      dom.contract.value = preferred || (valid[0] ? valid[0].id : '');
+      dom.contract.disabled = requiresContract && !valid.length;
+      dom.contractWarning.style.display = requiresContract && !dom.contract.value ? 'block' : 'none';
+    };
+
+    const setMode = (mode) => {
+      state.mode = mode === 'punch' ? 'punch' : 'manual';
+      if (dom.tabManual) dom.tabManual.classList.toggle('active', state.mode === 'manual');
+      if (dom.tabPunch) dom.tabPunch.classList.toggle('active', state.mode === 'punch');
+      if (dom.panelManual) dom.panelManual.style.display = state.mode === 'manual' ? 'block' : 'none';
+      if (dom.panelPunch) dom.panelPunch.style.display = state.mode === 'punch' ? 'block' : 'none';
+      if (dom.save) dom.save.textContent = state.currentEntry ? 'Update' : 'Save';
+      dom.deleteBtn.style.display = state.currentEntry ? 'inline-flex' : 'none';
+    };
+
+    const renderPunchList = () => {
+      if (!dom.punchList) return;
+      const punches = state.draftPunches || [];
+      dom.punchList.innerHTML = '';
+      punches.forEach((punch, index) => {
+        const row = document.createElement('div');
+        row.className = 'ts-punch-row';
+
+        const start = document.createElement('input');
+        start.type = 'time';
+        start.value = punch.in || '';
+        start.className = 'ts-punch-input';
+        start.onchange = () => {
+          state.draftPunches[index].in = start.value;
+          updatePunchSummary();
+        };
+
+        const end = document.createElement('input');
+        end.type = 'time';
+        end.value = punch.out || '';
+        end.className = 'ts-punch-input';
+        end.onchange = () => {
+          state.draftPunches[index].out = end.value;
+          updatePunchSummary();
+        };
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'ghost';
+        remove.textContent = 'Remove';
+        remove.onclick = () => {
+          state.draftPunches.splice(index, 1);
+          if (!state.draftPunches.length) state.draftPunches.push({ in: '', out: '' });
+          renderPunchList();
+          updatePunchSummary();
+        };
+
+        row.appendChild(start);
+        row.appendChild(document.createTextNode(' to '));
+        row.appendChild(end);
+        row.appendChild(remove);
+        dom.punchList.appendChild(row);
+      });
+      updatePunchSummary();
+    };
+
+    const addPunchRow = () => {
+      state.draftPunches.push({ in: '', out: '' });
+      renderPunchList();
+    };
+
+    const validatePunches = (punches) => {
+      const sorted = normalizePunchList(punches);
+      let lastEnd = null;
+      for (let i = 0; i < sorted.length; i += 1) {
+        const punch = sorted[i];
+        const startMinutes = timeToMinutes(punch.in);
+        if (startMinutes === null) return 'Each punch needs a start time.';
+        const endMinutes = timeToMinutes(punch.out);
+        if (endMinutes !== null && endMinutes <= startMinutes) return 'Punch end must be after start.';
+        if (lastEnd !== null && startMinutes < lastEnd) return 'Punches cannot overlap.';
+        if (endMinutes !== null) lastEnd = endMinutes;
+      }
+      return '';
+    };
+
+    const updatePunchSummary = () => {
+      const punches = normalizePunchList(state.draftPunches);
+      const summary = summarizePunches(punches);
+      if (dom.punchSummary) {
+        const rounded = roundDuration(summary.totalMinutes, roundInterval());
+        dom.punchSummary.textContent = punches.length ? `Recorded: ${ (rounded / 60).toFixed(2) }h` : '';
+      }
+      dom.punchWarning.style.display = summary.openCount > 0 ? 'block' : 'none';
+      dom.punchWarning.textContent = summary.openCount > 0 ? 'You have an open punch. Add an end time before saving.' : '';
+      dom.punchSuggestion.style.display = 'none';
+    };
+
+    const pickEntryForHourType = (hourTypeId) => {
+      if (!state.entries.length) return null;
+      const targetId = hourTypeId || defaultHourTypeId();
+      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === targetId) || state.entries[0];
+    };
+
+    const hydrateDraftFromEntry = (entry) => {
+      state.currentEntry = entry || null;
+      if (entry) {
+        if (entry.entry_type === 'advanced') {
+          state.mode = 'punch';
+          state.draftPunches = entry.punches && entry.punches.length ? entry.punches.map((p) => ({ ...p })) : [{ in: '', out: '' }];
+          state.draftHours = '';
+        } else {
+          state.mode = 'manual';
+          const summary = summarizePunches(entry.punches || []);
+          const minutes = summary.totalMinutes || Number(entry.duration_minutes) || 0;
+          state.draftHours = minutes ? (minutes / 60).toFixed(2) : '';
+          state.draftPunches = [{ in: '', out: '' }];
+        }
+        if (dom.hourType && entry.hour_type_id) dom.hourType.value = entry.hour_type_id;
+      } else {
+        state.mode = 'manual';
+        state.draftHours = '';
+        state.draftPunches = [{ in: '', out: '' }];
+        if (dom.hourType) dom.hourType.value = defaultHourTypeId();
+      }
+      renderContracts();
+      renderPunchList();
+      if (dom.hours) dom.hours.value = state.draftHours;
+      setMode(state.mode);
+    };
+
+    const loadStaticData = async () => {
+      if (state.staticLoaded) return true;
+      const [settings, hourTypes, contracts] = await Promise.all([
+        run('api_getSettings'),
+        run('api_getHourTypes'),
+        run('api_getContracts')
+      ]);
+      state.settings = settings || {};
+      state.hourTypes = Array.isArray(hourTypes) ? hourTypes : [];
+      state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+      state.contracts = Array.isArray(contracts) ? contracts : [];
+      renderHourTypes();
+      renderContracts();
+      state.staticLoaded = true;
+      return true;
+    };
+
+    const loadEntriesForDate = async (dateIso) => {
+      const entries = await run('api_getEntries', { startDate: dateIso, endDate: dateIso }) || [];
+      state.entries = entries.map(sanitizeEntry);
+    };
+
+    const hydrateDate = async (dateIso) => {
+      state.currentDate = dateIso || todayIso();
+      if (dom.date) dom.date.value = state.currentDate;
+      setStatus('Loading...', 'info');
+      await loadStaticData();
+      await loadEntriesForDate(state.currentDate);
+      renderHourTypes();
+      const chosen = pickEntryForHourType(dom.hourType.value || defaultHourTypeId());
+      hydrateDraftFromEntry(chosen);
+      setStatus(state.currentEntry ? 'Loaded existing entry.' : 'Ready to add entry.');
+    };
+
+    const findDuplicate = (payload) => {
+      const key = entryCompositeKey(payload.date, payload.hour_type_id, payload.contract_id);
+      return state.entries.find((e) => entryCompositeKey(e.date, e.hour_type_id, e.contract_id) === key && e.id !== payload.id) || null;
+    };
+
+    const getManualPayload = () => {
+      const hoursRaw = dom.hours ? dom.hours.value.trim() : '';
+      const totalHours = Number(hoursRaw);
+      if (!Number.isFinite(totalHours) || totalHours <= 0) {
+        setStatus('Enter total hours greater than zero.', 'error');
+        return null;
+      }
+      const minutes = Math.round(totalHours * 60);
+      if (minutes > 24 * 60) {
+        setStatus('Hours must be within a single day.', 'error');
+        return null;
+      }
+      const hourTypeId = dom.hourType ? dom.hourType.value || defaultHourTypeId() : defaultHourTypeId();
+      const hourType = state.hourTypeMap[hourTypeId] || {};
+      const contractId = dom.contract ? dom.contract.value : '';
+      if (hourType.requires_contract) {
+        if (!contractId) {
+          setStatus('Select a contract for this hour type.', 'error');
+          return null;
+        }
+        const contract = state.contracts.find((c) => c.id === contractId);
+        if (!contract || !contractIsValid(contract, state.currentDate)) {
+          setStatus('Selected contract is not valid for this date.', 'error');
+          return null;
+        }
+      }
+      const rounded = roundDuration(minutes, roundInterval());
+      return {
+        id: state.currentEntry ? state.currentEntry.id : undefined,
+        date: state.currentDate,
+        punches: [{ in: '00:00', out: minutesToTime(rounded) }],
+        duration_minutes: rounded,
+        contract_id: contractId,
+        hour_type_id: hourTypeId,
+        round_interval: roundInterval(),
+        entry_type: 'basic'
+      };
+    };
+
+    const getPunchPayload = () => {
+      const punches = normalizePunchList(state.draftPunches);
+      if (!punches.length) {
+        setStatus('Add at least one punch.', 'error');
+        return null;
+      }
+      const validationError = validatePunches(punches);
+      if (validationError) {
+        setStatus(validationError, 'error');
+        return null;
+      }
+      const hourTypeId = dom.hourType ? dom.hourType.value || defaultHourTypeId() : defaultHourTypeId();
+      const hourType = state.hourTypeMap[hourTypeId] || {};
+      const contractId = dom.contract ? dom.contract.value : '';
+      if (hourType.requires_contract) {
+        if (!contractId) {
+          setStatus('Select a contract for this hour type.', 'error');
+          return null;
+        }
+        const contract = state.contracts.find((c) => c.id === contractId);
+        if (!contract || !contractIsValid(contract, state.currentDate)) {
+          setStatus('Selected contract is not valid for this date.', 'error');
+          return null;
+        }
+      }
+      const summary = summarizePunches(punches);
+      const rounded = roundDuration(summary.totalMinutes, roundInterval());
+      return {
+        id: state.currentEntry ? state.currentEntry.id : undefined,
+        date: state.currentDate,
+        punches,
+        duration_minutes: rounded,
+        contract_id: contractId,
+        hour_type_id: hourTypeId,
+        round_interval: roundInterval(),
+        entry_type: 'advanced'
+      };
+    };
+
+    const setLoading = (flag) => {
+      state.loading = flag;
+      [dom.save, dom.deleteBtn, dom.reset, dom.addPunch, dom.date, dom.datePrev, dom.dateNext, dom.dateToday].forEach((el) => {
+        if (!el) return;
+        el.disabled = flag;
+      });
+    };
+
+    const saveEntry = async () => {
+      if (state.loading) return;
+      const payload = state.mode === 'punch' ? getPunchPayload() : getManualPayload();
+      if (!payload) return;
+      const duplicate = findDuplicate(payload);
+      if (duplicate) {
+        setStatus('An entry for this date/hour type already exists.', 'error');
+        hydrateDraftFromEntry(duplicate);
+        return;
+      }
+      setLoading(true);
+      setStatus('Saving...', 'info');
+      const isUpdate = !!payload.id;
+      const fn = isUpdate ? 'api_updateEntry' : 'api_addEntry';
+      const optimisticId = payload.id || ('temp_' + Date.now());
+      const optimistic = sanitizeEntry({ ...payload, id: optimisticId, created_at: isoDateTime(new Date()) });
+      if (!isUpdate) state.entries.push(optimistic);
+      const res = await run(fn, payload);
+      if (res && res.success && res.entry) {
+        const confirmed = sanitizeEntry(res.entry);
+        state.entries = state.entries.filter((e) => e.id !== confirmed.id).concat([confirmed]);
+        hydrateDraftFromEntry(confirmed);
+        setStatus('Saved.', 'success');
+      } else {
+        if (!isUpdate) {
+          state.entries = state.entries.filter((e) => e.id !== optimistic.id);
+        }
+        setStatus('Save failed. Please try again.', 'error');
+      }
+      setLoading(false);
+    };
+
+    const deleteEntry = async () => {
+      if (state.loading) return;
+      if (!state.currentEntry) {
+        setStatus('Nothing to delete.', 'error');
+        return;
+      }
+      setLoading(true);
+      setStatus('Deleting...', 'info');
+      const id = state.currentEntry.id;
+      const res = await run('api_deleteEntry', id);
+      if (res === null) {
+        setStatus('Delete failed. Please try again.', 'error');
+      } else {
+        state.entries = state.entries.filter((e) => e.id !== id);
+        state.currentEntry = null;
+        state.draftHours = '';
+        state.draftPunches = [{ in: '', out: '' }];
+        hydrateDraftFromEntry(null);
+        setStatus('Deleted.', 'success');
+      }
+      setLoading(false);
+    };
+
+    const resetDraft = () => {
+      state.currentEntry = null;
+      state.draftHours = '';
+      state.draftPunches = [{ in: '', out: '' }];
+      renderContracts();
+      renderPunchList();
+      if (dom.hours) dom.hours.value = '';
+      setMode('manual');
+      setStatus('Reset. Ready to add.', 'info');
+    };
+
+    const changeDate = (deltaDays) => {
+      const current = new Date(state.currentDate);
+      current.setDate(current.getDate() + deltaDays);
+      const iso = current.toISOString().slice(0, 10);
+      hydrateDate(iso);
+    };
+
+    const bindEvents = () => {
+      if (dom.tabManual) dom.tabManual.onclick = () => setMode('manual');
+      if (dom.tabPunch) dom.tabPunch.onclick = () => setMode('punch');
+      if (dom.addPunch) dom.addPunch.onclick = addPunchRow;
+      if (dom.save) dom.save.onclick = saveEntry;
+      if (dom.deleteBtn) dom.deleteBtn.onclick = deleteEntry;
+      if (dom.reset) dom.reset.onclick = resetDraft;
+      if (dom.date) dom.date.onchange = () => hydrateDate(dom.date.value || todayIso());
+      if (dom.datePrev) dom.datePrev.onclick = () => changeDate(-1);
+      if (dom.dateNext) dom.dateNext.onclick = () => changeDate(1);
+      if (dom.dateToday) dom.dateToday.onclick = () => hydrateDate(todayIso());
+      if (dom.hourType) dom.hourType.onchange = () => {
+        renderContracts();
+        const entry = pickEntryForHourType(dom.hourType.value);
+        hydrateDraftFromEntry(entry);
+      };
+      if (dom.contract) dom.contract.onchange = () => renderContracts();
+      if (dom.hours) dom.hours.oninput = () => { state.draftHours = dom.hours.value; };
+    };
+
+    const init = async () => {
+      bindEvents();
+      await hydrateDate(todayIso());
+    };
+
+    init();
+  })();
+</script>

@@ -11,6 +11,14 @@
     * Deal with the rounding off the cents on the invoice GST, by rounding that number down, and then increasing company income by the amount that was rounded off.
     * Provide export/print options for monthly or quarterly lodgements
 
+- Mobile view:
+    * Needs to respect the theme
+    * The form could use some rework. It's very busy.
+    * The date picker should be styled similarly to the monthly one on the calendar view.
+    * It seems to load slowly. After today's entry has loaded it should lazy load the other days 14 days either side.
+    * Should be able to use defaults
+    * Link to the mobile view from the about screen
+
 ## Things to Check in Beta
 
 - How are the cents in BAS reporting meant to be handled? Do they just get rounded off and ignored, or do they get rounded off and added somewhere else?
