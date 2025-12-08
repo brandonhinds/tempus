@@ -12,12 +12,9 @@
     * Provide export/print options for monthly or quarterly lodgements
 
 - Mobile view:
-    * Needs to respect the theme
-    * The form could use some rework. It's very busy.
-    * The date picker should be styled similarly to the monthly one on the calendar view.
-    * It seems to load slowly. After today's entry has loaded it should lazy load the other days 14 days either side.
-    * Should be able to use defaults
-    * Link to the mobile view from the about screen
+    * Needs link to/from desktop view
+    * the top bar needs to be improved a bit
+    * Need to test on an actual mobile
 
 ## Things to Check in Beta
 

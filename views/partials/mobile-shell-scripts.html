@@ -1,0 +1,373 @@
+<script>
+  (function () {
+    const DEFAULT_FEATURE_FLAGS = {
+      custom_theme: { enabled: false },
+      enable_colorblind_themes: { enabled: false },
+      default_inputs: { enabled: false },
+      hour_types: { enabled: false }
+    };
+
+    const THEME_KEYS = ['dark', 'light', 'og', 'rose', 'sierra117', 'protanopia', 'deuteranopia', 'tritanopia', 'monochrome', 'custom'];
+    const BASE_CACHE_KEY = 'ts_mobile_base_cache_v1';
+    const BASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+    const CUSTOM_THEME_DEFAULTS = {
+      bg: '#0b1220',
+      panel: '#111d33',
+      text: '#e8edf7',
+      muted: '#a4b5d6',
+      primary: '#3b82f6',
+      success: '#22c55e',
+      warning: '#fbbf24',
+      danger: '#ef4444'
+    };
+
+    const state = {
+      settings: {},
+      featureFlags: {},
+      entryDefaults: { basic: [], advanced: [] },
+      basePromise: null
+    };
+
+    const run = (fn, payload) => new Promise((resolve) => {
+      const handler = (res) => resolve(res);
+      const runner = google.script.run.withSuccessHandler(handler).withFailureHandler(() => resolve(null));
+      if (typeof runner[fn] === 'function') {
+        runner[fn](payload);
+      } else {
+        resolve(null);
+      }
+    });
+
+    const normalizeFeatureFlags = (raw) => {
+      const out = {};
+      const defaults = DEFAULT_FEATURE_FLAGS || {};
+      const rawKeys = raw && typeof raw === 'object' ? Object.keys(raw) : [];
+      const combinedKeys = Array.from(new Set([...Object.keys(defaults), ...rawKeys]));
+      combinedKeys.forEach((key) => {
+        const rawValue = raw && raw[key];
+        const enabled = rawValue && typeof rawValue === 'object'
+          ? !!rawValue.enabled
+          : !!rawValue;
+        const fallback = defaults[key] || { name: key, description: '' };
+        out[key] = {
+          enabled,
+          name: fallback.name || key,
+          description: fallback.description || ''
+        };
+      });
+      return out;
+    };
+
+    const hexToRgb = (hex) => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      } : null;
+    };
+
+    const rgbToHex = (r, g, b) => {
+      return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    };
+
+    const lighten = (hex, amount) => {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return hex;
+      const r = Math.min(255, Math.floor(rgb.r + (255 - rgb.r) * amount));
+      const g = Math.min(255, Math.floor(rgb.g + (255 - rgb.g) * amount));
+      const b = Math.min(255, Math.floor(rgb.b + (255 - rgb.b) * amount));
+      return rgbToHex(r, g, b);
+    };
+
+    const darken = (hex, amount) => {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return hex;
+      const r = Math.max(0, Math.floor(rgb.r * (1 - amount)));
+      const g = Math.max(0, Math.floor(rgb.g * (1 - amount)));
+      const b = Math.max(0, Math.floor(rgb.b * (1 - amount)));
+      return rgbToHex(r, g, b);
+    };
+
+    const mixColors = (hexA, hexB, amount) => {
+      const a = hexToRgb(hexA);
+      const b = hexToRgb(hexB);
+      if (!a || !b) return hexA;
+      const mix = (av, bv) => Math.round(av * (1 - amount) + bv * amount);
+      return rgbToHex(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b));
+    };
+
+    const withAlpha = (hex, alpha) => {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return hex;
+      return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.max(0, Math.min(1, alpha))})`;
+    };
+
+    const getLuminance = (hex) => {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return 0;
+      const toLinear = (channel) => {
+        const c = channel / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow(((c + 0.055) / 1.055), 2.4);
+      };
+      const r = toLinear(rgb.r);
+      const g = toLinear(rgb.g);
+      const b = toLinear(rgb.b);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+
+    const isColorLight = (hex) => getLuminance(hex) > 0.6;
+
+    const normalizeCustomThemeConfig = (raw) => {
+      const base = { ...CUSTOM_THEME_DEFAULTS };
+      if (raw && typeof raw === 'object') {
+        Object.keys(raw).forEach((key) => {
+          if (raw[key]) base[key] = raw[key];
+        });
+      }
+      if (!base.panel) base.panel = isColorLight(base.bg) ? darken(base.bg, 0.12) : lighten(base.bg, 0.12);
+      if (!base.muted) base.muted = mixColors(base.text, base.bg, 0.65);
+      if (!base.success) base.success = CUSTOM_THEME_DEFAULTS.success;
+      if (!base.warning) base.warning = mixColors(base.primary, base.danger, 0.3);
+      if (!base.danger) base.danger = CUSTOM_THEME_DEFAULTS.danger;
+      return base;
+    };
+
+    const generateCustomTheme = (config) => {
+      const normalized = normalizeCustomThemeConfig(config);
+      const bgIsLight = isColorLight(normalized.bg);
+      const panelIsLight = isColorLight(normalized.panel);
+
+      const border = mixColors(normalized.panel, normalized.bg, 0.35);
+      const surfaceSubtle = bgIsLight ? darken(normalized.bg, 0.04) : lighten(normalized.bg, 0.04);
+      const focusRing = withAlpha(normalized.primary, 0.55);
+      const primaryDark = darken(normalized.primary, 0.16);
+
+      const primarySoftBg = withAlpha(normalized.primary, 0.18);
+      const primarySoftBorder = withAlpha(normalized.primary, 0.65);
+      const primarySoftText = panelIsLight ? darken(normalized.primary, 0.25) : lighten(normalized.primary, 0.25);
+      const primaryGlow = withAlpha(normalized.primary, 0.3);
+      const primaryHintBg = withAlpha(normalized.primary, 0.16);
+      const primaryHintBorder = withAlpha(normalized.primary, 0.55);
+      const hoverBg = withAlpha(normalized.primary, 0.12);
+
+      const successText = isColorLight(normalized.success) ? darken(normalized.success, 0.3) : lighten(normalized.success, 0.3);
+      const warningText = isColorLight(normalized.warning) ? darken(normalized.warning, 0.35) : lighten(normalized.warning, 0.35);
+      const dangerText = isColorLight(normalized.danger) ? darken(normalized.danger, 0.35) : lighten(normalized.danger, 0.35);
+
+      const badgeSuccessBg = withAlpha(normalized.success, 0.18);
+      const badgeSuccessBorder = withAlpha(normalized.success, 0.55);
+      const badgeWarnBg = withAlpha(normalized.warning, 0.18);
+      const badgeWarnBorder = withAlpha(normalized.warning, 0.55);
+      const badgeErrorBg = withAlpha(normalized.danger, 0.2);
+      const badgeErrorBorder = withAlpha(normalized.danger, 0.6);
+
+      const holidayBg = withAlpha(normalized.success, 0.18);
+      const holidayBorder = withAlpha(normalized.success, 0.5);
+      const holidayHover = withAlpha(normalized.success, 0.75);
+      const calendarGlow = withAlpha(normalized.primary, 0.36);
+      const calendarBg = withAlpha(normalized.primary, 0.22);
+
+      return {
+        '--bg': normalized.bg,
+        '--panel': normalized.panel,
+        '--muted': normalized.muted,
+        '--text': normalized.text,
+        '--primary': normalized.primary,
+        '--primary-600': primaryDark,
+        '--danger': normalized.danger,
+        '--warning': normalized.warning,
+        '--success': normalized.success,
+        '--border': border,
+        '--badge-bg': normalized.panel,
+        '--badge-border': border,
+        '--badge-text': normalized.text,
+        '--badge-success-bg': badgeSuccessBg,
+        '--badge-success-border': badgeSuccessBorder,
+        '--badge-success-text': successText,
+        '--badge-warn-bg': badgeWarnBg,
+        '--badge-warn-border': badgeWarnBorder,
+        '--badge-warn-text': warningText,
+        '--badge-error-bg': badgeErrorBg,
+        '--badge-error-border': badgeErrorBorder,
+        '--badge-error-text': dangerText,
+        '--primary-soft-bg': primarySoftBg,
+        '--primary-soft-border': primarySoftBorder,
+        '--primary-soft-text': primarySoftText,
+        '--primary-glow': primaryGlow,
+        '--primary-hint-bg': primaryHintBg,
+        '--primary-hint-border': primaryHintBorder,
+        '--hover-bg': hoverBg,
+        '--border-color': border,
+        '--text-secondary': normalized.muted,
+        '--surface-subtle': surfaceSubtle,
+        '--focus-ring': focusRing,
+        '--holiday-bg': holidayBg,
+        '--holiday-border': holidayBorder,
+        '--holiday-hover': holidayHover,
+        '--calendar-selected-border': normalized.primary,
+        '--calendar-selected-glow': calendarGlow,
+        '--calendar-selected-bg': calendarBg
+      };
+    };
+
+    const applyCustomTheme = () => {
+      const customThemeConfig = normalizeCustomThemeConfig(state.settings.custom_theme_config);
+      state.settings.custom_theme_config = customThemeConfig;
+      const themeVars = generateCustomTheme(customThemeConfig);
+      const styleId = 'custom-theme-style';
+      let styleEl = document.getElementById(styleId);
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+      }
+      let css = '.ts-theme-custom {';
+      Object.keys(themeVars).forEach((key) => { css += key + ': ' + themeVars[key] + ';'; });
+      css += '}';
+      styleEl.textContent = css;
+    };
+
+    const getCustomThemeFlag = () => state.featureFlags.custom_theme || DEFAULT_FEATURE_FLAGS.custom_theme;
+
+    const getLastNonCustomTheme = () => {
+      const last = state.settings && state.settings.last_non_custom_theme;
+      if (last && last !== 'custom') return last;
+      return 'dark';
+    };
+
+    const applyTheme = (theme) => {
+      const body = document.body;
+      if (!body) return;
+      const normalizedTheme = (typeof theme === 'string' ? theme.trim().toLowerCase() : '');
+      const fallback = getLastNonCustomTheme();
+      const wantsCustom = normalizedTheme === 'custom';
+      const customEnabled = !!(getCustomThemeFlag() && getCustomThemeFlag().enabled);
+      const normalized = THEME_KEYS.includes(normalizedTheme) ? normalizedTheme : 'dark';
+      const finalTheme = wantsCustom && !customEnabled ? fallback : normalized;
+      THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
+      body.classList.add('ts-theme-' + finalTheme);
+      state.settings = { ...state.settings, theme: finalTheme };
+      if (finalTheme !== 'custom') {
+        state.settings.last_non_custom_theme = finalTheme;
+      }
+      if (finalTheme === 'custom' && customEnabled) {
+        applyCustomTheme();
+      }
+    };
+
+    const persistBaseCache = () => {
+      try {
+        const payload = {
+          savedAt: Date.now(),
+          settings: state.settings,
+          featureFlags: state.featureFlags,
+          entryDefaults: state.entryDefaults
+        };
+        localStorage.setItem(BASE_CACHE_KEY, JSON.stringify(payload));
+        console.log('[mobile-shell] base cache: saved');
+      } catch (err) {
+        console.log('[mobile-shell] base cache save failed', err);
+      }
+    };
+
+    const hydrateBaseCache = () => {
+      try {
+        const raw = localStorage.getItem(BASE_CACHE_KEY);
+        if (!raw) {
+          console.log('[mobile-shell] base cache: none');
+          return false;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.savedAt) return false;
+        const age = Date.now() - parsed.savedAt;
+        if (age > BASE_CACHE_TTL_MS) {
+          console.log('[mobile-shell] base cache: expired', { ageMs: age });
+          return false;
+        }
+        state.settings = parsed.settings || {};
+        if (state.settings && typeof state.settings.custom_theme_config === 'string') {
+          try {
+            state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
+          } catch (e) {
+            state.settings.custom_theme_config = null;
+          }
+        }
+        state.featureFlags = normalizeFeatureFlags(parsed.featureFlags);
+        state.entryDefaults = parsed.entryDefaults || { basic: [], advanced: [] };
+        console.log('[mobile-shell] base cache: restored', {
+          ageMs: age,
+          theme: state.settings.theme,
+          flags: Object.keys(state.featureFlags || {}).length,
+          defaultsBasic: (state.entryDefaults.basic || []).length,
+          defaultsAdvanced: (state.entryDefaults.advanced || []).length
+        });
+        return true;
+      } catch (err) {
+        console.log('[mobile-shell] base cache hydrate failed', err);
+        return false;
+      }
+    };
+
+    const refreshBaseFromServer = async () => {
+      const [settings, flags, defaults] = await Promise.all([
+        run('api_getSettings'),
+        run('api_getFeatureFlags'),
+        run('api_getEntryDefaults')
+      ]);
+      state.settings = settings || {};
+      if (state.settings && typeof state.settings.custom_theme_config === 'string') {
+        try {
+          state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
+        } catch (e) {
+          state.settings.custom_theme_config = null;
+        }
+      }
+      state.featureFlags = normalizeFeatureFlags(flags);
+      state.entryDefaults = defaults || { basic: [], advanced: [] };
+      applyTheme(state.settings.theme || 'dark');
+      persistBaseCache();
+      console.log('[mobile-shell] base loaded', {
+        theme: state.settings.theme,
+        flags: Object.keys(state.featureFlags || {}).length,
+        defaultsBasic: (state.entryDefaults.basic || []).length,
+        defaultsAdvanced: (state.entryDefaults.advanced || []).length
+      });
+    };
+
+    const backgroundRefreshBase = () => {
+      refreshBaseFromServer().catch((err) => console.log('[mobile-shell] base refresh failed', err));
+    };
+
+    const loadBaseState = async () => {
+      if (state.basePromise) return state.basePromise;
+      state.basePromise = (async () => {
+        const restored = hydrateBaseCache();
+        if (restored) {
+          applyTheme(state.settings.theme || 'dark');
+          backgroundRefreshBase();
+          return state;
+        }
+        await refreshBaseFromServer();
+        return state;
+      })();
+      return state.basePromise;
+    };
+
+    loadBaseState().catch(() => {
+      applyTheme('dark');
+    });
+
+    window.mobileShell = {
+      DEFAULT_FEATURE_FLAGS,
+      state,
+      applyTheme,
+      applyCustomTheme,
+      generateCustomTheme,
+      normalizeFeatureFlags,
+      loadBaseState,
+      run
+    };
+  })();
+</script>

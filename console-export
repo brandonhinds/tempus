@@ -1,0 +1,129 @@
+Content-Security-Policy warnings 4
+Feature Policy: Skipping unsupported feature name “accelerometer”. dev
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. dev
+Feature Policy: Skipping unsupported feature name “autoplay”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-read”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-write”. dev
+Feature Policy: Skipping unsupported feature name “encrypted-media”. dev
+Feature Policy: Skipping unsupported feature name “gyroscope”. dev
+Feature Policy: Skipping unsupported feature name “magnetometer”. dev
+Feature Policy: Skipping unsupported feature name “midi”. dev
+Feature Policy: Skipping unsupported feature name “payment”. dev
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. dev
+Feature Policy: Skipping unsupported feature name “speaker”. dev
+Feature Policy: Skipping unsupported feature name “sync-xhr”. dev
+Feature Policy: Skipping unsupported feature name “usb”. dev
+Feature Policy: Skipping unsupported feature name “vibrate”. dev
+Feature Policy: Skipping unsupported feature name “vr”. dev
+Feature Policy: Skipping unsupported feature name “accelerometer”. dev
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. dev
+Feature Policy: Skipping unsupported feature name “autoplay”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-read”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-write”. dev
+Feature Policy: Skipping unsupported feature name “encrypted-media”. dev
+Feature Policy: Skipping unsupported feature name “gyroscope”. dev
+Feature Policy: Skipping unsupported feature name “magnetometer”. dev
+Feature Policy: Skipping unsupported feature name “midi”. dev
+Feature Policy: Skipping unsupported feature name “payment”. dev
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. dev
+Feature Policy: Skipping unsupported feature name “speaker”. dev
+Feature Policy: Skipping unsupported feature name “sync-xhr”. dev
+Feature Policy: Skipping unsupported feature name “usb”. dev
+Feature Policy: Skipping unsupported feature name “vibrate”. dev
+Feature Policy: Skipping unsupported feature name “vr”. dev
+Feature Policy: Skipping unsupported feature name “accelerometer”. dev
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. dev
+Feature Policy: Skipping unsupported feature name “autoplay”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-read”. dev
+Feature Policy: Skipping unsupported feature name “clipboard-write”. dev
+Feature Policy: Skipping unsupported feature name “encrypted-media”. dev
+Feature Policy: Skipping unsupported feature name “gyroscope”. dev
+Feature Policy: Skipping unsupported feature name “magnetometer”. dev
+Feature Policy: Skipping unsupported feature name “midi”. dev
+Feature Policy: Skipping unsupported feature name “payment”. dev
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. dev
+Feature Policy: Skipping unsupported feature name “speaker”. dev
+Feature Policy: Skipping unsupported feature name “sync-xhr”. dev
+Feature Policy: Skipping unsupported feature name “usb”. dev
+Feature Policy: Skipping unsupported feature name “vibrate”. dev
+Feature Policy: Skipping unsupported feature name “vr”. dev
+Feature Policy: Skipping unsupported feature name “accelerometer”. dev:17:1
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. dev:17:1
+Feature Policy: Skipping unsupported feature name “autoplay”. dev:17:1
+Feature Policy: Skipping unsupported feature name “clipboard-read”. dev:17:1
+Feature Policy: Skipping unsupported feature name “clipboard-write”. dev:17:1
+Feature Policy: Skipping unsupported feature name “encrypted-media”. dev:17:1
+Feature Policy: Skipping unsupported feature name “gyroscope”. dev:17:1
+Feature Policy: Skipping unsupported feature name “magnetometer”. dev:17:1
+Feature Policy: Skipping unsupported feature name “midi”. dev:17:1
+Feature Policy: Skipping unsupported feature name “payment”. dev:17:1
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. dev:17:1
+Feature Policy: Skipping unsupported feature name “speaker”. dev:17:1
+Feature Policy: Skipping unsupported feature name “sync-xhr”. dev:17:1
+Feature Policy: Skipping unsupported feature name “usb”. dev:17:1
+Feature Policy: Skipping unsupported feature name “vibrate”. dev:17:1
+Feature Policy: Skipping unsupported feature name “vr”. dev:17:1
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “speaker”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vibrate”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “speaker”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vibrate”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “ambient-light-sensor”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “speaker”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vibrate”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “vr”. userCodeAppPanel
+Net state changed from IDLE to BUSY 2033248503-warden_bin_i18n_warden.js:164:504
+[mobile] cache hydrate: restored 
+Object { dates: 12, prefetchedRange: {…} }
+userCodeAppPanel:1720:17
+Partitioned cookie or storage access was provided to “https://n-u5seoq5dzc2qsppma6qpt2kbo3rbrk6dgvtwjky-0lu-script.googleusercontent.com/userCodeAppPanel?createOAuthDialog=true” because it is loaded in the third-party context and dynamic state partitioning is enabled. userCodeAppPanel:1703:21
+dropping postMessage.. was from unexpected window 3496719919-mae_html_user_bin_i18n_mae_html_user__en_gb.js:226:899
+dropping postMessage.. was from unexpected window 3496719919-mae_html_user_bin_i18n_mae_html_user__en_gb.js:226:899
+Net state changed from BUSY to IDLE 2033248503-warden_bin_i18n_warden.js:164:504
+[mobile-shell] base loaded 
+Object { theme: "sierra117", flags: 23, defaultsBasic: 2, defaultsAdvanced: 0 }
+userCodeAppPanel:1192:17
+Net state changed from IDLE to BUSY 2033248503-warden_bin_i18n_warden.js:164:504
+Net state changed from BUSY to IDLE 2033248503-warden_bin_i18n_warden.js:164:504
+[mobile] loadEntriesForDate cache hit 
+Object { dateIso: "2025-12-08", count: 1 }
+userCodeAppPanel:1748:17

@@ -14,6 +14,17 @@
       todayIso
     } = window.entryCore || {};
 
+    const mobileShell = window.mobileShell || {};
+    const run = mobileShell.run || ((fn, payload) => new Promise((resolve) => {
+      const handler = (res) => resolve(res);
+      const runner = google.script.run.withSuccessHandler(handler).withFailureHandler(() => resolve(null));
+      if (typeof runner[fn] === 'function') runner[fn](payload);
+      else resolve(null);
+    }));
+
+    const CACHE_KEY = 'ts_mobile_entry_cache_v1';
+    const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
     const dom = {
       status: document.getElementById('mobile-status'),
       date: document.getElementById('mobile-date'),
@@ -22,7 +33,6 @@
       dateToday: document.getElementById('mobile-date-today'),
       tabManual: document.getElementById('mobile-tab-manual'),
       tabPunch: document.getElementById('mobile-tab-punch'),
-      hourTypeRow: document.getElementById('mobile-hour-type-row'),
       hourType: document.getElementById('mobile-hour-type'),
       contract: document.getElementById('mobile-contract'),
       contractWarning: document.getElementById('mobile-contract-warning'),
@@ -36,22 +46,27 @@
       addPunch: document.getElementById('mobile-add-punch'),
       reset: document.getElementById('mobile-reset'),
       save: document.getElementById('mobile-save'),
-      deleteBtn: document.getElementById('mobile-delete')
+      deleteBtn: document.getElementById('mobile-delete'),
+      desktopLink: document.getElementById('mobile-desktop-link')
     };
 
     const state = {
       currentDate: todayIso(),
       mode: 'manual',
       settings: {},
+      featureFlags: {},
       contracts: [],
       hourTypes: [],
       hourTypeMap: {},
+      entryCache: {},
       entries: [],
       draftHours: '',
       draftPunches: [{ in: '', out: '' }],
       currentEntry: null,
       loading: false,
-      staticLoaded: false
+      staticLoaded: false,
+      prefetchedRange: null,
+      cacheHydrated: false
     };
 
     const setStatus = (message, tone = 'info') => {
@@ -59,19 +74,15 @@
       dom.status.textContent = message || '';
       dom.status.className = 'ts-mobile-row ts-mobile-status';
       if (tone === 'error') dom.status.classList.add('ts-warning');
-      else if (tone === 'success') dom.status.classList.add('ts-note');
       else dom.status.classList.add('ts-note');
     };
 
-    const run = (fn, payload) => new Promise((resolve) => {
-      const handler = (res) => resolve(res);
-      const runner = google.script.run.withSuccessHandler(handler).withFailureHandler(() => resolve(null));
-      if (typeof runner[fn] === 'function') {
-        runner[fn](payload);
-      } else {
-        resolve(null);
-      }
-    });
+    const shiftIso = (iso, deltaDays) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return todayIso();
+      d.setDate(d.getDate() + deltaDays);
+      return d.toISOString().slice(0, 10);
+    };
 
     const defaultHourTypeId = () => {
       if (!state.hourTypes.length) return '';
@@ -90,13 +101,10 @@
         opt.textContent = ht.name || 'Work';
         dom.hourType.appendChild(opt);
       });
-      dom.hourTypeRow.style.display = state.hourTypes.length > 1 ? 'block' : 'none';
       dom.hourType.value = state.currentEntry?.hour_type_id || defaultHourTypeId();
     };
 
-    const validContractsForDate = (dateIso) => {
-      return state.contracts.filter((c) => contractIsValid(c, dateIso));
-    };
+    const validContractsForDate = (dateIso) => state.contracts.filter((c) => contractIsValid(c, dateIso));
 
     const renderContracts = () => {
       if (!dom.contract) return;
@@ -105,27 +113,20 @@
       const requiresContract = !!hourType.requires_contract;
       const valid = validContractsForDate(dateIso);
       dom.contract.innerHTML = '';
-      if (!requiresContract) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = valid.length ? 'No contract (optional)' : 'Not required';
-        dom.contract.appendChild(opt);
-      } else {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = 'Select contract';
-        dom.contract.appendChild(opt);
-      }
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = requiresContract ? 'Select contract' : (valid.length ? 'No contract (optional)' : 'Not required');
+      dom.contract.appendChild(opt);
       valid.forEach((c) => {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = c.name;
-        dom.contract.appendChild(opt);
+        const option = document.createElement('option');
+        option.value = c.id;
+        option.textContent = c.name;
+        dom.contract.appendChild(option);
       });
       const preferred = state.currentEntry ? state.currentEntry.contract_id : '';
       dom.contract.value = preferred || (valid[0] ? valid[0].id : '');
       dom.contract.disabled = requiresContract && !valid.length;
-      dom.contractWarning.style.display = requiresContract && !dom.contract.value ? 'block' : 'none';
+      if (dom.contractWarning) dom.contractWarning.style.display = requiresContract && !dom.contract.value ? 'block' : 'none';
     };
 
     const setMode = (mode) => {
@@ -135,7 +136,7 @@
       if (dom.panelManual) dom.panelManual.style.display = state.mode === 'manual' ? 'block' : 'none';
       if (dom.panelPunch) dom.panelPunch.style.display = state.mode === 'punch' ? 'block' : 'none';
       if (dom.save) dom.save.textContent = state.currentEntry ? 'Update' : 'Save';
-      dom.deleteBtn.style.display = state.currentEntry ? 'inline-flex' : 'none';
+      if (dom.deleteBtn) dom.deleteBtn.style.display = state.currentEntry ? 'inline-flex' : 'none';
     };
 
     const renderPunchList = () => {
@@ -209,11 +210,112 @@
       const summary = summarizePunches(punches);
       if (dom.punchSummary) {
         const rounded = roundDuration(summary.totalMinutes, roundInterval());
-        dom.punchSummary.textContent = punches.length ? `Recorded: ${ (rounded / 60).toFixed(2) }h` : '';
+        dom.punchSummary.textContent = punches.length ? `Recorded: ${(rounded / 60).toFixed(2)}h` : '';
       }
-      dom.punchWarning.style.display = summary.openCount > 0 ? 'block' : 'none';
-      dom.punchWarning.textContent = summary.openCount > 0 ? 'You have an open punch. Add an end time before saving.' : '';
-      dom.punchSuggestion.style.display = 'none';
+      if (dom.punchWarning) {
+        dom.punchWarning.style.display = summary.openCount > 0 ? 'block' : 'none';
+        dom.punchWarning.textContent = summary.openCount > 0 ? 'You have an open punch. Add an end time before saving.' : '';
+      }
+      if (dom.punchSuggestion) dom.punchSuggestion.style.display = 'none';
+    };
+
+    const getCachedEntriesForDate = (dateIso) => state.entryCache[dateIso] || [];
+
+    const storeEntries = (entries) => {
+      (entries || []).forEach((entry) => {
+        if (!entry || !entry.date) return;
+        const existing = getCachedEntriesForDate(entry.date).filter((e) => e.id !== entry.id);
+        existing.push(entry);
+        state.entryCache[entry.date] = existing;
+      });
+      console.log('[mobile] cache store', { dates: (entries || []).map((e) => e.date) });
+      persistCache();
+    };
+
+    const persistCache = () => {
+      try {
+        const payload = {
+          savedAt: Date.now(),
+          entries: state.entryCache,
+          prefetchedRange: state.prefetchedRange,
+          hourTypes: state.hourTypes,
+          contracts: state.contracts
+        };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+        console.log('[mobile] cache persist', {
+          dates: Object.keys(state.entryCache || {}).length,
+          hourTypes: (state.hourTypes || []).length,
+          contracts: (state.contracts || []).length
+        });
+      } catch (err) {
+        console.log('[mobile] cache persist failed', err);
+      }
+    };
+
+    const hydrateCacheFromStorage = () => {
+      if (state.cacheHydrated) return;
+      state.cacheHydrated = true;
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) {
+          console.log('[mobile] cache hydrate: empty');
+          return;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.savedAt) {
+          console.log('[mobile] cache hydrate: invalid');
+          return;
+        }
+        const age = Date.now() - parsed.savedAt;
+        if (age > CACHE_TTL_MS) {
+          console.log('[mobile] cache hydrate: expired', { ageMs: age });
+          return;
+        }
+        state.entryCache = parsed.entries || {};
+        state.prefetchedRange = parsed.prefetchedRange || null;
+        state.hourTypes = Array.isArray(parsed.hourTypes) ? parsed.hourTypes : state.hourTypes;
+        state.hourTypeMap = (state.hourTypes || []).reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+        state.contracts = Array.isArray(parsed.contracts) ? parsed.contracts : state.contracts;
+        console.log('[mobile] cache hydrate: restored', {
+          dates: Object.keys(state.entryCache || {}).length,
+          prefetchedRange: state.prefetchedRange,
+          hourTypes: (state.hourTypes || []).length,
+          contracts: (state.contracts || []).length
+        });
+      } catch (err) {
+        console.log('[mobile] cache hydrate failed', err);
+      }
+    };
+
+    const fetchEntriesRange = async (startDate, endDate) => {
+      console.log('[mobile] fetchEntriesRange', { startDate, endDate });
+      const entries = await run('api_getEntries', { startDate, endDate }) || [];
+      const sanitized = entries.map(sanitizeEntry);
+      storeEntries(sanitized);
+    };
+
+    const prefetchRangeForDate = async (centerIso) => {
+      const startIso = shiftIso(centerIso, -14);
+      const endIso = shiftIso(centerIso, 14);
+      if (state.prefetchedRange && state.prefetchedRange.start <= startIso && state.prefetchedRange.end >= endIso) return;
+      console.log('[mobile] prefetchRangeForDate start', { centerIso, startIso, endIso });
+      await fetchEntriesRange(startIso, endIso);
+      state.prefetchedRange = { start: startIso, end: endIso };
+      console.log('[mobile] prefetchRangeForDate done', state.prefetchedRange);
+      persistCache();
+    };
+
+    const loadEntriesForDate = async (dateIso) => {
+      const cached = getCachedEntriesForDate(dateIso);
+      if (cached.length) {
+        state.entries = cached;
+        console.log('[mobile] loadEntriesForDate cache hit', { dateIso, count: cached.length });
+        return;
+      }
+      console.log('[mobile] loadEntriesForDate cache miss', { dateIso });
+      await fetchEntriesRange(dateIso, dateIso);
+      state.entries = getCachedEntriesForDate(dateIso);
+      console.log('[mobile] loadEntriesForDate loaded', { dateIso, count: state.entries.length });
     };
 
     const pickEntryForHourType = (hourTypeId) => {
@@ -251,36 +353,42 @@
 
     const loadStaticData = async () => {
       if (state.staticLoaded) return true;
-      const [settings, hourTypes, contracts] = await Promise.all([
-        run('api_getSettings'),
-        run('api_getHourTypes'),
-        run('api_getContracts')
-      ]);
-      state.settings = settings || {};
-      state.hourTypes = Array.isArray(hourTypes) ? hourTypes : [];
-      state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
-      state.contracts = Array.isArray(contracts) ? contracts : [];
+      let base = { settings: {}, featureFlags: {} };
+      if (mobileShell.loadBaseState) {
+        base = await mobileShell.loadBaseState();
+      }
+      state.settings = base.settings || {};
+      state.featureFlags = base.featureFlags || {};
+      if (!state.hourTypes.length || !state.contracts.length) {
+        const [hourTypes, contracts] = await Promise.all([
+          state.hourTypes.length ? Promise.resolve(state.hourTypes) : run('api_getHourTypes'),
+          state.contracts.length ? Promise.resolve(state.contracts) : run('api_getContracts')
+        ]);
+        state.hourTypes = Array.isArray(hourTypes) ? hourTypes : [];
+        state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+        state.contracts = Array.isArray(contracts) ? contracts : [];
+        persistCache();
+      } else {
+        state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+      }
       renderHourTypes();
       renderContracts();
       state.staticLoaded = true;
       return true;
     };
 
-    const loadEntriesForDate = async (dateIso) => {
-      const entries = await run('api_getEntries', { startDate: dateIso, endDate: dateIso }) || [];
-      state.entries = entries.map(sanitizeEntry);
-    };
-
     const hydrateDate = async (dateIso) => {
       state.currentDate = dateIso || todayIso();
       if (dom.date) dom.date.value = state.currentDate;
       setStatus('Loading...', 'info');
+      hydrateCacheFromStorage();
       await loadStaticData();
       await loadEntriesForDate(state.currentDate);
       renderHourTypes();
-      const chosen = pickEntryForHourType(dom.hourType.value || defaultHourTypeId());
+      const chosen = pickEntryForHourType(dom.hourType ? dom.hourType.value : defaultHourTypeId());
       hydrateDraftFromEntry(chosen);
       setStatus(state.currentEntry ? 'Loaded existing entry.' : 'Ready to add entry.');
+      prefetchRangeForDate(state.currentDate).catch((err) => console.log('[mobile] prefetch error', err));
     };
 
     const findDuplicate = (payload) => {
@@ -368,7 +476,7 @@
 
     const setLoading = (flag) => {
       state.loading = flag;
-      [dom.save, dom.deleteBtn, dom.reset, dom.addPunch, dom.date, dom.datePrev, dom.dateNext, dom.dateToday].forEach((el) => {
+      [dom.save, dom.deleteBtn, dom.reset, dom.addPunch, dom.datePrev, dom.dateNext, dom.dateToday].forEach((el) => {
         if (!el) return;
         el.disabled = flag;
       });
@@ -390,16 +498,23 @@
       const fn = isUpdate ? 'api_updateEntry' : 'api_addEntry';
       const optimisticId = payload.id || ('temp_' + Date.now());
       const optimistic = sanitizeEntry({ ...payload, id: optimisticId, created_at: isoDateTime(new Date()) });
-      if (!isUpdate) state.entries.push(optimistic);
+      if (!isUpdate) {
+        state.entries.push(optimistic);
+        storeEntries([optimistic]);
+      }
       const res = await run(fn, payload);
       if (res && res.success && res.entry) {
         const confirmed = sanitizeEntry(res.entry);
-        state.entries = state.entries.filter((e) => e.id !== confirmed.id).concat([confirmed]);
+        storeEntries([confirmed]);
+        state.entries = getCachedEntriesForDate(state.currentDate);
         hydrateDraftFromEntry(confirmed);
+        renderCalendar();
         setStatus('Saved.', 'success');
       } else {
         if (!isUpdate) {
-          state.entries = state.entries.filter((e) => e.id !== optimistic.id);
+          const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== optimisticId);
+          state.entryCache[state.currentDate] = filtered;
+          state.entries = filtered;
         }
         setStatus('Save failed. Please try again.', 'error');
       }
@@ -419,11 +534,14 @@
       if (res === null) {
         setStatus('Delete failed. Please try again.', 'error');
       } else {
-        state.entries = state.entries.filter((e) => e.id !== id);
+        const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
+        state.entryCache[state.currentDate] = filtered;
+        state.entries = filtered;
         state.currentEntry = null;
         state.draftHours = '';
         state.draftPunches = [{ in: '', out: '' }];
         hydrateDraftFromEntry(null);
+        renderCalendar();
         setStatus('Deleted.', 'success');
       }
       setLoading(false);
@@ -441,10 +559,7 @@
     };
 
     const changeDate = (deltaDays) => {
-      const current = new Date(state.currentDate);
-      current.setDate(current.getDate() + deltaDays);
-      const iso = current.toISOString().slice(0, 10);
-      hydrateDate(iso);
+      hydrateDate(shiftIso(state.currentDate, deltaDays));
     };
 
     const bindEvents = () => {
@@ -465,11 +580,21 @@
       };
       if (dom.contract) dom.contract.onchange = () => renderContracts();
       if (dom.hours) dom.hours.oninput = () => { state.draftHours = dom.hours.value; };
+      if (dom.desktopLink) {
+        dom.desktopLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          const target = window.location.origin + window.location.pathname;
+          window.location.href = target;
+        });
+      }
     };
 
     const init = async () => {
       bindEvents();
       await hydrateDate(todayIso());
+      if (mobileShell.applyTheme && state.settings && state.settings.theme) {
+        mobileShell.applyTheme(state.settings.theme);
+      }
     };
 
     init();
