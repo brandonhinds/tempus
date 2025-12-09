@@ -750,6 +750,42 @@
   .ts-calendar-total.empty { color: var(--muted); font-weight:500; font-size:16px; }
   .ts-mobile-defaults { display:flex; align-items:center; gap:8px; }
   .ts-mobile-defaults select { flex:1; }
+  .ts-mobile-shell { min-height:100vh; }
+  .ts-mobile-shell .ts-container { max-width:none; margin:0 auto; padding:0 14px 28px; }
+  .ts-mobile-container { width:100%; padding-top:14px; }
+  .ts-mobile-shell .ts-card { max-width:none; width:100%; padding:18px; border-radius:14px; box-shadow: var(--shadow-md); }
+  .ts-mobile-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .ts-mobile-header .ts-note { margin:0; }
+  .ts-mobile-card h2 { margin:4px 0 0; }
+  .ts-mobile-row { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+  .ts-mobile-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; width:100%; }
+  .ts-mobile-col { display:flex; flex-direction:column; gap:6px; }
+  .ts-mobile-date-controls { display:flex; align-items:center; gap:10px; flex-wrap:nowrap; }
+  .ts-mobile-date-controls input { flex:1; min-width:0; text-align:center; padding:12px; font-size:var(--font-size-sm); }
+  .ts-mobile-date-controls button { min-width:48px; height:44px; justify-content:center; }
+  .ts-mobile-panel { margin-bottom:12px; }
+  .ts-mobile-punch-actions { flex-direction:row; align-items:center; gap:12px; }
+  #mobile-punch-summary { margin-left:auto; text-align:right; }
+  .ts-mobile-actions { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; width:100%; margin-top:8px; }
+  .ts-mobile-actions button:nth-child(3) { grid-column:1 / -1; }
+  .ts-mobile-shell input,
+  .ts-mobile-shell select,
+  .ts-mobile-shell textarea { font-size:var(--font-size-base); padding:12px 14px; border-radius:12px; }
+  .ts-mobile-shell button { font-size:var(--font-size-base); padding:12px 14px; border-radius:12px; justify-content:center; min-height:44px; }
+  .ts-mobile-shell button.small { width:auto; padding:10px 12px; font-size:var(--font-size-sm); min-height:40px; }
+  .ts-mobile-actions button { width:100%; }
+  .ts-mobile-shell .ts-tabs { margin-bottom:8px; gap:6px; }
+  .ts-mobile-shell .ts-tab { flex:1; text-align:center; padding:10px 12px; font-size:var(--font-size-sm); }
+  .ts-mobile-shell .ts-tab.active { font-weight:700; }
+  .ts-mobile-shell .ts-punch-row { gap:10px; }
+  .ts-mobile-shell .ts-punch-row .ts-punch-input { width:128px; }
+  .ts-mobile-shell .ts-punch-row button { width:auto; }
+  @media (max-width: 640px) {
+    .ts-mobile-shell { --font-size-base:18px; --font-size-sm:16px; --font-size-lg:22px; --font-size-xl:26px; }
+    .ts-mobile-shell .ts-card { padding:20px; }
+    .ts-mobile-grid { grid-template-columns:1fr; }
+    .ts-mobile-shell button.small { font-size:var(--font-size-sm); }
+  }
   .ts-calendar-context-menu { position:fixed; z-index:2050; background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 30px rgba(15,23,42,0.25); min-width:240px; display:none; padding:8px 0; }
   .ts-calendar-context-header { font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; padding:0 16px 8px; color:var(--muted); text-align:center; }
   .ts-calendar-context-section { padding:8px 0; border-top:1px solid var(--border-subtle, var(--border)); }

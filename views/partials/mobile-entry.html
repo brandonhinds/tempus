@@ -11,9 +11,9 @@
 
   <div class="ts-mobile-row ts-mobile-date-row">
     <label for="mobile-date">Date</label>
-    <div class="ts-mobile-date-controls" style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap;">
+    <div class="ts-mobile-date-controls">
       <button class="ghost small" id="mobile-date-prev" type="button" aria-label="Previous day">‹</button>
-      <input type="date" id="mobile-date" style="flex:1; min-width:0; text-align:center; padding:6px 10px;" />
+      <input type="date" id="mobile-date" />
       <button class="ghost small" id="mobile-date-next" type="button" aria-label="Next day">›</button>
       <button class="ghost small" id="mobile-date-today" type="button">Today</button>
     </div>
@@ -26,12 +26,12 @@
     </div>
   </div>
 
-  <div class="ts-mobile-row" style="display:flex; gap:12px;">
-    <div style="flex:1; display:flex; flex-direction:column;">
+  <div class="ts-mobile-row ts-mobile-grid">
+    <div class="ts-mobile-col">
       <label for="mobile-hour-type">Hour type</label>
       <select id="mobile-hour-type"></select>
     </div>
-    <div style="flex:1; display:flex; flex-direction:column;">
+    <div class="ts-mobile-col">
       <label for="mobile-contract">Contract</label>
       <select id="mobile-contract"></select>
       <p class="ts-warning" id="mobile-contract-warning" style="display:none; margin-top:6px;">Select a valid contract for this date.</p>
@@ -48,15 +48,15 @@
 
   <div id="mobile-panel-punch" class="ts-mobile-panel" style="display:none;" role="tabpanel">
     <div id="mobile-punch-list" class="ts-punch-list ts-punch-list--compact"></div>
-    <div class="ts-mobile-row" style="justify-content:space-between; align-items:center;">
+    <div class="ts-mobile-row ts-mobile-punch-actions">
       <button class="ghost" id="mobile-add-punch" type="button">Add punch</button>
-      <div id="mobile-punch-summary" class="ts-note" style="margin-left:auto;"></div>
+      <div id="mobile-punch-summary" class="ts-note"></div>
     </div>
     <p class="ts-warning" id="mobile-punch-warning" style="display:none; margin-top:6px;"></p>
     <p class="ts-note" id="mobile-punch-suggestion" style="display:none; margin-top:6px;"></p>
   </div>
 
-  <div class="ts-mobile-actions" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; width:100%;">
+  <div class="ts-mobile-actions">
     <button class="ghost" id="mobile-reset" type="button" style="width:100%;">Reset</button>
     <button class="ghost" id="mobile-delete" type="button" style="display:none; width:100%;">Delete</button>
     <button id="mobile-save" type="button" style="width:100%;">Save</button>
