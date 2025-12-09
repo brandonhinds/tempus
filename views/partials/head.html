@@ -750,39 +750,50 @@
   .ts-calendar-total.empty { color: var(--muted); font-weight:500; font-size:16px; }
   .ts-mobile-defaults { display:flex; align-items:center; gap:8px; }
   .ts-mobile-defaults select { flex:1; }
-  .ts-mobile-shell { min-height:100vh; }
-  .ts-mobile-shell .ts-container { max-width:none; margin:0 auto; padding:0 14px 28px; }
-  .ts-mobile-container { width:100%; padding-top:14px; }
-  .ts-mobile-shell .ts-card { max-width:none; width:100%; padding:18px; border-radius:14px; box-shadow: var(--shadow-md); }
-  .ts-mobile-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .ts-mobile-shell {
+    min-height:100vh;
+    --font-size-base: clamp(19px, 3.4vw, 24px);
+    --font-size-sm: clamp(17px, 3vw, 21px);
+    --font-size-lg: clamp(22px, 4vw, 28px);
+    --font-size-xl: clamp(26px, 5vw, 32px);
+  }
+  .ts-mobile-shell .ts-container { max-width:none; margin:0 auto; padding:0 clamp(14px, 4.4vw, 26px) clamp(26px, 6.4vw, 36px); }
+  .ts-mobile-container { width:100%; padding-top:clamp(16px, 3.4vw, 22px); padding-bottom:clamp(22px, 5.4vw, 32px); min-height:100vh; display:flex; flex-direction:column; }
+  .ts-mobile-shell .ts-card { max-width:none; width:100%; padding:clamp(20px, 5vw, 30px); border-radius:clamp(14px, 4vw, 22px); box-shadow: var(--shadow-md); display:flex; flex-direction:column; flex:1; }
+  .ts-mobile-header { display:flex; align-items:flex-start; justify-content:space-between; gap:clamp(12px, 3vw, 18px); margin-bottom:clamp(12px, 2.6vw, 18px); }
   .ts-mobile-header .ts-note { margin:0; }
-  .ts-mobile-card h2 { margin:4px 0 0; }
-  .ts-mobile-row { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
-  .ts-mobile-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; width:100%; }
-  .ts-mobile-col { display:flex; flex-direction:column; gap:6px; }
-  .ts-mobile-date-controls { display:flex; align-items:center; gap:10px; flex-wrap:nowrap; }
-  .ts-mobile-date-controls input { flex:1; min-width:0; text-align:center; padding:12px; font-size:var(--font-size-sm); }
-  .ts-mobile-date-controls button { min-width:48px; height:44px; justify-content:center; }
-  .ts-mobile-panel { margin-bottom:12px; }
-  .ts-mobile-punch-actions { flex-direction:row; align-items:center; gap:12px; }
+  .ts-mobile-card h2 { margin:6px 0 0; }
+  .ts-mobile-row { display:flex; flex-direction:column; gap:clamp(10px, 2.4vw, 14px); margin-bottom:clamp(14px, 3.4vw, 20px); }
+  .ts-mobile-hours { padding:clamp(12px, 3vw, 18px); border:1px solid var(--border); border-radius:clamp(14px, 3.4vw, 18px); background: var(--surface-subtle); }
+  .ts-mobile-hours label { font-size:var(--font-size-lg); font-weight:700; }
+  .ts-mobile-hours input { font-size:var(--font-size-xl); font-weight:700; text-align:center; letter-spacing:-0.01em; }
+  .ts-mobile-hours .ts-note { text-align:center; margin-bottom:0; }
+  .ts-mobile-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:clamp(14px, 3.4vw, 20px); width:100%; }
+  .ts-mobile-col { display:flex; flex-direction:column; gap:clamp(8px, 2vw, 12px); }
+  .ts-mobile-date-controls { display:flex; align-items:center; gap:clamp(12px, 3vw, 18px); flex-wrap:nowrap; }
+  .ts-mobile-date-controls input { flex:1; min-width:0; text-align:center; padding:clamp(16px, 4vw, 22px) clamp(18px, 4.6vw, 24px); font-size:var(--font-size-base); border-radius:clamp(14px, 3.4vw, 18px); }
+  .ts-mobile-date-controls button { min-width:clamp(52px, 13vw, 72px); height:clamp(52px, 13vw, 72px); justify-content:center; font-size:var(--font-size-sm); }
+  .ts-mobile-panel { margin-bottom:clamp(12px, 3vw, 18px); }
+  .ts-mobile-punch-actions { flex-direction:row; align-items:center; gap:clamp(12px, 3vw, 18px); }
   #mobile-punch-summary { margin-left:auto; text-align:right; }
-  .ts-mobile-actions { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; width:100%; margin-top:8px; }
+  #mobile-punch-summary.ts-note { font-size:var(--font-size-lg); font-weight:700; color:var(--text); }
+  .ts-mobile-actions { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:clamp(14px, 3.4vw, 20px); width:100%; margin-top:clamp(10px, 2.4vw, 14px); }
   .ts-mobile-actions button:nth-child(3) { grid-column:1 / -1; }
   .ts-mobile-shell input,
   .ts-mobile-shell select,
-  .ts-mobile-shell textarea { font-size:var(--font-size-base); padding:12px 14px; border-radius:12px; }
-  .ts-mobile-shell button { font-size:var(--font-size-base); padding:12px 14px; border-radius:12px; justify-content:center; min-height:44px; }
-  .ts-mobile-shell button.small { width:auto; padding:10px 12px; font-size:var(--font-size-sm); min-height:40px; }
+  .ts-mobile-shell textarea { font-size:var(--font-size-base); padding:clamp(16px, 4vw, 22px) clamp(18px, 4.6vw, 24px); border-radius:clamp(14px, 3.4vw, 18px); }
+  .ts-mobile-shell button { font-size:var(--font-size-base); padding:clamp(16px, 4vw, 22px) clamp(18px, 4.6vw, 24px); border-radius:clamp(14px, 3.4vw, 18px); justify-content:center; min-height:clamp(56px, 13vw, 76px); }
+  .ts-mobile-shell button.small { width:auto; padding:clamp(14px, 3.6vw, 18px) clamp(16px, 4vw, 20px); font-size:var(--font-size-sm); min-height:clamp(48px, 11vw, 66px); }
   .ts-mobile-actions button { width:100%; }
   .ts-mobile-shell .ts-tabs { margin-bottom:8px; gap:6px; }
-  .ts-mobile-shell .ts-tab { flex:1; text-align:center; padding:10px 12px; font-size:var(--font-size-sm); }
+  .ts-mobile-shell .ts-tab { flex:1; text-align:center; padding:clamp(12px, 3vw, 16px) clamp(14px, 3.4vw, 18px); font-size:var(--font-size-sm); border-radius:clamp(10px, 2.8vw, 14px); }
   .ts-mobile-shell .ts-tab.active { font-weight:700; }
-  .ts-mobile-shell .ts-punch-row { gap:10px; }
-  .ts-mobile-shell .ts-punch-row .ts-punch-input { width:128px; }
+  .ts-mobile-shell .ts-tab.disabled { opacity:0.45; pointer-events:none; cursor:not-allowed; }
+  .ts-mobile-shell .ts-punch-row { gap:clamp(10px, 2.6vw, 16px); }
+  .ts-mobile-shell .ts-punch-row .ts-punch-input { width:clamp(130px, 34vw, 180px); }
   .ts-mobile-shell .ts-punch-row button { width:auto; }
+  .ts-mobile-card .ts-mobile-actions { margin-top:auto; }
   @media (max-width: 640px) {
-    .ts-mobile-shell { --font-size-base:18px; --font-size-sm:16px; --font-size-lg:22px; --font-size-xl:26px; }
-    .ts-mobile-shell .ts-card { padding:20px; }
     .ts-mobile-grid { grid-template-columns:1fr; }
     .ts-mobile-shell button.small { font-size:var(--font-size-sm); }
   }

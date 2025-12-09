@@ -129,14 +129,43 @@
       if (dom.contractWarning) dom.contractWarning.style.display = requiresContract && !dom.contract.value ? 'block' : 'none';
     };
 
-    const setMode = (mode) => {
-      state.mode = mode === 'punch' ? 'punch' : 'manual';
+    const entryTypeForMode = (mode) => (mode === 'punch' ? 'advanced' : 'basic');
+
+    const findExistingForHourType = () => {
+      const hourTypeId = dom.hourType ? (dom.hourType.value || defaultHourTypeId()) : defaultHourTypeId();
+      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === hourTypeId && e.date === state.currentDate) || null;
+    };
+
+    const syncTabAvailability = () => {
+      const entry = findExistingForHourType();
+      const entryType = entry ? (entry.entry_type || 'basic') : null;
+      const basicAllowed = !entryType || entryType === 'basic';
+      const punchAllowed = !entryType || entryType === 'advanced';
+      if (dom.tabManual) dom.tabManual.classList.toggle('disabled', !basicAllowed);
+      if (dom.tabPunch) dom.tabPunch.classList.toggle('disabled', !punchAllowed);
+    };
+
+    const setMode = (mode, opts = {}) => {
+      const targetMode = mode === 'punch' ? 'punch' : 'manual';
+      const targetEntryType = entryTypeForMode(targetMode);
+      if (!opts.force) {
+        const entry = findExistingForHourType();
+        const entryType = entry ? (entry.entry_type || 'basic') : null;
+        if (entryType && entryType !== targetEntryType) {
+          const label = entryType === 'advanced' ? 'Advanced' : 'Basic';
+          setStatus(`This hour type uses ${label} entry. Switch hour type to change input mode.`, 'error');
+          syncTabAvailability();
+          return;
+        }
+      }
+      state.mode = targetMode;
       if (dom.tabManual) dom.tabManual.classList.toggle('active', state.mode === 'manual');
       if (dom.tabPunch) dom.tabPunch.classList.toggle('active', state.mode === 'punch');
       if (dom.panelManual) dom.panelManual.style.display = state.mode === 'manual' ? 'block' : 'none';
       if (dom.panelPunch) dom.panelPunch.style.display = state.mode === 'punch' ? 'block' : 'none';
       if (dom.save) dom.save.textContent = state.currentEntry ? 'Update' : 'Save';
       if (dom.deleteBtn) dom.deleteBtn.style.display = state.currentEntry ? 'inline-flex' : 'none';
+      syncTabAvailability();
     };
 
     const renderPunchList = () => {
@@ -249,12 +278,18 @@
         });
       } catch (err) {
         console.log('[mobile] cache persist failed', err);
+        state.cacheHydrated = false; // retry on next hydration if storage recovers
       }
+    };
+
+    const derivePrefetchedRangeFromCache = () => {
+      const dates = Object.keys(state.entryCache || {}).filter(Boolean).sort();
+      if (!dates.length) return null;
+      return { start: dates[0], end: dates[dates.length - 1] };
     };
 
     const hydrateCacheFromStorage = () => {
       if (state.cacheHydrated) return;
-      state.cacheHydrated = true;
       try {
         const raw = localStorage.getItem(CACHE_KEY);
         if (!raw) {
@@ -269,10 +304,11 @@
         const age = Date.now() - parsed.savedAt;
         if (age > CACHE_TTL_MS) {
           console.log('[mobile] cache hydrate: expired', { ageMs: age });
+          localStorage.removeItem(CACHE_KEY);
           return;
         }
         state.entryCache = parsed.entries || {};
-        state.prefetchedRange = parsed.prefetchedRange || null;
+        state.prefetchedRange = parsed.prefetchedRange || derivePrefetchedRangeFromCache();
         state.hourTypes = Array.isArray(parsed.hourTypes) ? parsed.hourTypes : state.hourTypes;
         state.hourTypeMap = (state.hourTypes || []).reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
         state.contracts = Array.isArray(parsed.contracts) ? parsed.contracts : state.contracts;
@@ -282,9 +318,45 @@
           hourTypes: (state.hourTypes || []).length,
           contracts: (state.contracts || []).length
         });
+        state.cacheHydrated = true;
       } catch (err) {
         console.log('[mobile] cache hydrate failed', err);
       }
+    };
+
+    const hydrateFromDesktopCache = () => {
+      if (state.cacheHydrated) return;
+      try {
+        const raw = localStorage.getItem('ts_cache');
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.entries)) return;
+        const map = {};
+        let minDate = null;
+        let maxDate = null;
+        parsed.entries.map((e) => sanitizeEntry(e)).forEach((entry) => {
+          if (!entry || !entry.date) return;
+          if (!map[entry.date]) map[entry.date] = [];
+          map[entry.date].push(entry);
+          if (!minDate || entry.date < minDate) minDate = entry.date;
+          if (!maxDate || entry.date > maxDate) maxDate = entry.date;
+        });
+        state.entryCache = map;
+        state.hourTypes = Array.isArray(parsed.hourTypes) ? parsed.hourTypes.map((ht) => ({ ...ht })) : state.hourTypes;
+        state.hourTypeMap = (state.hourTypes || []).reduce((m, ht) => { m[ht.id] = ht; return m; }, {});
+        state.contracts = Array.isArray(parsed.contracts) ? parsed.contracts.map((c) => ({ ...c })) : state.contracts;
+        state.prefetchedRange = minDate && maxDate ? { start: minDate, end: maxDate } : derivePrefetchedRangeFromCache();
+        state.cacheHydrated = true;
+        console.log('[mobile] cache hydrate: seeded from desktop cache', {
+          dates: Object.keys(map).length,
+          hourTypes: (state.hourTypes || []).length,
+          contracts: (state.contracts || []).length
+        });
+        persistCache(); // write into mobile cache key for reuse
+      } catch (err) {
+        console.log('[mobile] desktop cache hydrate failed', err);
+      }
+      if (!state.cacheHydrated) state.cacheHydrated = true;
     };
 
     const fetchEntriesRange = async (startDate, endDate) => {
@@ -294,25 +366,40 @@
       storeEntries(sanitized);
     };
 
+    const rangeCovered = (range, startIso, endIso) => {
+      return range && range.start && range.end && range.start <= startIso && range.end >= endIso;
+    };
+
+    const cacheCoverageRange = () => derivePrefetchedRangeFromCache() || state.prefetchedRange || null;
+
     const prefetchRangeForDate = async (centerIso) => {
       const startIso = shiftIso(centerIso, -14);
       const endIso = shiftIso(centerIso, 14);
-      if (state.prefetchedRange && state.prefetchedRange.start <= startIso && state.prefetchedRange.end >= endIso) return;
+      const cachedRange = cacheCoverageRange();
+      if (rangeCovered(cachedRange, startIso, endIso)) {
+        console.log('[mobile] prefetchRangeForDate skip (covered)', { centerIso, startIso, endIso, prefetchedRange: cachedRange });
+        state.prefetchedRange = cachedRange;
+        return;
+      }
       console.log('[mobile] prefetchRangeForDate start', { centerIso, startIso, endIso });
       await fetchEntriesRange(startIso, endIso);
-      state.prefetchedRange = { start: startIso, end: endIso };
+      const currentRange = cacheCoverageRange() || { start: startIso, end: endIso };
+      const mergedStart = currentRange.start && currentRange.start < startIso ? currentRange.start : startIso;
+      const mergedEnd = currentRange.end && currentRange.end > endIso ? currentRange.end : endIso;
+      state.prefetchedRange = { start: mergedStart, end: mergedEnd };
       console.log('[mobile] prefetchRangeForDate done', state.prefetchedRange);
       persistCache();
     };
 
     const loadEntriesForDate = async (dateIso) => {
+      await prefetchRangeForDate(dateIso);
       const cached = getCachedEntriesForDate(dateIso);
       if (cached.length) {
         state.entries = cached;
         console.log('[mobile] loadEntriesForDate cache hit', { dateIso, count: cached.length });
         return;
       }
-      console.log('[mobile] loadEntriesForDate cache miss', { dateIso });
+      console.log('[mobile] loadEntriesForDate cache miss after prefetch', { dateIso });
       await fetchEntriesRange(dateIso, dateIso);
       state.entries = getCachedEntriesForDate(dateIso);
       console.log('[mobile] loadEntriesForDate loaded', { dateIso, count: state.entries.length });
@@ -348,7 +435,7 @@
       renderContracts();
       renderPunchList();
       if (dom.hours) dom.hours.value = state.draftHours;
-      setMode(state.mode);
+      setMode(state.mode, { force: true });
     };
 
     const loadStaticData = async () => {
@@ -382,13 +469,15 @@
       if (dom.date) dom.date.value = state.currentDate;
       setStatus('Loading...', 'info');
       hydrateCacheFromStorage();
+      hydrateFromDesktopCache();
+      if (!state.prefetchedRange) state.prefetchedRange = derivePrefetchedRangeFromCache();
+      if (!state.cacheHydrated) state.cacheHydrated = true;
       await loadStaticData();
       await loadEntriesForDate(state.currentDate);
       renderHourTypes();
       const chosen = pickEntryForHourType(dom.hourType ? dom.hourType.value : defaultHourTypeId());
       hydrateDraftFromEntry(chosen);
       setStatus(state.currentEntry ? 'Loaded existing entry.' : 'Ready to add entry.');
-      prefetchRangeForDate(state.currentDate).catch((err) => console.log('[mobile] prefetch error', err));
     };
 
     const findDuplicate = (payload) => {
@@ -595,6 +684,7 @@
       if (mobileShell.applyTheme && state.settings && state.settings.theme) {
         mobileShell.applyTheme(state.settings.theme);
       }
+      syncTabAvailability();
     };
 
     init();
