@@ -8,6 +8,8 @@ Professional time tracking powered by Google Sheets and Apps Script.
 
 Tempus is a sophisticated timesheet application that runs entirely within Google Sheets. It features a modern web interface for tracking time, managing contracts, generating invoices, and calculating income with full Australian tax and superannuation support.
 
+For detailed usage guides and feature references, see `docs/README.md`.
+
 ## Features
 
 ### Time Tracking
