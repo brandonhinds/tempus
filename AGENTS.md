@@ -26,6 +26,7 @@
   * `core` entries are always visible.
   * Any other value must match the feature-flag identifier that gates those controls; the UI automatically surfaces the section (with its own expand/collapse state) when the flag is enabled.
   Add new settings by inserting a template block with `data-setting-key` in the hidden container and registering it in `SETTINGS_CONFIG` with the correct `section` id rather than manually dropping markup into the visible grid.
+- Whenever you change behaviour, flows, or feature flags, add or update the relevant markdown in `docs/` so user-facing documentation stays current (see `docs/README.md` for the index).
 
 ## Testing Guidelines
 - No automated suite exists. Verify manually in the deployed preview: create, edit, and delete entries, and confirm cached UI state stays in sync after page reloads.

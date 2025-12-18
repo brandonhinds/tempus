@@ -78,6 +78,7 @@ The core system supports two modes:
 - The BAS screen includes a secondary invoice summary table (when invoices are enabled) that lists every invoice in the selected financial year with line counts, hours, and GST-inclusive totals to support reconciliation.
 - Deletion confirmations inside modals must be implemented inline within that modal's content; never spawn a secondary modal on top of an existing modal for confirmation.
 - Settings UI is data-driven: every control lives in the hidden template bank inside `views/partials/settings.html` and is registered in `SETTINGS_CONFIG`. Set `section: 'core'` for always-on settings; to gate a control behind a feature flag, set `section` to that flag's identifier so the renderer automatically creates a collapsible section that appears only when the flag is enabled. Do not hand-code new settings outside this structure.
+- Whenever you change behaviour, flows, or feature flags, add or update the relevant markdown in `docs/` (see `docs/README.md`) so user-facing documentation stays current.
 
 ### Data Handling
 - Dates: ISO format `yyyy-MM-dd`
