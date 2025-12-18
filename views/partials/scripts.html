@@ -20303,7 +20303,8 @@ function getCachedIncomeSummary(monthKey) {
       // Apply punches to advanced form
       ensurePunchDraft();
       if (state.punchDraft) {
-        state.punchDraft.punches = [...(defaultData.punches || [])];
+        // Clone so edits to the entry don't mutate the saved default
+        state.punchDraft.punches = clonePunches(defaultData.punches || []);
         setPunchDraftDirty();
         renderPunchDraft();
         updatePunchSummary();
