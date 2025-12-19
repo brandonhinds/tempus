@@ -1,5 +1,17 @@
 var TIMESHEET1_DATE_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
 var TIMESHEET1_MONTH_NAMES = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+var TIMESHEET1_IMPORT_TIME_BUDGET_MS = (5 * 60 * 1000) - 30000; // leave buffer under Apps Script 6 minute cap
+
+function buildPunchesForDuration(durationMinutes) {
+  var mins = Math.max(0, Math.round(Number(durationMinutes) || 0));
+  if (!mins) return [];
+  var capped = Math.min(mins, (24 * 60) - 1); // keep within a single day
+  var hours = Math.floor(capped / 60);
+  var minutesPart = capped % 60;
+  var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+  var end = pad(hours) + ':' + pad(minutesPart);
+  return [{ 'in': '00:00', out: end }];
+}
 
 function normalizeSheetDate(value) {
   if (!value && value !== 0) return null;
@@ -173,6 +185,48 @@ function contractsCoveringAllDates(contracts, dates) {
   });
 }
 
+function buildImportWorkItemsFromPreview(preview, contractSelections, hourTypeMap) {
+  var selections = contractSelections || {};
+  var work = [];
+  (preview.months || []).forEach(function(month) {
+    (month.entries || []).forEach(function(entry) {
+      var hourTypeId = entry.hourTypeId;
+      var hourType = hourTypeMap[hourTypeId];
+      var contractId = '';
+      if (hourType && hourType.requires_contract) {
+        var selectionKey = month.month + '|' + hourTypeId;
+        contractId = selections[selectionKey] || '';
+      }
+      work.push({
+        month: month.month,
+        sheetName: month.sheetName || '',
+        date: entry.date,
+        hourTypeId: hourTypeId,
+        hourTypeName: hourType ? hourType.name : hourTypeId,
+        contractId: contractId,
+        durationMinutes: Math.round(Number(entry.hours || 0) * 60)
+      });
+    });
+  });
+  return work;
+}
+
+function mergeImportSummaryMap(map, workItem) {
+  var key = (workItem.month || '') + '|' + workItem.hourTypeId;
+  if (!map[key]) {
+    map[key] = {
+      hourTypeId: workItem.hourTypeId,
+      hourTypeName: workItem.hourTypeName,
+      entries: 0,
+      minutes: 0,
+      month: workItem.month || '',
+      sheetName: workItem.sheetName || ''
+    };
+  }
+  map[key].entries += 1;
+  map[key].minutes += workItem.durationMinutes;
+}
+
 function buildTimesheet1Preview(payload, dryRun) {
   var spreadsheetId = payload && payload.spreadsheetId;
   if (!spreadsheetId) throw new Error('Spreadsheet ID is required');
@@ -201,7 +255,8 @@ function buildTimesheet1Preview(payload, dryRun) {
   var existingEntries = api_getEntries({});
   var existingIndex = existingEntries.reduce(function(acc, entry) {
     var hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-    var key = entry.date + '|' + hourTypeId;
+    var contractId = entry.contract_id || '';
+    var key = entry.date + '|' + hourTypeId + '|' + contractId;
     acc[key] = true;
     return acc;
   }, {});
@@ -280,7 +335,12 @@ function buildTimesheet1Preview(payload, dryRun) {
 
       var keyCount = 0;
       list.forEach(function(e) {
-        var key = e.date + '|' + hourTypeId;
+        var contractId = '';
+        if (hourType && hourType.requires_contract) {
+          var selectionKey = monthKey + '|' + hourTypeId;
+          contractId = (payload && payload.contractSelections && payload.contractSelections[selectionKey]) || '';
+        }
+        var key = e.date + '|' + hourTypeId + '|' + contractId;
         if (existingIndex[key]) {
           totalDuplicates += 1;
           duplicateExamples.push({ date: e.date, hourTypeId: hourTypeId, hourTypeName: label });
@@ -372,107 +432,153 @@ function api_previewTimesheet1Import(payload) {
 }
 
 function api_runTimesheet1Import(payload) {
-  var preview;
-  try {
-    preview = buildTimesheet1Preview(payload || {}, false);
-  } catch (e) {
-    Logger.log('[Timesheet1] Import preview error: %s', e && e.message ? e.message : e);
-    return { success: false, error: 'preview_failed', message: e && e.message ? e.message : 'Import preview failed' };
-  }
-
-  // Abort if there are unmapped hour types or missing contract selections
-  var blockingMissing = [];
-  var blockingUnmapped = [];
-
-  preview.months.forEach(function(month) {
-    if (month.unmapped && month.unmapped.length) {
-      blockingUnmapped = blockingUnmapped.concat(month.unmapped);
-    }
-    if (month.missingContracts && month.missingContracts.length) {
-      blockingMissing = blockingMissing.concat(month.missingContracts);
-    }
-    if (month.needsContractSelection && month.needsContractSelection.length) {
-      blockingMissing = blockingMissing.concat(month.needsContractSelection);
-    }
-  });
-
-  if (blockingUnmapped.length) {
-    return {
-      success: false,
-      error: 'unmapped_hour_types',
-      details: blockingUnmapped
-    };
-  }
-  if (blockingMissing.length) {
-    return {
-      success: false,
-      error: 'missing_contract_selection',
-      details: blockingMissing
-    };
-  }
-
+  var start = Date.now();
   var hourTypeMap = {};
   api_getHourTypes().forEach(function(ht) { hourTypeMap[ht.id] = ht; });
+
+  var spreadsheetId = payload && payload.spreadsheetId;
+  var skipPublicHolidays = !!(payload && payload.skipPublicHolidays);
+  var contractSelections = (payload && payload.contractSelections) || {};
+  var mapping = (payload && payload.hourTypeMapping) || {};
+  var continuation = payload && payload.continuation;
+  var preview = null;
+  var workItems = [];
+  var progress = {
+    imported: 0,
+    skippedDuplicates: 0,
+    importSummary: {}
+  };
+
+  if (continuation) {
+    Logger.log('[Timesheet1] Import continuation received with %s work items', (continuation.workItems || []).length);
+    workItems = continuation.workItems || [];
+    contractSelections = continuation.contractSelections || contractSelections;
+    mapping = continuation.hourTypeMapping || mapping;
+    spreadsheetId = continuation.spreadsheetId || spreadsheetId;
+    skipPublicHolidays = continuation.skipPublicHolidays != null ? !!continuation.skipPublicHolidays : skipPublicHolidays;
+    if (continuation.progress) {
+      progress.imported = continuation.progress.imported || 0;
+      progress.skippedDuplicates = continuation.progress.skippedDuplicates || 0;
+      progress.importSummary = continuation.progress.importSummary || {};
+    }
+    preview = continuation.preview || payload.preview || null;
+  } else {
+    var providedPreview = payload && payload.preview;
+    var canReusePreview = providedPreview && providedPreview.success && providedPreview.spreadsheetId === spreadsheetId && providedPreview.skipPublicHolidays === skipPublicHolidays;
+    try {
+      preview = canReusePreview ? providedPreview : buildTimesheet1Preview(payload || {}, false);
+      if (preview) {
+        preview.dryRun = false;
+        preview.success = true;
+      }
+    } catch (e) {
+      Logger.log('[Timesheet1] Import preview error: %s', e && e.message ? e.message : e);
+      return { success: false, error: 'preview_failed', message: e && e.message ? e.message : 'Import preview failed' };
+    }
+
+    // Abort if there are unmapped hour types or missing contract selections
+    var blockingMissing = [];
+    var blockingUnmapped = [];
+
+    (preview.months || []).forEach(function(month) {
+      if (month.unmapped && month.unmapped.length) {
+        blockingUnmapped = blockingUnmapped.concat(month.unmapped);
+      }
+      if (month.missingContracts && month.missingContracts.length) {
+        blockingMissing = blockingMissing.concat(month.missingContracts);
+      }
+      if (month.needsContractSelection && month.needsContractSelection.length) {
+        blockingMissing = blockingMissing.concat(month.needsContractSelection);
+      }
+    });
+
+    if (blockingUnmapped.length) {
+      return {
+        success: false,
+        error: 'unmapped_hour_types',
+        details: blockingUnmapped
+      };
+    }
+    if (blockingMissing.length) {
+      return {
+        success: false,
+        error: 'missing_contract_selection',
+        details: blockingMissing
+      };
+    }
+
+    workItems = buildImportWorkItemsFromPreview(preview, contractSelections, hourTypeMap);
+  }
 
   var existingEntries = api_getEntries({});
   var existingIndex = existingEntries.reduce(function(acc, entry) {
     var hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-    var key = entry.date + '|' + hourTypeId;
+    var contractId = entry.contract_id || '';
+    var key = entry.date + '|' + hourTypeId + '|' + contractId;
     acc[key] = true;
     return acc;
   }, {});
 
-  var imported = 0;
-  var skippedDuplicates = 0;
-  var importSummary = {};
-
-  preview.months.forEach(function(month) {
-    (month.entries || []).forEach(function(entry) {
-      var hourTypeId = entry.hourTypeId;
-      var hourType = hourTypeMap[hourTypeId];
-      var selectionKey = month.month + '|' + hourTypeId;
-      var contractId = '';
-      if (hourType && hourType.requires_contract) {
-        contractId = (payload && payload.contractSelections && payload.contractSelections[selectionKey]) || '';
-      }
-
-      var key = entry.date + '|' + hourTypeId;
-      if (existingIndex[key]) {
-        skippedDuplicates += 1;
-        return;
-      }
-
-      var durationMinutes = Math.round(Number(entry.hours || 0) * 60);
-      var res = api_addEntry({
-        date: entry.date,
-        duration_minutes: durationMinutes,
-        contract_id: contractId,
-        hour_type_id: hourTypeId,
-        entry_type: 'basic'
-      });
-      if (res && res.success && res.entry) {
-        existingIndex[key] = true;
-        imported += 1;
-        if (!importSummary[hourTypeId]) {
-          importSummary[hourTypeId] = {
-            hourTypeId: hourTypeId,
-            hourTypeName: hourType ? hourType.name : hourTypeId,
-            entries: 0,
-            minutes: 0,
-            month: month.month || '',
-            sheetName: month.sheetName || ''
-          };
-        }
-        importSummary[hourTypeId].entries += 1;
-        importSummary[hourTypeId].minutes += durationMinutes;
-      }
+  var batchEntries = [];
+  var remaining = [];
+  for (var i = 0; i < workItems.length; i++) {
+    if ((Date.now() - start) > TIMESHEET1_IMPORT_TIME_BUDGET_MS) {
+      remaining = workItems.slice(i);
+      break;
+    }
+    var item = workItems[i];
+    var key = item.date + '|' + item.hourTypeId + '|' + (item.contractId || '');
+    if (existingIndex[key]) {
+      progress.skippedDuplicates += 1;
+      continue;
+    }
+    existingIndex[key] = true;
+    batchEntries.push({
+      date: item.date,
+      duration_minutes: item.durationMinutes,
+      contract_id: item.contractId || '',
+      hour_type_id: item.hourTypeId,
+      entry_type: 'basic',
+      punches: buildPunchesForDuration(item.durationMinutes)
     });
-  });
+    mergeImportSummaryMap(progress.importSummary, item);
+  }
 
-  Logger.log('[Timesheet1] Import finished: imported=%s skippedDuplicates=%s', imported, skippedDuplicates);
-  preview.imported = imported;
-  preview.skippedDuplicates = skippedDuplicates;
-  preview.importSummary = Object.keys(importSummary).map(function(key) { return importSummary[key]; });
-  preview.success = true;
-  return preview;
+  if (batchEntries.length) {
+    var bulkRes = api_addEntriesBulk({ entries: batchEntries });
+    progress.imported += bulkRes && bulkRes.added ? bulkRes.added : 0;
+    progress.skippedDuplicates += bulkRes && bulkRes.duplicates ? bulkRes.duplicates : 0;
+  }
+
+  var response = {
+    success: true,
+    imported: progress.imported,
+    skippedDuplicates: progress.skippedDuplicates,
+    importSummary: Object.keys(progress.importSummary).map(function(key) { return progress.importSummary[key]; }),
+    preview: preview
+  };
+
+  if (remaining.length) {
+    response.partial = true;
+    response.continuation = {
+      spreadsheetId: spreadsheetId,
+      skipPublicHolidays: skipPublicHolidays,
+      workItems: remaining,
+      contractSelections: contractSelections,
+      hourTypeMapping: mapping,
+      progress: progress,
+      preview: preview
+    };
+  } else {
+    Logger.log('[Timesheet1] Import finished: imported=%s skippedDuplicates=%s', progress.imported, progress.skippedDuplicates);
+    if (preview) {
+      preview.imported = progress.imported;
+      preview.skippedDuplicates = progress.skippedDuplicates;
+      preview.importSummary = response.importSummary;
+      preview.success = true;
+      preview.dryRun = false;
+    }
+  }
+
+  return response;
 }

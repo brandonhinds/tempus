@@ -405,6 +405,8 @@ function syncRecurringTimeEntries(options) {
     // Ignore hour type failures; default behaviour will treat schedules as income-generating
   }
   var existingIndex = buildRecurringEntryIndex();
+  var batchEntries = [];
+  var batchMeta = [];
   var totalCreated = 0;
   var summaries = [];
   var todayIso = toIsoDate(new Date());
@@ -414,7 +416,9 @@ function syncRecurringTimeEntries(options) {
       hourTypes: hourTypeMap,
       existingIndex: existingIndex,
       horizonDays: horizon,
-      todayIso: todayIso
+      todayIso: todayIso,
+      batchEntries: batchEntries,
+      batchMeta: batchMeta
     });
     totalCreated += summary.createdEntries;
     summaries.push(summary.summary);
@@ -422,7 +426,20 @@ function syncRecurringTimeEntries(options) {
       persistRecurringEntry(entry);
     }
   });
-  if (totalCreated > 0) {
+  if (batchEntries.length) {
+    var bulkRes = api_addEntriesBulk({ entries: batchEntries });
+    var addedEntries = bulkRes && bulkRes.entries ? bulkRes.entries : [];
+    var addedCount = bulkRes && bulkRes.added ? bulkRes.added : 0;
+    totalCreated += addedCount;
+    // Update existingIndex with created recurrence/date combos
+    for (var i = 0; i < addedEntries.length && i < batchMeta.length; i++) {
+      var meta = batchMeta[i];
+      if (!meta) continue;
+      var recKey = meta.recurrenceId + '__' + meta.date;
+      existingIndex[recKey] = true;
+    }
+    cacheClearPrefix(ENTRY_CACHE_PREFIX);
+  } else if (totalCreated > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
   return {
@@ -556,7 +573,7 @@ function processRecurringEntry(entry, context) {
       if (shouldGenerate) {
         var key = entry.id + '__' + dateIso;
         if (!context.existingIndex[key]) {
-          var created = createRecurringEntryInstance(entry, dateIso);
+          var created = createRecurringEntryInstance(entry, dateIso, context);
           if (created) {
             context.existingIndex[key] = true;
             summary.createdEntries += 1;
@@ -676,7 +693,7 @@ function incomeWarningText(startBound, todayIso, generatedUntil, isIncome) {
   return 'Income-generating schedules only create entries from ' + todayIso + ' onward (no backfill).';
 }
 
-function createRecurringEntryInstance(entry, dateIso) {
+function createRecurringEntryInstance(entry, dateIso, context) {
   try {
     var payload = {
       date: dateIso,
@@ -687,6 +704,11 @@ function createRecurringEntryInstance(entry, dateIso) {
       punches: buildBasicPunches(entry.duration_minutes),
       recurrence_id: entry.id
     };
+    if (context && context.batchEntries && context.batchMeta) {
+      context.batchEntries.push(payload);
+      context.batchMeta.push({ recurrenceId: entry.id, date: dateIso });
+      return true;
+    }
     api_addEntry(payload);
     return true;
   } catch (e) {

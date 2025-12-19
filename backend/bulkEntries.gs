@@ -310,7 +310,9 @@ function syncBulkTimeEntries(options) {
     totalUpdates: 0,
     totalDeletes: 0,
     existingEntries: existingEntryCache,
-    roundInterval: roundInterval
+    roundInterval: roundInterval,
+    batchCreates: [],
+    batchMeta: []
   };
   var summaries = [];
   entries.forEach(function(entry) {
@@ -320,7 +322,24 @@ function syncBulkTimeEntries(options) {
       persistBulkEntry(entry);
     }
   });
-  if (context.totalCreates > 0 || context.totalUpdates > 0 || context.totalDeletes > 0) {
+  if (context.batchCreates.length) {
+    var bulkRes = api_addEntriesBulk({ entries: context.batchCreates });
+    var created = bulkRes && bulkRes.entries ? bulkRes.entries : [];
+    for (var c = 0; c < created.length && c < context.batchMeta.length; c++) {
+      var meta = context.batchMeta[c];
+      var item = created[c];
+      if (!meta || !item) continue;
+      if (!context.existingEntries[meta.recurrenceId]) context.existingEntries[meta.recurrenceId] = {};
+      context.existingEntries[meta.recurrenceId][meta.date] = {
+        id: item.id,
+        duration_minutes: meta.durationMinutes,
+        contract_id: meta.contractId,
+        hour_type_id: meta.hourTypeId || ''
+      };
+    }
+    context.totalCreates += bulkRes && bulkRes.added ? bulkRes.added : 0;
+    cacheClearPrefix(ENTRY_CACHE_PREFIX);
+  } else if (context.totalCreates > 0 || context.totalUpdates > 0 || context.totalDeletes > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
   var responseEntries = filterId ? allEntries : entries;
@@ -406,16 +425,17 @@ function processBulkEntry(entry, context) {
     if (minutesForDay <= 0) return;
     var existing = existingEntries[dateIso];
     if (!existing) {
-      var createdEntry = createBulkEntryInstance(entry, dateIso, minutesForDay);
+      var createdEntry = createBulkEntryInstance(entry, dateIso, minutesForDay, context);
       if (createdEntry) {
         summary.created += 1;
-        context.totalCreates += 1;
-        existingEntries[dateIso] = {
-          id: createdEntry.id,
-          duration_minutes: minutesForDay,
-          contract_id: entry.contract_id,
-          hour_type_id: entry.hour_type_id || ''
-        };
+        if (createdEntry.id) {
+          existingEntries[dateIso] = {
+            id: createdEntry.id,
+            duration_minutes: minutesForDay,
+            contract_id: entry.contract_id,
+            hour_type_id: entry.hour_type_id || ''
+          };
+        }
       }
       return;
     }
@@ -630,7 +650,7 @@ function buildBulkExistingEntryCache() {
   return map;
 }
 
-function createBulkEntryInstance(entry, dateIso, durationMinutes) {
+function createBulkEntryInstance(entry, dateIso, durationMinutes, context) {
   try {
     var minutes = durationMinutes != null ? durationMinutes : entry.duration_minutes;
     if (!minutes || minutes <= 0) return null;
@@ -643,8 +663,19 @@ function createBulkEntryInstance(entry, dateIso, durationMinutes) {
       punches: buildBasicPunches(minutes),
       recurrence_id: entry.id
     };
+    if (context && context.batchCreates && context.batchMeta) {
+      context.batchCreates.push(payload);
+      context.batchMeta.push({
+        recurrenceId: entry.id,
+        date: dateIso,
+        durationMinutes: minutes,
+        contractId: entry.contract_id,
+        hourTypeId: entry.hour_type_id || ''
+      });
+      return payload;
+    }
     var res = api_addEntry(payload);
-    return res && res.entry ? res.entry : null;
+    return res && res.entry ? res.entry : payload;
   } catch (e) {
     Logger.log('Failed to create bulk entry for ' + dateIso + ': ' + e.message);
     return null;

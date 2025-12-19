@@ -12917,7 +12917,7 @@ function getCachedIncomeSummary(monthKey) {
     const value = select.value;
     timesheet1State.mapping[label] = value || '';
     if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
-    setTimesheet1Status('Mapping updated. Run preview again to refresh totals.', 'warn');
+    setTimesheet1Status('Mapping changed. Re-run Preview so duplicates, contracts, and totals use your new mapping.', 'warn');
   }
 
   function renderTimesheet1Mapping(mapping) {
@@ -12977,7 +12977,7 @@ function getCachedIncomeSummary(monthKey) {
     const value = select.value;
     timesheet1State.contractSelections[selectionKey] = value || '';
     if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
-    setTimesheet1Status('Contract selection changed. Run preview again to refresh totals.', 'warn');
+    setTimesheet1Status('Contract selection changed. Re-run Preview so validation and totals match your selection.', 'warn');
   }
 
   function renderTimesheet1Contracts(months) {
@@ -13191,6 +13191,16 @@ function getCachedIncomeSummary(monthKey) {
       .api_previewTimesheet1Import(payload);
   }
 
+  function hideTimesheet1ContentSections() {
+    if (timesheet1MappingSection) timesheet1MappingSection.style.display = 'none';
+    if (timesheet1ContractSection) timesheet1ContractSection.style.display = 'none';
+    if (timesheet1PreviewSection) timesheet1PreviewSection.style.display = 'none';
+    if (timesheet1ImportSummary) timesheet1ImportSummary.style.display = 'none';
+    if (timesheet1PreviewSummary) timesheet1PreviewSummary.innerHTML = '';
+    if (timesheet1MappingList) timesheet1MappingList.innerHTML = '';
+    if (timesheet1ContractList) timesheet1ContractList.innerHTML = '';
+  }
+
   function runTimesheet1Import() {
     if (!timesheet1State.preview || !timesheet1State.preview.success) {
       setTimesheet1Status('Run a preview before importing.', 'error');
@@ -13198,58 +13208,131 @@ function getCachedIncomeSummary(monthKey) {
     }
     if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
     setTimesheet1Status('Importing entries...', 'warn');
+    hideTimesheet1ContentSections();
+
+    const importProgress = {
+      imported: 0,
+      skippedDuplicates: 0,
+      summaryMap: {}
+    };
+
+    const mergeImportSummaryIntoMap = (map, list) => {
+      (list || []).forEach((item) => {
+        if (!item) return;
+        const key = `${item.month || ''}|${item.hourTypeId || item.hour_type_id || item.hour_type || ''}`;
+        if (!map[key]) {
+          map[key] = { ...item, entries: item.entries || 0, minutes: item.minutes || 0 };
+        } else {
+          map[key].entries += item.entries || 0;
+          map[key].minutes += item.minutes || 0;
+        }
+      });
+    };
+
+    const summaryMapToList = (map) => Object.keys(map || {}).map((k) => map[k]);
+
+    const renderFinal = (res) => {
+      const finalRes = {
+        ...res,
+        imported: importProgress.imported,
+        skippedDuplicates: importProgress.skippedDuplicates,
+        importSummary: summaryMapToList(importProgress.summaryMap)
+      };
+      timesheet1State.preview = finalRes.preview || timesheet1State.preview;
+      renderTimesheet1Preview(timesheet1State.preview || finalRes);
+      if (timesheet1ImportSummary && finalRes.importSummary && finalRes.importSummary.length) {
+        const byMonth = {};
+        (finalRes.importSummary || []).forEach((item) => {
+          const key = item.month || 'unknown';
+          if (!byMonth[key]) byMonth[key] = [];
+          byMonth[key].push(item);
+        });
+
+        const monthBlocks = Object.keys(byMonth).map((monthKey) => {
+          const label = formatMonthLabel(monthKey, monthKey === 'unknown' ? 'Imported entries' : monthKey);
+          const lines = byMonth[monthKey].map((item) => {
+            const hours = (item.minutes || 0) / 60;
+            return `<div>${item.hourTypeName}, ${hours.toFixed(2)} hrs (${item.entries} entries)</div>`;
+          }).join('');
+          return `
+            <div class="ts-panel" style="padding:12px;">
+              <div style="font-weight:700; margin-bottom:6px;">${label}</div>
+              ${lines}
+            </div>
+          `;
+        }).join('');
+
+        timesheet1ImportSummary.innerHTML = `
+          <div style="font-weight:700; margin-bottom:6px;">Import complete</div>
+          ${monthBlocks}
+        `;
+        timesheet1ImportSummary.style.display = 'block';
+      }
+      refreshEntriesFromServer(() => {
+        markAllIncomeSummariesDirty();
+        renderIncomeSummary();
+        onCalendarMonthChange();
+        if (state.annualData) {
+          loadAnnualData();
+        }
+        setStatus(`Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates).`, 'success');
+      });
+      setTimesheet1Status(`Import complete. Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates). It is recommended you browser refresh Tempus to ensure the new data is synced.`, 'success');
+    };
+
+    const handleSuccess = (res) => {
+      console.log('[Timesheet1] Import response', res);
+      if (!res || !res.success) {
+        const message = res && (res.message || res.error) ? `Import failed: ${res.message || res.error}` : 'Import failed. Resolve blocking issues and try again.';
+        setTimesheet1Status(message, 'error');
+        return;
+      }
+
+      if (res.preview) {
+        timesheet1State.preview = res.preview;
+      }
+
+      importProgress.imported += res.imported || 0;
+      importProgress.skippedDuplicates += res.skippedDuplicates || 0;
+      mergeImportSummaryIntoMap(importProgress.summaryMap, res.importSummary || []);
+
+      if (res.partial && res.continuation) {
+        const nextPayload = {
+          continuation: {
+            ...res.continuation,
+            progress: {
+              imported: importProgress.imported,
+              skippedDuplicates: importProgress.skippedDuplicates,
+              importSummary: importProgress.summaryMap
+            }
+          }
+        };
+        const remainingCount = (res.continuation.workItems || []).length;
+        setTimesheet1Status(`Importing entries... (${importProgress.imported} added so far, ${importProgress.skippedDuplicates} duplicates skipped; ${remainingCount} remaining)`, 'warn');
+        google.script.run
+          .withSuccessHandler(handleSuccess)
+          .withFailureHandler((err) => {
+            console.log('[Timesheet1] Import failed', err);
+            const message = err && err.message ? err.message : 'Import failed. Resolve blocking issues and try again.';
+            setTimesheet1Status(message, 'error');
+          })
+          .api_runTimesheet1Import(nextPayload);
+        return;
+      }
+
+      renderFinal(res);
+    };
 
     const payload = {
       spreadsheetId: timesheet1State.preview.spreadsheetId,
       hourTypeMapping: timesheet1State.mapping,
       contractSelections: timesheet1State.contractSelections,
-      skipPublicHolidays: timesheet1State.skipPublicHolidays
+      skipPublicHolidays: timesheet1State.skipPublicHolidays,
+      preview: timesheet1State.preview
     };
 
     google.script.run
-      .withSuccessHandler((res) => {
-        console.log('[Timesheet1] Import response', res);
-        if (res && res.success) {
-          timesheet1State.preview = res;
-          renderTimesheet1Preview(res);
-          if (timesheet1ImportSummary && res.importSummary && res.importSummary.length) {
-            // Group summary by month if provided, otherwise show flat list
-            const byMonth = {};
-            (res.importSummary || []).forEach((item) => {
-              const key = item.month || 'unknown';
-              if (!byMonth[key]) byMonth[key] = [];
-              byMonth[key].push(item);
-            });
-
-            const monthBlocks = Object.keys(byMonth).map((monthKey) => {
-              const label = formatMonthLabel(monthKey, monthKey === 'unknown' ? 'Imported entries' : monthKey);
-              const lines = byMonth[monthKey].map((item) => {
-                const hours = (item.minutes || 0) / 60;
-                return `<div>${item.hourTypeName}, ${hours.toFixed(2)} hrs (${item.entries} entries)</div>`;
-              }).join('');
-              return `
-                <div class="ts-panel" style="padding:12px;">
-                  <div style="font-weight:700; margin-bottom:6px;">${label}</div>
-                  ${lines}
-                </div>
-              `;
-            }).join('');
-
-            timesheet1ImportSummary.innerHTML = `
-              <div style="font-weight:700; margin-bottom:6px;">Import complete</div>
-              ${monthBlocks}
-            `;
-            timesheet1ImportSummary.style.display = 'block';
-          }
-          refreshEntriesFromServer(() => {
-            setStatus(`Imported ${res.imported || 0} entries (skipped ${res.skippedDuplicates || 0} duplicates).`, 'success');
-          });
-          setTimesheet1Status(`Import complete. Imported ${res.imported || 0} entries (skipped ${res.skippedDuplicates || 0} duplicates). It is recommended you browser refresh Tempus to ensure the new data is synced.`, 'success');
-        } else {
-          const message = res && (res.message || res.error) ? `Import failed: ${res.message || res.error}` : 'Import failed. Resolve blocking issues and try again.';
-          setTimesheet1Status(message, 'error');
-        }
-      })
+      .withSuccessHandler(handleSuccess)
       .withFailureHandler((err) => {
         console.log('[Timesheet1] Import failed', err);
         const message = err && err.message ? err.message : 'Import failed. Resolve blocking issues and try again.';
@@ -22226,8 +22309,14 @@ function getCachedIncomeSummary(monthKey) {
         const sanitized = (entries || []).map(sanitizeEntry);
         mergeEntriesWithServerEntries(sanitized);
         state.entriesLoaded = true;
+        markAllIncomeSummariesDirty();
+        // Force annual data to rebuild on next load
+        state.annualData = null;
         saveCache();
         renderEntries();
+        if (state.annualData) {
+          loadAnnualData();
+        }
         if (typeof onComplete === 'function') onComplete();
       })
       .withFailureHandler(() => {
