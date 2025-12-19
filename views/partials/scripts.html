@@ -3356,8 +3356,11 @@ function loadAnnualData() {
     const contractFilter = Array.isArray(contractIds) && contractIds.length ? new Set(contractIds.map(String)) : null;
     const monthEntries = entriesForMonth(year, month);
     const filteredEntries = contractFilter
-      ? monthEntries.filter((entry) => contractFilter.has(String(entry.contract_id)))
+      ? monthEntries.filter((entry) => contractFilter.has(String(entry.contract_id || '')))
       : monthEntries.slice();
+    if (contractFilter) {
+      // contract filter applied; filteredEntries already scoped
+    }
     const periodStart = startOfDay(new Date(year, month, 1));
     const periodEnd = startOfDay(new Date(year, month + 1, 0));
     const periodStartIso = periodStart.toISOString().substring(0, 10);
@@ -3728,6 +3731,10 @@ function loadAnnualData() {
     renderAnnualContractFilter();
 
     // Load data
+    // Always clear annual data when switching year/year type to avoid stale filters
+    state.annualData = null;
+    // Ensure filtered contracts reset to relevant set for this year
+    state.annualFilteredContracts = [];
     loadAnnualData();
   }
 
@@ -3744,15 +3751,23 @@ function loadAnnualData() {
       yearEnd = new Date(state.annualCurrentYear, 11, 31, 23, 59, 59); // Dec 31st
     }
 
-    // Filter contracts that overlap with the selected year
+    // Filter contracts that overlap with the selected year OR are referenced by entries in that range
+    const entryContractIds = new Set();
+    (state.entries || []).forEach((entry) => {
+      if (!entry || !entry.contract_id || !entry.date) return;
+      const entryDate = new Date(entry.date);
+      if (entryDate >= yearStart && entryDate <= yearEnd) {
+        entryContractIds.add(String(entry.contract_id));
+      }
+    });
+
     const relevantContracts = state.contracts.filter(c => {
       if (!c || !c.id || !c.name) return false;
-
       const contractStart = c.start_date ? new Date(c.start_date) : new Date(0);
       const contractEnd = c.end_date ? new Date(c.end_date) : new Date(9999, 11, 31);
-
-      // Contract overlaps if it starts before year ends AND ends after year starts
-      return contractStart <= yearEnd && contractEnd >= yearStart;
+      const overlaps = contractStart <= yearEnd && contractEnd >= yearStart;
+      const referenced = entryContractIds.has(String(c.id));
+      return overlaps || referenced;
     });
 
     if (relevantContracts.length <= 1) {
@@ -3800,6 +3815,9 @@ function loadAnnualData() {
           state.annualFilteredContracts.splice(idx, 1);
         } else {
           state.annualFilteredContracts.push(contractId);
+        }
+        if (!state.annualFilteredContracts.length) {
+          state.annualFilteredContracts = relevantContracts.map(c => c.id);
         }
         saveCache();
         renderAnnualContractFilter();
@@ -13239,7 +13257,7 @@ function getCachedIncomeSummary(monthKey) {
         importSummary: summaryMapToList(importProgress.summaryMap)
       };
       timesheet1State.preview = finalRes.preview || timesheet1State.preview;
-      renderTimesheet1Preview(timesheet1State.preview || finalRes);
+      // Keep content sections hidden after import completes
       if (timesheet1ImportSummary && finalRes.importSummary && finalRes.importSummary.length) {
         const byMonth = {};
         (finalRes.importSummary || []).forEach((item) => {
@@ -13272,7 +13290,7 @@ function getCachedIncomeSummary(monthKey) {
         markAllIncomeSummariesDirty();
         renderIncomeSummary();
         onCalendarMonthChange();
-        if (state.annualData) {
+        if (state.currentPage === 'annual-views') {
           loadAnnualData();
         }
         setStatus(`Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates).`, 'success');
@@ -22314,7 +22332,7 @@ function getCachedIncomeSummary(monthKey) {
         state.annualData = null;
         saveCache();
         renderEntries();
-        if (state.annualData) {
+        if (state.currentPage === 'annual-views') {
           loadAnnualData();
         }
         if (typeof onComplete === 'function') onComplete();
