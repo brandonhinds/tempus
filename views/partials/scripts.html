@@ -3366,14 +3366,14 @@ function loadAnnualData() {
     const periodStartIso = periodStart.toISOString().substring(0, 10);
     const superRate = getSuperGuaranteeRateForDate(periodStartIso);
     const contractIncome = {};
-    let totalMinutes = 0;
+    let totalMinutes = 0; // income-contributing minutes only
     filteredEntries.forEach((entry) => {
       const minutes = Number(entry.duration_minutes) || 0;
-      totalMinutes += minutes;
       const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId];
       const contributes = hourType ? hourType.contributes_to_income : true;
       if (!contributes) return;
+      totalMinutes += minutes;
       const contractId = entry.contract_id || '';
       const contract = state.contractMap[contractId];
       let rate = 0;
@@ -3735,6 +3735,10 @@ function loadAnnualData() {
     state.annualData = null;
     // Ensure filtered contracts reset to relevant set for this year
     state.annualFilteredContracts = [];
+    console.log('[AnnualDebug] renderAnnualViews payload', {
+      yearType: state.annualYearType,
+      year: state.annualCurrentYear
+    });
     loadAnnualData();
   }
 
@@ -3774,6 +3778,11 @@ function loadAnnualData() {
       if (annualContractFilterToggle) annualContractFilterToggle.style.display = 'none';
       if (annualContractFilterPanel) annualContractFilterPanel.style.display = 'none';
       state.annualFilteredContracts = relevantContracts.map(c => c.id);
+      console.log('[AnnualDebug] Contract filter init (<=1 relevant)', {
+        yearType: state.annualYearType,
+        year: state.annualCurrentYear,
+        relevantContracts: relevantContracts.map(c => ({ id: c.id, name: c.name }))
+      });
       return;
     }
 
@@ -3793,6 +3802,12 @@ function loadAnnualData() {
     if (state.annualFilteredContracts.length === 0 || !currentFilteredAreRelevant) {
       state.annualFilteredContracts = relevantContracts.map(c => c.id);
     }
+    console.log('[AnnualDebug] Contract filter state', {
+      yearType: state.annualYearType,
+      year: state.annualCurrentYear,
+      relevantContracts: relevantContracts.map(c => ({ id: c.id, name: c.name })),
+      filteredContracts: state.annualFilteredContracts.slice()
+    });
 
     const html = relevantContracts.map(contract => {
       const isActive = state.annualFilteredContracts.includes(contract.id);
@@ -4939,6 +4954,10 @@ function loadAnnualData() {
         annualYearSelect.value = String(state.annualCurrentYear);
       }
 
+      // Reset annual data and contract filter when toggling year type
+      state.annualData = null;
+      state.annualFilteredContracts = [];
+
       saveCache();
       renderAnnualContractFilter();
       loadAnnualData();
@@ -4948,6 +4967,9 @@ function loadAnnualData() {
   if (annualYearSelect) {
     annualYearSelect.addEventListener('change', () => {
       state.annualCurrentYear = Number(annualYearSelect.value);
+      // Reset annual data and contract filter when changing year
+      state.annualData = null;
+      state.annualFilteredContracts = [];
       saveCache();
       loadAnnualData();
     });

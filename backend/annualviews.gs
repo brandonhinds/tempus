@@ -277,13 +277,12 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
   // Calculate income by contract (using contract-filtered entries)
   var contractIncome = {};
-  var totalMinutes = 0;
+  var totalMinutes = 0; // income-contributing minutes
   var totalHours = 0;
 
   for (var i = 0; i < monthEntries.length; i++) {
     var entry = monthEntries[i];
     var minutes = Number(entry.duration_minutes) || 0;
-    totalMinutes += minutes;
     var hours = minutes / 60;
 
     // Calculate income (only for income-contributing hour types)
@@ -292,6 +291,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     var contributesToIncome = hourType ? hourType.contributes_to_income : true;
 
     if (contributesToIncome) {
+      totalMinutes += minutes;
       var contract = contractMap[entry.contract_id];
       if (contract) {
         var income = hours * contract.hourly_rate;
