@@ -94,6 +94,7 @@
   const navAnnualViewsBtn = document.getElementById('nav-annual-views');
   const navInvoicesBtn = document.getElementById('nav-invoices');
   const navSettingsBtn = document.getElementById('nav-settings');
+  const navDocsLink = document.getElementById('nav-docs');
   const navAboutBtn = document.getElementById('nav-about');
   const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
   const ratePreviewPercentInput = document.getElementById('rate-preview-percent');
@@ -1097,6 +1098,12 @@ let ratePreviewInputSyncing = false;
   if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
   if (navInvoicesBtn) navInvoicesBtn.onclick = () => { closeNavMenu(); showPage('invoices'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
+  if (navDocsLink) {
+    navDocsLink.onclick = () => {
+      closeNavMenu();
+      window.open('https://github.com/brandonhinds/tempus/blob/main/docs/README.md', '_blank', 'noopener');
+    };
+  }
   if (navAboutBtn) navAboutBtn.onclick = () => { closeNavMenu(); showPage('about'); };
   if (ratePreviewContractSelect) ratePreviewContractSelect.addEventListener('change', handleRatePreviewContractChange);
   if (ratePreviewPercentInput) {
@@ -12917,7 +12924,10 @@ function getCachedIncomeSummary(monthKey) {
     if (!timesheet1Modal) return;
     resetTimesheet1State();
     showModal(timesheet1Modal);
-    if (timesheet1FileInput) timesheet1FileInput.focus();
+    if (timesheet1FileInput) {
+      timesheet1FileInput.readOnly = false;
+      timesheet1FileInput.focus();
+    }
   }
 
   function closeTimesheet1Importer() {
@@ -13249,6 +13259,7 @@ function getCachedIncomeSummary(monthKey) {
     if (timesheet1RunBtn) timesheet1RunBtn.disabled = true;
     setTimesheet1Status('Importing entries...', 'warn');
     hideTimesheet1ContentSections();
+    if (timesheet1FileInput) timesheet1FileInput.readOnly = true;
 
     const importProgress = {
       imported: 0,
@@ -13317,7 +13328,7 @@ function getCachedIncomeSummary(monthKey) {
         }
         setStatus(`Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates).`, 'success');
       });
-      setTimesheet1Status(`Import complete. Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates). It is recommended you browser refresh Tempus to ensure the new data is synced.`, 'success');
+      setTimesheet1Status(`Import complete. Imported ${finalRes.imported || 0} entries (skipped ${finalRes.skippedDuplicates || 0} duplicates). Please refresh your browser before running another import to ensure data is synced.`, 'success');
     };
 
     const handleSuccess = (res) => {
@@ -22814,6 +22825,16 @@ function getCachedIncomeSummary(monthKey) {
     processHolidayAutoPopulateQueue(queue, []);
   }
 
+  function buildHolidayPunches(minutes) {
+    const total = Math.max(0, Math.round(Number(minutes) || 0));
+    if (!total) return [];
+    const capped = Math.min(total, (24 * 60) - 1); // stay within day
+    const hours = Math.floor(capped / 60);
+    const mins = capped % 60;
+    const pad = (n) => (n < 10 ? `0${n}` : String(n));
+    return [{ in: '00:00', out: `${pad(hours)}:${pad(mins)}` }];
+  }
+
   function processHolidayAutoPopulateQueue(queue, createdEntries) {
     if (!queue.length) {
       if (createdEntries.length) {
@@ -22854,7 +22875,8 @@ function getCachedIncomeSummary(monthKey) {
         duration_minutes: minutes,
         entry_type: 'basic',
         hour_type_id: next.hourTypeId,
-        contract_id: ''
+        contract_id: '',
+        punches: buildHolidayPunches(minutes)
       });
   }
 
