@@ -13,6 +13,16 @@ function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
+function api_getWebAppUrl() {
+  var url = '';
+  try {
+    url = ScriptApp.getService().getUrl() || '';
+  } catch (e) {
+    Logger.log('Error getting service URL: ' + e.toString());
+  }
+  return url;
+}
+
 /**
  * Adds a custom menu to the spreadsheet when it opens.
  */

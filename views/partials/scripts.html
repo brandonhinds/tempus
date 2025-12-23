@@ -253,6 +253,8 @@ const deductionCategoryEmptyNote = document.getElementById('deduction-category-e
   const btnCancelDeductionCategory = document.getElementById('btn-cancel-deduction-category');
   const btnSaveDeductionCategory = document.getElementById('btn-save-deduction-category');
   const modalSplitDeduction = document.getElementById('modal-split-deduction');
+  const openMobileViewWrapper = document.getElementById('open-mobile-view-wrapper');
+  const openMobileViewBtn = document.getElementById('btn-open-mobile-view');
   const btnCancelSplit = document.getElementById('btn-cancel-split');
   const btnConfirmSplit = document.getElementById('btn-confirm-split');
   let pendingDeductionPayload = null;
@@ -419,6 +421,22 @@ let ratePreviewInputSyncing = false;
       }
     }
   };
+
+  let mobileViewUrl = '';
+  if (openMobileViewWrapper && openMobileViewBtn) {
+    google.script.run
+      .withSuccessHandler((url) => {
+        if (!url) return;
+        mobileViewUrl = url + '?view=mobile';
+        openMobileViewWrapper.style.display = 'flex';
+      })
+      .api_getWebAppUrl();
+
+    openMobileViewBtn.addEventListener('click', () => {
+      if (!mobileViewUrl) return;
+      window.open(mobileViewUrl, '_blank', 'noopener');
+    });
+  }
 
   const deductionFormState = {
     mode: 'create',

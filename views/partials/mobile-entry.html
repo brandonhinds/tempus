@@ -1,21 +1,21 @@
 <section class="ts-card ts-mobile-card" id="mobile-entry">
   <div class="ts-mobile-header">
-    <div>
-      <p class="ts-note" style="margin:0;">Mobile Time Entry</p>
-      <h2 style="margin:2px 0 0;">Simple Daily Hours</h2>
+    <div class="ts-calendar-nav ts-mobile-day-nav" aria-label="Day navigation">
+      <button class="ghost" id="mobile-date-prev" type="button" aria-label="Previous day">◀</button>
+      <button class="ghost" id="mobile-date-label" type="button" aria-label="Selected date">--/--/----</button>
+      <button class="ghost" id="mobile-date-next" type="button" aria-label="Next day">▶</button>
     </div>
-    <a class="ghost" id="mobile-desktop-link" href="./" style="font-size:13px; text-decoration:none;">Desktop view</a>
   </div>
 
   <div class="ts-mobile-row" aria-live="polite" id="mobile-status" role="status"></div>
 
-  <div class="ts-mobile-row ts-mobile-date-row">
-    <label for="mobile-date">Date</label>
-    <div class="ts-mobile-date-controls">
-      <button class="ghost small" id="mobile-date-prev" type="button" aria-label="Previous day">‹</button>
-      <input type="date" id="mobile-date" />
-      <button class="ghost small" id="mobile-date-next" type="button" aria-label="Next day">›</button>
-      <button class="ghost small" id="mobile-date-today" type="button">Today</button>
+  <input type="date" id="mobile-date" class="ts-mobile-date-input" />
+
+  <div class="ts-mobile-day-card">
+    <div class="ts-calendar-cell ts-calendar-cell--mobile" id="mobile-day-card">
+      <div class="ts-calendar-day" id="mobile-day-number">--</div>
+      <div class="ts-calendar-hour-types" id="mobile-day-hour-types"></div>
+      <div class="ts-calendar-total" id="mobile-day-total"></div>
     </div>
   </div>
 
@@ -26,39 +26,79 @@
     </div>
   </div>
 
-  <div class="ts-mobile-row ts-mobile-grid">
-    <div class="ts-mobile-col">
-      <label for="mobile-hour-type">Hour type</label>
-      <select id="mobile-hour-type"></select>
-    </div>
-    <div class="ts-mobile-col">
-      <label for="mobile-contract">Contract</label>
-      <select id="mobile-contract"></select>
-      <p class="ts-warning" id="mobile-contract-warning" style="display:none; margin-top:6px;">Select a valid contract for this date.</p>
-    </div>
-  </div>
-
   <div id="mobile-panel-manual" class="ts-mobile-panel" role="tabpanel">
-    <div class="ts-mobile-row ts-mobile-hours">
-      <label for="mobile-hours">Total hours</label>
-      <input type="number" id="mobile-hours" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 7.5" />
-      <p class="ts-note" style="margin-top:6px;">Whole day only; rounding uses your settings.</p>
+    <div class="ts-grid ts-grid--gap-md ts-grid--align-start ts-mobile-form-grid">
+      <div class="ts-col-span-4" id="mobile-manual-hour-type-col" style="display:none;">
+        <label>Hour Type</label>
+        <select id="mobile-manual-hour-type"></select>
+      </div>
+      <div class="ts-col-span-4">
+        <label>Contract</label>
+        <select id="mobile-manual-contract"></select>
+        <div class="ts-warning" id="mobile-manual-contract-warning" style="display:none;">Select a valid contract for this date.</div>
+      </div>
+    </div>
+    <div class="ts-grid ts-grid--gap-md" style="margin-top:8px;">
+      <div class="ts-col-span-4">
+        <label>Total hours</label>
+        <input type="number" id="mobile-hours" min="0" step="0.01" inputmode="decimal" placeholder="" />
+      </div>
+    </div>
+    <p class="ts-note" style="margin-top:8px;">Whole day only; rounding uses your settings.</p>
+    <div class="ts-mobile-actions-row">
+      <div class="ts-gap-md" style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button class="ghost" id="mobile-cancel-edit" type="button" style="display:none;">Cancel Edit</button>
+        <button class="ghost" id="mobile-delete" type="button" style="display:none;">Delete Entry</button>
+        <button id="mobile-save" type="button">Add Entry</button>
+      </div>
     </div>
   </div>
 
   <div id="mobile-panel-punch" class="ts-mobile-panel" style="display:none;" role="tabpanel">
-    <div id="mobile-punch-list" class="ts-punch-list ts-punch-list--compact"></div>
-    <div class="ts-mobile-row ts-mobile-punch-actions">
-      <button class="ghost" id="mobile-add-punch" type="button">Add punch</button>
-      <div id="mobile-punch-summary" class="ts-note"></div>
+    <div class="ts-grid ts-grid--gap-md ts-grid--align-start ts-mobile-form-grid">
+      <div class="ts-col-span-4" id="mobile-punch-hour-type-col" style="display:none;">
+        <label>Hour Type</label>
+        <select id="mobile-punch-hour-type"></select>
+      </div>
+      <div class="ts-col-span-4">
+        <label>Contract</label>
+        <select id="mobile-punch-contract"></select>
+        <div class="ts-warning" id="mobile-punch-contract-warning" style="display:none;">Select a valid contract for this date.</div>
+      </div>
     </div>
-    <p class="ts-warning" id="mobile-punch-warning" style="display:none; margin-top:6px;"></p>
-    <p class="ts-note" id="mobile-punch-suggestion" style="display:none; margin-top:6px;"></p>
+    <div class="ts-note" id="mobile-punch-summary" style="margin-top:8px;"></div>
+    <div class="ts-warning" id="mobile-punch-warning" style="display:none; margin-top:4px;"></div>
+    <div class="ts-note" id="mobile-punch-suggestion" style="display:none; margin-top:4px; color: var(--success);"></div>
+    <div id="mobile-punch-list" class="ts-punch-list ts-punch-list--compact"></div>
+    <div class="ts-mobile-actions-row">
+      <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button id="mobile-punch-toggle" type="button">Punch In</button>
+        <button class="ghost" id="mobile-punch-discard" type="button" style="display:none;">Discard Changes</button>
+        <button class="ghost" id="mobile-delete-punch" type="button" style="display:none;">Delete Entry</button>
+        <button id="mobile-punch-save" type="button">Add Entry</button>
+      </div>
+    </div>
   </div>
 
-  <div class="ts-mobile-actions">
-    <button class="ghost" id="mobile-reset" type="button" style="width:100%;">Reset</button>
-    <button class="ghost" id="mobile-delete" type="button" style="display:none; width:100%;">Delete</button>
-    <button id="mobile-save" type="button" style="width:100%;">Save</button>
+  <div class="ts-view-switch" id="mobile-view-switch" style="margin-top:auto; display:none;">
+    <a class="ghost" id="mobile-view-desktop-link" href="#">Desktop view</a>
   </div>
 </section>
+
+<div class="ts-modal ts-modal--mobile-date" id="mobile-date-picker" style="display:none;">
+  <div class="ts-modal-content">
+    <div class="ts-modal-header">
+      <h3>Select day</h3>
+      <button class="ts-modal-close" id="mobile-date-picker-close">&times;</button>
+    </div>
+    <div class="ts-modal-body">
+      <div class="ts-month-picker-header">
+        <button class="ghost" id="mobile-date-month-prev">◀</button>
+        <div id="mobile-date-month-label" class="ts-month-picker-year">--</div>
+        <button class="ghost" id="mobile-date-month-next">▶</button>
+      </div>
+      <div class="ts-day-picker-weekdays" id="mobile-day-picker-weekdays"></div>
+      <div class="ts-day-picker-grid" id="mobile-day-picker-grid"></div>
+    </div>
+  </div>
+</div>

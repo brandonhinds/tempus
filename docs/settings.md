@@ -12,6 +12,7 @@ How settings are organized and controlled.
 - Superannuation rate (%).
 - Rounding intervals and projection preferences.
 - Cache controls (when `show_clear_cache` is enabled).
+- Open Mobile View button (launches the mobile entry view in a new tab).
 - Themes and color options (see `themes-accessibility.md`).
 
 ## Behavior
@@ -22,4 +23,3 @@ How settings are organized and controlled.
 ## Tips
 - When adding new settings, register template + `SETTINGS_CONFIG` with the correct section id (flag id).
 - Use inline confirmation for destructive actions; do not stack modals.
-

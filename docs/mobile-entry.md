@@ -6,8 +6,10 @@ Current mobile experience and limitations compared to desktop.
 - Lightweight entry flow for updating timesheets on mobile.
 
 ## Capabilities
-- Mobile shell hosts the entry form and calendar suited for small screens.
-- Supports basic navigation between dates and entry modes available in mobile view.
+- Mobile shell hosts a single-day calendar card that mirrors the desktop calendar styling.
+- Day navigation uses the desktop-style switcher, showing the selected date in `dd/mm/yyyy`.
+- Hour type chips appear inside the day card when multiple hour types are enabled.
+- Basic and Advanced inputs mirror desktop behaviors, including edit/delete for existing entries.
 
 ## Known Gaps
 - Feature set is reduced versus desktop; some advanced features (invoices, BAS, helpers) are desktop-only.
@@ -16,4 +18,3 @@ Current mobile experience and limitations compared to desktop.
 ## Tips
 - Prefer desktop for full-feature workflows (defaults management, invoices, BAS, payroll helpers).
 - Use consistent hour types/contracts to keep data aligned across devices.
-

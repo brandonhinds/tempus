@@ -28,14 +28,30 @@
     const dom = {
       status: document.getElementById('mobile-status'),
       date: document.getElementById('mobile-date'),
+      dateLabel: document.getElementById('mobile-date-label'),
       datePrev: document.getElementById('mobile-date-prev'),
       dateNext: document.getElementById('mobile-date-next'),
-      dateToday: document.getElementById('mobile-date-today'),
+      dayCard: document.getElementById('mobile-day-card'),
+      dayNumber: document.getElementById('mobile-day-number'),
+      dayTotal: document.getElementById('mobile-day-total'),
+      dayHourTypes: document.getElementById('mobile-day-hour-types'),
+      datePicker: document.getElementById('mobile-date-picker'),
+      datePickerClose: document.getElementById('mobile-date-picker-close'),
+      dateMonthPrev: document.getElementById('mobile-date-month-prev'),
+      dateMonthNext: document.getElementById('mobile-date-month-next'),
+      dateMonthLabel: document.getElementById('mobile-date-month-label'),
+      dateWeekdays: document.getElementById('mobile-day-picker-weekdays'),
+      dateGrid: document.getElementById('mobile-day-picker-grid'),
       tabManual: document.getElementById('mobile-tab-manual'),
       tabPunch: document.getElementById('mobile-tab-punch'),
-      hourType: document.getElementById('mobile-hour-type'),
-      contract: document.getElementById('mobile-contract'),
-      contractWarning: document.getElementById('mobile-contract-warning'),
+      manualHourType: document.getElementById('mobile-manual-hour-type'),
+      manualHourTypeCol: document.getElementById('mobile-manual-hour-type-col'),
+      manualContract: document.getElementById('mobile-manual-contract'),
+      manualContractWarning: document.getElementById('mobile-manual-contract-warning'),
+      punchHourType: document.getElementById('mobile-punch-hour-type'),
+      punchHourTypeCol: document.getElementById('mobile-punch-hour-type-col'),
+      punchContract: document.getElementById('mobile-punch-contract'),
+      punchContractWarning: document.getElementById('mobile-punch-contract-warning'),
       panelManual: document.getElementById('mobile-panel-manual'),
       panelPunch: document.getElementById('mobile-panel-punch'),
       hours: document.getElementById('mobile-hours'),
@@ -43,11 +59,13 @@
       punchSummary: document.getElementById('mobile-punch-summary'),
       punchWarning: document.getElementById('mobile-punch-warning'),
       punchSuggestion: document.getElementById('mobile-punch-suggestion'),
-      addPunch: document.getElementById('mobile-add-punch'),
-      reset: document.getElementById('mobile-reset'),
-      save: document.getElementById('mobile-save'),
-      deleteBtn: document.getElementById('mobile-delete'),
-      desktopLink: document.getElementById('mobile-desktop-link')
+      punchToggle: document.getElementById('mobile-punch-toggle'),
+      punchSave: document.getElementById('mobile-punch-save'),
+      punchDiscard: document.getElementById('mobile-punch-discard'),
+      punchDelete: document.getElementById('mobile-delete-punch'),
+      manualSave: document.getElementById('mobile-save'),
+      manualDelete: document.getElementById('mobile-delete'),
+      manualCancel: document.getElementById('mobile-cancel-edit')
     };
 
     const state = {
@@ -63,10 +81,13 @@
       draftHours: '',
       draftPunches: [{ in: '', out: '' }],
       currentEntry: null,
+      selectedHourTypeId: '',
       loading: false,
       staticLoaded: false,
       prefetchedRange: null,
-      cacheHydrated: false
+      cacheHydrated: false,
+      punchDirty: false,
+      datePicker: { year: null, month: null }
     };
 
     const setStatus = (message, tone = 'info') => {
@@ -77,6 +98,19 @@
       else dom.status.classList.add('ts-note');
     };
 
+    const formatDateLabel = (iso) => {
+      if (!iso) return '--/--/----';
+      const parts = iso.split('-');
+      if (parts.length !== 3) return '--/--/----';
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+
+    const formatDayNumber = (iso) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '--';
+      return String(d.getDate());
+    };
+
     const shiftIso = (iso, deltaDays) => {
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return todayIso();
@@ -84,55 +118,97 @@
       return d.toISOString().slice(0, 10);
     };
 
+    const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
     const defaultHourTypeId = () => {
       if (!state.hourTypes.length) return '';
       const preferred = state.hourTypes.find((ht) => ht.is_default);
       return (preferred || state.hourTypes[0]).id;
     };
 
+    const hourTypesEnabled = () => {
+      const flag = state.featureFlags.hour_types || {};
+      return !!flag.enabled && state.hourTypes.length > 1;
+    };
+
     const roundInterval = () => clampRoundInterval(state.settings ? state.settings.round_to_nearest : 0);
 
-    const renderHourTypes = () => {
-      if (!dom.hourType) return;
-      dom.hourType.innerHTML = '';
-      state.hourTypes.forEach((ht) => {
-        const opt = document.createElement('option');
-        opt.value = ht.id;
-        opt.textContent = ht.name || 'Work';
-        dom.hourType.appendChild(opt);
-      });
-      dom.hourType.value = state.currentEntry?.hour_type_id || defaultHourTypeId();
+    const formatHours = (minutes) => {
+      const total = Math.max(0, Math.round(Number(minutes) || 0));
+      return (total / 60).toFixed(2);
     };
 
     const validContractsForDate = (dateIso) => state.contracts.filter((c) => contractIsValid(c, dateIso));
 
-    const renderContracts = () => {
-      if (!dom.contract) return;
+    const renderHourTypeSelect = (select) => {
+      if (!select) return;
+      select.innerHTML = '';
+      state.hourTypes.forEach((ht) => {
+        const opt = document.createElement('option');
+        opt.value = ht.id;
+        opt.textContent = ht.name || 'Work';
+        select.appendChild(opt);
+      });
+    };
+
+    const syncHourTypeSelects = (hourTypeId) => {
+      const target = hourTypeId || defaultHourTypeId();
+      if (dom.manualHourType) dom.manualHourType.value = target;
+      if (dom.punchHourType) dom.punchHourType.value = target;
+    };
+
+    const renderHourTypes = () => {
+      renderHourTypeSelect(dom.manualHourType);
+      renderHourTypeSelect(dom.punchHourType);
+      const shouldShow = hourTypesEnabled();
+      if (!shouldShow) state.selectedHourTypeId = defaultHourTypeId();
+      const selected = state.selectedHourTypeId || defaultHourTypeId();
+      syncHourTypeSelects(selected);
+      if (dom.manualHourTypeCol) dom.manualHourTypeCol.style.display = shouldShow ? 'block' : 'none';
+      if (dom.punchHourTypeCol) dom.punchHourTypeCol.style.display = shouldShow ? 'block' : 'none';
+    };
+
+    const renderContractsForSelect = (select, warningEl, hourTypeId, preferredContractId) => {
+      if (!select) return;
       const dateIso = state.currentDate;
-      const hourType = state.hourTypeMap[dom.hourType.value] || {};
+      const hourType = state.hourTypeMap[hourTypeId || defaultHourTypeId()] || {};
       const requiresContract = !!hourType.requires_contract;
       const valid = validContractsForDate(dateIso);
-      dom.contract.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = requiresContract ? 'Select contract' : (valid.length ? 'No contract (optional)' : 'Not required');
-      dom.contract.appendChild(opt);
+      select.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = requiresContract ? 'Select contract' : (valid.length ? 'Not required (optional)' : 'Not required');
+      select.appendChild(placeholder);
       valid.forEach((c) => {
         const option = document.createElement('option');
         option.value = c.id;
         option.textContent = c.name;
-        dom.contract.appendChild(option);
+        select.appendChild(option);
       });
-      const preferred = state.currentEntry ? state.currentEntry.contract_id : '';
-      dom.contract.value = preferred || (valid[0] ? valid[0].id : '');
-      dom.contract.disabled = requiresContract && !valid.length;
-      if (dom.contractWarning) dom.contractWarning.style.display = requiresContract && !dom.contract.value ? 'block' : 'none';
+      const preferred = preferredContractId || '';
+      const fallback = preferred && valid.some((c) => c.id === preferred) ? preferred : '';
+      select.value = fallback || (valid[0] ? valid[0].id : '');
+      select.disabled = requiresContract && !valid.length;
+      if (warningEl) warningEl.style.display = requiresContract && !select.value ? 'block' : 'none';
+    };
+
+    const renderContracts = (opts = {}) => {
+      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
+      const manualPreferred = opts.manualPreferred != null
+        ? opts.manualPreferred
+        : (dom.manualContract ? dom.manualContract.value : (state.currentEntry?.contract_id || ''));
+      const punchPreferred = opts.punchPreferred != null
+        ? opts.punchPreferred
+        : (dom.punchContract ? dom.punchContract.value : (state.currentEntry?.contract_id || ''));
+      renderContractsForSelect(dom.manualContract, dom.manualContractWarning, hourTypeId, manualPreferred);
+      renderContractsForSelect(dom.punchContract, dom.punchContractWarning, hourTypeId, punchPreferred);
     };
 
     const entryTypeForMode = (mode) => (mode === 'punch' ? 'advanced' : 'basic');
 
     const findExistingForHourType = () => {
-      const hourTypeId = dom.hourType ? (dom.hourType.value || defaultHourTypeId()) : defaultHourTypeId();
+      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === hourTypeId && e.date === state.currentDate) || null;
     };
 
@@ -143,6 +219,20 @@
       const punchAllowed = !entryType || entryType === 'advanced';
       if (dom.tabManual) dom.tabManual.classList.toggle('disabled', !basicAllowed);
       if (dom.tabPunch) dom.tabPunch.classList.toggle('disabled', !punchAllowed);
+    };
+
+    const updateManualActions = () => {
+      if (!dom.manualSave) return;
+      const isEdit = !!state.currentEntry && entryTypeForMode('manual') === (state.currentEntry.entry_type || 'basic');
+      dom.manualSave.textContent = isEdit ? 'Update Entry' : 'Add Entry';
+      if (dom.manualDelete) dom.manualDelete.style.display = isEdit ? 'inline-flex' : 'none';
+      if (dom.manualCancel) dom.manualCancel.style.display = isEdit ? 'inline-flex' : 'none';
+    };
+
+    const updatePunchActions = () => {
+      if (dom.punchSave) dom.punchSave.textContent = state.currentEntry ? 'Update Entry' : 'Add Entry';
+      if (dom.punchDelete) dom.punchDelete.style.display = state.currentEntry ? 'inline-flex' : 'none';
+      if (dom.punchDiscard) dom.punchDiscard.style.display = state.punchDirty ? 'inline-flex' : 'none';
     };
 
     const setMode = (mode, opts = {}) => {
@@ -163,16 +253,137 @@
       if (dom.tabPunch) dom.tabPunch.classList.toggle('active', state.mode === 'punch');
       if (dom.panelManual) dom.panelManual.style.display = state.mode === 'manual' ? 'block' : 'none';
       if (dom.panelPunch) dom.panelPunch.style.display = state.mode === 'punch' ? 'block' : 'none';
-      if (dom.save) dom.save.textContent = state.currentEntry ? 'Update' : 'Save';
-      if (dom.deleteBtn) dom.deleteBtn.style.display = state.currentEntry ? 'inline-flex' : 'none';
+      updateManualActions();
+      updatePunchActions();
       syncTabAvailability();
+    };
+
+    const sortHourTypeIds = (ids) => {
+      const order = state.hourTypes.reduce((map, ht, idx) => {
+        if (ht && ht.id) map[ht.id] = idx;
+        return map;
+      }, {});
+      return ids.slice().sort((a, b) => {
+        const orderA = Number.isInteger(order[a]) ? order[a] : Number.MAX_SAFE_INTEGER;
+        const orderB = Number.isInteger(order[b]) ? order[b] : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        const nameA = state.hourTypeMap[a]?.name || '';
+        const nameB = state.hourTypeMap[b]?.name || '';
+        return nameA.localeCompare(nameB);
+      });
+    };
+
+    const renderDayCard = () => {
+      if (dom.dayNumber) dom.dayNumber.textContent = formatDayNumber(state.currentDate);
+      if (!dom.dayTotal || !dom.dayHourTypes) return;
+      dom.dayHourTypes.innerHTML = '';
+      dom.dayTotal.textContent = '';
+      if (!dom.dayCard) return;
+      dom.dayCard.classList.remove('has-entries');
+      const totals = state.entries.reduce((map, entry) => {
+        if (!entry || entry.date !== state.currentDate) return map;
+        const hourTypeId = entry.hour_type_id || defaultHourTypeId();
+        map[hourTypeId] = (map[hourTypeId] || 0) + (Number(entry.duration_minutes) || 0);
+        return map;
+      }, {});
+      const totalMinutes = Object.keys(totals).reduce((acc, key) => acc + totals[key], 0);
+      if (totalMinutes > 0) dom.dayCard.classList.add('has-entries');
+      if (!hourTypesEnabled() || !Object.keys(totals).length) {
+        if (totalMinutes > 0) {
+          dom.dayTotal.textContent = formatHours(roundDuration(totalMinutes, roundInterval()));
+        }
+        return;
+      }
+      const defaultId = defaultHourTypeId();
+      const defaultMinutes = totals[defaultId] || 0;
+      const otherIds = sortHourTypeIds(Object.keys(totals).filter((id) => id !== defaultId && totals[id] > 0));
+      otherIds.forEach((hourTypeId) => {
+        const hourType = state.hourTypeMap[hourTypeId];
+        if (!hourType) return;
+        const chip = document.createElement('span');
+        chip.className = 'ts-calendar-hour-type-indicator';
+        if (hourTypeId === state.selectedHourTypeId) chip.classList.add('active');
+        chip.style.color = hourType.color;
+        chip.textContent = formatHours(roundDuration(totals[hourTypeId], roundInterval()));
+        chip.title = `${hourType.name}: ${chip.textContent}`;
+        chip.dataset.hourTypeId = hourTypeId;
+        chip.addEventListener('click', (event) => {
+          event.stopPropagation();
+          selectHourType(hourTypeId);
+        });
+        dom.dayHourTypes.appendChild(chip);
+      });
+      if (defaultMinutes > 0 || !otherIds.length) {
+        dom.dayTotal.textContent = defaultMinutes > 0
+          ? formatHours(roundDuration(defaultMinutes, roundInterval()))
+          : '';
+      }
+    };
+
+    const openDatePicker = () => {
+      const current = new Date(state.currentDate);
+      if (Number.isNaN(current.getTime())) return;
+      state.datePicker.year = current.getFullYear();
+      state.datePicker.month = current.getMonth();
+      renderDatePicker();
+      if (dom.datePicker) dom.datePicker.style.display = 'flex';
+    };
+
+    const closeDatePicker = () => {
+      if (dom.datePicker) dom.datePicker.style.display = 'none';
+    };
+
+    const renderDatePicker = () => {
+      if (!dom.dateGrid || !dom.dateMonthLabel) return;
+      const year = state.datePicker.year;
+      const month = state.datePicker.month;
+      if (year == null || month == null) return;
+      const labelDate = new Date(year, month, 1);
+      dom.dateMonthLabel.textContent = labelDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      dom.dateGrid.innerHTML = '';
+      if (dom.dateWeekdays) {
+        dom.dateWeekdays.innerHTML = '';
+        weekdayLabels.forEach((label) => {
+          const el = document.createElement('div');
+          el.className = 'ts-day-picker-weekday';
+          el.textContent = label;
+          dom.dateWeekdays.appendChild(el);
+        });
+      }
+      const totalDays = daysInMonth(year, month);
+      const firstDay = new Date(year, month, 1);
+      const offset = (firstDay.getDay() + 6) % 7; // Monday start
+      for (let i = 0; i < offset; i += 1) {
+        const empty = document.createElement('div');
+        empty.className = 'ts-day-picker-cell empty';
+        dom.dateGrid.appendChild(empty);
+      }
+      for (let day = 1; day <= totalDays; day += 1) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ts-day-picker-cell';
+        btn.textContent = String(day);
+        const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (iso === state.currentDate) btn.classList.add('active');
+        btn.onclick = () => {
+          closeDatePicker();
+          hydrateDate(iso);
+        };
+        dom.dateGrid.appendChild(btn);
+      }
     };
 
     const renderPunchList = () => {
       if (!dom.punchList) return;
       const punches = state.draftPunches || [];
       dom.punchList.innerHTML = '';
-      punches.forEach((punch, index) => {
+      const ensureRow = () => {
+        if (!state.draftPunches.length) state.draftPunches.push({ in: '', out: '' });
+      };
+      if (!punches.length || (punches.length === 1 && !punches[0].in && !punches[0].out)) {
+        ensureRow();
+      }
+      state.draftPunches.forEach((punch, index) => {
         const row = document.createElement('div');
         row.className = 'ts-punch-row';
 
@@ -182,6 +393,7 @@
         start.className = 'ts-punch-input';
         start.onchange = () => {
           state.draftPunches[index].in = start.value;
+          state.punchDirty = true;
           updatePunchSummary();
         };
 
@@ -191,7 +403,18 @@
         end.className = 'ts-punch-input';
         end.onchange = () => {
           state.draftPunches[index].out = end.value;
+          state.punchDirty = true;
           updatePunchSummary();
+        };
+
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'ghost';
+        add.textContent = 'Add';
+        add.onclick = () => {
+          state.draftPunches.splice(index + 1, 0, { in: '', out: '' });
+          state.punchDirty = true;
+          renderPunchList();
         };
 
         const remove = document.createElement('button');
@@ -201,21 +424,32 @@
         remove.onclick = () => {
           state.draftPunches.splice(index, 1);
           if (!state.draftPunches.length) state.draftPunches.push({ in: '', out: '' });
+          state.punchDirty = true;
           renderPunchList();
-          updatePunchSummary();
         };
 
         row.appendChild(start);
         row.appendChild(document.createTextNode(' to '));
         row.appendChild(end);
+        row.appendChild(add);
         row.appendChild(remove);
         dom.punchList.appendChild(row);
       });
       updatePunchSummary();
     };
 
-    const addPunchRow = () => {
-      state.draftPunches.push({ in: '', out: '' });
+    const togglePunch = () => {
+      const now = new Date();
+      const nowTime = now.toTimeString().slice(0, 5);
+      const punches = state.draftPunches || [];
+      const open = punches.find((p) => p.in && !p.out);
+      if (open) {
+        open.out = nowTime;
+      } else {
+        punches.push({ in: nowTime, out: '' });
+      }
+      state.draftPunches = punches;
+      state.punchDirty = true;
       renderPunchList();
     };
 
@@ -239,13 +473,20 @@
       const summary = summarizePunches(punches);
       if (dom.punchSummary) {
         const rounded = roundDuration(summary.totalMinutes, roundInterval());
-        dom.punchSummary.textContent = punches.length ? `Recorded: ${(rounded / 60).toFixed(2)}h` : '';
+        dom.punchSummary.textContent = punches.length ? `Recorded: ${formatHours(rounded)} hours` : '';
       }
       if (dom.punchWarning) {
         dom.punchWarning.style.display = summary.openCount > 0 ? 'block' : 'none';
-        dom.punchWarning.textContent = summary.openCount > 0 ? 'You have an open punch. Add an end time before saving.' : '';
+        dom.punchWarning.textContent = summary.openCount > 0 ? 'Open punch detected. Remember to punch out.' : '';
       }
       if (dom.punchSuggestion) dom.punchSuggestion.style.display = 'none';
+      if (dom.punchToggle) dom.punchToggle.textContent = summary.openCount > 0 ? 'Punch Out' : 'Punch In';
+      const requiresContract = (state.hourTypeMap[state.selectedHourTypeId] || {}).requires_contract;
+      const hasContract = dom.punchContract ? !!dom.punchContract.value : true;
+      const hasPunches = punches.some((p) => p.in);
+      if (dom.punchToggle) dom.punchToggle.disabled = requiresContract && !hasContract;
+      if (dom.punchSave) dom.punchSave.disabled = (requiresContract && !hasContract) || !hasPunches;
+      updatePunchActions();
     };
 
     const getCachedEntriesForDate = (dateIso) => state.entryCache[dateIso] || [];
@@ -257,7 +498,6 @@
         existing.push(entry);
         state.entryCache[entry.date] = existing;
       });
-      console.log('[mobile] cache store', { dates: (entries || []).map((e) => e.date) });
       persistCache();
     };
 
@@ -271,14 +511,8 @@
           contracts: state.contracts
         };
         localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-        console.log('[mobile] cache persist', {
-          dates: Object.keys(state.entryCache || {}).length,
-          hourTypes: (state.hourTypes || []).length,
-          contracts: (state.contracts || []).length
-        });
       } catch (err) {
-        console.log('[mobile] cache persist failed', err);
-        state.cacheHydrated = false; // retry on next hydration if storage recovers
+        state.cacheHydrated = false;
       }
     };
 
@@ -292,18 +526,11 @@
       if (state.cacheHydrated) return;
       try {
         const raw = localStorage.getItem(CACHE_KEY);
-        if (!raw) {
-          console.log('[mobile] cache hydrate: empty');
-          return;
-        }
+        if (!raw) return;
         const parsed = JSON.parse(raw);
-        if (!parsed || !parsed.savedAt) {
-          console.log('[mobile] cache hydrate: invalid');
-          return;
-        }
+        if (!parsed || !parsed.savedAt) return;
         const age = Date.now() - parsed.savedAt;
         if (age > CACHE_TTL_MS) {
-          console.log('[mobile] cache hydrate: expired', { ageMs: age });
           localStorage.removeItem(CACHE_KEY);
           return;
         }
@@ -312,12 +539,6 @@
         state.hourTypes = Array.isArray(parsed.hourTypes) ? parsed.hourTypes : state.hourTypes;
         state.hourTypeMap = (state.hourTypes || []).reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
         state.contracts = Array.isArray(parsed.contracts) ? parsed.contracts : state.contracts;
-        console.log('[mobile] cache hydrate: restored', {
-          dates: Object.keys(state.entryCache || {}).length,
-          prefetchedRange: state.prefetchedRange,
-          hourTypes: (state.hourTypes || []).length,
-          contracts: (state.contracts || []).length
-        });
         state.cacheHydrated = true;
       } catch (err) {
         console.log('[mobile] cache hydrate failed', err);
@@ -347,12 +568,7 @@
         state.contracts = Array.isArray(parsed.contracts) ? parsed.contracts.map((c) => ({ ...c })) : state.contracts;
         state.prefetchedRange = minDate && maxDate ? { start: minDate, end: maxDate } : derivePrefetchedRangeFromCache();
         state.cacheHydrated = true;
-        console.log('[mobile] cache hydrate: seeded from desktop cache', {
-          dates: Object.keys(map).length,
-          hourTypes: (state.hourTypes || []).length,
-          contracts: (state.contracts || []).length
-        });
-        persistCache(); // write into mobile cache key for reuse
+        persistCache();
       } catch (err) {
         console.log('[mobile] desktop cache hydrate failed', err);
       }
@@ -360,7 +576,6 @@
     };
 
     const fetchEntriesRange = async (startDate, endDate) => {
-      console.log('[mobile] fetchEntriesRange', { startDate, endDate });
       const entries = await run('api_getEntries', { startDate, endDate }) || [];
       const sanitized = entries.map(sanitizeEntry);
       storeEntries(sanitized);
@@ -377,17 +592,14 @@
       const endIso = shiftIso(centerIso, 14);
       const cachedRange = cacheCoverageRange();
       if (rangeCovered(cachedRange, startIso, endIso)) {
-        console.log('[mobile] prefetchRangeForDate skip (covered)', { centerIso, startIso, endIso, prefetchedRange: cachedRange });
         state.prefetchedRange = cachedRange;
         return;
       }
-      console.log('[mobile] prefetchRangeForDate start', { centerIso, startIso, endIso });
       await fetchEntriesRange(startIso, endIso);
       const currentRange = cacheCoverageRange() || { start: startIso, end: endIso };
       const mergedStart = currentRange.start && currentRange.start < startIso ? currentRange.start : startIso;
       const mergedEnd = currentRange.end && currentRange.end > endIso ? currentRange.end : endIso;
       state.prefetchedRange = { start: mergedStart, end: mergedEnd };
-      console.log('[mobile] prefetchRangeForDate done', state.prefetchedRange);
       persistCache();
     };
 
@@ -396,45 +608,56 @@
       const cached = getCachedEntriesForDate(dateIso);
       if (cached.length) {
         state.entries = cached;
-        console.log('[mobile] loadEntriesForDate cache hit', { dateIso, count: cached.length });
         return;
       }
-      console.log('[mobile] loadEntriesForDate cache miss after prefetch', { dateIso });
       await fetchEntriesRange(dateIso, dateIso);
       state.entries = getCachedEntriesForDate(dateIso);
-      console.log('[mobile] loadEntriesForDate loaded', { dateIso, count: state.entries.length });
     };
 
     const pickEntryForHourType = (hourTypeId) => {
       if (!state.entries.length) return null;
       const targetId = hourTypeId || defaultHourTypeId();
-      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === targetId) || state.entries[0];
+      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === targetId) || null;
     };
 
-    const hydrateDraftFromEntry = (entry) => {
+    const selectHourType = (hourTypeId) => {
+      state.selectedHourTypeId = hourTypeId || defaultHourTypeId();
+      syncHourTypeSelects(state.selectedHourTypeId);
+      const entry = pickEntryForHourType(state.selectedHourTypeId);
+      hydrateDraftFromEntry(entry, { preserveMode: true });
+      renderDayCard();
+      syncTabAvailability();
+    };
+
+    const hydrateDraftFromEntry = (entry, opts = {}) => {
       state.currentEntry = entry || null;
+      const hourTypeId = entry?.hour_type_id || state.selectedHourTypeId || defaultHourTypeId();
+      state.selectedHourTypeId = hourTypeId;
+      syncHourTypeSelects(hourTypeId);
+      const preferredContract = entry?.contract_id || '';
+      renderContracts({ manualPreferred: preferredContract, punchPreferred: preferredContract });
       if (entry) {
         if (entry.entry_type === 'advanced') {
           state.mode = 'punch';
           state.draftPunches = entry.punches && entry.punches.length ? entry.punches.map((p) => ({ ...p })) : [{ in: '', out: '' }];
           state.draftHours = '';
+          state.punchDirty = false;
         } else {
           state.mode = 'manual';
           const summary = summarizePunches(entry.punches || []);
           const minutes = summary.totalMinutes || Number(entry.duration_minutes) || 0;
           state.draftHours = minutes ? (minutes / 60).toFixed(2) : '';
           state.draftPunches = [{ in: '', out: '' }];
+          state.punchDirty = false;
         }
-        if (dom.hourType && entry.hour_type_id) dom.hourType.value = entry.hour_type_id;
       } else {
-        state.mode = 'manual';
         state.draftHours = '';
         state.draftPunches = [{ in: '', out: '' }];
-        if (dom.hourType) dom.hourType.value = defaultHourTypeId();
+        state.punchDirty = false;
+        if (!opts.preserveMode) state.mode = 'manual';
       }
-      renderContracts();
-      renderPunchList();
       if (dom.hours) dom.hours.value = state.draftHours;
+      renderPunchList();
       setMode(state.mode, { force: true });
     };
 
@@ -467,6 +690,7 @@
     const hydrateDate = async (dateIso) => {
       state.currentDate = dateIso || todayIso();
       if (dom.date) dom.date.value = state.currentDate;
+      if (dom.dateLabel) dom.dateLabel.textContent = formatDateLabel(state.currentDate);
       setStatus('Loading...', 'info');
       hydrateCacheFromStorage();
       hydrateFromDesktopCache();
@@ -475,8 +699,9 @@
       await loadStaticData();
       await loadEntriesForDate(state.currentDate);
       renderHourTypes();
-      const chosen = pickEntryForHourType(dom.hourType ? dom.hourType.value : defaultHourTypeId());
-      hydrateDraftFromEntry(chosen);
+      renderDayCard();
+      const entry = pickEntryForHourType(state.selectedHourTypeId || defaultHourTypeId());
+      hydrateDraftFromEntry(entry, { preserveMode: true });
       setStatus(state.currentEntry ? 'Loaded existing entry.' : 'Ready to add entry.');
     };
 
@@ -497,9 +722,9 @@
         setStatus('Hours must be within a single day.', 'error');
         return null;
       }
-      const hourTypeId = dom.hourType ? dom.hourType.value || defaultHourTypeId() : defaultHourTypeId();
+      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId] || {};
-      const contractId = dom.contract ? dom.contract.value : '';
+      const contractId = dom.manualContract ? dom.manualContract.value : '';
       if (hourType.requires_contract) {
         if (!contractId) {
           setStatus('Select a contract for this hour type.', 'error');
@@ -535,9 +760,9 @@
         setStatus(validationError, 'error');
         return null;
       }
-      const hourTypeId = dom.hourType ? dom.hourType.value || defaultHourTypeId() : defaultHourTypeId();
+      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId] || {};
-      const contractId = dom.contract ? dom.contract.value : '';
+      const contractId = dom.punchContract ? dom.punchContract.value : '';
       if (hourType.requires_contract) {
         if (!contractId) {
           setStatus('Select a contract for this hour type.', 'error');
@@ -565,7 +790,7 @@
 
     const setLoading = (flag) => {
       state.loading = flag;
-      [dom.save, dom.deleteBtn, dom.reset, dom.addPunch, dom.datePrev, dom.dateNext, dom.dateToday].forEach((el) => {
+      [dom.manualSave, dom.manualDelete, dom.manualCancel, dom.punchToggle, dom.punchSave, dom.punchDelete, dom.punchDiscard, dom.datePrev, dom.dateNext].forEach((el) => {
         if (!el) return;
         el.disabled = flag;
       });
@@ -597,7 +822,7 @@
         storeEntries([confirmed]);
         state.entries = getCachedEntriesForDate(state.currentDate);
         hydrateDraftFromEntry(confirmed);
-        renderCalendar();
+        renderDayCard();
         setStatus('Saved.', 'success');
       } else {
         if (!isUpdate) {
@@ -629,22 +854,34 @@
         state.currentEntry = null;
         state.draftHours = '';
         state.draftPunches = [{ in: '', out: '' }];
-        hydrateDraftFromEntry(null);
-        renderCalendar();
+        state.punchDirty = false;
+        hydrateDraftFromEntry(null, { preserveMode: true });
+        renderDayCard();
         setStatus('Deleted.', 'success');
       }
       setLoading(false);
     };
 
-    const resetDraft = () => {
+    const cancelManualEdit = () => {
       state.currentEntry = null;
       state.draftHours = '';
       state.draftPunches = [{ in: '', out: '' }];
+      state.punchDirty = false;
       renderContracts();
       renderPunchList();
       if (dom.hours) dom.hours.value = '';
       setMode('manual');
-      setStatus('Reset. Ready to add.', 'info');
+      setStatus('Ready to add entry.', 'info');
+    };
+
+    const discardPunchChanges = () => {
+      if (state.currentEntry) {
+        hydrateDraftFromEntry(state.currentEntry, { preserveMode: true });
+      } else {
+        state.draftPunches = [{ in: '', out: '' }];
+        state.punchDirty = false;
+        renderPunchList();
+      }
     };
 
     const changeDate = (deltaDays) => {
@@ -654,31 +891,52 @@
     const bindEvents = () => {
       if (dom.tabManual) dom.tabManual.onclick = () => setMode('manual');
       if (dom.tabPunch) dom.tabPunch.onclick = () => setMode('punch');
-      if (dom.addPunch) dom.addPunch.onclick = addPunchRow;
-      if (dom.save) dom.save.onclick = saveEntry;
-      if (dom.deleteBtn) dom.deleteBtn.onclick = deleteEntry;
-      if (dom.reset) dom.reset.onclick = resetDraft;
-      if (dom.date) dom.date.onchange = () => hydrateDate(dom.date.value || todayIso());
+      if (dom.punchToggle) dom.punchToggle.onclick = togglePunch;
+      if (dom.punchSave) dom.punchSave.onclick = saveEntry;
+      if (dom.punchDelete) dom.punchDelete.onclick = deleteEntry;
+      if (dom.punchDiscard) dom.punchDiscard.onclick = discardPunchChanges;
+      if (dom.manualSave) dom.manualSave.onclick = saveEntry;
+      if (dom.manualDelete) dom.manualDelete.onclick = deleteEntry;
+      if (dom.manualCancel) dom.manualCancel.onclick = cancelManualEdit;
       if (dom.datePrev) dom.datePrev.onclick = () => changeDate(-1);
       if (dom.dateNext) dom.dateNext.onclick = () => changeDate(1);
-      if (dom.dateToday) dom.dateToday.onclick = () => hydrateDate(todayIso());
-      if (dom.hourType) dom.hourType.onchange = () => {
-        renderContracts();
-        const entry = pickEntryForHourType(dom.hourType.value);
-        hydrateDraftFromEntry(entry);
+      if (dom.dateLabel) dom.dateLabel.onclick = openDatePicker;
+      if (dom.datePickerClose) dom.datePickerClose.onclick = closeDatePicker;
+      if (dom.dateMonthPrev) dom.dateMonthPrev.onclick = () => {
+        if (state.datePicker.year == null || state.datePicker.month == null) return;
+        const prev = new Date(state.datePicker.year, state.datePicker.month - 1, 1);
+        state.datePicker.year = prev.getFullYear();
+        state.datePicker.month = prev.getMonth();
+        renderDatePicker();
       };
-      if (dom.contract) dom.contract.onchange = () => renderContracts();
-      if (dom.hours) dom.hours.oninput = () => { state.draftHours = dom.hours.value; };
-      if (dom.desktopLink) {
-        dom.desktopLink.addEventListener('click', (e) => {
-          e.preventDefault();
-          const target = window.location.origin + window.location.pathname;
-          window.location.href = target;
+      if (dom.dateMonthNext) dom.dateMonthNext.onclick = () => {
+        if (state.datePicker.year == null || state.datePicker.month == null) return;
+        const next = new Date(state.datePicker.year, state.datePicker.month + 1, 1);
+        state.datePicker.year = next.getFullYear();
+        state.datePicker.month = next.getMonth();
+        renderDatePicker();
+      };
+      if (dom.datePicker) {
+        dom.datePicker.addEventListener('click', (event) => {
+          if (event.target === dom.datePicker) closeDatePicker();
         });
       }
+      if (dom.manualHourType) dom.manualHourType.onchange = () => selectHourType(dom.manualHourType.value);
+      if (dom.punchHourType) dom.punchHourType.onchange = () => selectHourType(dom.punchHourType.value);
+      if (dom.manualContract) dom.manualContract.onchange = () => renderContracts({ manualPreferred: dom.manualContract.value });
+      if (dom.punchContract) dom.punchContract.onchange = () => renderContracts({ punchPreferred: dom.punchContract.value });
+      if (dom.hours) dom.hours.oninput = () => { state.draftHours = dom.hours.value; };
     };
 
     const init = async () => {
+      run('api_getWebAppUrl').then((url) => {
+        const desktopLink = document.getElementById('mobile-view-desktop-link');
+        const viewSwitch = document.getElementById('mobile-view-switch');
+        if (desktopLink && url) {
+          desktopLink.href = url;
+          if (viewSwitch) viewSwitch.style.display = 'flex';
+        }
+      });
       bindEvents();
       await hydrateDate(todayIso());
       if (mobileShell.applyTheme && state.settings && state.settings.theme) {
