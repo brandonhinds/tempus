@@ -7135,6 +7135,8 @@ function updateDeductionFormVisibility() {
     if (settingsSectionControls) {
       settingsSectionControls.style.display = visibleSections > 1 ? 'flex' : 'none';
     }
+    // Update custom theme controls after settings are rendered and in final positions
+    updateCustomThemeControls();
   }
 
   const contractIsValid = (contract, dateIso) => {
