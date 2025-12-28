@@ -79,6 +79,14 @@ The core system supports two modes:
 - Deletion confirmations inside modals must be implemented inline within that modal's content; never spawn a secondary modal on top of an existing modal for confirmation.
 - Settings UI is data-driven: every control lives in the hidden template bank inside `views/partials/settings.html` and is registered in `SETTINGS_CONFIG`. Set `section: 'core'` for always-on settings; to gate a control behind a feature flag, set `section` to that flag's identifier so the renderer automatically creates a collapsible section that appears only when the flag is enabled. Do not hand-code new settings outside this structure.
 - Whenever you change behaviour, flows, or feature flags, add or update the relevant markdown in `docs/` (see `docs/README.md`) so user-facing documentation stays current.
+- **Documentation Standard**: All user-facing documentation in `docs/` must follow these guidelines:
+  * **British English**: Use proper British English spelling throughout (e.g., "organise" not "organize", "colour" not "color", "behaviour" not "behavior", "categorise" not "categorize").
+  * **Structure**: Follow the established pattern of Purpose, Accessing the Page/Feature, detailed sections explaining UI elements and workflows, and practical Tips.
+  * **Detail Level**: Provide comprehensive explanations of what information is displayed, how to interact with elements, and what each field/setting does. See `docs/actual-income.md` and `docs/annual-views.md` for the expected level of detail.
+  * **Feature Flags**: Clearly indicate when features require specific feature flags to be enabled, using italics (e.g., *Enable invoices*).
+  * **Consistency**: Use consistent terminology across all docs (e.g., "Time Entry page" not "timesheet page", "contracts" not "engagements" unless specifically referring to client relationships).
+  * **Cross-references**: When linking to other documentation files, always use the full path with `docs/` prefix (e.g., `[Contracts](docs/contracts.md)` not `[Contracts](contracts.md)`).
+  * When updating existing docs, maintain the established voice and structure while improving clarity and completeness.
 
 ### Data Handling
 - Dates: ISO format `yyyy-MM-dd`
@@ -89,10 +97,15 @@ The core system supports two modes:
 ### Feature Flags
 Reference `featureFlags.md` for current flags. Use snake_case identifiers and update both the sheet schema and documentation when adding new flags.
 
-**IMPORTANT:** When adding a new feature flag, you must add it to THREE places:
+**IMPORTANT:** When adding a new feature flag, you must add it to FOUR places:
 1. `featureFlags.md` - Documentation file with the flag description
 2. `DEFAULT_FEATURE_FLAGS` object in `views/partials/scripts.html` (around line 4028) - This makes it appear in the Settings page UI with name, description, and order
 3. The feature flag sheet schema in Google Sheets (handled by `api_setFeatureFlag` in `backend/settings.gs`)
+4. `docs/settings.md` - Add the flag to the appropriate group in the "Feature Flag Groups" section so users can find it in the Settings documentation
+
+**IMPORTANT:** When adding a new setting that requires a feature flag, you must also update `docs/settings.md`:
+1. Add the setting to the "Feature-Specific Settings" section with its flag requirement, description, options, and default value
+2. Ensure the section explains clearly what the setting controls and when to use it
 
 ## Important Documentation
 

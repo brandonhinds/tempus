@@ -1,5 +1,7 @@
 # Invoices
 
+*TODO - Need to update when the invoice generation is working correctly.*
+
 Available when `enable_invoices` is enabled; line item templates require `enable_contract_line_item_templates`.
 
 ## Prerequisites
@@ -23,4 +25,8 @@ Available when `enable_invoices` is enabled; line item templates require `enable
 ## Tips
 - Keep hour types aligned with invoiced work to avoid income mismatch.
 - Ensure line limit in Settings matches template placeholders.
+
+## Summary
+
+Invoices track company income with line items, client details, and Google Docs generation. Create headers, add line items with optional hours linkage, manage default templates, and generate formatted invoices from templates.
 

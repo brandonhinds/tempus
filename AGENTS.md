@@ -27,6 +27,14 @@
   * Any other value must match the feature-flag identifier that gates those controls; the UI automatically surfaces the section (with its own expand/collapse state) when the flag is enabled.
   Add new settings by inserting a template block with `data-setting-key` in the hidden container and registering it in `SETTINGS_CONFIG` with the correct `section` id rather than manually dropping markup into the visible grid.
 - Whenever you change behaviour, flows, or feature flags, add or update the relevant markdown in `docs/` so user-facing documentation stays current (see `docs/README.md` for the index).
+- **Documentation Standard**: All user-facing documentation in `docs/` must follow these guidelines:
+  * **British English**: Use proper British English spelling throughout (e.g., "organise" not "organize", "colour" not "color", "behaviour" not "behavior", "categorise" not "categorize").
+  * **Structure**: Follow the established pattern of Purpose, Accessing the Page/Feature, detailed sections explaining UI elements and workflows, and practical Tips.
+  * **Detail Level**: Provide comprehensive explanations of what information is displayed, how to interact with elements, and what each field/setting does. See `docs/actual-income.md` and `docs/annual-views.md` for the expected level of detail.
+  * **Feature Flags**: Clearly indicate when features require specific feature flags to be enabled, using italics (e.g., *Enable invoices*).
+  * **Consistency**: Use consistent terminology across all docs (e.g., "Time Entry page" not "timesheet page", "contracts" not "engagements" unless specifically referring to client relationships).
+  * **Cross-references**: When linking to other documentation files, always use the full path with `docs/` prefix (e.g., `[Contracts](docs/contracts.md)` not `[Contracts](contracts.md)`).
+  * When updating existing docs, maintain the established voice and structure while improving clarity and completeness.
 
 ## Testing Guidelines
 - No automated suite exists. Verify manually in the deployed preview: create, edit, and delete entries, and confirm cached UI state stays in sync after page reloads.
@@ -41,8 +49,12 @@
 
 ## Feature Flags
 - Feature flags are documented in `featureFlags.md` and use snake_case identifiers.
-- **IMPORTANT:** When adding a new feature flag, you must add it to THREE places:
+- **IMPORTANT:** When adding a new feature flag, you must add it to FOUR places:
   1. `featureFlags.md` - Documentation file with the flag description
   2. `DEFAULT_FEATURE_FLAGS` object in `views/partials/scripts.html` (around line 4028) - This makes it appear in the Settings page UI with name, description, and order
   3. The feature flag sheet schema in Google Sheets (handled by `api_setFeatureFlag` in `backend/settings.gs`)
+  4. `docs/settings.md` - Add the flag to the appropriate group in the "Feature Flag Groups" section so users can find it in the Settings documentation
 - The UI toggle for feature flags is automatically generated from the `DEFAULT_FEATURE_FLAGS` object, so skipping step 2 will result in the flag not appearing in Settings.
+- **IMPORTANT:** When adding a new setting that requires a feature flag, you must also update `docs/settings.md`:
+  1. Add the setting to the "Feature-Specific Settings" section with its flag requirement, description, options, and default value
+  2. Ensure the section explains clearly what the setting controls and when to use it

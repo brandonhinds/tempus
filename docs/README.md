@@ -4,7 +4,6 @@ Table of contents for the Tempus docs set.
 
 ## Foundations
 - [Getting Started](getting-started.md)
-- [Data Model & Sheets Overview](data-model.md)
 - [Navigation & Layout Conventions](navigation.md)
 
 ## Time Entry
@@ -35,7 +34,8 @@ Table of contents for the Tempus docs set.
 ## Settings, Themes, Cache
 - [Settings Page Guide](settings.md)
 - [Themes & Accessibility](themes-accessibility.md)
-- [Cache & Update Controls](cache-and-update.md)
+- [Cache Management](cache.md)
+- [Updates](updates.md)
 
 ## Mobile
 - [Mobile Entry Overview](mobile-entry.md)
