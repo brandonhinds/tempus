@@ -240,13 +240,13 @@ Click "Click for details" in the Pre-tax deductions row to see:
 - **Adjust** buttons for creating occurrence exceptions.
 
 ### Annual Views
-The [Annual Views page](docs/annual-views.md) displays:
+The [Annual Views page](annual-views.md) displays:
 - Expense categories breakdown (when categories are enabled).
 - Total deductions across all months.
 - Category-based charts and summaries.
 
 ### BAS Reporting
-The [BAS Reporting page](docs/bas-reporting.md) includes:
+The [BAS Reporting page](bas-reporting.md) includes:
 - Company expenses with GST separated.
 - Categorised breakdowns for business expenses.
 - Quarterly and annual totals.

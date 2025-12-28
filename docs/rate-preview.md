@@ -238,4 +238,4 @@ Not directly. Rate Preview shows one scenario at a time. To compare multiple rat
 
 Rate Preview is your financial what-if calculator. Model pay rises, compare job offers, evaluate pay cuts, or just explore extreme scenarios for motivation. The calculations factor in super and tax to show you real net income differences, not just gross figures. Use it to plan negotiations, budget for career changes, or simply enjoy the dopamine hit of seeing what you could have earned at a higher rate. Just remember: it's a sandbox - nothing changes until you update your actual contract rates.
 
-For contract management, see [Contracts documentation](docs/contracts.md).
+For contract management, see [Contracts documentation](contracts.md).

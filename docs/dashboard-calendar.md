@@ -25,7 +25,7 @@ Two modes for logging time, selectable via tabs at the top of the card.
 
 ### Basic Mode
 
-Simple hour total entry for straightforward time tracking. See [Basic Time Entry documentation](docs/time-entry-basic.md) for complete details.
+Simple hour total entry for straightforward time tracking. See [Basic Time Entry documentation](time-entry-basic.md) for complete details.
 
 **Fields:**
 - **Date**: The day you're logging time for
@@ -41,7 +41,7 @@ Simple hour total entry for straightforward time tracking. See [Basic Time Entry
 
 ### Advanced Mode
 
-Punch-based tracking for precise in/out times. See [Advanced Punch Entry documentation](docs/time-entry-advanced.md) for complete details.
+Punch-based tracking for precise in/out times. See [Advanced Punch Entry documentation](time-entry-advanced.md) for complete details.
 
 **Fields:**
 - **Date**: The day you're tracking
@@ -83,7 +83,7 @@ Shows estimated net income for the month (or "Net income: --" if no entries exis
 **Expanded View:**
 When clicked, reveals the full income breakdown with two columns:
 
-- **Left column**: "Actual" values (when [Actual Income](docs/actual-income.md) has been recorded for this month)
+- **Left column**: "Actual" values (when [Actual Income](actual-income.md) has been recorded for this month)
 - **Right column**: "Estimated" values calculated from time entries
 
 **Income Waterfall:**
@@ -174,32 +174,32 @@ A row of buttons providing access to advanced features and utilities. Buttons ap
 - **Xero Payroll Helper**: Generates payroll import data for Xero (when *Enable payroll helpers* is enabled)
 - **MYOB Payroll Helper**: Generates payroll import data for MYOB (when *Enable payroll helpers* is enabled)
 
-See [Payroll Helpers documentation](docs/payroll-helpers.md) for details.
+See [Payroll Helpers documentation](payroll-helpers.md) for details.
 
 ### Actual Income
 
 - **Add Actual Income**: Opens modal to record actual income received (when *Enable actual income tracking* is enabled)
 
-See [Actual Income documentation](docs/actual-income.md) for details.
+See [Actual Income documentation](actual-income.md) for details.
 
 ### Bulk Operations
 
 - **Reoccurring Entries**: Manage schedules that automatically generate future entries (when *Enable recurring entries* is enabled)
 - **Bulk Entries**: Fill date ranges with consistent entries (when *Enable bulk entries* is enabled)
 
-See [Recurring Time Entries](docs/time-entry-recurring.md) and [Bulk Time Entries](docs/time-entry-bulk.md) documentation.
+See [Recurring Time Entries](time-entry-recurring.md) and [Bulk Time Entries](time-entry-bulk.md) documentation.
 
 ### Print View
 
 - **Print Monthly Hours**: Generate a printer-friendly summary of the month (when *Enable monthly print view* is enabled)
 
-See [Print View documentation](docs/print-view.md) for details.
+See [Print View documentation](print-view.md) for details.
 
 ### Import
 
 - **Import Timesheet 1.0**: Migrate data from legacy Timesheet 1.0 spreadsheets (when *Enable Timesheet 1.0 importer* is enabled)
 
-See [Timesheet 1.0 Importer documentation](docs/time-entry-importer.md) for details.
+See [Timesheet 1.0 Importer documentation](time-entry-importer.md) for details.
 
 ---
 
@@ -241,10 +241,10 @@ See [Timesheet 1.0 Importer documentation](docs/time-entry-importer.md) for deta
 ## Tips
 
 - **Keyboard workflow**: Use the date picker in the form to quickly navigate dates without clicking the calendar.
-- **Contract warnings**: If you see a contract warning, visit the [Contracts page](docs/contracts.md) to add or extend a valid contract.
+- **Contract warnings**: If you see a contract warning, visit the [Contracts page](contracts.md) to add or extend a valid contract.
 - **Default entries**: Create defaults for your most common entry patterns (e.g., "Standard Day", "Half Day", "Split Shift") to speed up data entry.
 - **Filter hour types**: When tracking multiple categories of time, filter the calendar to focus on specific hour types.
 - **Income variance**: If actual vs estimated income consistently differs, check your contract rates and deduction settings.
 - **Public holidays**: Enable public holiday syncing (via the *Enable public holidays* feature flag) to automatically mark non-working days on your calendar.
 - **Cache usage**: The calendar caches data for fast loads; if something seems stale after a manual sheet edit, use the clear cache button in Settings.
-- **Mobile view**: For quick entries on mobile, use the dedicated [Mobile Entry view](docs/mobile-entry.md) instead of this full interface.
+- **Mobile view**: For quick entries on mobile, use the dedicated [Mobile Entry view](mobile-entry.md) instead of this full interface.

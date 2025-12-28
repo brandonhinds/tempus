@@ -152,7 +152,7 @@ Tempus generates all the entries and updates the calendar immediately.
 
 **Use case for disabling:** You work on public holidays, or the bulk range represents a period where holidays don't apply.
 
-See [Settings documentation](docs/settings.md) for configuring your public holiday state.
+See [Settings documentation](settings.md) for configuring your public holiday state.
 
 ## Editing a Bulk Range
 
@@ -420,4 +420,4 @@ Yes, for daily distribution mode. Monthly distribution is locked to a single mon
 
 Bulk Time Entries automate repetitive entry creation across date ranges. Choose daily or monthly hour distribution, exclude weekends and holidays, and let Tempus generate all entries from one configuration. Edit the bulk range to update all entries, or delete it to remove them entirely.
 
-For individual time entry, see [Basic Time Entry documentation](docs/time-entry-basic.md) and [Advanced Punch Entry documentation](docs/time-entry-advanced.md). For automated recurring entries, see [Recurring Time Entries documentation](docs/time-entry-recurring.md).
+For individual time entry, see [Basic Time Entry documentation](time-entry-basic.md) and [Advanced Punch Entry documentation](time-entry-advanced.md). For automated recurring entries, see [Recurring Time Entries documentation](time-entry-recurring.md).

@@ -199,4 +199,4 @@ Both helpers produce the same weekly totals - they just format them differently 
 
 Payroll helpers bridge the gap between Tempus time tracking and external payroll systems. By formatting your monthly hours into weekly summaries that match Xero or MYOB's timesheet forms, they eliminate the need to manually calculate weekly totals or reformat data. Enable the helper for your payroll system, generate the report at month-end, and transfer the weekly totals into your payroll software with confidence.
 
-For the full Tempus time tracking experience, see [Dashboard & Calendar documentation](docs/dashboard-calendar.md).
+For the full Tempus time tracking experience, see [Dashboard & Calendar documentation](dashboard-calendar.md).

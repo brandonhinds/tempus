@@ -115,7 +115,7 @@ The total hours field accepts decimal values representing the duration worked.
 - Rounding interval: 6 minutes (0.1 hours)
 - Saved as: 7.4 hours (rounded to nearest 0.1)
 
-See [Settings documentation](docs/settings.md) for configuring rounding intervals.
+See [Settings documentation](settings.md) for configuring rounding intervals.
 
 ## Editing an Existing Manual Entry
 
@@ -164,7 +164,7 @@ If you have a consistent schedule (e.g., always 7.5 hours, always 8 hours), crea
 
 **With hour types:** Defaults can include a pinned hour type. If set, applying the default also selects that hour type, overriding your current selection.
 
-See [Entry Defaults documentation](docs/time-entry-defaults.md) for full details.
+See [Entry Defaults documentation](time-entry-defaults.md) for full details.
 
 ## Basic Entry vs Advanced Entry
 
@@ -280,4 +280,4 @@ No, and hour type is always required for a time entry.
 
 Basic Time Entry logs time as a simple total duration without tracking start/stop times. Perfect for retrospective entry or consistent schedules, it requires only a date, contract, and total hours. Rounding applies automatically, and entry defaults speed up repetitive logging.
 
-For precise punch-based tracking with multiple time ranges, see [Advanced Punch Entry documentation](docs/time-entry-advanced.md). For saving reusable hour templates, see [Entry Defaults documentation](docs/time-entry-defaults.md).
+For precise punch-based tracking with multiple time ranges, see [Advanced Punch Entry documentation](time-entry-advanced.md). For saving reusable hour templates, see [Entry Defaults documentation](time-entry-defaults.md).

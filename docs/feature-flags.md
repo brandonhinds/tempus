@@ -43,7 +43,7 @@ Adds category management for deductions and groups them on the deductions page a
 - Category management modal on the Deductions page
 - Colour-coded deduction categories
 - Category-based grouping on the Deductions page
-- Category breakdowns in [Annual Views](docs/annual-views.md) and [BAS Reporting](docs/bas-reporting.md)
+- Category breakdowns in [Annual Views](annual-views.md) and [BAS Reporting](bas-reporting.md)
 - Expand/collapse controls for category groups
 
 **When to enable:** If you have multiple deductions and want to organise them into categories like "Tools", "Office supplies", "Professional development", etc.
@@ -58,11 +58,11 @@ Allows recording actual income so you can compare estimated versus received amou
 - Actual income entry modal
 - Actual vs estimated comparison in the income breakdown badge
 - Variance indicators showing differences between calculated and actual income
-- Actual income data in [Annual Views](docs/annual-views.md)
+- Actual income data in [Annual Views](annual-views.md)
 
 **When to enable:** If you want to track the difference between your estimated income (based on hours worked) and what you actually receive in your bank account.
 
-See [Actual Income documentation](docs/actual-income.md) for details.
+See [Actual Income documentation](actual-income.md) for details.
 
 ### Enable expected monthly hours insights
 **Default:** Disabled
@@ -119,7 +119,7 @@ Allows saving reusable entry templates that can be applied when adding new time 
 
 **When to enable:** If you frequently log the same hours (e.g., "Standard Day: 7.5 hours", "Half Day: 3.75 hours") and want to apply them quickly.
 
-See [Entry Defaults documentation](docs/time-entry-defaults.md) for details.
+See [Entry Defaults documentation](time-entry-defaults.md) for details.
 
 ### Enable multiple hour types
 **Default:** Disabled
@@ -136,7 +136,7 @@ Lets you categorise hours (work, annual, sick, training, etc.) and visualise the
 
 **When to enable:** If you need to track different categories of time (billable, leave, training, overtime, etc.) and understand how each affects your income.
 
-See [Hour Types documentation](docs/time-entry-hour-types-contracts.md) for details.
+See [Hour Types documentation](time-entry-hour-types-contracts.md) for details.
 
 ### Enable reoccurring time entries
 **Default:** Disabled
@@ -151,7 +151,7 @@ Adds a scheduler to automatically create weekly or monthly entries that stay wit
 
 **When to enable:** If you work consistent schedules and want to pre-populate your timesheet automatically (e.g., every Monday and Wednesday, 7.5 hours).
 
-See [Recurring Time Entries documentation](docs/time-entry-recurring.md) for details.
+See [Recurring Time Entries documentation](time-entry-recurring.md) for details.
 
 ### Enable bulk time entries
 **Default:** Disabled
@@ -166,7 +166,7 @@ Adds a tool to apply identical entries across a date range with weekend and publ
 
 **When to enable:** If you need to fill multiple days with the same entry (e.g., apply 7.5 hours to every weekday in January).
 
-See [Bulk Time Entries documentation](docs/time-entry-bulk.md) for details.
+See [Bulk Time Entries documentation](time-entry-bulk.md) for details.
 
 ### Suggest exact end time
 **Default:** Disabled
@@ -207,7 +207,7 @@ Adds a modal that slices the active month into Xero-aligned weekly ranges with c
 
 **When to enable:** If you use Xero for payroll and need to generate weekly hour totals for import.
 
-See [Payroll Helpers documentation](docs/payroll-helpers.md) for details.
+See [Payroll Helpers documentation](payroll-helpers.md) for details.
 
 ### Enable MYOB payroll helper
 **Default:** Disabled
@@ -222,7 +222,7 @@ Adds a modal that groups the active month into MYOB-ready weekly totals with a m
 
 **When to enable:** If you use MYOB for payroll and need to generate weekly summaries for import.
 
-See [Payroll Helpers documentation](docs/payroll-helpers.md) for details.
+See [Payroll Helpers documentation](payroll-helpers.md) for details.
 
 ### Enable monthly hours print view
 **Default:** Disabled
@@ -237,7 +237,7 @@ Adds a printable calendar showing hour breakdowns by type that fits on one A4 pa
 
 **When to enable:** If you need to print physical copies of your monthly timesheets for records or approval processes.
 
-See [Print View documentation](docs/print-view.md) for details.
+See [Print View documentation](print-view.md) for details.
 
 ### Enable Timesheet 1.0 importer
 **Default:** Disabled
@@ -253,7 +253,7 @@ Adds an importer on the Time Entries page to pull legacy spreadsheet hours with 
 
 **When to enable:** If you're migrating from the original Timesheet 1.0 spreadsheet and need to import historical data.
 
-See [Timesheet 1.0 Importer documentation](docs/time-entry-importer.md) for details.
+See [Timesheet 1.0 Importer documentation](time-entry-importer.md) for details.
 
 ## Company Flags
 
@@ -288,7 +288,7 @@ Shows BAS reporting in quarterly totals instead of monthly when company income t
 
 **Important:** Australian BAS reporting defaults to quarterly for most small businesses. Enable this if you report to the ATO quarterly.
 
-See [BAS Reporting documentation](docs/bas-reporting.md) for details.
+See [BAS Reporting documentation](bas-reporting.md) for details.
 
 ### Enable invoices page
 **Default:** Disabled
@@ -370,7 +370,7 @@ Adds a button to wipe cached entries, settings, and remembered preferences from 
 
 **Important:** This is primarily for troubleshooting. Most users don't need this enabled.
 
-See [Cache Management documentation](docs/cache.md) for details.
+See [Cache Management documentation](cache.md) for details.
 
 ## Accessibility Flags
 
@@ -388,7 +388,7 @@ Adds a Custom theme option with configurable colours.
 
 **When to enable:** If none of the built-in themes suit your preferences and you want to create your own colour scheme.
 
-See [Themes & Accessibility documentation](docs/themes-accessibility.md) for details.
+See [Themes & Accessibility documentation](themes-accessibility.md) for details.
 
 ### Enable colour blind themes
 **Default:** Disabled
@@ -402,7 +402,7 @@ Adds colour-blind friendly theme presets and warns about difficult hour type col
 
 **When to enable:** If you have colour vision deficiency (colour blindness) and need high-contrast, accessible colour schemes.
 
-See [Themes & Accessibility documentation](docs/themes-accessibility.md) for details.
+See [Themes & Accessibility documentation](themes-accessibility.md) for details.
 
 ## Managing Feature Flags
 

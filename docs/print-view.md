@@ -191,4 +191,4 @@ If the content still overflows, you may have selected too many non-income hour t
 
 Print View transforms your monthly time entries into a printable A4 calendar optimised for physical timesheets and record-keeping. By combining income hour types into clean daily totals and limiting non-income types to two, the layout stays readable whilst fitting on a single page. Generate the view, select your hour types, and print directly from your browser to create professional timesheet documentation.
 
-For the full Tempus time tracking experience, see [Dashboard & Calendar documentation](docs/dashboard-calendar.md).
+For the full Tempus time tracking experience, see [Dashboard & Calendar documentation](dashboard-calendar.md).

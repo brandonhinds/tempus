@@ -52,7 +52,7 @@ Create contracts in Tempus that cover the date ranges in your legacy data. The i
 
 **Example:** If your Timesheet 1.0 data spans Jan 2023 - Dec 2023, create a contract with start date 1 Jan 2023 and end date 31 Dec 2023 (or use multiple contracts for different periods/clients).
 
-See [Contracts documentation](docs/contracts.md) for contract setup.
+See [Contracts documentation](contracts.md) for contract setup.
 
 ### Configure Hour Types
 If your Timesheet 1.0 data uses multiple hour type labels (Work, Leave, Training, etc.), enable hour types in Tempus and create matching hour types before importing.
@@ -63,12 +63,12 @@ If your Timesheet 1.0 data uses multiple hour type labels (Work, Leave, Training
 
 **Tip:** Create hour types with names matching your legacy labels to minimise manual mapping.
 
-See [Hour Types documentation](docs/hour-types.md) for hour type configuration.
+See [Hour Types documentation](hour-types.md) for hour type configuration.
 
 ### Check Public Holidays Configuration
 The importer can skip public holidays automatically if you have public holidays enabled. Entries falling on configured public holidays are excluded from import if the "Skip public holidays" toggle is enabled.
 
-See [Settings documentation](docs/settings.md) for public holiday configuration.
+See [Settings documentation](settings.md) for public holiday configuration.
 
 ## Using the Importer
 
@@ -413,4 +413,4 @@ Not automatically. You'd need to manually edit each imported entry to change its
 
 Timesheet 1.0 Importer migrates legacy data with automated hour type mapping, contract selection, duplicate detection, and bulk entry creation. Preview before importing, resolve all mappings and contract selections, then run to create entries with continuation support for large datasets.
 
-For manual time entry after import, see [Basic Time Entry documentation](docs/time-entry-basic.md). For contract setup, see [Contracts documentation](docs/contracts.md). For hour type configuration, see [Hour Types documentation](docs/hour-types.md).
+For manual time entry after import, see [Basic Time Entry documentation](time-entry-basic.md). For contract setup, see [Contracts documentation](contracts.md). For hour type configuration, see [Hour Types documentation](hour-types.md).

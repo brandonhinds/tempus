@@ -589,4 +589,4 @@ The schedule becomes invalid and shows a warning: "Contract not found." No entri
 
 Recurring Time Entries automate entry creation for weekly or monthly schedules. Configure recurrence patterns, contract boundaries, and hour types, then let Tempus generate entries automatically with income-aware backfill handling and duplicate prevention via generation tracking.
 
-For one-time range filling, see [Bulk Time Entries documentation](docs/time-entry-bulk.md). For manual entry with reusable templates, see [Entry Defaults documentation](docs/time-entry-defaults.md). For contract configuration, see [Contracts documentation](docs/contracts.md).
+For one-time range filling, see [Bulk Time Entries documentation](time-entry-bulk.md). For manual entry with reusable templates, see [Entry Defaults documentation](time-entry-defaults.md). For contract configuration, see [Contracts documentation](contracts.md).

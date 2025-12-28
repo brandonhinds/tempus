@@ -44,7 +44,7 @@ Enable as needed:
 - Recurring and bulk time entries
 - And many more...
 
-See [Feature Flags Reference](docs/feature-flags.md) for the complete list.
+See [Feature Flags Reference](feature-flags.md) for the complete list.
 
 ## First-Time Setup
 
@@ -115,7 +115,7 @@ Before you can log any time, you need at least one contract.
 
 **Why contracts matter:** Every time entry must reference a valid contract. Contracts define your rates and are used for all income calculations.
 
-See [Contracts documentation](docs/contracts.md) for details.
+See [Contracts documentation](contracts.md) for details.
 
 ### Step 5: Configure Core Settings
 
@@ -156,7 +156,7 @@ Customise Tempus to match your situation.
 
 **Settings are flexible:** You can return to Settings at any time to adjust these values. Many additional settings appear when you enable feature flags.
 
-See [Settings documentation](docs/settings.md) for complete details.
+See [Settings documentation](settings.md) for complete details.
 
 ## Next Steps
 
@@ -173,7 +173,7 @@ You're now ready to use Tempus! Here's what to do next:
 5. Click **Add Entry**.
 6. Your time appears on the calendar and income calculations update automatically.
 
-See [Dashboard & Calendar documentation](docs/dashboard-calendar.md) for details.
+See [Dashboard & Calendar documentation](dashboard-calendar.md) for details.
 
 ### Explore the Interface
 
@@ -203,7 +203,7 @@ Tempus includes many optional features that are disabled by default. Enable them
 - **Enable actual income tracking**: If you want to compare estimated vs actual income
 - **Enable company income tracking**: If you run a business and need to track company-level finances
 
-See [Feature Flags Reference](docs/feature-flags.md) for complete details on every flag.
+See [Feature Flags Reference](feature-flags.md) for complete details on every flag.
 
 ### Experiment with Features
 
@@ -214,7 +214,7 @@ See [Feature Flags Reference](docs/feature-flags.md) for complete details on eve
 
 ### Get Help
 
-- **Documentation**: Every feature has detailed documentation. Use the links throughout the app and in [docs/README.md](docs/README.md).
+- **Documentation**: Every feature has detailed documentation. Use the links throughout the app and in [docs/README.md](README.md).
 - **Feature flags**: If a button or page is missing, check if it requires a feature flag to be enabled.
 - **Cache issues**: If the UI seems stale after manual spreadsheet edits, enable the **Show clear cache button** flag and use it to refresh.
 
@@ -247,7 +247,7 @@ Tempus caches data in browser local storage for performance:
 - **Cache status**: The status badge in the header shows the current cache state
 - **Clearing cache**: Enable the **Show clear cache button** flag in Settings if you need to manually clear
 
-See [Cache Management documentation](docs/cache.md) for details.
+See [Cache Management documentation](cache.md) for details.
 
 ## Common First-Time Questions
 
@@ -273,26 +273,26 @@ No. Tempus requires an internet connection to access Google Sheets and Apps Scri
 Yes. Your data lives on your Google Drive, protected by your Google account security. The application code runs in your Google Apps Script environment. Nothing is sent to external servers.
 
 ### How do I update Tempus?
-See [Updates documentation](docs/updates.md) for the complete update process. The About page provides an automated update script.
+See [Updates documentation](updates.md) for the complete update process. The About page provides an automated update script.
 
 ## Tips for New Users
 
 - **Start simple**: Begin with basic time entry and a single contract. Enable features gradually as you need them.
 - **Bookmark the URL**: Save your web app URL as a bookmark for easy access.
 - **Use feature flags liberally**: Don't be afraid to enable a flag, try the feature, and disable it if you don't need it.
-- **Check the documentation**: When you're unsure how something works, look for the documentation link in the interface or visit [docs/README.md](docs/README.md).
+- **Check the documentation**: When you're unsure how something works, look for the documentation link in the interface or visit [docs/README.md](README.md).
 - **Review settings periodically**: As tax rates and super guarantee rates change, update your settings to keep calculations accurate.
 - **Understand contracts**: Contracts are the foundation of Tempus. Make sure your contract rates include your full package (gross income + super).
 - **Trust the cache**: The cache makes Tempus fast. Only clear it if something seems wrong - most of the time it "just works".
-- **Mobile support**: Tempus is desktop-first but includes a mobile entry view for quick entries on phones. See [Mobile Entry documentation](docs/mobile-entry.md).
+- **Mobile support**: Tempus is desktop-first but includes a mobile entry view for quick entries on phones. See [Mobile Entry documentation](mobile-entry.md).
 
 ## Next Documentation to Read
 
-1. [Dashboard & Calendar](docs/dashboard-calendar.md) - Learn the primary time entry interface
-2. [Contracts Management](docs/contracts.md) - Understand how to manage your engagements
-3. [Feature Flags Reference](docs/feature-flags.md) - Explore available optional features
-4. [Settings Page Guide](docs/settings.md) - Configure Tempus to match your situation
-5. [Cache Management](docs/cache.md) - Understand how caching works and when to clear it
+1. [Dashboard & Calendar](dashboard-calendar.md) - Learn the primary time entry interface
+2. [Contracts Management](contracts.md) - Understand how to manage your engagements
+3. [Feature Flags Reference](feature-flags.md) - Explore available optional features
+4. [Settings Page Guide](settings.md) - Configure Tempus to match your situation
+5. [Cache Management](cache.md) - Understand how caching works and when to clear it
 
 ## Summary
 

@@ -99,7 +99,7 @@ If you have a consistent schedule, create an advanced entry default to prefill y
 
 **Important:** Defaults clone punch ranges on apply. Editing the entry after applying a default does not change the saved default template.
 
-See [Entry Defaults documentation](docs/time-entry-defaults.md) for full details.
+See [Entry Defaults documentation](time-entry-defaults.md) for full details.
 
 ## The Punch Entry Form
 
@@ -171,7 +171,7 @@ When enabled, Tempus suggests an exact out time for your last open punch to achi
 
 **Use case:** If you use 6-minute rounding (0.1 hours) and want to hit exactly 7.5 hours, the suggestion tells you the precise time to clock out rather than guessing.
 
-See [Settings documentation](docs/settings.md) for configuring minimum end time.
+See [Settings documentation](settings.md) for configuring minimum end time.
 
 ## Editing an Existing Advanced Entry
 
@@ -298,4 +298,4 @@ Yes, if you're logged into the same Google account. Punch entries are saved to G
 
 Advanced Punch Entry tracks time as multiple punch-in/punch-out ranges, automatically calculating duration from closed punches. Perfect for precise tracking, billing, or payroll, it supports real-time punch toggles, manual time entry, and entry defaults. Open punches are preserved but excluded from totals until closed.
 
-For manual duration entry, see [Time Entry documentation](docs/time-entry-manual.md). For saving reusable punch templates, see [Entry Defaults documentation](docs/time-entry-defaults.md).
+For manual duration entry, see [Time Entry documentation](time-entry-manual.md). For saving reusable punch templates, see [Entry Defaults documentation](time-entry-defaults.md).

@@ -172,7 +172,7 @@ Feature flags enable optional Tempus features. All flags are disabled by default
 - **Enable colour blind themes**: Protanopia, deuteranopia, tritanopia, monochrome themes
 - **Enable custom themes**: Define your own colour palette
 
-See [Feature Flags Reference](docs/feature-flags.md) for complete details on every flag.
+See [Feature Flags Reference](feature-flags.md) for complete details on every flag.
 
 ## Feature-Specific Settings
 
@@ -267,7 +267,7 @@ At the bottom of the Core section, the **Open Mobile View** button (when *Show m
 
 **When to use:** When you need to access Tempus on a mobile device and want the streamlined mobile interface rather than the full desktop view.
 
-See [Mobile Entry documentation](docs/mobile-entry.md) for details.
+See [Mobile Entry documentation](mobile-entry.md) for details.
 
 ## Clear Cache
 
@@ -280,7 +280,7 @@ When the *Show clear cache button* flag is enabled, a **Clear Cache** button app
 - Troubleshooting unexpected behaviour
 - After major updates that change data structures
 
-See [Cache Management documentation](docs/cache.md) for details.
+See [Cache Management documentation](cache.md) for details.
 
 ## Saving Settings
 
@@ -309,4 +309,4 @@ See [Cache Management documentation](docs/cache.md) for details.
 
 Settings configure Tempus's core behaviour (tax rates, super, rounding, themes) and enable optional features through feature flags. Core settings are always visible, whilst feature-specific sections appear when you enable their flags.
 
-For detailed information on specific features, see [Feature Flags Reference](docs/feature-flags.md).
+For detailed information on specific features, see [Feature Flags Reference](feature-flags.md).

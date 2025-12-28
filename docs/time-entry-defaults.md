@@ -296,4 +296,4 @@ Yes. When you save an entry created from a default, the hours are rounded accord
 
 Entry Defaults save reusable time patterns for instant application. Create basic defaults for common total hours or advanced defaults for typical punch schedules. Apply from the entry form or calendar right-click menu, optionally pinning hour types for automatic override. Defaults speed up repetitive entry without sacrificing flexibility.
 
-For automated range filling, see [Bulk Time Entries documentation](docs/time-entry-bulk.md). For scheduled recurring entries, see [Recurring Time Entries documentation](docs/time-entry-recurring.md).
+For automated range filling, see [Bulk Time Entries documentation](time-entry-bulk.md). For scheduled recurring entries, see [Recurring Time Entries documentation](time-entry-recurring.md).

@@ -305,4 +305,4 @@ Yes. Each hour type has a colour that appears on calendar day cells, helping you
 
 Hour types categorise time (work, leave, training) with configurable income contribution and contract requirements. Contracts define where time applies and must be valid for the entry date. Together they enable sophisticated tracking: multiple entries per day with different types or contracts, income vs non-income separation, and mode-specific entry restrictions.
 
-For hour type configuration, see [Hour Types documentation](docs/hour-types.md). For contract management, see [Contracts documentation](docs/contracts.md). For time entry workflows, see [Basic Time Entry](docs/time-entry-basic.md) and [Advanced Punch Entry](docs/time-entry-advanced.md).
+For hour type configuration, see [Hour Types documentation](hour-types.md). For contract management, see [Contracts documentation](contracts.md). For time entry workflows, see [Basic Time Entry](time-entry-basic.md) and [Advanced Punch Entry](time-entry-advanced.md).

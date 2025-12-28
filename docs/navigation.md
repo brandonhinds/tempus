@@ -35,7 +35,7 @@ These pages are always available, regardless of feature flag settings.
 - Accessing income breakdowns
 - Quick navigation between dates
 
-See [Dashboard & Calendar documentation](docs/dashboard-calendar.md) for complete details.
+See [Dashboard & Calendar documentation](dashboard-calendar.md) for complete details.
 
 ### Annual Views
 Yearly financial summaries and trends.
@@ -57,7 +57,7 @@ Yearly financial summaries and trends.
 - Trend analysis across months
 - Contract performance comparison
 
-See [Annual Views documentation](docs/annual-views.md) for complete details.
+See [Annual Views documentation](annual-views.md) for complete details.
 
 ### Contracts
 Manage your client engagements and employment agreements.
@@ -77,7 +77,7 @@ Manage your client engagements and employment agreements.
 - Viewing contract progress and burndown
 - Managing contract-specific invoice templates
 
-See [Contracts documentation](docs/contracts.md) for complete details.
+See [Contracts documentation](contracts.md) for complete details.
 
 ### Deductions
 Manage salary sacrifice, company expenses, and extra super contributions.
@@ -94,7 +94,7 @@ Manage salary sacrifice, company expenses, and extra super contributions.
 - Managing deduction categories
 - Organising business expenses
 
-See [Deductions documentation](docs/deductions.md) for complete details.
+See [Deductions documentation](deductions.md) for complete details.
 
 ### Settings
 Configure Tempus to match your situation.
@@ -123,7 +123,7 @@ Configure Tempus to match your situation.
 - Customising the interface
 - Adjusting financial settings
 
-See [Settings documentation](docs/settings.md) for complete details.
+See [Settings documentation](settings.md) for complete details.
 
 ### About
 Application information, updates, and backups.
@@ -167,7 +167,7 @@ Manage categories of time (work, leave, training, etc.).
 - Setting up leave types vs billable types
 - Customising hour type colours
 
-See [Hour Types documentation](docs/time-entry-hour-types-contracts.md) for complete details.
+See [Hour Types documentation](time-entry-hour-types-contracts.md) for complete details.
 
 ### BAS Reporting
 **Requires:** *Enable company income tracking* AND *Switch from monthly to quarterly BAS reporting* feature flags
@@ -189,7 +189,7 @@ Australian BAS (Business Activity Statement) reporting.
 - Checking PAYG withholding amounts
 - Reconciling invoices for tax purposes
 
-See [BAS Reporting documentation](docs/bas-reporting.md) for complete details.
+See [BAS Reporting documentation](bas-reporting.md) for complete details.
 
 ### Invoices
 **Requires:** *Enable company income tracking* AND *Enable invoices page* feature flags
