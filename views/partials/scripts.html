@@ -348,6 +348,7 @@ let ratePreviewInputSyncing = false;
     isAutoPopulatingPublicHolidays: false,
     annualYearType: 'financial',
     annualCurrentYear: null,
+    annualAllTime: false,
     annualFilteredContracts: [],
     annualCategoryFilters: [],
     annualCategoryExpansion: {},
@@ -3123,6 +3124,7 @@ let ratePreviewInputSyncing = false;
   const annualCategoryTableBody = document.getElementById('annual-category-table-body');
   const annualCategoryEmpty = document.getElementById('annual-category-empty');
   const annualCategoryEmptyText = document.getElementById('annual-category-empty-text');
+  const ANNUAL_ALL_TIME_VALUE = 'all_time';
 
   function getThemeColors() {
     const computedStyle = getComputedStyle(document.body);
@@ -3290,11 +3292,12 @@ function hideAnnualLoadingState() {
     }
   }
 
-function loadAnnualData() {
+  function loadAnnualData() {
     const payload = {
       yearType: state.annualYearType,
       startYear: state.annualCurrentYear,
-      contractIds: state.annualFilteredContracts
+      contractIds: state.annualFilteredContracts,
+      allTime: state.annualAllTime
     };
 
     const hasAnyCachedData = state.annualData !== null;
@@ -3328,13 +3331,15 @@ function loadAnnualData() {
     }, 0);
 }
 
-  function buildAnnualDataFromMonthlyCache({ yearType, startYear, contractIds }) {
+  function buildAnnualDataFromMonthlyCache({ yearType, startYear, contractIds, allTime }) {
     const normalizedContractIds = Array.isArray(contractIds)
       ? contractIds.filter((id) => id != null && id !== '').map((id) => String(id))
       : [];
-    const months = yearType === 'financial'
-      ? getFinancialYearMonths(startYear)
-      : getCalendarYearMonths(startYear);
+    const months = allTime
+      ? collectAllTimeMonths()
+      : (yearType === 'financial'
+        ? getFinancialYearMonths(startYear)
+        : getCalendarYearMonths(startYear));
     const monthlyData = months.map(({ year, month }) => buildAnnualMonthSummary(year, month, normalizedContractIds));
     const yearTotals = monthlyData.reduce((acc, month) => {
       acc.grossIncome += month.grossIncome || 0;
@@ -3367,6 +3372,7 @@ function loadAnnualData() {
     return {
       yearType,
       startYear,
+      allTime: !!allTime,
       monthlyData,
       yearTotals,
       contractBreakdown: buildAnnualContractBreakdown(monthlyData),
@@ -3393,6 +3399,7 @@ function loadAnnualData() {
     const periodStartIso = periodStart.toISOString().substring(0, 10);
     const superRate = getSuperGuaranteeRateForDate(periodStartIso);
     const contractIncome = {};
+    const contractMinutes = {};
     let totalMinutes = 0; // income-contributing minutes only
     filteredEntries.forEach((entry) => {
       const minutes = Number(entry.duration_minutes) || 0;
@@ -3413,11 +3420,17 @@ function loadAnnualData() {
       const hours = minutes / 60;
       if (!contractIncome[contractId]) contractIncome[contractId] = 0;
       contractIncome[contractId] += hours * rate;
+      if (!contractMinutes[contractId]) contractMinutes[contractId] = 0;
+      contractMinutes[contractId] += minutes;
     });
     const roundingScale = totalMinutes > 0 ? 1 : 0;
     const totalHours = totalMinutes / 60;
     Object.keys(contractIncome).forEach((cid) => {
       contractIncome[cid] = contractIncome[cid] * roundingScale;
+    });
+    const contractHours = {};
+    Object.keys(contractMinutes).forEach((cid) => {
+      contractHours[cid] = contractMinutes[cid] / 60;
     });
 
     const hourTypeMinutes = {};
@@ -3572,6 +3585,17 @@ function loadAnnualData() {
       finalNetIncome = Number(actualIncome.net_income) || 0;
     }
 
+    let adjustedContractIncome = contractIncome;
+    if (totalPackage > 0 && finalGrossIncome >= 0) {
+      const scale = finalGrossIncome / totalPackage;
+      if (Number.isFinite(scale)) {
+        adjustedContractIncome = {};
+        Object.keys(contractIncome).forEach((cid) => {
+          adjustedContractIncome[cid] = contractIncome[cid] * scale;
+        });
+      }
+    }
+
     return {
       year,
       month,
@@ -3592,7 +3616,8 @@ function loadAnnualData() {
       companyExpensesGst,
       invoiceTotal,
       superRate,
-      contractIncome,
+      contractIncome: adjustedContractIncome,
+      contractHours,
       hourTypeHours,
       categoryBreakdown: {
         categories: categoryBreakdown
@@ -3641,6 +3666,28 @@ function loadAnnualData() {
       });
     });
     breakdown.sort((a, b) => b.grossIncome - a.grossIncome);
+    return breakdown;
+  }
+
+  function buildAnnualContractHoursBreakdown(monthlyData) {
+    const hoursByContract = {};
+    monthlyData.forEach((month) => {
+      const hoursMap = month.contractHours || {};
+      Object.keys(hoursMap).forEach((contractId) => {
+        hoursByContract[contractId] = (hoursByContract[contractId] || 0) + hoursMap[contractId];
+      });
+    });
+    const breakdown = [];
+    Object.keys(hoursByContract).forEach((contractId) => {
+      const contract = state.contractMap[contractId];
+      if (!contract) return;
+      breakdown.push({
+        contractId,
+        contractName: contract.name,
+        hours: hoursByContract[contractId]
+      });
+    });
+    breakdown.sort((a, b) => b.hours - a.hours);
     return breakdown;
   }
 
@@ -3742,8 +3789,8 @@ function loadAnnualData() {
         const fy = financialYearLabel(year);
         return `<option value="${year}">${state.annualYearType === 'financial' ? fy : year}</option>`;
       }).join('');
-      annualYearSelect.innerHTML = options;
-      annualYearSelect.value = String(state.annualCurrentYear);
+      annualYearSelect.innerHTML = `${options}<option value="${ANNUAL_ALL_TIME_VALUE}">All time</option>`;
+      annualYearSelect.value = state.annualAllTime ? ANNUAL_ALL_TIME_VALUE : String(state.annualCurrentYear);
     }
 
     // Initialize year type toggle
@@ -3753,6 +3800,7 @@ function loadAnnualData() {
     if (annualYearTypeLabel) {
       annualYearTypeLabel.textContent = state.annualYearType === 'financial' ? 'Financial Year' : 'Calendar Year';
     }
+    updateAnnualYearTypeVisibility();
 
     // Initialize contract filter
     renderAnnualContractFilter();
@@ -3769,12 +3817,30 @@ function loadAnnualData() {
     loadAnnualData();
   }
 
+  function updateAnnualYearTypeVisibility() {
+    const showToggle = !state.annualAllTime;
+    if (annualYearTypeToggle) annualYearTypeToggle.style.display = showToggle ? '' : 'none';
+    if (annualYearTypeLabel) annualYearTypeLabel.style.display = showToggle ? '' : 'none';
+  }
+
   function renderAnnualContractFilter() {
     if (!annualContractFilterList) return;
 
     // Get year range based on year type
-    let yearStart, yearEnd;
-    if (state.annualYearType === 'financial') {
+    let yearStart;
+    let yearEnd;
+    let excludePublicHolidays = false;
+    let publicHolidayHourTypeIds = [];
+    if (state.annualAllTime) {
+      const months = collectAllTimeMonths();
+      const range = getAllTimeRangeFromMonths(months);
+      if (range) {
+        yearStart = range.start;
+        yearEnd = range.end;
+      }
+      excludePublicHolidays = true;
+      publicHolidayHourTypeIds = getPublicHolidayHourTypeIds();
+    } else if (state.annualYearType === 'financial') {
       yearStart = new Date(state.annualCurrentYear, 6, 1); // July 1st
       yearEnd = new Date(state.annualCurrentYear + 1, 5, 30, 23, 59, 59); // June 30th
     } else {
@@ -3786,8 +3852,12 @@ function loadAnnualData() {
     const entryContractIds = new Set();
     (state.entries || []).forEach((entry) => {
       if (!entry || !entry.contract_id || !entry.date) return;
+      if (excludePublicHolidays) {
+        const hourTypeId = entry.hour_type_id || '';
+        if (publicHolidayHourTypeIds.includes(hourTypeId)) return;
+      }
       const entryDate = new Date(entry.date);
-      if (entryDate >= yearStart && entryDate <= yearEnd) {
+      if (yearStart && yearEnd && entryDate >= yearStart && entryDate <= yearEnd) {
         entryContractIds.add(String(entry.contract_id));
       }
     });
@@ -3796,7 +3866,7 @@ function loadAnnualData() {
       if (!c || !c.id || !c.name) return false;
       const contractStart = c.start_date ? new Date(c.start_date) : new Date(0);
       const contractEnd = c.end_date ? new Date(c.end_date) : new Date(9999, 11, 31);
-      const overlaps = contractStart <= yearEnd && contractEnd >= yearStart;
+      const overlaps = yearStart && yearEnd ? (contractStart <= yearEnd && contractEnd >= yearStart) : false;
       const referenced = entryContractIds.has(String(c.id));
       return overlaps || referenced;
     });
@@ -3900,6 +3970,18 @@ function loadAnnualData() {
     }
     const existing = Array.isArray(state.annualCategoryFilters) ? state.annualCategoryFilters.slice() : [];
     const valid = existing.filter((id) => keys.includes(id));
+    if (state.annualAllTime) {
+      state.annualCategoryFilters = valid;
+      if (!state.annualCategoryExpansion || typeof state.annualCategoryExpansion !== 'object') {
+        state.annualCategoryExpansion = {};
+      }
+      Object.keys(state.annualCategoryExpansion).forEach((key) => {
+        if (!keys.includes(key)) {
+          delete state.annualCategoryExpansion[key];
+        }
+      });
+      return;
+    }
     const additions = keys.filter((id) => !valid.includes(id));
     state.annualCategoryFilters = valid.concat(additions);
     if (!state.annualCategoryExpansion || typeof state.annualCategoryExpansion !== 'object') {
@@ -4157,10 +4239,7 @@ function loadAnnualData() {
   }
 
   function collectAllYears() {
-    // Get list of public holiday hour type IDs
-    const publicHolidayHourTypeIds = state.hourTypes
-      .filter(ht => ht.auto_populate_public_holidays === true || ht.auto_populate_public_holidays === 'TRUE')
-      .map(ht => ht.id);
+    const publicHolidayHourTypeIds = getPublicHolidayHourTypeIds();
 
     // Group entries by year to check if year has non-public-holiday entries
     const calendarYearEntries = {};
@@ -4220,6 +4299,83 @@ function loadAnnualData() {
     };
   }
 
+  function getPublicHolidayHourTypeIds() {
+    return (state.hourTypes || [])
+      .filter(ht => ht && (ht.auto_populate_public_holidays === true || ht.auto_populate_public_holidays === 'TRUE'))
+      .map(ht => ht.id);
+  }
+
+  function getMonthKey(year, month) {
+    const monthNum = month + 1;
+    return `${year}-${monthNum < 10 ? '0' + monthNum : monthNum}`;
+  }
+
+  function collectAllTimeMonths() {
+    const publicHolidayHourTypeIds = getPublicHolidayHourTypeIds();
+    const monthStats = {};
+
+    (state.entries || []).forEach(entry => {
+      if (!entry || !entry.date) return;
+      const duration = Number(entry.duration_minutes) || 0;
+      if (duration <= 0) return;
+      const date = new Date(entry.date);
+      if (Number.isNaN(date.getTime())) return;
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const key = getMonthKey(year, month);
+      if (!monthStats[key]) {
+        monthStats[key] = {
+          year,
+          month,
+          total: 0,
+          publicHolidays: 0
+        };
+      }
+      monthStats[key].total += 1;
+      const hourTypeId = entry.hour_type_id || '';
+      if (publicHolidayHourTypeIds.includes(hourTypeId)) {
+        monthStats[key].publicHolidays += 1;
+      }
+    });
+
+    const validMonths = Object.keys(monthStats)
+      .map(key => monthStats[key])
+      .filter(stats => stats.total > stats.publicHolidays)
+      .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
+
+    if (!validMonths.length) return [];
+
+    const first = validMonths[0];
+    const last = validMonths[validMonths.length - 1];
+    const months = [];
+    let currentYear = first.year;
+    let currentMonth = first.month;
+
+    while (currentYear < last.year || (currentYear === last.year && currentMonth <= last.month)) {
+      const key = getMonthKey(currentYear, currentMonth);
+      const stats = monthStats[key];
+      if (!stats || stats.total > stats.publicHolidays) {
+        months.push({ year: currentYear, month: currentMonth });
+      }
+      currentMonth += 1;
+      if (currentMonth > 11) {
+        currentMonth = 0;
+        currentYear += 1;
+      }
+    }
+
+    return months;
+  }
+
+  function getAllTimeRangeFromMonths(months) {
+    if (!Array.isArray(months) || months.length === 0) return null;
+    const first = months[0];
+    const last = months[months.length - 1];
+    const start = new Date(first.year, first.month, 1);
+    const end = new Date(last.year, last.month + 1, 0, 23, 59, 59);
+    return { start, end };
+  }
+
   function getCorrespondingYear(year, fromType, toType) {
     if (fromType === toType) return year;
 
@@ -4257,7 +4413,8 @@ function loadAnnualData() {
 
     // Calculate and display new metrics
     const effectiveTaxRate = totals.grossIncome > 0 ? (totals.tax / totals.grossIncome) * 100 : 0;
-    const avgMonthlyIncome = totals.grossIncome / 12;
+    const monthsInPeriod = state.annualAllTime ? data.monthlyData.length : 12;
+    const avgMonthlyIncome = monthsInPeriod > 0 ? totals.grossIncome / monthsInPeriod : 0;
     // Use rateCalcHours if available and > 0, otherwise fall back to totalHours
     const hoursForRate = totals.rateCalcHours > 0 ? totals.rateCalcHours : totals.totalHours;
     const effectiveHourlyRate = hoursForRate > 0 ? totals.grossIncome / hoursForRate : 0;
@@ -4279,12 +4436,21 @@ function loadAnnualData() {
     renderAnnualTotalHoursByTypePieChart();
 
     // Update tax analysis
-    renderAnnualTaxAnalysis();
+    const taxAnalysis = document.getElementById('annual-tax-analysis');
+    if (taxAnalysis) taxAnalysis.style.display = state.annualAllTime ? 'none' : 'block';
+    if (!state.annualAllTime) {
+      renderAnnualTaxAnalysis();
+    }
     renderAnnualCategorySection();
 
     // Show/hide empty state
     const hasData = data.monthlyData.some(m => m.grossIncome > 0 || m.totalHours > 0);
     if (annualEmpty) annualEmpty.style.display = hasData ? 'none' : 'block';
+
+    const hoursTitle = document.getElementById('annual-total-hours-title');
+    if (hoursTitle) {
+      hoursTitle.textContent = state.annualAllTime ? 'Billable Hours by Contract' : 'Hours by Month';
+    }
   }
 
   function updateAnnualBreakdownTable() {
@@ -4745,18 +4911,30 @@ function loadAnnualData() {
     const canvas = document.getElementById('annual-total-hours-pie-chart');
     if (!canvas || !state.annualData) return;
 
-    const monthlyData = state.annualData.monthlyData;
-    const labels = monthlyData.map(m => m.label);
-    const hours = monthlyData.map(m => m.totalHours);
     const colors = getThemeColors();
+    let labels = [];
+    let hours = [];
+    let backgroundColor = [];
+
+    if (state.annualAllTime) {
+      const breakdown = buildAnnualContractHoursBreakdown(state.annualData.monthlyData || []);
+      if (!breakdown.length) return;
+      const chartColors = [colors.primary, colors.success, colors.warning, colors.danger, '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b'];
+      labels = breakdown.map(item => item.contractName);
+      hours = breakdown.map(item => item.hours);
+      backgroundColor = chartColors.slice(0, breakdown.length);
+    } else {
+      const monthlyData = state.annualData.monthlyData;
+      labels = monthlyData.map(m => m.label);
+      hours = monthlyData.map(m => m.totalHours);
+      backgroundColor = hours.map((_, index) => {
+        const hue = (index * 30) % 360;
+        return `hsl(${hue}, 70%, 60%)`;
+      });
+    }
 
     const totalHours = hours.reduce((sum, h) => sum + h, 0);
-
-    // Use rainbow gradient for 12 months (ordered visually)
-    const monthColors = hours.map((_, index) => {
-      const hue = (index * 30) % 360; // 0, 30, 60, 90, 120... (full spectrum)
-      return `hsl(${hue}, 70%, 60%)`;
-    });
+    if (totalHours <= 0) return;
 
     const ctx = canvas.getContext('2d');
     state.annualCharts.totalHoursPie = new Chart(ctx, {
@@ -4765,7 +4943,7 @@ function loadAnnualData() {
         labels: labels,
         datasets: [{
           data: hours,
-          backgroundColor: monthColors,
+          backgroundColor,
           borderWidth: 3,
           borderColor: getComputedStyle(document.body).getPropertyValue('--panel').trim(),
           hoverBorderWidth: 4,
@@ -4949,6 +5127,7 @@ function loadAnnualData() {
     annualYearTypeToggle.addEventListener('change', () => {
       const oldType = state.annualYearType;
       state.annualYearType = annualYearTypeToggle.checked ? 'calendar' : 'financial';
+      state.annualAllTime = false;
 
       if (annualYearTypeLabel) {
         annualYearTypeLabel.textContent = state.annualYearType === 'financial' ? 'Financial Year' : 'Calendar Year';
@@ -4977,9 +5156,10 @@ function loadAnnualData() {
           const fy = financialYearLabel(year);
           return `<option value="${year}">${state.annualYearType === 'financial' ? fy : year}</option>`;
         }).join('');
-        annualYearSelect.innerHTML = options;
-        annualYearSelect.value = String(state.annualCurrentYear);
+        annualYearSelect.innerHTML = `${options}<option value="${ANNUAL_ALL_TIME_VALUE}">All time</option>`;
+        annualYearSelect.value = state.annualAllTime ? ANNUAL_ALL_TIME_VALUE : String(state.annualCurrentYear);
       }
+      updateAnnualYearTypeVisibility();
 
       // Reset annual data and contract filter when toggling year type
       state.annualData = null;
@@ -4993,7 +5173,16 @@ function loadAnnualData() {
 
   if (annualYearSelect) {
     annualYearSelect.addEventListener('change', () => {
-      state.annualCurrentYear = Number(annualYearSelect.value);
+      const selectedValue = annualYearSelect.value;
+      if (selectedValue === ANNUAL_ALL_TIME_VALUE) {
+        state.annualAllTime = true;
+        state.annualCategoryFilters = [];
+        state.annualCategoryExpansion = {};
+      } else {
+        state.annualAllTime = false;
+        state.annualCurrentYear = Number(selectedValue);
+      }
+      updateAnnualYearTypeVisibility();
       // Reset annual data and contract filter when changing year
       state.annualData = null;
       state.annualFilteredContracts = [];
@@ -5014,8 +5203,16 @@ function loadAnnualData() {
   if (annualFilterSelectAll) {
     annualFilterSelectAll.addEventListener('click', () => {
       // Get year range based on year type
-      let yearStart, yearEnd;
-      if (state.annualYearType === 'financial') {
+      let yearStart;
+      let yearEnd;
+      if (state.annualAllTime) {
+        const months = collectAllTimeMonths();
+        const range = getAllTimeRangeFromMonths(months);
+        if (range) {
+          yearStart = range.start;
+          yearEnd = range.end;
+        }
+      } else if (state.annualYearType === 'financial') {
         yearStart = new Date(state.annualCurrentYear, 6, 1);
         yearEnd = new Date(state.annualCurrentYear + 1, 5, 30, 23, 59, 59);
       } else {
@@ -5028,6 +5225,7 @@ function loadAnnualData() {
         if (!c || !c.id) return false;
         const contractStart = c.start_date ? new Date(c.start_date) : new Date(0);
         const contractEnd = c.end_date ? new Date(c.end_date) : new Date(9999, 11, 31);
+        if (!yearStart || !yearEnd) return false;
         return contractStart <= yearEnd && contractEnd >= yearStart;
       });
 

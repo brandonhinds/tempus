@@ -22,6 +22,9 @@ Provides a complete overview of your financial performance across a 12-month per
 - For Financial Years, displays as "FY 2024/2025" format.
 - For Calendar Years, displays as "2024" format.
 - Only shows years where you have time entries.
+- **All time** appears at the bottom of the list and aggregates every month between your first and last non-public-holiday entries.
+- Months that only contain public holiday entries are excluded from the all-time view, while empty months between the first and last entry remain in the timeline.
+- When All time is selected, the Financial/Calendar toggle is hidden and the average monthly income uses the full month span shown in the charts.
 
 ### Contract Filter (appears when multiple contracts exist)
 - Filter icon button appears when you have more than one contract active in the selected year.
@@ -110,11 +113,11 @@ Shows the percentage of total income earned from each contract, useful for:
 - Identifying primary income sources
 - Planning contract renewals
 
-### Hours by Month
-Shows the distribution of billable hours across the 12 months:
-- Identifies busy and quiet periods
-- Helps with capacity planning
-- Each month is colour-coded for easy identification
+### Hours by Contract
+Shows the distribution of billable hours across contracts:
+- Highlights which contracts consume the most time
+- Helps balance workload across clients
+- Each contract uses its configured colour in the legend (when available)
 
 ### Hours by Type
 Breaks down total hours by hour type category:
@@ -135,6 +138,8 @@ Financial year-specific tax insights:
 **Important Caveat**: This analysis is most accurate toward the end of the financial year. The tax withheld each pay period assumes that amount is your average for the entire year, while the expected tax assumes your taxable income is complete. Early in the year, these assumptions create large discrepancies.
 
 **Note**: Tax estimates do not account for tax offsets (low income, seniors, etc.) or other adjustments. Actual tax liability may vary. Always consult the ATO or a tax professional for final calculations.
+
+**All time**: Tax analysis is hidden when viewing All time because the calculation is only meaningful for a single financial year.
 
 ## Workflow
 1. Navigate to Annual Views from the menu.
