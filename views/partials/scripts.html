@@ -8843,9 +8843,8 @@ function updateDeductionFormVisibility() {
     return { modal, confirmBtn };
   }
 
-  function deleteEntriesById(ids) {
-    const results = [];
-    const run = (id) => new Promise((resolve) => {
+  function runEntryDeleteRequest(id) {
+    return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler(() => resolve({ id, success: true }))
         .withFailureHandler((error) => {
@@ -8859,6 +8858,10 @@ function updateDeductionFormVisibility() {
         })
         .api_deleteEntry(id);
     });
+  }
+
+  function deleteEntriesById(ids) {
+    const results = [];
     const seq = async () => {
       for (const id of ids) {
         // Remove locally optimistically; rollback handled by refresh on failure
@@ -8867,7 +8870,19 @@ function updateDeductionFormVisibility() {
           const removed = state.entries.splice(idx, 1)[0];
           markIncomeSummaryDirtyForEntry(removed);
         }
-        const res = await run(id);
+        const res = await runEntryDeleteRequest(id);
+        results.push(res);
+      }
+      return results;
+    };
+    return seq();
+  }
+
+  function deleteEntriesByIdServerOnly(ids) {
+    const results = [];
+    const seq = async () => {
+      for (const id of ids) {
+        const res = await runEntryDeleteRequest(id);
         results.push(res);
       }
       return results;
@@ -9597,7 +9612,6 @@ function updateDeductionFormVisibility() {
   const incomeActualSuperValueEl = document.getElementById('income-actual-super-value');
   const incomeActualTaxValueEl = document.getElementById('income-actual-tax-value');
   const incomeActualNetValueEl = document.getElementById('income-actual-net-value');
-  const potentialNetDivider = document.getElementById('potential-net-divider');
   const incomeProjectionsHeader = document.getElementById('income-projections-header');
   const incomePotentialNetRow = document.getElementById('income-potential-net-row');
   const incomeEstimatedStandardRow = document.getElementById('income-estimated-standard-row');
@@ -14556,7 +14570,7 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function updatePotentialIncomeSection(summary) {
-    if (!potentialNetDivider || !incomePotentialNetRow) return;
+    if (!incomePotentialNetRow) return;
     if (!summary || !state.calendar) {
       hidePotentialIncomeSection();
       return;
@@ -14608,7 +14622,6 @@ function getCachedIncomeSummary(monthKey) {
   function hidePotentialIncomeSection() {
     state.potentialIncomeStats = null;
     const rows = [
-      potentialNetDivider,
       incomeProjectionsHeader,
       incomePotentialNetRow,
       incomeEstimatedStandardRow,
@@ -14901,7 +14914,7 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function applyPotentialIncomeDisplay(contract, stats, summary, year, month) {
-    if (!potentialNetDivider || !incomePotentialNetRow) return;
+    if (!incomePotentialNetRow) return;
     const scenarios = [
       { id: 'potential', hours: stats.standardPotentialHours, element: incomePotentialNetEl },
       { id: 'standard', hours: stats.actualIncomeHours + stats.remainingStandardHours, element: incomeEstimatedStandardNetEl },
@@ -14922,7 +14935,6 @@ function getCachedIncomeSummary(monthKey) {
       }
     });
     const rowsToShow = [
-      potentialNetDivider,
       incomeProjectionsHeader,
       incomePotentialNetRow,
       incomeEstimatedStandardRow,
@@ -16581,6 +16593,7 @@ function getCachedIncomeSummary(monthKey) {
   const calendarContextEmptyState = document.getElementById('calendar-context-empty');
   const calendarContextBasicSection = calendarContextMenu ? calendarContextMenu.querySelector('[data-section="basic"]') : null;
   const calendarContextAdvancedSection = calendarContextMenu ? calendarContextMenu.querySelector('[data-section="advanced"]') : null;
+  const calendarClearDayBtn = document.getElementById('calendar-clear-day');
   let calendarContextMenuDate = null;
 
   function renderCalendarFilters() {
@@ -21311,6 +21324,20 @@ function getCachedIncomeSummary(monthKey) {
       const shouldShowEmpty = !hasBasic && !hasAdvanced;
       calendarContextEmptyState.style.display = shouldShowEmpty ? 'block' : 'none';
     }
+    updateCalendarContextActions(calendarContextMenuDate);
+  }
+
+  function updateCalendarContextActions(dateIso) {
+    if (!calendarClearDayBtn) return;
+    if (!dateIso) {
+      calendarClearDayBtn.disabled = true;
+      calendarClearDayBtn.title = 'Select a date to manage entries.';
+      return;
+    }
+    const entriesForDate = state.entries.filter(entry => entry.date === dateIso);
+    const hasEntries = entriesForDate.length > 0;
+    calendarClearDayBtn.disabled = !hasEntries;
+    calendarClearDayBtn.title = hasEntries ? 'Delete all entries for this day.' : 'No entries to clear for this day.';
   }
 
   function positionCalendarContextMenu(x, y) {
@@ -21360,6 +21387,63 @@ function getCachedIncomeSummary(monthKey) {
     insertDefaultEntryForDate(targetDate, defaultData, type);
   }
 
+  async function handleCalendarClearDay() {
+    if (!calendarContextMenuDate) return;
+    const targetDate = calendarContextMenuDate;
+    const entriesForDate = state.entries.filter(entry => entry.date === targetDate);
+    hideCalendarContextMenu();
+    if (!entriesForDate.length) {
+      setStatus('No entries to clear for this day.', 'warn');
+      return;
+    }
+
+    const entryCount = entriesForDate.length;
+    const dateLabel = formatFriendlyDate(targetDate);
+    const confirmed = await customConfirm(
+      `Delete all ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} on ${dateLabel}? This action cannot be undone.`,
+      { danger: true, okText: 'Delete all' }
+    );
+    if (!confirmed) return;
+
+    const ids = entriesForDate.map(entry => entry.id);
+    const failedIds = new Set();
+
+    state.entries = state.entries.filter(entry => entry.date !== targetDate);
+    entriesForDate.forEach((entry) => {
+      markIncomeSummaryDirtyForEntry(entry);
+      recordPendingEntryDelete(entry.id);
+    });
+
+    saveCache();
+    renderEntries();
+    setStatus('Deleting entries...', 'warn');
+
+    const results = await deleteEntriesByIdServerOnly(ids);
+    results.forEach((result) => {
+      if (result.success) {
+        if (!entriesSyncInFlight) resolvePendingEntryDelete(result.id);
+      } else {
+        failedIds.add(String(result.id));
+        resolvePendingEntryDelete(result.id);
+      }
+    });
+
+    if (failedIds.size) {
+      const restored = entriesForDate.filter(entry => failedIds.has(String(entry.id)));
+      if (restored.length) {
+        state.entries = state.entries.concat(restored);
+        state.entries.sort(entrySort);
+        restored.forEach(entry => markIncomeSummaryDirtyForEntry(entry));
+      }
+      saveCache();
+      renderEntries();
+      setStatus(`Failed to delete ${failedIds.size} entr${failedIds.size === 1 ? 'y' : 'ies'}.`, 'error');
+      return;
+    }
+
+    setStatus(`Cleared ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}.`, 'success');
+  }
+
   function insertDefaultEntryForDate(dateIso, defaultData, type) {
     if (!dateIso || !defaultData) return;
     withEntryFocusSuppressed(() => {
@@ -21402,6 +21486,9 @@ function getCachedIncomeSummary(monthKey) {
   }
   if (calendarContextMenu) {
     calendarContextMenu.addEventListener('contextmenu', (event) => event.preventDefault());
+  }
+  if (calendarClearDayBtn) {
+    calendarClearDayBtn.addEventListener('click', handleCalendarClearDay);
   }
   document.addEventListener('click', (event) => {
     if (!calendarContextMenu || calendarContextMenu.style.display !== 'block') return;

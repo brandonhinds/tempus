@@ -165,7 +165,6 @@
         <span class="ts-income-row-actual" id="income-actual-net-value"></span>
         <span class="ts-income-row-est" id="income-net">--</span>
       </div>
-      <div class="ts-income-divider ts-expected-breakdown income-potential-row" id="potential-net-divider" hidden></div>
       <div class="ts-income-row income-potential-row" id="income-projections-header" hidden>
         <div style="grid-column: 1 / -1; height: 1px; background: var(--border); margin: 16px 0px 8px;"></div>
         <div class="ts-expected-section-title" style="grid-column: 1 / -1; font-weight: 600; margin: 8px 0px 4px;">Projections</div>
@@ -217,9 +216,9 @@
     </div>
     <div class="ts-calendar-grid" id="calendar-grid"></div>
     <div class="ts-calendar-context-menu" id="calendar-context-menu" style="display:none;">
-      <div class="ts-calendar-context-header">Add default entry</div>
+      <div class="ts-calendar-context-header">Quick actions</div>
       <div class="ts-calendar-context-empty" id="calendar-context-empty" style="display:none;">
-        Create a basic or advanced default to use this shortcut.
+        No defaults yet. Create a basic or advanced default to add quick entries.
       </div>
       <div class="ts-calendar-context-section" data-section="basic">
         <div class="ts-calendar-context-title">Basic defaults</div>
@@ -228,6 +227,12 @@
       <div class="ts-calendar-context-section" data-section="advanced">
         <div class="ts-calendar-context-title">Advanced defaults</div>
         <div class="ts-calendar-context-list" id="calendar-context-advanced"></div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="actions">
+        <div class="ts-calendar-context-title">Actions</div>
+        <div class="ts-calendar-context-list">
+          <button class="ts-calendar-context-item danger" id="calendar-clear-day" type="button">Clear day</button>
+        </div>
       </div>
     </div>
     <div class="ts-note" style="margin-top:6px;">Click a day to add or edit entries. Right-click to insert a default.</div>

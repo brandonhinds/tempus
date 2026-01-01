@@ -299,7 +299,7 @@ Calendar-based pages share common navigation:
 
 ### Context Menus
 Right-click interactions provide quick access:
-- **Calendar days**: Right-click to insert default entries (when *Enable default inputs* is enabled)
+- **Calendar days**: Right-click to insert default entries or clear a day (when *Enable default inputs* is enabled)
 - Click outside or press **Escape** to dismiss
 
 ## Tips for Navigation

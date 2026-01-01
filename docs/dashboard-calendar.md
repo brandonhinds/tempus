@@ -136,7 +136,7 @@ Each day displays:
 
 **Interactions:**
 - **Left-click**: Selects the day and loads its entry into the form above
-- **Right-click**: Opens context menu to insert a default entry (when *Enable default inputs* is enabled)
+- **Right-click**: Opens the context menu for defaults and day-level actions (when *Enable default inputs* is enabled)
 
 ### Calendar Navigation
 
@@ -160,8 +160,11 @@ Right-click any day to insert a default entry quickly (requires *Enable default 
 **Menu Sections:**
 - **Basic defaults**: Pre-configured hour totals
 - **Advanced defaults**: Pre-configured punch patterns
+- **Actions**: Calendar-wide shortcuts
 
 Select a default to instantly apply it to the selected date. If you haven't created any defaults, the menu prompts you to create one first.
+
+**Clear day:** Choose **Clear day** to remove every entry for the selected date. Tempus shows a confirmation prompt before deleting, and the action cannot be undone.
 
 ---
 
