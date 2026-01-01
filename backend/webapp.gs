@@ -39,6 +39,12 @@ function onOpen() {
 function getTempusWebAppUrl() {
   var ui = SpreadsheetApp.getUi();
   var url = null;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targetSheetName = 'INTRO';
+  var targetCell = 'B12';
+  var linkLabel = 'Open Tempus';
+  var settings = {};
+  var storedUrl = '';
 
   try {
     url = ScriptApp.getService().getUrl();
@@ -46,12 +52,47 @@ function getTempusWebAppUrl() {
     Logger.log('Error getting service URL: ' + e.toString());
   }
 
+  try {
+    settings = api_getSettings ? api_getSettings() : {};
+    storedUrl = settings && settings.tempus_url ? String(settings.tempus_url) : '';
+  } catch (e) {
+    Logger.log('Error loading settings: ' + e.toString());
+  }
+
+  if (storedUrl) {
+    Logger.log('getTempusWebAppUrl: opening stored Tempus URL: ' + storedUrl);
+    var html = HtmlService.createHtmlOutput(
+      '<html><body style="font-family:Arial, sans-serif; padding:16px;">' +
+      '<p style="margin:0 0 12px;">Opening Tempus in a new tab.<br><br>If your browser blocks the pop-up, click the button below.</p>' +
+      '<button id="open-tempus" style="padding:6px 10px; font-size:12px;">Open Tempus</button>' +
+      '<script>' +
+      'var opened = window.open("' + storedUrl + '", "_blank", "noopener");' +
+      'document.getElementById("open-tempus").addEventListener("click", function(){' +
+      '  window.open("' + storedUrl + '", "_blank", "noopener");' +
+      '});' +
+      '</script>' +
+      '</body></html>'
+    ).setWidth(360).setHeight(150);
+    ui.showModelessDialog(html, 'Opening Tempus');
+    return storedUrl;
+  }
+
   var message = '';
 
   // Check if we have a test deployment URL (contains /dev)
   if (url && url.indexOf('/dev') !== -1) {
-    message = 'Your Tempus Web App URL:\n\n' +
-              url + '\n\n'
+    var targetSheet = ss.getSheetByName(targetSheetName);
+    if (!targetSheet) {
+      message = 'Your Tempus Web App URL:\n\n' +
+                url + '\n\n' +
+                'Note: The "' + targetSheetName + '" sheet was not found, so the link could not be written.';
+    } else {
+      var hyperlinkFormula = '=HYPERLINK("' + url + '","' + linkLabel + '")';
+      targetSheet.getRange(targetCell).setFormula(hyperlinkFormula);
+      message = 'Your Tempus Web App URL:\n\n' +
+                url + '\n\n' +
+                'Saved as a clickable link in ' + targetSheetName + '!' + targetCell + '.';
+    }
   } else {
     message = 'Unable to retrieve the test deployment.\n\n' +
               'To create a test deployment, or get an existing URL that the script cannot find:\n\n' +

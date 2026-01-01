@@ -274,6 +274,8 @@ let ratePreviewInputSyncing = false;
 
   const state = {
     cacheKey: 'ts_cache',
+    cacheHadStoredData: false,
+    tempusUrlWriteAttempted: false,
     entries: [],
     settings: {},
     contracts: [],
@@ -7187,6 +7189,7 @@ function updateDeductionFormVisibility() {
   function loadCache() {
     try {
       const raw = localStorage.getItem(state.cacheKey);
+      state.cacheHadStoredData = !!raw;
       if (!raw) return;
       const obj = JSON.parse(raw);
       state.entries = Array.isArray(obj.entries) ? obj.entries.map(sanitizeEntry) : [];
@@ -7296,6 +7299,39 @@ function updateDeductionFormVisibility() {
       state.pendingEntryUpdates = new Map();
       state.pendingEntryDeletes = new Set();
     } catch (e) {}
+  }
+
+  function maybePersistTempusUrlSetting() {
+    if (state.tempusUrlWriteAttempted) return;
+    if (state.cacheHadStoredData) return;
+    if (state.settings && state.settings.tempus_url) {
+      state.tempusUrlWriteAttempted = true;
+      return;
+    }
+
+    state.tempusUrlWriteAttempted = true;
+    google.script.run
+      .withSuccessHandler((url) => {
+        const resolvedUrl = url ? String(url) : '';
+        if (!resolvedUrl || resolvedUrl.indexOf('/dev') === -1) {
+          console.warn('[Tempus URL] Skipping write; resolved URL is not a dev deployment:', resolvedUrl);
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(() => {
+            state.settings.tempus_url = resolvedUrl;
+            saveCache();
+            console.log('[Tempus URL] Stored dev URL in settings:', resolvedUrl);
+          })
+          .withFailureHandler((error) => {
+            console.warn('[Tempus URL] Failed to store dev URL:', error);
+          })
+          .api_updateSettings({ tempus_url: resolvedUrl });
+      })
+      .withFailureHandler((error) => {
+        console.warn('[Tempus URL] Failed to resolve web app URL:', error);
+      })
+      .api_getWebAppUrl();
   }
   function saveCache() {
     try {
@@ -17021,6 +17057,7 @@ function getCachedIncomeSummary(monthKey) {
     } finally {
       state.loadingTiers.tier1Complete = true;
       saveCache();
+      maybePersistTempusUrlSetting();
       loadTier2Supporting();
     }
   }

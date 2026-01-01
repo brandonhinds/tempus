@@ -54,33 +54,25 @@ Follow these steps to get Tempus running for the first time.
 
 When you first run Tempus, Google will prompt you to grant permissions.
 
-1. Click **Review Permissions** when prompted.
-2. Select your Google account.
-3. Google will warn that "Tempus hasn't been verified" (this is normal for personal Apps Script projects).
-4. Click **Advanced**.
-5. Click **Go to Tempus (unsafe)** (it's safe - it's your own code running on your own data).
-6. Click **Allow** to grant the necessary permissions:
-   - View and manage spreadsheets in Google Drive
-   - Display and run third-party web content
+1. A dialog will say a script needs your permission to run. Click **Review permissions**.
+2. In the **Choose an account** window, select your Google account.
+3. In the **Google hasn’t verified this app** window, click **Advanced**, then **Go to Tempus (unsafe)**.
+4. In the **Tempus wants to access your Google Account** window, review the permissions (see *Why these permissions?* below), then scroll down and click **Allow**.
+5. Return to the Google Sheet and follow the pop-up instructions to get the Tempus URL.
 
-**Why these permissions?** Tempus needs access to the spreadsheet to read and write your time entries, contracts, and settings. The web content permission allows the interface to load and pull data for public holidays.
+**Why these permissions?**
+Tempus needs access to the spreadsheet to read and write your time entries, contracts, and settings. The web content permission allows the interface to load and pull data for public holidays. **None of your data is sent externally - the creator of Tempus has no interest in how much money you make!**
 
 The Google Drive access allows the sheet to read and write files to your Google Drive (such as reading Timesheet 1.0 sheets and writing invoices). This permssion *may* be optional if you don't use these features, but it has not been tested.
 
-### Step 2: Deploy the Application
+### Step 2: Get the Tempus URL
 
-After granting permissions, you need to create a web app deployment.
+After granting permissions, you need the test deployment URL.
 
 1. Open the Apps Script editor (Extensions → Apps Script from your spreadsheet).
-2. Click **Deploy** → **New deployment** in the toolbar.
-3. Click the gear icon ⚙️ next to "Select type" and choose **Web app**.
-4. Configure the deployment:
-   - **Description**: "Tempus production" (or any name you prefer)
-   - **Execute as**: Me
-   - **Who has access**: Only myself
-5. Click **Deploy**.
-6. Copy the **Web app URL** that appears.
-7. Bookmark this URL in your browser - this is your Tempus application.
+2. Click **Deploy** → **Test deployments**.
+3. Copy the **Web app URL** shown.
+4. Bookmark this URL in your browser - this is your Tempus application.
 
 **Development URL tip:** The URL will look like `https://script.google.com/macros/s/.../dev`. Despite being the development URL it is recommended this be the permanent Tempus URL, as it makes updating significantly easier. Bookmark this.
 
