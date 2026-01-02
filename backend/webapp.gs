@@ -42,6 +42,7 @@ function getTempusWebAppUrl() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var targetSheetName = 'INTRO';
   var targetCell = 'B12';
+  var instructionsCell = 'M2';
   var linkLabel = 'Open Tempus';
   var settings = {};
   var storedUrl = '';
@@ -59,7 +60,14 @@ function getTempusWebAppUrl() {
     Logger.log('Error loading settings: ' + e.toString());
   }
 
+  var targetSheet = ss.getSheetByName(targetSheetName);
+  var clearIntroInstructions = function() {
+    if (!targetSheet) return;
+    targetSheet.getRange(instructionsCell).setValue('');
+  };
+
   if (storedUrl) {
+    clearIntroInstructions();
     Logger.log('getTempusWebAppUrl: opening stored Tempus URL: ' + storedUrl);
     var html = HtmlService.createHtmlOutput(
       '<html><body style="font-family:Arial, sans-serif; padding:16px;">' +
@@ -81,7 +89,6 @@ function getTempusWebAppUrl() {
 
   // Check if we have a test deployment URL (contains /dev)
   if (url && url.indexOf('/dev') !== -1) {
-    var targetSheet = ss.getSheetByName(targetSheetName);
     if (!targetSheet) {
       message = 'Your Tempus Web App URL:\n\n' +
                 url + '\n\n' +
@@ -89,24 +96,30 @@ function getTempusWebAppUrl() {
     } else {
       var hyperlinkFormula = '=HYPERLINK("' + url + '","' + linkLabel + '")';
       targetSheet.getRange(targetCell).setFormula(hyperlinkFormula);
+      clearIntroInstructions();
       message = 'Your Tempus Web App URL:\n\n' +
                 url + '\n\n' +
                 'Saved as a clickable link in ' + targetSheetName + '!' + targetCell + '.';
     }
   } else {
-    message = 'Unable to retrieve the test deployment.\n\n' +
-              'To create a test deployment, or get an existing URL that the script cannot find:\n\n' +
-              '1. Click "Extensions" → "Apps Script" in the toolbar above\n' +
-              '2. In Apps Script Editor, click "Deploy" → "Test deployments"\n' +
-              '3. Click the "Copy" button under the URL\n\n'
+    var instructions = 'Unable to retrieve the test deployment.\n\n' +
+                       'To create a test deployment, or get an existing URL that the script cannot find:\n\n' +
+                       '1. Click "Extensions" → "Apps Script" in the toolbar above\n' +
+                       '2. In Apps Script Editor, click "Deploy" → "Test deployments"\n' +
+                       '3. Click the "Copy" button under the URL\n\n' +
+                       'Bookmark this URL for easy access.\n\n' +
+                       'The test deployment URL automatically updates when you push updates to Tempus, so this is a one-time process.\n\n' +
+                       'To share access with others:\n' +
+                       '1. Share your Google Sheet with them (Editor or Viewer)\n' +
+                       '2. Give them the URL\n';
+    if (targetSheet) {
+      targetSheet.getRange(instructionsCell).setValue(instructions);
+      message = 'To get the URL for the Tempus frontend follow the instructions that have been posted in the INTRO sheet.';
+    } else {
+      message = instructions + '\n' +
+                'Note: The "' + targetSheetName + '" sheet was not found, so the instructions could not be written.';
+    }
   }
-
-  message = message + 
-            'Bookmark this URL for easy access.\n\n' +
-            'The test deployment URL automatically updates when you push updates to Tempus, so this is a one-time process.\n\n' +
-            'To share access with others:\n' +
-            '1. Share your Google Sheet with them (Editor or Viewer)\n' +
-            '2. Give them the URL\n'
 
   ui.alert('Tempus Web App URL', message, ui.ButtonSet.OK);
 

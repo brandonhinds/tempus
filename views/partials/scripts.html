@@ -16141,15 +16141,25 @@ function getCachedIncomeSummary(monthKey) {
 }
   function renderCalendar() {
     ensureCalendarState();
+    const calendarHelpText = document.getElementById('calendar-help-text');
+    if (calendarHelpText) {
+      calendarHelpText.textContent = getFeatureFlag('default_inputs')
+        ? 'Click a day to add or edit entries. Right-click to insert a default.'
+        : 'Click a day to add or edit entries.';
+    }
 
-    // Get filtered hour type IDs
-    const activeHourTypeIds = state.calendarFilteredHourTypes || state.hourTypes.map(ht => ht.id);
+    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 0;
+    const activeHourTypeIds = hourTypesEnabled
+      ? (state.calendarFilteredHourTypes || state.hourTypes.map(ht => ht.id))
+      : null;
 
-    // Filter entries by active hour types
-    const filteredEntries = state.entries.filter(entry => {
-      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-      return activeHourTypeIds.includes(hourTypeId);
-    });
+    // Only filter by hour type when the feature is enabled and loaded.
+    const filteredEntries = hourTypesEnabled
+      ? state.entries.filter(entry => {
+          const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
+          return activeHourTypeIds.includes(hourTypeId);
+        })
+      : state.entries.slice();
 
     // Calculate totals based on filtered entries
     const totals = filteredEntries.reduce((map, entry) => {

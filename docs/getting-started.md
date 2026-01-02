@@ -55,10 +55,15 @@ Follow these steps to get Tempus running for the first time.
 When you first run Tempus, Google will prompt you to grant permissions.
 
 1. A dialog will say a script needs your permission to run. Click **Review permissions**.
+![Review Permissions](docs/images/getting-started1.png)
 2. In the **Choose an account** window, select your Google account.
+![Select Google Account](docs/images/getting-started2.png)
 3. In the **Google hasn’t verified this app** window, click **Advanced**, then **Go to Tempus (unsafe)**.
-4. In the **Tempus wants to access your Google Account** window, review the permissions (see *Why these permissions?* below), then scroll down and click **Allow**.
-5. Return to the Google Sheet and follow the pop-up instructions to get the Tempus URL.
+![Google hasn't verified this app](docs/images/getting-started3.png)
+![Clicked Advanced](docs/images/getting-started4.png)
+4. In the **Tempus wants to access your Google Account** window, review the permissions (see *Why these permissions?* below), click the *Select All* option, then scroll down and click **Continue**.
+![Required Permissions](docs/images/getting-started5.png)
+5. Return to the Google Sheet and follow the instructions in the INTRO sheet to get the Tempus URL.
 
 **Why these permissions?**
 Tempus needs access to the spreadsheet to read and write your time entries, contracts, and settings. The web content permission allows the interface to load and pull data for public holidays. **None of your data is sent externally - the creator of Tempus has no interest in how much money you make!**
@@ -79,8 +84,12 @@ After granting permissions, you need the test deployment URL.
 ### Step 3: Load Tempus
 
 1. Open the web app URL you copied in Step 2.
-2. The Tempus interface loads with the Time Entry page as the default view.
-3. You'll see a mostly empty interface - this is expected for a fresh installation.
+2. You will again be prompted to grant Tempus permissions. Click the *Review Permissions* button.
+![Review Tempus Permissions](docs/images/getting-started6.png)
+3. Most of this process is the same as *Step 1: Allow Permissions* section above, with the only difference being the way you accept the permissions (this time you just click *Allow* at the bottom of the window).
+![Allow Tempus Permissions](docs/images/getting-started7.png)
+4. The Tempus interface loads with the Time Entry page as the default view.
+5. You'll see a mostly empty interface - this is expected for a fresh installation.
 
 **What you'll see:**
 - Time Entry form (Basic and Advanced tabs)
