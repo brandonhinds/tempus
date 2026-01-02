@@ -114,6 +114,7 @@ function getTempusWebAppUrl() {
                        '2. Give them the URL\n';
     if (targetSheet) {
       targetSheet.getRange(instructionsCell).setValue(instructions);
+      ss.setActiveSheet(targetSheet);
       message = 'To get the URL for the Tempus frontend follow the instructions that have been posted in the INTRO sheet.';
     } else {
       message = instructions + '\n' +

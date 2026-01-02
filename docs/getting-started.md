@@ -50,26 +50,31 @@ See [Feature Flags Reference](feature-flags.md) for the complete list.
 
 Follow these steps to get Tempus running for the first time.
 
-### Step 1: Allow Permissions
+### Step 1: Clone the Tempus Template
 
-When you first run Tempus, Google will prompt you to grant permissions.
+While Tempus could theoretically be installed into a completely clean, fresh Google sheet (by using [clasp](https://github.com/google/clasp) to push the contents of this git repo to it) it is easier to simply copy the Tempus template. Contact Brandon for the link to this (at the time of writing the link changes too regularly to bother linking here).
 
-1. A dialog will say a script needs your permission to run. Click **Review permissions**.
+### Step 2: Allow Permissions
 
-![Review Permissions](images/getting-started1.png)
+When you first run Tempus, Google will prompt you to grant permissions to run the scripts.
+
+1. Open your cloned Tempus sheet and click the large button on the *INTRO* sheet.
+1. A pop-up will appear requesting authorisation to run the scripts attached to the document. Click **OK**.
+
+![Authorisation required](images/getting-started1.png)
 
 2. In the **Choose an account** window, select your Google account.
 
-![Select Google Account](images/getting-started2.png)
+![Select Google account](images/getting-started2.png)
 
 3. In the **Google hasn’t verified this app** window, click **Advanced**, then **Go to Tempus (unsafe)**.
 
 ![Google hasn't verified this app](images/getting-started3.png)
-![Clicked Advanced](images/getting-started4.png)
+![Clicked advanced](images/getting-started4.png)
 
 4. In the **Tempus wants to access your Google Account** window, review the permissions (see *Why these permissions?* below), click the *Select All* option, then scroll down and click **Continue**.
 
-![Required Permissions](images/getting-started5.png)
+![Required permissions](images/getting-started5.png)
 
 5. Return to the Google Sheet and follow the instructions in the INTRO sheet to get the Tempus URL.
 
@@ -78,7 +83,7 @@ Tempus needs access to the spreadsheet to read and write your time entries, cont
 
 The Google Drive access allows the sheet to read and write files to your Google Drive (such as reading Timesheet 1.0 sheets and writing invoices). This permssion *may* be optional if you don't use these features, but it has not been tested.
 
-### Step 2: Get the Tempus URL
+### Step 3: Get the Tempus URL
 
 After granting permissions, you need the test deployment URL.
 
@@ -89,16 +94,16 @@ After granting permissions, you need the test deployment URL.
 
 **Development URL tip:** The URL will look like `https://script.google.com/macros/s/.../dev`. Despite being the development URL it is recommended this be the permanent Tempus URL, as it makes updating significantly easier. Bookmark this.
 
-### Step 3: Load Tempus
+### Step 4: Load Tempus
 
 1. Open the web app URL you copied in Step 2.
 2. You will again be prompted to grant Tempus permissions. Click the *Review Permissions* button.
 
-![Review Tempus Permissions](images/getting-started6.png)
+![Review Tempus permissions](images/getting-started6.png)
 
-3. Most of this process is the same as *Step 1: Allow Permissions* section above, with the only difference being the way you accept the permissions (this time you just click *Allow* at the bottom of the window).
+3. Most of this process is the same as *Step 2: Allow Permissions* section above, with the only difference being the way you accept the permissions (this time you just click *Allow* at the bottom of the window).
 
-![Allow Tempus Permissions](images/getting-started7.png)
+![Allow Tempus permissions](images/getting-started7.png)
 
 4. The Tempus interface loads with the Time Entry page as the default view.
 5. You'll see a mostly empty interface - this is expected for a fresh installation.
@@ -109,7 +114,7 @@ After granting permissions, you need the test deployment URL.
 - Navigation menu in the header
 - No entries, contracts, or data yet
 
-### Step 4: Create Your First Contract
+### Step 5: Create Your First Contract
 
 Before you can log any time, you need at least one contract.
 
@@ -130,7 +135,7 @@ Before you can log any time, you need at least one contract.
 
 See [Contracts documentation](contracts.md) for details.
 
-### Step 5: Configure Core Settings
+### Step 6: Configure Core Settings
 
 Customise Tempus to match your situation.
 

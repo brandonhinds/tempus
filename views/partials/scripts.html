@@ -253,6 +253,8 @@ const deductionCategoryEmptyNote = document.getElementById('deduction-category-e
   const btnCancelDeductionCategory = document.getElementById('btn-cancel-deduction-category');
   const btnSaveDeductionCategory = document.getElementById('btn-save-deduction-category');
   const modalSplitDeduction = document.getElementById('modal-split-deduction');
+  const welcomeModal = document.getElementById('modal-welcome');
+  const welcomeOkBtn = document.getElementById('btn-welcome-ok');
   const openMobileViewWrapper = document.getElementById('open-mobile-view-wrapper');
   const openMobileViewBtn = document.getElementById('btn-open-mobile-view');
   const btnCancelSplit = document.getElementById('btn-cancel-split');
@@ -276,6 +278,8 @@ let ratePreviewInputSyncing = false;
     cacheKey: 'ts_cache',
     cacheHadStoredData: false,
     tempusUrlWriteAttempted: false,
+    entriesSyncSucceeded: false,
+    entriesSyncEmpty: false,
     entries: [],
     settings: {},
     contracts: [],
@@ -16974,6 +16978,8 @@ function getCachedIncomeSummary(monthKey) {
         .withSuccessHandler((entries) => {
           entriesSyncInFlight = false;
           const sanitizedEntries = (entries || []).map(sanitizeEntry);
+          state.entriesSyncSucceeded = true;
+          state.entriesSyncEmpty = sanitizedEntries.length === 0;
           mergeEntriesWithServerEntries(sanitizedEntries);
           state.entriesLoaded = true;
           saveCache();
@@ -16989,6 +16995,8 @@ function getCachedIncomeSummary(monthKey) {
       })
         .withFailureHandler(() => {
           entriesSyncInFlight = false;
+          state.entriesSyncSucceeded = false;
+          state.entriesSyncEmpty = false;
           setStatus('Entries sync failed', 'error');
           resolve(false);
         })
@@ -17267,6 +17275,14 @@ function getCachedIncomeSummary(monthKey) {
     loadTier1Critical();
   }
 
+  function maybeShowWelcomeModal() {
+    if (!welcomeModal) return;
+    if (!state.entriesSyncSucceeded || !state.entriesSyncEmpty) return;
+    if (state.cacheHadStoredData) return;
+    if (state.contracts && state.contracts.length > 0) return;
+    showModal(welcomeModal);
+  }
+
   async function loadTier1Critical() {
     try {
       await Promise.all([
@@ -17275,6 +17291,7 @@ function getCachedIncomeSummary(monthKey) {
         fetchContractsFromServer(),
         fetchFeatureFlagsFromServer()
       ]);
+      maybeShowWelcomeModal();
     } finally {
       state.loadingTiers.tier1Complete = true;
       saveCache();
@@ -17635,6 +17652,10 @@ function getCachedIncomeSummary(monthKey) {
 
   function hideModal(modal) {
     if (modal) modal.style.display = 'none';
+  }
+
+  if (welcomeOkBtn) {
+    welcomeOkBtn.addEventListener('click', () => hideModal(welcomeModal));
   }
 
   function showMonthlyDeductionsModal(type) {

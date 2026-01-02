@@ -79,6 +79,13 @@ function api_updateSettings(settings) {
     else { sh.appendRow([k, v, typeof v]); }
   });
   cacheClearPrefix('settings');
+  if (settings && Object.prototype.hasOwnProperty.call(settings, 'tempus_url')) {
+    var urlValue = settings.tempus_url;
+    var urlString = urlValue !== null && urlValue !== undefined ? String(urlValue).trim() : '';
+    if (urlString && urlString.indexOf('/dev') !== -1) {
+      clearIntroTempusInstructions();
+    }
+  }
   var newRoundInterval = settings.hasOwnProperty('round_to_nearest') ? settings.round_to_nearest : previousRoundInterval;
   var previousClamped = clampRoundInterval(previousRoundInterval);
   var newClamped = clampRoundInterval(newRoundInterval);
@@ -86,6 +93,13 @@ function api_updateSettings(settings) {
     reroundTimesheetEntries(newClamped);
   }
   return { success: true };
+}
+
+function clearIntroTempusInstructions() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var introSheet = ss.getSheetByName('INTRO');
+  if (!introSheet) return;
+  introSheet.getRange('M2').setValue('');
 }
 
 function api_getProjects() {
