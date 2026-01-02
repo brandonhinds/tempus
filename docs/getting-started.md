@@ -89,8 +89,8 @@ After granting permissions, you need the test deployment URL.
 
 1. Open the Apps Script editor (Extensions → Apps Script from your spreadsheet).
 2. Click **Deploy** → **Test deployments**.
-3. Copy the **Web app URL** shown.
-4. Bookmark this URL in your browser - this is your Tempus application.
+3. Click the **Web app URL** shown.
+4. Bookmark this URL - this is your Tempus application.
 
 **Development URL tip:** The URL will look like `https://script.google.com/macros/s/.../dev`. Despite being the development URL it is recommended this be the permanent Tempus URL, as it makes updating significantly easier. Bookmark this.
 

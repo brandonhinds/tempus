@@ -96,6 +96,8 @@
   const navSettingsBtn = document.getElementById('nav-settings');
   const navDocsLink = document.getElementById('nav-docs');
   const navAboutBtn = document.getElementById('nav-about');
+  const navAboutUpdateBadge = document.getElementById('nav-about-update-badge');
+  const navUpdateWarning = document.getElementById('nav-update-warning');
   const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
   const ratePreviewPercentInput = document.getElementById('rate-preview-percent');
   const ratePreviewRateInput = document.getElementById('rate-preview-rate');
@@ -280,6 +282,8 @@ let ratePreviewInputSyncing = false;
     tempusUrlWriteAttempted: false,
     entriesSyncSucceeded: false,
     entriesSyncEmpty: false,
+    updateCheckAttempted: false,
+    updateStatus: null,
     entries: [],
     settings: {},
     contracts: [],
@@ -790,6 +794,7 @@ let ratePreviewInputSyncing = false;
       if (page) page.style.display = key === normalized ? 'block' : 'none';
     });
     state.currentPage = normalized;
+    applyUpdateIndicators();
     if (normalized === 'bas') {
       renderBasReporting();
     }
@@ -886,32 +891,79 @@ let ratePreviewInputSyncing = false;
         aboutVersionDisplay.textContent = 'Unavailable';
       })
       .api_getBuildMeta();
+    applyUpdateStatusToAbout();
+  }
 
+  function parseUpdateTimestamp(status) {
+    if (!status) return null;
+    const dateValue = String(status.upstreamTimestamp || status.upstreamDate || '').trim();
+    if (!dateValue) return null;
+    const parsed = new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  }
+
+  function isUpdateStale(status) {
+    if (!status || !status.hasUpdate) return false;
+    const upstreamDate = parseUpdateTimestamp(status);
+    if (!upstreamDate) return false;
+    const ageMs = Date.now() - upstreamDate.getTime();
+    return ageMs >= 30 * 24 * 60 * 60 * 1000;
+  }
+
+  function applyUpdateStatusToAbout() {
+    if (!aboutVersionStatus) return;
+    if (!state.updateStatus) {
+      aboutVersionStatus.textContent = 'Checking...';
+      aboutVersionStatus.style.color = 'var(--muted)';
+      return;
+    }
+    const result = state.updateStatus;
+    if (result.error) {
+      aboutVersionStatus.textContent = 'Status unavailable';
+      aboutVersionStatus.style.color = 'var(--danger)';
+      return;
+    }
+    if (result.hasUpdate) {
+      const upstream = String(result.upstreamDate || result.upstreamTimestamp || '').trim();
+      aboutVersionStatus.textContent = upstream ? 'Update available (since ' + upstream + ')' : 'Update available';
+      aboutVersionStatus.style.color = 'var(--warning)';
+      return;
+    }
+    if (result.upstreamDate) {
+      const dateLabel = String(result.localBuildDate || result.upstreamDate || '').trim();
+      aboutVersionStatus.textContent = dateLabel ? 'Up to date (as of ' + dateLabel + ')' : 'Up to date';
+      aboutVersionStatus.style.color = 'var(--success)';
+      return;
+    }
+    aboutVersionStatus.textContent = 'Status unavailable';
+    aboutVersionStatus.style.color = 'var(--muted)';
+  }
+
+  function applyUpdateIndicators() {
+    if (navAboutUpdateBadge) {
+      navAboutUpdateBadge.style.display = state.updateStatus && state.updateStatus.hasUpdate ? 'inline-flex' : 'none';
+    }
+    if (navUpdateWarning) {
+      const shouldShow = state.currentPage === 'time' && isUpdateStale(state.updateStatus);
+      navUpdateWarning.style.display = shouldShow ? 'inline-flex' : 'none';
+    }
+    if (state.currentPage === 'about') {
+      applyUpdateStatusToAbout();
+    }
+  }
+
+  function checkForUpdateInBackground() {
+    if (state.updateCheckAttempted) return;
+    state.updateCheckAttempted = true;
     google.script.run
       .withSuccessHandler((result) => {
-        if (!aboutVersionStatus) return;
-        if (!result || (result.error && result.error.length)) {
-          aboutVersionStatus.textContent = 'Status unavailable';
-          aboutVersionStatus.style.color = 'var(--danger)';
-          return;
-        }
-        if (result.hasUpdate) {
-          const upstream = String(result.upstreamDate || result.upstreamTimestamp || '').trim();
-          aboutVersionStatus.textContent = upstream ? 'Update available (since ' + upstream + ')' : 'Update available';
-          aboutVersionStatus.style.color = 'var(--warning)';
-        } else if (result.upstreamDate) {
-          const dateLabel = String(result.localBuildDate || result.upstreamDate || '').trim();
-          aboutVersionStatus.textContent = dateLabel ? 'Up to date (as of ' + dateLabel + ')' : 'Up to date';
-          aboutVersionStatus.style.color = 'var(--success)';
-        } else {
-          aboutVersionStatus.textContent = 'Status unavailable';
-          aboutVersionStatus.style.color = 'var(--muted)';
-        }
+        state.updateStatus = result || { error: 'unknown' };
+        applyUpdateIndicators();
       })
-      .withFailureHandler(() => {
-        if (!aboutVersionStatus) return;
-        aboutVersionStatus.textContent = 'Status unavailable';
-        aboutVersionStatus.style.color = 'var(--danger)';
+      .withFailureHandler((error) => {
+        state.updateStatus = { error: String(error || 'unknown') };
+        applyUpdateIndicators();
       })
       .api_checkForUpdate();
   }
@@ -17278,7 +17330,6 @@ function getCachedIncomeSummary(monthKey) {
   function maybeShowWelcomeModal() {
     if (!welcomeModal) return;
     if (!state.entriesSyncSucceeded || !state.entriesSyncEmpty) return;
-    if (state.cacheHadStoredData) return;
     if (state.contracts && state.contracts.length > 0) return;
     showModal(welcomeModal);
   }
@@ -17328,6 +17379,7 @@ function getCachedIncomeSummary(monthKey) {
 
   async function loadTier3BackgroundEager() {
     const tasks = [];
+    checkForUpdateInBackground();
 
     updateLoadingFeatureState('basSubmissions', { loading: true });
     tasks.push(fetchBasSubmissionsFromServer().then((success) => {

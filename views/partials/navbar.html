@@ -15,7 +15,10 @@
       <div style="font-size:20px; font-weight:700;">Tempus</div>
       <div id="status" class="ts-badge" style="margin-left:10px;">Idle</div>
     </div>
-    <div class="ts-nav" style="margin-left:auto;">
+    <div class="ts-nav" style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+      <div id="nav-update-warning" class="ts-warning" style="display:none; font-size:12px; padding:4px 8px;">
+        Your Tempus instance is out of date and needs to be updated. See the About page for details.
+      </div>
       <button class="ghost ts-nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Open navigation">☰</button>
       <div class="ts-nav-menu" id="nav-menu" hidden>
         <button class="ghost" id="nav-time">Time Entry</button>
@@ -28,7 +31,10 @@
         <button class="ghost" id="nav-invoices" style="display:none;">Invoices</button>
         <button class="ghost" id="nav-settings">Settings</button>
         <button class="ghost" id="nav-docs" type="button" title="Open documentation (new tab)">Docs</button>
-        <button class="ghost" id="nav-about">About</button>
+        <button class="ghost" id="nav-about">
+          <span>About</span>
+          <span class="ts-badge warn" id="nav-about-update-badge" style="display:none; margin-left:6px; font-size:11px; padding:2px 6px;">Update</span>
+        </button>
       </div>
     </div>
   </div>
