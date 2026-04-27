@@ -5,6 +5,7 @@
       <p class="ts-note" style="margin:0;">Comprehensive financial breakdown across the year with income, hours, and tax insights.</p>
     </div>
     <div class="ts-toolbar-actions ts-gap-md" style="display:flex; align-items:center;">
+
       <button class="ghost" id="annual-contract-filter-toggle" style="display:none;" title="Filter by contract">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
@@ -41,6 +42,7 @@
     <div class="ts-annual-stat-card">
       <div class="ts-annual-stat-label">Total Superannuation</div>
       <div class="ts-annual-stat-value" id="annual-stat-super">--</div>
+      <div id="annual-super-cap-warning" style="display:none; font-size:11px; margin-top:4px;"></div>
     </div>
     <div class="ts-annual-stat-card">
       <div class="ts-annual-stat-label">Total Tax</div>

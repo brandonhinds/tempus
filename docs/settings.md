@@ -143,6 +143,7 @@ Feature flags enable optional Tempus features. All flags are disabled by default
 - **Enable company income tracking**: Separate company vs employee income
 - **Enable actual income tracking**: Record real earnings vs estimates
 - **Enable contract rate preview page**: Model rate changes and their impact
+- **Configure income payment timing**: Report income in the month it is received rather than earned
 
 #### Time Entries Flags
 - **Enable multiple hour types**: Categorise time (work, leave, training)
@@ -162,7 +163,7 @@ Feature flags enable optional Tempus features. All flags are disabled by default
 
 #### Utilities Flags
 - **Show clear cache button**: Manual cache clearing
-- **Show mobile view button**: Access mobile entry interface
+- **Show mobile view button**: Access mobile entry interface — adds an Open Mobile View button to Settings and a Mobile View shortcut to the Time Entries page
 - **Remember last page on refresh**: Reopen last viewed page
 - **Enable public holidays**: Mark public holidays on calendar
 - **Suggest end times for punch entries**: Auto-suggest clock-out times
@@ -241,6 +242,20 @@ What the variance compares against when showing projected hours differences.
 - **Trend average**: Expected hours based on trend method
 
 **Default:** Monthly capacity
+
+#### Income Payment Timing
+(**Requires:** *Configure income payment timing*)
+
+Controls which month income is attributed to — the month it was earned or the month it was received.
+
+**Options:**
+- **Same month (income appears when earned)**: Income is attributed to the month the hours were worked. Use this if you are paid within the same calendar month you work.
+- **Following month (income appears when received)**: Income is attributed to the month after the hours were worked. Use this if your pay arrives in the following month (e.g., January hours paid in February).
+
+**Default:** Following month
+
+**When to change:** Set this to match when your payslip actually arrives. Most contractors and employees paid monthly in arrears should use "Following month". Those on same-month pay cycles should use "Same month".
+
 
 #### PAYG Instalment Rate
 (**Requires:** *Is sole trader*)
