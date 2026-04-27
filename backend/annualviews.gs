@@ -399,11 +399,13 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
       }
 
       var monthlyAmount = occAmount;
-      var netAmount = monthlyAmount;
+      var netAmount;
       if (companyExpense && gstInclusive) {
-        netAmount = monthlyAmount / (1 + GST_RATE);
-        var gstComponent = monthlyAmount - netAmount;
+        netAmount = Math.round((monthlyAmount / (1 + GST_RATE)) * 100) / 100;
+        var gstComponent = Math.round((monthlyAmount - netAmount) * 100) / 100;
         companyExpensesGst += gstComponent;
+      } else {
+        netAmount = Math.round(monthlyAmount * 100) / 100;
       }
 
       if (companyExpense) {
@@ -436,6 +438,9 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
       categoryDeductionMap[categoryKey][deductionId].amount += netAmount;
     } // End of occurrence loop
   }
+  companyExpenses = Math.round(companyExpenses * 100) / 100;
+  companyExpensesGst = Math.round(companyExpensesGst * 100) / 100;
+  otherDeductions = Math.round(otherDeductions * 100) / 100;
 
   // Calculate company income and invoice total
   var companyIncome = totalPackage;
@@ -563,16 +568,21 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     }
   }
 
+  // When actuals are recorded the estimated superLost and taxableIncome are meaningless —
+  // actual data already reflects what really happened.
+  var finalSuperLost = actualIncome ? 0 : superLost;
+  var finalTaxableIncome = actualIncome ? Math.max(0, finalNetIncome + finalTax) : taxableIncome;
+
   return {
     year: year,
     month: month,
     label: Utilities.formatDate(periodStart, Session.getScriptTimeZone(), 'MMM yyyy'),
     grossIncome: finalGrossIncome,
     superGuarantee: finalSuperGuarantee,
-    superLost: superLost,
+    superLost: finalSuperLost,
     extraSuper: finalExtraSuper,
     otherDeductions: otherDeductions,
-    taxableIncome: taxableIncome,
+    taxableIncome: finalTaxableIncome,
     tax: finalTax,
     netIncome: finalNetIncome,
     totalHours: totalHours,

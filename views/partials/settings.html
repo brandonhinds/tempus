@@ -99,6 +99,23 @@
       </select>
      </div>
     </div>
+    <div class="ts-settings-item" data-setting-key="default_income_month_offset" id="income-month-offset-col">
+     <label class="ts-settings-label" for="set-income-month-offset">
+      Income payment timing
+      <span class="ts-info-icon" title="Whether income appears in the month it was earned (same month) or the month the payment arrived (following month). Individual months can be overridden on the Annual Views page.">
+       i
+      </span>
+     </label>
+     <div class="ts-note">
+      Controls which month's worked hours are used when calculating estimated income for each row in the annual view. Months with actual income recorded always show the actual value regardless of this setting.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-income-month-offset">
+       <option value="0">Same month (income appears when earned)</option>
+       <option value="1">Following month (income appears when received)</option>
+      </select>
+     </div>
+    </div>
     <div class="ts-settings-item" data-setting-key="lost_super_recovery_mode" id="lost-super-recovery-col">
      <label class="ts-settings-label" for="set-lost-super-recovery-mode">
       Lost super recovery method

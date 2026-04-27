@@ -259,6 +259,7 @@ const deductionCategoryEmptyNote = document.getElementById('deduction-category-e
   const welcomeOkBtn = document.getElementById('btn-welcome-ok');
   const openMobileViewWrapper = document.getElementById('open-mobile-view-wrapper');
   const openMobileViewBtn = document.getElementById('btn-open-mobile-view');
+  const mobileViewShortcutBtn = document.getElementById('btn-mobile-view-shortcut');
   const btnCancelSplit = document.getElementById('btn-cancel-split');
   const btnConfirmSplit = document.getElementById('btn-confirm-split');
   let pendingDeductionPayload = null;
@@ -440,10 +441,20 @@ let ratePreviewInputSyncing = false;
         if (!url) return;
         mobileViewUrl = url + '?view=mobile';
         openMobileViewWrapper.style.display = 'flex';
+        if (mobileViewShortcutBtn && getFeatureFlag('show_mobile_view')) {
+          mobileViewShortcutBtn.style.display = '';
+        }
       })
       .api_getWebAppUrl();
 
     openMobileViewBtn.addEventListener('click', () => {
+      if (!mobileViewUrl) return;
+      window.open(mobileViewUrl, '_blank', 'noopener');
+    });
+  }
+
+  if (mobileViewShortcutBtn) {
+    mobileViewShortcutBtn.addEventListener('click', () => {
       if (!mobileViewUrl) return;
       window.open(mobileViewUrl, '_blank', 'noopener');
     });
@@ -1608,11 +1619,19 @@ let ratePreviewInputSyncing = false;
     const lastYear = currentYear - 1;
     const monthKey = monthKeyFor(lastYear, lastYearMonth);
 
-    const monthEntries = allEntries.filter(e => {
-      if (e.contract_id !== contract.id) return false;
+    let monthEntries = allEntries.filter(e => {
+      if (String(e.contract_id) !== String(contract.id)) return false;
       const dateIso = getEntryDateIso(e);
       return dateIso ? dateIso.startsWith(monthKey) : false;
     });
+    // If no entries for this specific contract (e.g. user was on a different contract last year),
+    // use all contracts for that month so the daily-hours average is still meaningful.
+    if (!monthEntries.length) {
+      monthEntries = allEntries.filter(e => {
+        const dateIso = getEntryDateIso(e);
+        return dateIso ? dateIso.startsWith(monthKey) : false;
+      });
+    }
     if (!monthEntries.length) return { success: false };
 
     const incomeMinutes = monthEntries.reduce((sum, e) => sum + (Number(e.duration_minutes) || 0), 0);
@@ -2146,7 +2165,11 @@ let ratePreviewInputSyncing = false;
   function hasFutureRecurringEntries(recurrenceId) {
     if (!recurrenceId) return false;
     const today = todayIso();
-    return state.entries.some((entry) => entry && entry.recurrence_id === recurrenceId && entry.date && entry.date >= today);
+    return state.entries.some((entry) => {
+      if (!entry || String(entry.recurrence_id) !== String(recurrenceId)) return false;
+      const dateIso = getEntryDateIso(entry);
+      return dateIso && dateIso >= today;
+    });
   }
 
   function deleteFutureEntriesForSchedule(recurrenceId, options = {}) {
@@ -2863,16 +2886,18 @@ let ratePreviewInputSyncing = false;
       // Process each occurrence individually to handle amount adjustments
       occurrences.forEach(occ => {
         const baseAmount = occ.amount !== null ? occ.amount : deduction.amount_value;
-        let netAmount = baseAmount;
+        let netAmount;
         if (deduction.gst_inclusive) {
-          netAmount = baseAmount / (1 + GST_RATE);
+          netAmount = Math.round((baseAmount / (1 + GST_RATE)) * 100) / 100;
+        } else {
+          netAmount = Math.round(baseAmount * 100) / 100;
         }
 
         result.standardTotal += netAmount;
         if (deduction.company_expense) {
           result.companyStandardTotal += netAmount;
           if (deduction.gst_inclusive) {
-            const gstComponent = baseAmount - (baseAmount / (1 + GST_RATE));
+            const gstComponent = Math.round((baseAmount - netAmount) * 100) / 100;
             result.companyGstTotal += gstComponent;
           }
         } else {
@@ -2880,6 +2905,11 @@ let ratePreviewInputSyncing = false;
         }
       });
     });
+    result.standardTotal = Math.round(result.standardTotal * 100) / 100;
+    result.personalStandardTotal = Math.round(result.personalStandardTotal * 100) / 100;
+    result.companyStandardTotal = Math.round(result.companyStandardTotal * 100) / 100;
+    result.companyGstTotal = Math.round(result.companyGstTotal * 100) / 100;
+    result.extraSuperFlat = Math.round(result.extraSuperFlat * 100) / 100;
     return result;
   }
 
@@ -3170,6 +3200,7 @@ let ratePreviewInputSyncing = false;
   const annualContractFilterPanel = document.getElementById('annual-contract-filter-panel');
   const annualContractFilterList = document.getElementById('annual-contract-filter-list');
   const annualFilterSelectAll = document.getElementById('annual-filter-select-all');
+
   const annualEmpty = document.getElementById('annual-empty');
   const annualCategorySection = document.getElementById('annual-category-section');
   const annualCategoryFilterWrapper = document.getElementById('annual-category-filter-wrapper');
@@ -3440,20 +3471,38 @@ function hideAnnualLoadingState() {
     return MONTH_YEAR_FORMATTER.format(new Date(year, month, 1));
   }
 
+  function getDefaultIncomeOffset() {
+    if (!getFeatureFlag('income_month_offset')) return 0;
+    const v = state.settings && state.settings.default_income_month_offset;
+    return v != null ? Number(v) : 1;
+  }
+
+
   function buildAnnualMonthSummary(year, month, contractIds) {
     ensureIncomeCacheStructures();
     const contractFilter = Array.isArray(contractIds) && contractIds.length ? new Set(contractIds.map(String)) : null;
-    const monthEntries = entriesForMonth(year, month);
+
+    // Determine the source month for income entries (may lag display month by one month)
+    const incomeOffset = getDefaultIncomeOffset();
+    let srcYear = year;
+    let srcMonth = month - incomeOffset;
+    if (srcMonth < 0) { srcMonth += 12; srcYear--; }
+
+    // Income and hours come from the source month; deductions use the display month
+    const incomeMonthEntries = entriesForMonth(srcYear, srcMonth);
+    const monthEntries = incomeMonthEntries; // alias kept for deduction-free code below
     const filteredEntries = contractFilter
-      ? monthEntries.filter((entry) => contractFilter.has(String(entry.contract_id || '')))
-      : monthEntries.slice();
-    if (contractFilter) {
-      // contract filter applied; filteredEntries already scoped
-    }
+      ? incomeMonthEntries.filter((entry) => contractFilter.has(String(entry.contract_id || '')))
+      : incomeMonthEntries.slice();
+
+    // Display month period (used for deductions and label)
     const periodStart = startOfDay(new Date(year, month, 1));
     const periodEnd = startOfDay(new Date(year, month + 1, 0));
     const periodStartIso = periodStart.toISOString().substring(0, 10);
-    const superRate = getSuperGuaranteeRateForDate(periodStartIso);
+
+    // Super rate uses source month (that is when the work was earned)
+    const srcPeriodStartIso = startOfDay(new Date(srcYear, srcMonth, 1)).toISOString().substring(0, 10);
+    const superRate = getSuperGuaranteeRateForDate(srcPeriodStartIso);
     const contractIncome = {};
     const contractMinutes = {};
     let totalMinutes = 0; // income-contributing minutes only
@@ -3617,7 +3666,7 @@ function hideAnnualLoadingState() {
 
     const categoryBreakdown = buildAnnualCategoryBreakdown(categoryTotals, categoryDeductionMap);
 
-    const actualIncome = state.actualIncomeMap ? state.actualIncomeMap[monthKeyFor(year, month)] : null;
+    const actualIncome = state.actualIncomeMap ? state.actualIncomeMap[monthKeyFor(srcYear, srcMonth)] : null;
     let finalGrossIncome = grossIncome;
     let finalSuperGuarantee = superGuarantee;
     let finalExtraSuper = extraSuper;
@@ -3652,6 +3701,11 @@ function hideAnnualLoadingState() {
       }
     }
 
+    // When actuals are recorded the estimated superLost and taxableIncome are meaningless —
+    // actual data already reflects what really happened.
+    const finalSuperLost = hasActualIncome ? 0 : superLost;
+    const finalTaxableIncome = hasActualIncome ? Math.max(0, finalNetIncome + finalTax) : taxableIncome;
+
     return {
       year,
       month,
@@ -3659,10 +3713,10 @@ function hideAnnualLoadingState() {
       monthKey: monthKeyFor(year, month),
       grossIncome: finalGrossIncome,
       superGuarantee: finalSuperGuarantee,
-      superLost,
+      superLost: finalSuperLost,
       extraSuper: finalExtraSuper,
       otherDeductions,
-      taxableIncome,
+      taxableIncome: finalTaxableIncome,
       tax: finalTax,
       netIncome: finalNetIncome,
       totalHours,
@@ -4451,6 +4505,8 @@ function hideAnnualLoadingState() {
     const data = state.annualData;
     const totals = data.yearTotals;
 
+
+
     // Update summary stats
     const grossEl = document.getElementById('annual-stat-gross');
     const superEl = document.getElementById('annual-stat-super');
@@ -4462,7 +4518,24 @@ function hideAnnualLoadingState() {
     const hourlyRateEl = document.getElementById('annual-stat-hourly-rate');
 
     if (grossEl) grossEl.textContent = formatCurrency(totals.grossIncome);
-    if (superEl) superEl.textContent = formatCurrency(totals.superGuarantee + totals.extraSuper);
+    const totalSuperDisplay = totals.superGuarantee + totals.extraSuper;
+    if (superEl) superEl.textContent = formatCurrency(totalSuperDisplay);
+    const superCapWarning = document.getElementById('annual-super-cap-warning');
+    if (superCapWarning) {
+      const isFY = !state.annualAllTime && state.annualYearType === 'financial';
+      const cap = 30000;
+      if (isFY && totalSuperDisplay > cap) {
+        superCapWarning.style.display = '';
+        superCapWarning.style.color = 'var(--danger)';
+        superCapWarning.textContent = 'Concessional cap ($30,000) exceeded';
+      } else if (isFY && totalSuperDisplay >= cap * 0.8) {
+        superCapWarning.style.display = '';
+        superCapWarning.style.color = 'var(--warning)';
+        superCapWarning.textContent = 'Approaching concessional cap ($30,000)';
+      } else {
+        superCapWarning.style.display = 'none';
+      }
+    }
     if (taxEl) taxEl.textContent = formatCurrency(totals.tax);
     if (netEl) netEl.textContent = formatCurrency(totals.netIncome);
     if (hoursEl) hoursEl.textContent = totals.totalHours.toFixed(1) + ' hrs';
@@ -5255,6 +5328,7 @@ function hideAnnualLoadingState() {
       }
     });
   }
+
 
   if (annualFilterSelectAll) {
     annualFilterSelectAll.addEventListener('click', () => {
@@ -6592,6 +6666,12 @@ function updateDeductionFormVisibility() {
       order: 150,
       group: 'income'
     },
+    income_month_offset: {
+      name: 'Configure income payment timing',
+      description: 'Reports income in the month it is received rather than the month it was earned. The default offset is set in Settings; individual months can be overridden directly on the Annual Views page.',
+      order: 160,
+      group: 'income'
+    },
     default_inputs: {
       name: 'Enable default hours for time entries',
       description: 'Allows saving reusable entry templates that can be applied when adding new time entries.',
@@ -6698,6 +6778,12 @@ function updateDeductionFormVisibility() {
       name: 'Show clear cache button',
       description: 'Adds a button to wipe cached entries, settings, and remembered preferences from this browser.',
       order: 430,
+      group: 'utilities'
+    },
+    show_mobile_view: {
+      name: 'Show mobile view button',
+      description: 'Adds a Mobile View shortcut to the Time Entries page for quick access to the mobile-optimised interface.',
+      order: 440,
       group: 'utilities'
     },
     custom_theme: {
@@ -10620,14 +10706,22 @@ function updateDeductionFormVisibility() {
         return `<div style="font-weight:700; margin-bottom:4px;">${label}</div>${rows}`;
       };
       const handleMove = (evt) => {
+        const svgEl = plotWrapper.querySelector('svg');
+        const vbW = svgEl && svgEl.viewBox ? svgEl.viewBox.baseVal.width : 0;
+        const vbH = svgEl && svgEl.viewBox ? svgEl.viewBox.baseVal.height : 0;
+        const svgBounds = svgEl ? svgEl.getBoundingClientRect() : null;
+        const scaleX = (svgBounds && vbW) ? svgBounds.width / vbW : 1;
+        const scaleY = (svgBounds && vbH) ? svgBounds.height / vbH : 1;
         const rect = plotWrapper.getBoundingClientRect();
         const mouseX = evt.clientX - rect.left;
         const mouseY = evt.clientY - rect.top;
         let closest = null;
         let minDist = 18;
         circleMeta.forEach((meta) => {
-          const dx = meta.x - mouseX;
-          const dy = meta.y - mouseY;
+          const cx = meta.x * scaleX;
+          const cy = meta.y * scaleY;
+          const dx = cx - mouseX;
+          const dy = cy - mouseY;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < minDist) {
             minDist = dist;
@@ -10638,17 +10732,19 @@ function updateDeductionFormVisibility() {
           tooltip.style.display = 'none';
           return;
         }
+        const cx = closest.x * scaleX;
+        const cy = closest.y * scaleY;
         tooltip.style.display = 'block';
         tooltip.innerHTML = buildTooltipContent(closest.label);
         const tooltipRect = tooltip.getBoundingClientRect();
         const wrapperRect = plotWrapper.getBoundingClientRect();
-        let left = closest.x + 12;
-        let top = closest.y - tooltipRect.height - 8;
+        let left = cx + 12;
+        let top = cy - tooltipRect.height - 8;
         if (left + tooltipRect.width > wrapperRect.width) {
-          left = closest.x - tooltipRect.width - 12;
+          left = cx - tooltipRect.width - 12;
         }
         if (left < 0) left = 4;
-        if (top < 0) top = closest.y + 12;
+        if (top < 0) top = cy + 12;
         tooltip.style.left = `${left}px`;
         tooltip.style.top = `${top}px`;
       };
@@ -16817,6 +16913,15 @@ function getCachedIncomeSummary(monthKey) {
       defaultValue: 'extra_contribution',
       event: 'change'
     },
+    default_income_month_offset: {
+      section: 'income_month_offset',
+      order: 45,
+      element: () => document.getElementById('set-income-month-offset'),
+      getValue: (el) => Number(el.value),
+      setValue: (el, val) => { if (el) el.value = String(val != null ? Number(val) : 1); },
+      defaultValue: 1,
+      event: 'change'
+    },
     monthly_insights_trend_method: {
       section: 'expected_monthly_hours',
       order: 80,
@@ -17300,6 +17405,10 @@ function getCachedIncomeSummary(monthKey) {
   // Initial load
   function init() {
     loadCache();
+    if (!state.cacheHadStoredData) {
+      const loadingEl = document.getElementById('ts-initial-loading');
+      if (loadingEl) loadingEl.style.display = 'flex';
+    }
     initializeLazyLoadingState();
     renderEntries();
     // Load settings into UI inputs from cache
@@ -17344,6 +17453,8 @@ function getCachedIncomeSummary(monthKey) {
       ]);
       maybeShowWelcomeModal();
     } finally {
+      const loadingEl = document.getElementById('ts-initial-loading');
+      if (loadingEl) loadingEl.style.display = 'none';
       state.loadingTiers.tier1Complete = true;
       saveCache();
       maybePersistTempusUrlSetting();

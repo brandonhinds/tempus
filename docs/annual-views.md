@@ -33,12 +33,13 @@ Provides a complete overview of your financial performance across a 12-month per
 - Click "Select All" to quickly include all contracts.
 - Filters affect all sections of the page including charts and totals.
 
+
 ## Summary Statistics
 
 Eight key metrics displayed in a grid at the top of the page:
 
 - **Gross Income**: Total income earned before any deductions or tax.
-- **Total Superannuation**: Combined superannuation guarantee (employer contribution) and any extra super contributions.
+- **Total Superannuation**: Combined superannuation guarantee (employer contribution) and any extra super contributions. A warning appears when total super reaches 80% of the $30,000 concessional cap, and a stronger warning when the cap is exceeded. Both warnings only show in Financial Year view.
 - **Total Tax**: Sum of all tax withheld throughout the year.
 - **Net Income**: Your take-home income after super, deductions, and tax.
 - **Total Billable Hours**: All hours that contribute to income calculations (excludes non-billable hour types).
@@ -174,6 +175,7 @@ Financial year-specific tax insights:
 - Switch between Financial Year and Calendar Year views to align with your tax planning or personal preferences.
 - Use contract filtering when working with multiple clients to analyze individual contract performance.
 - Enable actual income tracking (separate feature flag) to see variance between estimated and actual earnings on the monthly chart.
+- If your income figures look off by a month, check the income payment timing setting — the global default is "Following month" (income appears the month after it was earned). Adjust this in Settings under *Configure income payment timing*.
 - Expense category breakdown is most useful after consistently categorising deductions throughout the year.
 - Tax analysis becomes reliable in Q3-Q4 of the financial year; ignore large discrepancies early in the year.
 - Use the effective hourly rate metric to identify if you're meeting your target billable rate across all contracts.

@@ -6,6 +6,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | --- | --- | --- |
 | `remember_last_page` | Disabled | When enabled, the app reopens on the last viewed page after refresh. |
 | `show_clear_cache` | Disabled | Shows a "Clear Local Cache" button on the Settings page. |
+| `show_mobile_view` | Disabled | Adds a Mobile View shortcut button to the Time Entries page for quick access to the mobile-optimised interface. |
 | `show_zero_hours` | Disabled | Displays `0` for days without logged time in the calendar instead of leaving them blank. |
 | `default_inputs` | Disabled | Enables creating, using, and managing default time entry templates for faster data entry. |
 | `hour_types` | Disabled | Enables tracking different types of hours (work, annual, sick, training, etc.) with configurable income contribution and visualization. |
@@ -29,6 +30,7 @@ This document lists the feature flags supported by the Tempus app. Each flag is 
 | `suggest_end_time` | Disabled | Shows a helpful suggestion for when to clock out to achieve nicely rounded daily hours. Uses the minimum_end_time setting to suggest a punch-out time that results in a total matching the rounding increment. |
 | `enable_actual_income` | Disabled | Enables tracking of actual income received, allowing comparison between estimated and actual earnings. Adds a button to input gross income, superannuation, tax, and net income for each month. The income badge displays both estimated and actual values with a variance indicator. |
 | `no_lost_super_to_deductions` | Disabled | Recovers the superannuation guarantee amount that would normally be lost when pre-tax salary sacrifice deductions reduce the super base. Configure the recovery method in Settings (either as extra super contribution or added back to the super base, which increases super, taxable income, tax, and net income). |
+| `income_month_offset` | Disabled | Reports income in the month it is received rather than the month it was earned. The global default (same month or following month) is configured in Settings. Individual months can be overridden directly on the Annual Views page via the clock icon. Months with actual income recorded always use the actual value regardless of the offset. |
 
 ## Usage Guidelines
 - Update this file whenever a new feature flag is introduced or an existing one is retired.
