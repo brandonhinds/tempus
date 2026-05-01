@@ -1,2 +1,5 @@
 # Clasp files
 .clasp.json
+
+# Sensitive update scripts
+scripts/update-template-prod.sh

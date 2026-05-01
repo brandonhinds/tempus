@@ -133,7 +133,7 @@ echo "Preparing workspace..."
 echo "Downloading latest Tempus sources from GitHub..."
 curl -fsSL "https://codeload.github.com/brandonhinds/tempus/tar.gz/refs/heads/main" | tar -xz -C "$DOWNLOAD_DIR" --strip-components=1
 
-echo "Copying repository sources..."
+echo "Copying repository code..."
 cp -R "$DOWNLOAD_DIR"/. "$CLONE_DIR"/
 
 echo "Pushing updated files with clasp..."
