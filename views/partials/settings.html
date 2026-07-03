@@ -290,6 +290,124 @@
       <input id="set-invoice-hours-label" placeholder="Hours" type="text"/>
      </div>
     </div>
+    <div class="ts-settings-item" data-setting-key="manage_assessment_types" id="manage-assessment-types-col">
+     <label class="ts-settings-label">
+      Assessment types
+     </label>
+     <div class="ts-note">
+      The catalogue of assessment categories used by assessments mode. Each type defines one or more invoice lines with their own description templates and multipliers. Built-in types can be edited but not deleted.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <button class="secondary" id="btn-manage-assessment-types" type="button">
+       Manage assessment types…
+      </button>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_default_actual_hour_type_id" id="assessment-default-actual-hour-type-col">
+     <label class="ts-settings-label" for="set-assessment-default-actual-hour-type">
+      Default hour type for assessment time entries
+     </label>
+     <div class="ts-note">
+      Pre-fills the hour type when logging time against an assessment. Only non-income hour types are listed. Leave blank to use the auto-created "Assessment work" type.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-assessment-default-actual-hour-type"></select>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_grouping" id="assessment-invoice-grouping-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-grouping">
+      Monthly invoice grouping
+     </label>
+     <div class="ts-note">
+      How to group a month's assessments into invoices. "Combined" produces a single invoice per month containing every assessment. "Per organisation" produces one invoice per organisation per month.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <select id="set-assessment-invoice-grouping">
+       <option value="combined">Combined (one invoice per month)</option>
+       <option value="per_org">Per organisation (one invoice per organisation per month)</option>
+      </select>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_template_reference" id="assessment-invoice-template-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-template">
+      Invoice template (Doc ID or path)
+     </label>
+     <div class="ts-note">
+      The Google Docs template (by ID or Drive path) used to render assessment-driven monthly invoices. Placeholders use the legacy format: <code>{{invoiceNumber}}</code>, <code>{{date}}</code>, <code>{{date1}}..{{dateN}}</code>, <code>{{serviceDescription1}}..{{serviceDescriptionN}}</code>, <code>{{amount1}}..{{amountN}}</code>, <code>{{subtotal}}</code>, <code>{{gst}}</code>, <code>{{total}}</code>.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-template" placeholder="Document ID or path" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_output_folder_reference" id="assessment-invoice-output-folder-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-output-folder">
+      Invoice output folder (ID or path)
+     </label>
+     <div class="ts-note">
+      Drive folder where generated assessment invoices are stored. Accepts an ID or a path.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-output-folder" placeholder="Folder ID or path" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_line_limit" id="assessment-invoice-line-limit-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-line-limit">
+      Invoice line placeholder limit
+     </label>
+     <div class="ts-note">
+      Maximum number of line placeholders in the template (e.g., 18). Unused placeholders are blanked out at render time.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-line-limit" min="1" step="1" type="number" placeholder="18"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_default_email_to" id="assessment-invoice-default-email-to-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-default-email-to">
+      Default invoice email — To
+     </label>
+     <div class="ts-note">
+      Used by combined-mode invoices and as a fallback when a contract has no per-organisation recipient set.
+     </div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-default-email-to" placeholder="accounts@example.com" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_default_email_cc" id="assessment-invoice-default-email-cc-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-default-email-cc">
+      Default invoice email — CC
+     </label>
+     <div class="ts-note">Optional, comma-separated.</div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-default-email-cc" placeholder="optional" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_default_email_bcc" id="assessment-invoice-default-email-bcc-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-default-email-bcc">
+      Default invoice email — BCC
+     </label>
+     <div class="ts-note">Optional, comma-separated. Use this to BCC yourself on every send.</div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-default-email-bcc" placeholder="me@example.com" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_default_email_subject" id="assessment-invoice-default-email-subject-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-default-email-subject">
+      Default invoice email — Subject template
+     </label>
+     <div class="ts-note">Placeholders: <code>{invoiceNumber}</code>, <code>{monthYear}</code>, <code>{org}</code>, <code>{total}</code>.</div>
+     <div class="ts-settings-field ts-settings-control">
+      <input id="set-assessment-invoice-default-email-subject" placeholder="Invoice {invoiceNumber} - {monthYear}" type="text"/>
+     </div>
+    </div>
+    <div class="ts-settings-item" data-setting-key="assessment_invoice_default_email_body" id="assessment-invoice-default-email-body-col">
+     <label class="ts-settings-label" for="set-assessment-invoice-default-email-body">
+      Default invoice email — Body template
+     </label>
+     <div class="ts-note">Same placeholder set as the subject. Newlines preserved.</div>
+     <div class="ts-settings-field ts-settings-control">
+      <textarea id="set-assessment-invoice-default-email-body" rows="5" style="font-family:monospace; font-size:12px;" placeholder="Hi,&#10;&#10;Please see attached invoice {invoiceNumber} for {monthYear}.&#10;&#10;Kind regards"></textarea>
+     </div>
+    </div>
    </div>
    <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
     <div style="display:flex; gap:8px;">
@@ -543,6 +661,36 @@
    <button id="btn-save-super-rates">
     Save Rates
    </button>
+  </div>
+ </div>
+</div>
+
+<!-- Assessment Types Modal -->
+<div class="ts-modal" id="modal-assessment-types" style="display:none;">
+ <div class="ts-modal-content" style="max-width:960px;">
+  <div class="ts-modal-header">
+   <h3>Assessment types</h3>
+   <button class="ts-modal-close" id="btn-close-assessment-types-x" type="button">×</button>
+  </div>
+  <div class="ts-modal-body">
+   <div class="ts-note" style="margin-bottom: 16px;">
+    Each type defines one or more invoice line breakdowns. The multiplier on each line scales the contract's hourly rate. Built-in types can be edited but not deleted. Available placeholders inside line templates: <code>{org}</code>, <code>{name}</code>, <code>{dob}</code>, <code>{surge_suffix}</code>.
+   </div>
+   <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+    <button class="secondary" id="btn-add-assessment-type" type="button">Add type</button>
+    <div class="ts-note" id="assessment-types-status"></div>
+   </div>
+   <div id="assessment-types-list" style="display:flex; flex-direction:column; gap:16px;">
+    <!-- Cards rendered here -->
+   </div>
+   <div id="assessment-types-empty" class="ts-empty-state ts-empty-state--inline" style="display:none;">
+    <div class="ts-empty-state__icon">📋</div>
+    <p class="ts-empty-state__title">No assessment types yet</p>
+    <p class="ts-empty-state__text">Click "Add type" to create one, or reload the page if the built-in types are missing.</p>
+   </div>
+  </div>
+  <div class="ts-modal-footer">
+   <button class="ghost" id="btn-close-assessment-types">Close</button>
   </div>
  </div>
 </div>

@@ -121,6 +121,29 @@ Allows you to define reusable line items for this contract:
 
 When creating invoices, you can quickly insert these templates instead of typing common line items repeatedly.
 
+## Assessment Configuration
+
+Only visible when the *Enable assessments mode* feature flag is enabled. See [Assessments](docs/assessments.md) for the full workflow.
+
+Each contract can opt-in to specific assessment types and override the default per-line multipliers:
+
+- **Type checklist**: Tick each assessment type that this organisation offers. Unticked types are hidden from the assessment form when this organisation is selected.
+- **Per-line multipliers**: When a type is ticked, an input appears for each line in the type's catalogue definition. Multipliers default to the catalogue values; override them here if this organisation pays differently.
+
+A type cannot be unticked while any existing assessment for this contract still uses it — re-assign or delete those assessments first.
+
+## Invoice Email Defaults
+
+Only visible when the *Enable assessments mode* feature flag is enabled.
+
+Recipients and message templates used when sending monthly invoices for this organisation:
+
+- **To**, **CC**, **BCC**: Email addresses (comma-separated for multiple recipients).
+- **Subject template**: Subject line with placeholder substitution.
+- **Body template**: Message body with placeholder substitution. Newlines are preserved.
+
+Available placeholders: `{invoiceNumber}`, `{monthYear}`, `{org}`, `{total}`. When a field is left blank, the corresponding *Default invoice email* setting from the Settings page is used as fallback.
+
 ## Contract Validation Rules
 
 ### Date Range Validation

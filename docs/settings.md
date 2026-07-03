@@ -160,6 +160,8 @@ Feature flags enable optional Tempus features. All flags are disabled by default
 - **Switch from monthly to quarterly BAS reporting**: Quarterly BAS periods
 - **Enable Google Docs invoice generation**: Generate formatted invoices
 - **Is sole trader**: Changes PAYG and income treatment
+- **Enable assessments mode**: Unlocks the Assessments workflow for users who bill per assessment. Adds a month-centric Assessments page, per-contract assessment type configuration, an auto-created "Assessment work" hour type, and assessment-driven monthly invoice generation.
+- **Enable expense report**: Adds an Expense Report section to BAS Reporting showing the selected financial year's company expenses grouped by category, with a CSV download.
 
 #### Utilities Flags
 - **Show clear cache button**: Manual cache clearing
@@ -173,7 +175,7 @@ Feature flags enable optional Tempus features. All flags are disabled by default
 - **Enable colour blind themes**: Protanopia, deuteranopia, tritanopia, monochrome themes
 - **Enable custom themes**: Define your own colour palette
 
-See [Feature Flags Reference](feature-flags.md) for complete details on every flag.
+See [Feature Flags Reference](docs/feature-flags.md) for complete details on every flag.
 
 ## Feature-Specific Settings
 
@@ -264,6 +266,49 @@ The PAYG instalment rate for sole traders (percentage).
 
 **Default:** 2%
 
+#### Assessment types
+(**Requires:** *Enable assessments mode*)
+
+A button that opens the **Manage assessment types** modal. Each type defines the invoice line breakdown for assessments of that category — one or more `{description template, multiplier}` rows. Built-in types can be edited (rename, reorder, edit line templates/multipliers) but not deleted. Deleting a custom type shows an inline confirmation inside the same modal card before the row is removed. See [Assessments](docs/assessments.md) for the workflow.
+
+#### Default hour type for assessment time entries
+(**Requires:** *Enable assessments mode*)
+
+Pre-selects the hour type when logging time against an assessment. The dropdown lists every non-income hour type configured under [Hour Types & Contracts](docs/time-entry-hour-types-contracts.md); leaving the value on the blank placeholder uses the auto-created "Assessment work" hour type as the fallback. Users can still override the pick per row in the assessment modal.
+
+#### Monthly invoice grouping
+(**Requires:** *Enable assessments mode*)
+
+Controls how the *Generate monthly invoice* button groups assessments into invoices.
+
+**Options:**
+- **Combined** (default): One invoice per month covering every assessment regardless of organisation.
+- **Per organisation**: One invoice per (month, organisation) pair.
+
+**When to change:** Most users with one consolidated recipient should leave this on Combined. Switch to Per organisation if you bill each organisation separately and need distinct invoice documents and email recipients per org.
+
+#### Invoice template (Doc ID or path)
+(**Requires:** *Enable assessments mode*)
+
+The Google Docs template copied for each generated invoice. Accepts either a Doc ID (e.g., `1AbCdef...`) or a Drive path (e.g., `Assessments Financial Tracking/Invoice Template`).
+
+#### Invoice output folder (ID or path)
+(**Requires:** *Enable assessments mode*)
+
+Drive folder where generated invoice Docs and exported PDFs are written. Accepts an ID or a path.
+
+#### Invoice line placeholder limit
+(**Requires:** *Enable assessments mode*)
+
+Maximum number of `{{dateN}} / {{serviceDescriptionN}} / {{amountN}}` slots in the template. Unused slots are blanked out at render time. If a month produces more lines than the limit, generation refuses with an error so you can either raise the limit or split the month.
+
+**Default:** 18
+
+#### Default invoice email — To, CC, BCC, Subject, Body
+(**Requires:** *Enable assessments mode*)
+
+Recipients and templates used by combined-mode invoices, and as a fallback for per-organisation invoices when the contract has no override. The subject and body templates support placeholders: `{invoiceNumber}`, `{monthYear}`, `{org}`, `{total}`.
+
 ## Expand/Collapse Controls
 
 At the top of the Settings page, expand/collapse controls let you quickly scan all sections.
@@ -282,7 +327,7 @@ At the bottom of the Core section, the **Open Mobile View** button (when *Show m
 
 **When to use:** When you need to access Tempus on a mobile device and want the streamlined mobile interface rather than the full desktop view.
 
-See [Mobile Entry documentation](mobile-entry.md) for details.
+See [Mobile Entry documentation](docs/mobile-entry.md) for details.
 
 ## Clear Cache
 
@@ -295,7 +340,7 @@ When the *Show clear cache button* flag is enabled, a **Clear Cache** button app
 - Troubleshooting unexpected behaviour
 - After major updates that change data structures
 
-See [Cache Management documentation](cache.md) for details.
+See [Cache Management documentation](docs/cache.md) for details.
 
 ## Saving Settings
 
@@ -324,4 +369,4 @@ See [Cache Management documentation](cache.md) for details.
 
 Settings configure Tempus's core behaviour (tax rates, super, rounding, themes) and enable optional features through feature flags. Core settings are always visible, whilst feature-specific sections appear when you enable their flags.
 
-For detailed information on specific features, see [Feature Flags Reference](feature-flags.md).
+For detailed information on specific features, see [Feature Flags Reference](docs/feature-flags.md).

@@ -49,6 +49,9 @@ The app uses Google Sheets with these main sheets:
 - `contracts` - Billable agreements with date ranges and rates
 - `user_settings` - Key-value user preferences
 - `feature_flags` - Toggle optional behaviors
+- `assessments` - Per-assessment records driving the assessment-mode billing workflow (requires `enable_assessments_mode`); the canonical record, with the billable entry derived back into `timesheet_entries` via `assessment_id`
+- `assessment_types` - Catalogue of assessment categories with line-breakdown definitions
+- `assessment_invoices` - Headers for the monthly invoices generated from assessments; lines are derived on the fly
 
 ### API Design
 Backend functions follow the `api_*` naming convention (e.g., `api_getEntries`, `api_addContract`). All APIs use normalized data objects and handle caching automatically.
@@ -75,7 +78,8 @@ The core system supports two modes:
 - Function naming: `api_*` for endpoints, verb-first for utilities (e.g., `cacheSet`, `getOrCreateSheet`)
 - Binary configuration controls must use the shared `.ts-toggle` styling; avoid introducing checkbox UI for toggles.
 - Layout containers: default to the 1280px `.ts-container`; apply `.ts-container--fluid` only when content truly needs to be extra wide (currently just BAS reporting).
-- The BAS screen includes a secondary invoice summary table (when invoices are enabled) that lists every invoice in the selected financial year with line counts, hours, and GST-inclusive totals to support reconciliation.
+- The BAS screen includes a secondary invoice summary table (when invoices are enabled) that lists every invoice in the selected financial year with line counts, hours, and GST-inclusive totals to support reconciliation. An Expense Report section appears when `enable_expense_report` is enabled.
+- When `enable_assessments_mode` is on, the Assessments page is the canonical workflow for per-assessment billing. The legacy `Invoices` page (gated by `enable_invoices`) is independent of assessments mode and untouched by the new flow.
 - Deletion confirmations inside modals must be implemented inline within that modal's content; never spawn a secondary modal on top of an existing modal for confirmation.
 - Settings UI is data-driven: every control lives in the hidden template bank inside `views/partials/settings.html` and is registered in `SETTINGS_CONFIG`. Set `section: 'core'` for always-on settings; to gate a control behind a feature flag, set `section` to that flag's identifier so the renderer automatically creates a collapsible section that appears only when the flag is enabled. Do not hand-code new settings outside this structure.
 - Whenever you change behaviour, flows, or feature flags, add or update the relevant markdown in `docs/` (see `docs/README.md`) so user-facing documentation stays current.

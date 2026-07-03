@@ -79,6 +79,7 @@
   const pageRatePreview = document.getElementById('page-rate-preview');
   const pageSettings = document.getElementById('page-settings');
   const pageInvoices = document.getElementById('page-invoices');
+  const pageAssessments = document.getElementById('page-assessments');
   const pageAbout = document.getElementById('page-about');
   const aboutVersionDisplay = document.getElementById('about-version-display');
   const aboutVersionStatus = document.getElementById('about-version-status');
@@ -93,6 +94,7 @@
   const navBasBtn = document.getElementById('nav-bas');
   const navAnnualViewsBtn = document.getElementById('nav-annual-views');
   const navInvoicesBtn = document.getElementById('nav-invoices');
+  const navAssessmentsBtn = document.getElementById('nav-assessments');
   const navSettingsBtn = document.getElementById('nav-settings');
   const navDocsLink = document.getElementById('nav-docs');
   const navAboutBtn = document.getElementById('nav-about');
@@ -269,6 +271,11 @@ const deductionCategoryEmptyNote = document.getElementById('deduction-category-e
   const basQuarterlyNote = document.getElementById('bas-quarterly-note');
   const basEmptyNote = document.getElementById('bas-empty');
   const basInvoiceSection = document.getElementById('bas-invoice-section');
+  const basExpenseReportSection = document.getElementById('bas-expense-report-section');
+  const basExpenseReportSummary = document.getElementById('bas-expense-report-summary');
+  const basExpenseReportEmpty = document.getElementById('bas-expense-report-empty');
+  const basExpenseReportGroups = document.getElementById('bas-expense-report-groups');
+  const btnExpenseReportCsv = document.getElementById('btn-expense-report-csv');
   const basInvoiceEmpty = document.getElementById('bas-invoice-empty');
   const basInvoiceEmptyText = document.getElementById('bas-invoice-empty-text');
   const basInvoiceTableBody = document.getElementById('bas-invoice-table-body');
@@ -366,6 +373,18 @@ let ratePreviewInputSyncing = false;
     invoiceMap: {},
     invoiceDefaults: [],
     invoiceDefaultMap: {},
+    assessmentTypes: [],
+    assessmentTypesInitialized: false,
+    assessmentsView: {
+      year: 0,
+      month: 0,
+      loading: false
+    },
+    assessmentMonthCache: {},
+    assessmentInvoiceCache: {},
+    expenseReportCache: {},
+    editingAssessment: null,
+    editingAssessmentTimeEntries: [],
     invoiceFilters: {
       year: '',
       month: ''
@@ -747,7 +766,7 @@ let ratePreviewInputSyncing = false;
   let deductionCategoryDeleteId = null;
   let deductionCategorySavePending = false;
 
-  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'settings', 'about'];
+  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'annual-views', 'invoices', 'assessments', 'settings', 'about'];
   const LAST_PAGE_KEY = 'ts_last_page';
   const SCRIPT_ID_CACHE_KEY = 'ts_script_id';
 
@@ -797,6 +816,7 @@ let ratePreviewInputSyncing = false;
       bas: pageBas,
       'annual-views': pageAnnualViews,
       invoices: pageInvoices,
+      assessments: pageAssessments,
       settings: pageSettings,
       about: pageAbout
     };
@@ -817,6 +837,9 @@ let ratePreviewInputSyncing = false;
     }
     if (normalized === 'invoices') {
       renderInvoicesPage();
+    }
+    if (normalized === 'assessments') {
+      renderAssessmentsPage();
     }
     if (normalized === 'about') {
       loadScriptId();
@@ -1185,6 +1208,7 @@ let ratePreviewInputSyncing = false;
   if (navBasBtn) navBasBtn.onclick = () => { closeNavMenu(); showPage('bas'); };
   if (navAnnualViewsBtn) navAnnualViewsBtn.onclick = () => { closeNavMenu(); showPage('annual-views'); };
   if (navInvoicesBtn) navInvoicesBtn.onclick = () => { closeNavMenu(); showPage('invoices'); };
+  if (navAssessmentsBtn) navAssessmentsBtn.onclick = () => { closeNavMenu(); showPage('assessments'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   if (navDocsLink) {
     navDocsLink.onclick = () => {
@@ -3027,6 +3051,7 @@ let ratePreviewInputSyncing = false;
       if (basEmptyNote) basEmptyNote.style.display = 'none';
       if (basQuarterlyNote) basQuarterlyNote.style.display = 'none';
       if (basInvoiceSection) basInvoiceSection.style.display = 'none';
+      if (basExpenseReportSection) basExpenseReportSection.style.display = 'none';
       return;
     }
 
@@ -3086,7 +3111,168 @@ let ratePreviewInputSyncing = false;
     }
 
     renderBasInvoiceTable();
+    renderBasExpenseReportSection();
   }
+
+  function renderBasExpenseReportSection() {
+    if (!basExpenseReportSection) return;
+    if (!state.companyTrackingEnabled || !getFeatureFlag('enable_expense_report')) {
+      basExpenseReportSection.style.display = 'none';
+      return;
+    }
+    basExpenseReportSection.style.display = 'block';
+    const fy = state.basCurrentFy;
+    if (!fy) {
+      if (basExpenseReportSummary) basExpenseReportSummary.textContent = 'Select a financial year.';
+      if (basExpenseReportGroups) basExpenseReportGroups.innerHTML = '';
+      if (basExpenseReportEmpty) basExpenseReportEmpty.style.display = 'none';
+      return;
+    }
+    const cacheKey = String(fy);
+    const cached = state.expenseReportCache && state.expenseReportCache[cacheKey];
+    if (cached) {
+      renderExpenseReportPayload(cached);
+    } else {
+      if (basExpenseReportSummary) basExpenseReportSummary.textContent = 'Loading…';
+      if (basExpenseReportGroups) basExpenseReportGroups.innerHTML = '';
+      if (basExpenseReportEmpty) basExpenseReportEmpty.style.display = 'none';
+    }
+    google.script.run
+      .withSuccessHandler(function(report) {
+        if (!state.expenseReportCache) state.expenseReportCache = {};
+        state.expenseReportCache[cacheKey] = report;
+        saveCache();
+        if (String(state.basCurrentFy) === cacheKey) {
+          renderExpenseReportPayload(report);
+        }
+      })
+      .withFailureHandler(function(error) {
+        const msg = error && error.message ? error.message : String(error);
+        if (!cached) {
+          if (basExpenseReportSummary) basExpenseReportSummary.textContent = 'Failed to load: ' + msg;
+        } else {
+          setStatus('Expense report refresh failed: ' + msg, 'error');
+        }
+      })
+      .api_buildExpenseReportCsv(fy);
+  }
+
+  function renderExpenseReportPayload(report) {
+    if (!basExpenseReportGroups || !report) return;
+    const rows = Array.isArray(report.rows) ? report.rows : [];
+    basExpenseReportGroups.innerHTML = '';
+    if (!rows.length) {
+      if (basExpenseReportEmpty) basExpenseReportEmpty.style.display = 'block';
+      if (basExpenseReportSummary) basExpenseReportSummary.textContent = (report.financial_year_label || '') + ' · 0 rows';
+      return;
+    }
+    if (basExpenseReportEmpty) basExpenseReportEmpty.style.display = 'none';
+    const byCategory = {};
+    rows.forEach(function(row) {
+      const key = row.category || 'Uncategorised';
+      if (!byCategory[key]) byCategory[key] = { items: [], totalEx: 0, totalGst: 0, totalInc: 0 };
+      byCategory[key].items.push(row);
+      byCategory[key].totalEx += Number(row.amount_ex_gst) || 0;
+      byCategory[key].totalGst += Number(row.gst) || 0;
+      byCategory[key].totalInc += Number(row.amount_inc_gst) || 0;
+    });
+    let grandEx = 0, grandGst = 0, grandInc = 0;
+    rows.forEach(function(row) {
+      grandEx += Number(row.amount_ex_gst) || 0;
+      grandGst += Number(row.gst) || 0;
+      grandInc += Number(row.amount_inc_gst) || 0;
+    });
+    if (basExpenseReportSummary) {
+      basExpenseReportSummary.textContent = (report.financial_year_label || '') + ' · ' + rows.length + ' rows · ' + formatCurrencyAud(grandEx) + ' ex GST · ' + formatCurrencyAud(grandGst) + ' GST · ' + formatCurrencyAud(grandInc) + ' inc GST';
+    }
+    Object.keys(byCategory).sort().forEach(function(catName) {
+      const group = byCategory[catName];
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ts-card ts-card--subsection';
+      wrapper.style.cssText = 'padding:8px 12px;';
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; font-weight:600; margin-bottom:6px;';
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = catName;
+      const totalsSpan = document.createElement('span');
+      totalsSpan.style.fontWeight = '400';
+      totalsSpan.style.fontSize = '12px';
+      totalsSpan.textContent = formatCurrencyAud(group.totalInc) + ' inc · ' + formatCurrencyAud(group.totalGst) + ' GST';
+      header.appendChild(nameSpan);
+      header.appendChild(totalsSpan);
+      wrapper.appendChild(header);
+      const table = document.createElement('table');
+      table.className = 'ts-table';
+      table.style.cssText = 'min-width:0; width:100%;';
+      table.innerHTML = '<thead><tr><th>Date</th><th>Name</th><th>Notes</th><th style="text-align:right;">Ex GST</th><th style="text-align:right;">GST</th><th style="text-align:right;">Inc GST</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      group.items.forEach(function(item) {
+        const tr = document.createElement('tr');
+        const cells = [
+          item.date,
+          item.name,
+          item.notes || '',
+          formatCurrencyAud(item.amount_ex_gst),
+          formatCurrencyAud(item.gst),
+          formatCurrencyAud(item.amount_inc_gst)
+        ];
+        cells.forEach(function(value, idx) {
+          const td = document.createElement('td');
+          td.textContent = value;
+          if (idx >= 3) td.style.textAlign = 'right';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+      basExpenseReportGroups.appendChild(wrapper);
+    });
+  }
+
+  function triggerExpenseCsvDownload(report, fy) {
+    if (!report || !report.csv) return;
+    const blob = new Blob([report.csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tempus-expense-report-fy-' + fy + '-' + (fy + 1) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadExpenseReportCsv() {
+    if (!btnExpenseReportCsv) return;
+    const fy = state.basCurrentFy;
+    if (!fy) return;
+    const cached = state.expenseReportCache && state.expenseReportCache[String(fy)];
+    if (cached) {
+      triggerExpenseCsvDownload(cached, fy);
+      return;
+    }
+    btnExpenseReportCsv.disabled = true;
+    btnExpenseReportCsv.textContent = 'Preparing…';
+    google.script.run
+      .withSuccessHandler(function(report) {
+        btnExpenseReportCsv.disabled = false;
+        btnExpenseReportCsv.textContent = 'Download CSV';
+        if (!state.expenseReportCache) state.expenseReportCache = {};
+        state.expenseReportCache[String(fy)] = report;
+        saveCache();
+        triggerExpenseCsvDownload(report, fy);
+      })
+      .withFailureHandler(function(error) {
+        btnExpenseReportCsv.disabled = false;
+        btnExpenseReportCsv.textContent = 'Download CSV';
+        const msg = error && error.message ? error.message : String(error);
+        setStatus('Expense CSV failed: ' + msg, 'error');
+      })
+      .api_buildExpenseReportCsv(fy);
+  }
+
+  if (btnExpenseReportCsv) btnExpenseReportCsv.addEventListener('click', downloadExpenseReportCsv);
 
   function renderBasInvoiceTable() {
     if (!basInvoiceSection || !basInvoiceTableBody || !basInvoiceEmpty) return;
@@ -6762,6 +6948,18 @@ function updateDeductionFormVisibility() {
       order: 340,
       group: 'company'
     },
+    enable_assessments_mode: {
+      name: 'Enable assessments mode',
+      description: 'Unlocks the Assessments workflow for users who bill per assessment. Adds a month-centric Assessments page, per-contract assessment type configuration, an auto-created "Assessment work" hour type, and assessment-driven monthly invoice generation.',
+      order: 350,
+      group: 'company'
+    },
+    enable_expense_report: {
+      name: 'Enable expense report',
+      description: 'Adds an Expense Report section to BAS Reporting showing the selected financial year’s company expenses grouped by category, with a CSV download for sharing with an accountant.',
+      order: 360,
+      group: 'company'
+    },
     remember_last_page: {
       name: 'Remember last page on refresh',
       description: 'When enabled, the app reopens on the most recently viewed page after a reload.',
@@ -7566,6 +7764,11 @@ function updateDeductionFormVisibility() {
         : {};
       state.invoices = Array.isArray(obj.invoices) ? obj.invoices.map((invoice) => ({ ...invoice })) : [];
       updateInvoiceMaps();
+      state.assessmentTypes = Array.isArray(obj.assessmentTypes) ? obj.assessmentTypes.map((t) => ({ ...t })) : [];
+      state.assessmentTypesInitialized = state.assessmentTypes.length > 0;
+      state.assessmentMonthCache = (obj.assessmentMonthCache && typeof obj.assessmentMonthCache === 'object') ? obj.assessmentMonthCache : {};
+      state.assessmentInvoiceCache = (obj.assessmentInvoiceCache && typeof obj.assessmentInvoiceCache === 'object') ? obj.assessmentInvoiceCache : {};
+      state.expenseReportCache = (obj.expenseReportCache && typeof obj.expenseReportCache === 'object') ? obj.expenseReportCache : {};
       state.invoiceDefaults = Array.isArray(obj.invoiceDefaults) ? obj.invoiceDefaults.map((item) => ({ ...item })) : [];
       state.invoiceDefaultMap = state.invoiceDefaults.reduce((acc, item) => {
         if (item && item.id) acc[item.id] = item;
@@ -7709,6 +7912,10 @@ function updateDeductionFormVisibility() {
         actualIncome: state.actualIncome,
         invoices: invoicesForCache,
         invoiceDefaults: invoiceDefaultsForCache,
+        assessmentTypes: Array.isArray(state.assessmentTypes) ? state.assessmentTypes.map((t) => ({ ...t })) : [],
+        assessmentMonthCache: state.assessmentMonthCache || {},
+        assessmentInvoiceCache: state.assessmentInvoiceCache || {},
+        expenseReportCache: state.expenseReportCache || {},
         invoiceFilters: invoiceFiltersForCache,
         invoiceSelectedId: state.invoiceSelectedId,
         invoiceDetail: invoiceDetailForCache,
@@ -9910,6 +10117,15 @@ function updateDeductionFormVisibility() {
       })()
     : null;
   const contractTemplatesSection = document.getElementById('contract-line-item-templates-section');
+  const contractAssessmentConfigSection = document.getElementById('contract-assessment-config-section');
+  const contractAssessmentTypesList = document.getElementById('contract-assessment-types-list');
+  const contractAssessmentTypesEmpty = document.getElementById('contract-assessment-types-empty');
+  const contractInvoiceEmailSection = document.getElementById('contract-invoice-email-section');
+  const contractInvoiceEmailToInput = document.getElementById('contract-invoice-email-to');
+  const contractInvoiceEmailCcInput = document.getElementById('contract-invoice-email-cc');
+  const contractInvoiceEmailBccInput = document.getElementById('contract-invoice-email-bcc');
+  const contractInvoiceEmailSubjectInput = document.getElementById('contract-invoice-email-subject');
+  const contractInvoiceEmailBodyInput = document.getElementById('contract-invoice-email-body');
   const contractTemplateList = document.getElementById('contract-template-list');
   const contractTemplateEmpty = document.getElementById('contract-template-empty');
   const contractTemplateForm = document.getElementById('contract-template-form');
@@ -10043,6 +10259,12 @@ function updateDeductionFormVisibility() {
     if (contractRateInput) contractRateInput.value = '';
     if (contractTotalHoursInput) contractTotalHoursInput.value = '';
     if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = false;
+    if (contractInvoiceEmailToInput) contractInvoiceEmailToInput.value = '';
+    if (contractInvoiceEmailCcInput) contractInvoiceEmailCcInput.value = '';
+    if (contractInvoiceEmailBccInput) contractInvoiceEmailBccInput.value = '';
+    if (contractInvoiceEmailSubjectInput) contractInvoiceEmailSubjectInput.value = '';
+    if (contractInvoiceEmailBodyInput) contractInvoiceEmailBodyInput.value = '';
+    state.contractAssessmentConfig = {};
   }
 
   function placeContractFormAtDefault() {
@@ -10066,6 +10288,7 @@ function updateDeductionFormVisibility() {
     if (contractSaveBtn) contractSaveBtn.textContent = mode === 'edit' ? 'Save Changes' : 'Save';
     if (contractCancelBtn) contractCancelBtn.style.display = visible ? 'inline-flex' : 'none';
     updateContractTemplatesSectionVisibility();
+    updateContractAssessmentConfigVisibility();
   }
 
   function showContractForm(mode) {
@@ -10080,6 +10303,7 @@ function updateDeductionFormVisibility() {
     renderContractTemplateList();
     renderContractTemplateForm();
     updateContractTemplatesSectionVisibility();
+    updateContractAssessmentConfigVisibility();
     setContractFormMode(mode);
     if (mode === 'create' && contractNameInput) contractNameInput.focus();
     renderContractDetail();
@@ -10128,7 +10352,8 @@ function updateDeductionFormVisibility() {
     const includeWeekends = contractIncludeWeekendsInput ? contractIncludeWeekendsInput.checked : false;
     const contract = getEditingContract();
     const lineItemTemplatesJson = contract ? (contract.line_item_templates_json || '') : '';
-    return {
+    const assessmentsModeOn = getFeatureFlag('enable_assessments_mode');
+    const payload = {
       name,
       start_date: startDate,
       end_date: endDate,
@@ -10138,6 +10363,23 @@ function updateDeductionFormVisibility() {
       include_weekends: includeWeekends,
       line_item_templates_json: lineItemTemplatesJson
     };
+    if (assessmentsModeOn) {
+      payload.assessment_type_multipliers_json = serializeContractAssessmentMultipliers(state.contractAssessmentConfig || {});
+      payload.invoice_email_to = contractInvoiceEmailToInput ? contractInvoiceEmailToInput.value.trim() : '';
+      payload.invoice_email_cc = contractInvoiceEmailCcInput ? contractInvoiceEmailCcInput.value.trim() : '';
+      payload.invoice_email_bcc = contractInvoiceEmailBccInput ? contractInvoiceEmailBccInput.value.trim() : '';
+      payload.invoice_email_subject_template = contractInvoiceEmailSubjectInput ? contractInvoiceEmailSubjectInput.value : '';
+      payload.invoice_email_body_template = contractInvoiceEmailBodyInput ? contractInvoiceEmailBodyInput.value : '';
+    } else if (contract) {
+      // Preserve existing values when the flag is off so toggling it back doesn't lose configuration.
+      payload.assessment_type_multipliers_json = contract.assessment_type_multipliers_json || '';
+      payload.invoice_email_to = contract.invoice_email_to || '';
+      payload.invoice_email_cc = contract.invoice_email_cc || '';
+      payload.invoice_email_bcc = contract.invoice_email_bcc || '';
+      payload.invoice_email_subject_template = contract.invoice_email_subject_template || '';
+      payload.invoice_email_body_template = contract.invoice_email_body_template || '';
+    }
+    return payload;
   }
 
   function populateContractForm(contract) {
@@ -10155,10 +10397,17 @@ function updateDeductionFormVisibility() {
       contractStandardHoursInput.value = String(standardHours);
     }
     if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = !!contract.include_weekends;
+    state.contractAssessmentConfig = parseContractAssessmentMultipliers(contract.assessment_type_multipliers_json);
+    if (contractInvoiceEmailToInput) contractInvoiceEmailToInput.value = contract.invoice_email_to || '';
+    if (contractInvoiceEmailCcInput) contractInvoiceEmailCcInput.value = contract.invoice_email_cc || '';
+    if (contractInvoiceEmailBccInput) contractInvoiceEmailBccInput.value = contract.invoice_email_bcc || '';
+    if (contractInvoiceEmailSubjectInput) contractInvoiceEmailSubjectInput.value = contract.invoice_email_subject_template || '';
+    if (contractInvoiceEmailBodyInput) contractInvoiceEmailBodyInput.value = contract.invoice_email_body_template || '';
     state.contractTemplateForm = { mode: 'hidden', editingIndex: null, draft: {} };
     renderContractTemplateList();
     renderContractTemplateForm();
     updateContractTemplatesSectionVisibility();
+    updateContractAssessmentConfigVisibility();
     placeContractFormInDetail();
     setContractFormMode('edit');
     if (contractAddToggle) contractAddToggle.textContent = 'Add Contract';
@@ -11774,6 +12023,9 @@ function updateDeductionFormVisibility() {
         state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
         state.selectedContractId = normalized.id;
         refreshContractBindings(normalized.id, normalized.id);
+        // Invalidate assessment caches because contract names and base rates feed into cached month payloads.
+        state.assessmentMonthCache = {};
+        state.assessmentInvoiceCache = {};
         saveCache();
         hideContractForm();
         renderContractDetail();
@@ -11826,6 +12078,8 @@ function updateDeductionFormVisibility() {
           state.selectedContractId = '';
         }
         refreshContractBindings();
+        state.assessmentMonthCache = {};
+        state.assessmentInvoiceCache = {};
         saveCache();
         setStatus('Contract deleted', 'success');
       })
@@ -12061,6 +12315,156 @@ function updateDeductionFormVisibility() {
     if (shouldShow) {
       renderContractTemplateList();
     }
+  }
+
+  function updateContractAssessmentConfigVisibility() {
+    const flagOn = getFeatureFlag('enable_assessments_mode');
+    const showForm = state.contractFormMode === 'edit' || state.contractFormMode === 'create';
+    const shouldShow = flagOn && showForm;
+    if (contractAssessmentConfigSection) {
+      contractAssessmentConfigSection.style.display = shouldShow ? 'block' : 'none';
+    }
+    if (contractInvoiceEmailSection) {
+      contractInvoiceEmailSection.style.display = shouldShow ? 'block' : 'none';
+    }
+    if (shouldShow) {
+      ensureContractAssessmentTypesLoaded(function() {
+        renderContractAssessmentTypesList();
+      });
+    }
+  }
+
+  function ensureContractAssessmentTypesLoaded(callback) {
+    const hasCached = Array.isArray(state.assessmentTypes) && state.assessmentTypes.length;
+    if (hasCached && callback) callback(state.assessmentTypes);
+    google.script.run
+      .withSuccessHandler(function(types) {
+        state.assessmentTypes = Array.isArray(types) ? types : [];
+        state.assessmentTypesInitialized = true;
+        saveCache();
+        renderContractAssessmentTypesList();
+        if (!hasCached && callback) callback(state.assessmentTypes);
+      })
+      .withFailureHandler(function() {
+        if (!hasCached) {
+          state.assessmentTypes = [];
+          if (callback) callback([]);
+        }
+      })
+      .api_listAssessmentTypes();
+  }
+
+  function parseContractAssessmentMultipliers(jsonString) {
+    if (!jsonString) return {};
+    try {
+      const parsed = JSON.parse(String(jsonString));
+      if (!Array.isArray(parsed)) return {};
+      const map = {};
+      parsed.forEach(function(entry) {
+        if (entry && entry.type_id && Array.isArray(entry.multipliers)) {
+          map[entry.type_id] = {
+            enabled: true,
+            multipliers: entry.multipliers.map(function(m) { return Number(m) || 0; })
+          };
+        }
+      });
+      return map;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function serializeContractAssessmentMultipliers(config) {
+    const out = [];
+    Object.keys(config || {}).forEach(function(typeId) {
+      const entry = config[typeId];
+      if (!entry || !entry.enabled) return;
+      out.push({
+        type_id: typeId,
+        multipliers: (entry.multipliers || []).map(function(m) { return Number(m) || 0; })
+      });
+    });
+    return JSON.stringify(out);
+  }
+
+  function defaultMultipliersForType(type) {
+    if (!type || !Array.isArray(type.lines)) return [];
+    return type.lines.map(function(line) { return Number(line.multiplier) || 0; });
+  }
+
+  function renderContractAssessmentTypesList() {
+    if (!contractAssessmentTypesList) return;
+    const types = state.assessmentTypes || [];
+    contractAssessmentTypesList.innerHTML = '';
+    if (!types.length) {
+      if (contractAssessmentTypesEmpty) contractAssessmentTypesEmpty.style.display = 'block';
+      return;
+    }
+    if (contractAssessmentTypesEmpty) contractAssessmentTypesEmpty.style.display = 'none';
+    state.contractAssessmentConfig = state.contractAssessmentConfig || {};
+    types.slice().sort(function(a, b) {
+      return (a.display_order || 0) - (b.display_order || 0) || (a.name || '').localeCompare(b.name || '');
+    }).forEach(function(type) {
+      contractAssessmentTypesList.appendChild(buildContractAssessmentTypeRow(type));
+    });
+  }
+
+  function buildContractAssessmentTypeRow(type) {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'border:1px solid var(--border); border-radius:6px; padding:8px;';
+    const currentConfig = state.contractAssessmentConfig[type.id] || { enabled: false, multipliers: defaultMultipliersForType(type) };
+    if (!currentConfig.multipliers || currentConfig.multipliers.length !== (type.lines || []).length) {
+      const defaults = defaultMultipliersForType(type);
+      const padded = (type.lines || []).map(function(_, idx) {
+        return currentConfig.multipliers && currentConfig.multipliers[idx] != null
+          ? Number(currentConfig.multipliers[idx])
+          : defaults[idx] || 0;
+      });
+      currentConfig.multipliers = padded;
+    }
+    state.contractAssessmentConfig[type.id] = currentConfig;
+
+    const header = document.createElement('label');
+    header.style.cssText = 'display:flex; align-items:center; gap:8px; font-weight:600;';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!currentConfig.enabled;
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = type.name || '(unnamed)';
+    header.appendChild(checkbox);
+    header.appendChild(nameSpan);
+    wrapper.appendChild(header);
+
+    const lineList = document.createElement('div');
+    lineList.style.cssText = 'margin-top:8px; display:flex; flex-direction:column; gap:6px;';
+    lineList.style.display = currentConfig.enabled ? 'flex' : 'none';
+
+    (type.lines || []).forEach(function(line, idx) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:grid; grid-template-columns: 1fr 120px; gap:8px; align-items:center;';
+      const desc = document.createElement('div');
+      desc.style.cssText = 'font-size:12px; color:var(--muted); white-space:pre-wrap; word-break:break-word;';
+      desc.textContent = line.template || '(no template)';
+      const multInput = document.createElement('input');
+      multInput.type = 'number';
+      multInput.step = '0.001';
+      multInput.min = '0';
+      multInput.value = currentConfig.multipliers[idx];
+      multInput.addEventListener('input', function() {
+        currentConfig.multipliers[idx] = Number(multInput.value);
+      });
+      row.appendChild(desc);
+      row.appendChild(multInput);
+      lineList.appendChild(row);
+    });
+
+    checkbox.addEventListener('change', function() {
+      currentConfig.enabled = checkbox.checked;
+      lineList.style.display = currentConfig.enabled ? 'flex' : 'none';
+    });
+
+    wrapper.appendChild(lineList);
+    return wrapper;
   }
 
   function renderFeatureFlags() {
@@ -12419,6 +12823,14 @@ function updateDeductionFormVisibility() {
       initializeInvoicesFeature();
     } else {
       resetInvoicesState();
+    }
+
+    const assessmentsModeFlag = state.featureFlags.enable_assessments_mode || DEFAULT_FEATURE_FLAGS.enable_assessments_mode || { enabled: false };
+    if (navAssessmentsBtn) {
+      navAssessmentsBtn.style.display = assessmentsModeFlag.enabled ? 'block' : 'none';
+    }
+    if (!assessmentsModeFlag.enabled && state.currentPage === 'assessments') {
+      showPage('time');
     }
 
     // Show/hide public holidays state setting
@@ -16979,6 +17391,115 @@ function getCachedIncomeSummary(monthKey) {
       getValue: (el) => el.value.trim(),
       setValue: (el, val) => { el.value = val || ''; },
       defaultValue: 'Hours',
+      event: 'input'
+    },
+    manage_assessment_types: {
+      section: 'enable_assessments_mode',
+      order: 200,
+      element: () => document.getElementById('btn-manage-assessment-types'),
+      getValue: () => '',
+      setValue: () => {},
+      defaultValue: '',
+      event: 'click'
+    },
+    assessment_default_actual_hour_type_id: {
+      section: 'enable_assessments_mode',
+      order: 205,
+      element: () => document.getElementById('set-assessment-default-actual-hour-type'),
+      getValue: (el) => el ? el.value : '',
+      setValue: (el, val) => {
+        if (!el) return;
+        renderAssessmentDefaultActualHourTypeOptions();
+        el.value = val || '';
+      },
+      defaultValue: '',
+      event: 'change'
+    },
+    assessment_invoice_grouping: {
+      section: 'enable_assessments_mode',
+      order: 210,
+      element: () => document.getElementById('set-assessment-invoice-grouping'),
+      getValue: (el) => el ? el.value : 'combined',
+      setValue: (el, val) => { if (el) el.value = val === 'per_org' ? 'per_org' : 'combined'; },
+      defaultValue: 'combined',
+      event: 'change'
+    },
+    assessment_invoice_template_reference: {
+      section: 'enable_assessments_mode',
+      order: 220,
+      element: () => document.getElementById('set-assessment-invoice-template'),
+      getValue: (el) => el ? el.value.trim() : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    assessment_invoice_output_folder_reference: {
+      section: 'enable_assessments_mode',
+      order: 230,
+      element: () => document.getElementById('set-assessment-invoice-output-folder'),
+      getValue: (el) => el ? el.value.trim() : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    assessment_invoice_line_limit: {
+      section: 'enable_assessments_mode',
+      order: 240,
+      element: () => document.getElementById('set-assessment-invoice-line-limit'),
+      getValue: (el) => {
+        if (!el) return '';
+        const v = el.value.trim();
+        if (v === '') return '';
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) && n > 0 ? n : '';
+      },
+      setValue: (el, val) => { if (el) el.value = val != null && val !== '' ? val : ''; },
+      defaultValue: 18,
+      event: 'input'
+    },
+    assessment_invoice_default_email_to: {
+      section: 'enable_assessments_mode',
+      order: 250,
+      element: () => document.getElementById('set-assessment-invoice-default-email-to'),
+      getValue: (el) => el ? el.value.trim() : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    assessment_invoice_default_email_cc: {
+      section: 'enable_assessments_mode',
+      order: 251,
+      element: () => document.getElementById('set-assessment-invoice-default-email-cc'),
+      getValue: (el) => el ? el.value.trim() : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    assessment_invoice_default_email_bcc: {
+      section: 'enable_assessments_mode',
+      order: 252,
+      element: () => document.getElementById('set-assessment-invoice-default-email-bcc'),
+      getValue: (el) => el ? el.value.trim() : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
+      event: 'input'
+    },
+    assessment_invoice_default_email_subject: {
+      section: 'enable_assessments_mode',
+      order: 253,
+      element: () => document.getElementById('set-assessment-invoice-default-email-subject'),
+      getValue: (el) => el ? el.value : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: 'Invoice {invoiceNumber} - {monthYear}',
+      event: 'input'
+    },
+    assessment_invoice_default_email_body: {
+      section: 'enable_assessments_mode',
+      order: 254,
+      element: () => document.getElementById('set-assessment-invoice-default-email-body'),
+      getValue: (el) => el ? el.value : '',
+      setValue: (el, val) => { if (el) el.value = val || ''; },
+      defaultValue: '',
       event: 'input'
     }
   };
@@ -23098,6 +23619,8 @@ function getCachedIncomeSummary(monthKey) {
           }
           renderHourTypes();
           updateHourTypeFormVisibility();
+          renderAssessmentDefaultActualHourTypeOptions();
+          renderAssessmentTimeEntries();
         renderCalendarFilters();
         renderCalendar();
         saveCache();
@@ -24158,6 +24681,1651 @@ function getCachedIncomeSummary(monthKey) {
       closeBtnSuper.addEventListener('click', hideSuperGuaranteeRatesModal);
     }
   }
+
+  // Assessment Types Modal
+  const modalAssessmentTypes = document.getElementById('modal-assessment-types');
+  const btnManageAssessmentTypes = document.getElementById('btn-manage-assessment-types');
+  const btnAddAssessmentType = document.getElementById('btn-add-assessment-type');
+  const btnCloseAssessmentTypes = document.getElementById('btn-close-assessment-types');
+  const btnCloseAssessmentTypesX = document.getElementById('btn-close-assessment-types-x');
+  const assessmentTypesList = document.getElementById('assessment-types-list');
+  const assessmentTypesEmpty = document.getElementById('assessment-types-empty');
+  const assessmentTypesStatus = document.getElementById('assessment-types-status');
+  let assessmentTypesWorkingCopy = [];
+  let nextAssessmentTypeTempId = 0;
+
+  function setAssessmentTypesStatus(text, kind) {
+    if (!assessmentTypesStatus) return;
+    assessmentTypesStatus.textContent = text || '';
+    assessmentTypesStatus.style.color = kind === 'error' ? 'var(--danger)' : (kind === 'success' ? 'var(--success)' : '');
+  }
+
+  function cloneTypeForEditing(type) {
+    return {
+      id: type.id || '',
+      name: type.name || '',
+      display_order: type.display_order != null ? Number(type.display_order) : 0,
+      is_built_in: !!type.is_built_in,
+      lines: Array.isArray(type.lines) ? type.lines.map(function(line) {
+        return { template: line.template || '', multiplier: Number(line.multiplier) || 0 };
+      }) : []
+    };
+  }
+
+  function loadAssessmentTypes() {
+    // Render from cache immediately if we have one; refresh in background.
+    if (Array.isArray(state.assessmentTypes) && state.assessmentTypes.length) {
+      assessmentTypesWorkingCopy = state.assessmentTypes.map(cloneTypeForEditing);
+      setAssessmentTypesStatus('');
+      renderAssessmentTypesList();
+    } else {
+      setAssessmentTypesStatus('Loading…');
+    }
+    google.script.run
+      .withSuccessHandler(function(types) {
+        state.assessmentTypes = Array.isArray(types) ? types : [];
+        state.assessmentTypesInitialized = true;
+        assessmentTypesWorkingCopy = state.assessmentTypes.map(cloneTypeForEditing);
+        saveCache();
+        setAssessmentTypesStatus('');
+        renderAssessmentTypesList();
+      })
+      .withFailureHandler(function(error) {
+        if (!Array.isArray(state.assessmentTypes) || !state.assessmentTypes.length) {
+          setAssessmentTypesStatus('Failed to load: ' + (error && error.message ? error.message : error), 'error');
+        }
+      })
+      .api_listAssessmentTypes();
+  }
+
+  function renderAssessmentTypesList() {
+    if (!assessmentTypesList) return;
+    assessmentTypesList.innerHTML = '';
+    if (!assessmentTypesWorkingCopy.length) {
+      if (assessmentTypesEmpty) assessmentTypesEmpty.style.display = 'block';
+      return;
+    }
+    if (assessmentTypesEmpty) assessmentTypesEmpty.style.display = 'none';
+    assessmentTypesWorkingCopy.forEach(function(type, index) {
+      assessmentTypesList.appendChild(buildAssessmentTypeCard(type, index));
+    });
+  }
+
+  function buildAssessmentTypeCard(type, index) {
+    const card = document.createElement('div');
+    card.className = 'ts-card ts-card--section';
+    card.style.cssText = 'padding:12px; border:1px solid var(--border); border-radius:6px;';
+
+    const head = document.createElement('div');
+    head.style.cssText = 'display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;';
+
+    const nameCol = document.createElement('div');
+    nameCol.style.cssText = 'flex:1 1 240px; min-width:200px; display:flex; flex-direction:column;';
+    const nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Name';
+    nameLabel.style.cssText = 'font-size:12px; font-weight:600; margin-bottom:4px;';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = type.name || '';
+    nameInput.addEventListener('input', function() { type.name = nameInput.value; });
+    nameCol.appendChild(nameLabel);
+    nameCol.appendChild(nameInput);
+
+    const orderCol = document.createElement('div');
+    orderCol.style.cssText = 'flex:0 0 120px; display:flex; flex-direction:column;';
+    const orderLabel = document.createElement('label');
+    orderLabel.textContent = 'Order';
+    orderLabel.style.cssText = 'font-size:12px; font-weight:600; margin-bottom:4px;';
+    const orderInput = document.createElement('input');
+    orderInput.type = 'number';
+    orderInput.value = type.display_order != null ? type.display_order : 0;
+    orderInput.step = '1';
+    orderInput.addEventListener('input', function() { type.display_order = Number(orderInput.value) || 0; });
+    orderCol.appendChild(orderLabel);
+    orderCol.appendChild(orderInput);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex; gap:8px; align-items:center;';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.className = 'ts-btn--primary';
+    saveBtn.addEventListener('click', function() { handleAssessmentTypeSave(type, saveBtn); });
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = type.is_built_in ? 'Built-in' : 'Delete';
+    deleteBtn.className = 'ghost';
+    deleteBtn.disabled = !!type.is_built_in;
+    deleteBtn.title = type.is_built_in ? 'Built-in types cannot be deleted.' : 'Delete this assessment type';
+    deleteBtn.addEventListener('click', function() { handleAssessmentTypeDelete(type); });
+    actions.appendChild(saveBtn);
+    actions.appendChild(deleteBtn);
+
+    head.appendChild(nameCol);
+    head.appendChild(orderCol);
+    head.appendChild(actions);
+    card.appendChild(head);
+
+    const linesHeader = document.createElement('div');
+    linesHeader.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;';
+    const linesLabel = document.createElement('div');
+    linesLabel.style.cssText = 'font-size:12px; font-weight:600;';
+    linesLabel.textContent = 'Line breakdown';
+    const addLineBtn = document.createElement('button');
+    addLineBtn.textContent = 'Add line';
+    addLineBtn.className = 'ghost small';
+    addLineBtn.addEventListener('click', function() {
+      type.lines = type.lines || [];
+      type.lines.push({ template: '', multiplier: 1.0 });
+      renderAssessmentTypesList();
+    });
+    linesHeader.appendChild(linesLabel);
+    linesHeader.appendChild(addLineBtn);
+    card.appendChild(linesHeader);
+
+    const linesContainer = document.createElement('div');
+    linesContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+    (type.lines || []).forEach(function(line, lineIdx) {
+      linesContainer.appendChild(buildAssessmentTypeLineRow(type, line, lineIdx));
+    });
+    card.appendChild(linesContainer);
+    if (type.__confirmDelete) {
+      card.appendChild(buildAssessmentTypeDeleteConfirm(type));
+    }
+    return card;
+  }
+
+  function buildAssessmentTypeDeleteConfirm(type) {
+    const confirmBox = document.createElement('div');
+    confirmBox.className = 'ts-warning';
+    confirmBox.style.cssText = 'margin:12px 0 0; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;';
+    const message = document.createElement('span');
+    message.textContent = 'Delete "' + (type.name || 'untitled') + '"? This cannot be undone.';
+    const actions = document.createElement('span');
+    actions.style.cssText = 'display:flex; gap:8px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'ghost small';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() {
+      type.__confirmDelete = false;
+      renderAssessmentTypesList();
+    });
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'ghost small';
+    confirmBtn.textContent = 'Delete';
+    confirmBtn.style.color = 'var(--danger)';
+    confirmBtn.addEventListener('click', function() {
+      performAssessmentTypeDelete(type);
+    });
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    confirmBox.appendChild(message);
+    confirmBox.appendChild(actions);
+    return confirmBox;
+  }
+
+  function buildAssessmentTypeLineRow(type, line, lineIdx) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns: 1fr 120px auto; gap:8px; align-items:stretch;';
+
+    const templateCol = document.createElement('div');
+    templateCol.style.cssText = 'display:flex; flex-direction:column;';
+    const templateLabel = document.createElement('label');
+    templateLabel.textContent = 'Description template (line ' + (lineIdx + 1) + ')';
+    templateLabel.style.cssText = 'font-size:11px; color:var(--muted); margin-bottom:4px;';
+    const templateInput = document.createElement('textarea');
+    templateInput.rows = 2;
+    templateInput.value = line.template || '';
+    templateInput.style.cssText = 'font-family:monospace; font-size:12px;';
+    templateInput.placeholder = '{org} Psychological Assessment Report (Initial){surge_suffix}\\nClearance Subject: {name} (DOB: {dob})';
+    templateInput.addEventListener('input', function() { line.template = templateInput.value; });
+    templateCol.appendChild(templateLabel);
+    templateCol.appendChild(templateInput);
+
+    const multCol = document.createElement('div');
+    multCol.style.cssText = 'display:flex; flex-direction:column;';
+    const multLabel = document.createElement('label');
+    multLabel.textContent = 'Multiplier';
+    multLabel.style.cssText = 'font-size:11px; color:var(--muted); margin-bottom:4px;';
+    const multInput = document.createElement('input');
+    multInput.type = 'number';
+    multInput.step = '0.001';
+    multInput.min = '0';
+    multInput.value = line.multiplier != null ? line.multiplier : '';
+    multInput.addEventListener('input', function() { line.multiplier = Number(multInput.value); });
+    multCol.appendChild(multLabel);
+    multCol.appendChild(multInput);
+
+    const removeWrap = document.createElement('div');
+    removeWrap.style.cssText = 'display:flex; align-items:flex-end;';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.className = 'ghost small';
+    removeBtn.disabled = (type.lines || []).length <= 1;
+    removeBtn.title = removeBtn.disabled ? 'A type must have at least one line' : 'Remove this line';
+    removeBtn.addEventListener('click', function() {
+      type.lines.splice(lineIdx, 1);
+      renderAssessmentTypesList();
+    });
+    removeWrap.appendChild(removeBtn);
+
+    row.appendChild(templateCol);
+    row.appendChild(multCol);
+    row.appendChild(removeWrap);
+    return row;
+  }
+
+  function handleAssessmentTypeSave(type, saveBtn) {
+    const payload = {
+      id: type.id || '',
+      name: type.name,
+      display_order: type.display_order,
+      default_lines_json: JSON.stringify((type.lines || []).map(function(line) {
+        return { template: line.template, multiplier: Number(line.multiplier) || 0 };
+      }))
+    };
+    // Optimistically update the cached type list so other UIs see the change immediately.
+    const previousTypes = Array.isArray(state.assessmentTypes) ? state.assessmentTypes.map((t) => ({ ...t, lines: Array.isArray(t.lines) ? t.lines.slice() : [] })) : [];
+    const optimisticType = {
+      id: type.id || ('temp_' + Date.now()),
+      name: type.name || '',
+      display_order: Number(type.display_order) || 0,
+      default_lines_json: payload.default_lines_json,
+      lines: (type.lines || []).map(function(line) { return { template: line.template, multiplier: Number(line.multiplier) || 0 }; }),
+      is_built_in: !!type.is_built_in
+    };
+    const existingIdx = state.assessmentTypes.findIndex(function(t) { return t.id === optimisticType.id; });
+    if (existingIdx !== -1) {
+      state.assessmentTypes.splice(existingIdx, 1, optimisticType);
+    } else {
+      state.assessmentTypes.push(optimisticType);
+    }
+    // Invalidate any cached month payloads (type renames change displayed names).
+    state.assessmentMonthCache = {};
+    saveCache();
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    setAssessmentTypesStatus('Saving ' + (type.name || 'type') + '…');
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+        setAssessmentTypesStatus('Saved.', 'success');
+        if (response && response.type) {
+          const fresh = response.type;
+          const swapIdx = state.assessmentTypes.findIndex(function(t) { return t.id === optimisticType.id; });
+          if (swapIdx !== -1) {
+            state.assessmentTypes.splice(swapIdx, 1, fresh);
+            type.id = fresh.id;
+          } else {
+            state.assessmentTypes.push(fresh);
+          }
+          saveCache();
+        }
+        loadAssessmentTypes();
+      })
+      .withFailureHandler(function(error) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+        const msg = error && error.message ? error.message : String(error);
+        setAssessmentTypesStatus('Save failed: ' + msg, 'error');
+        state.assessmentTypes = previousTypes;
+        saveCache();
+        renderAssessmentTypesList();
+      })
+      .api_upsertAssessmentType(payload);
+  }
+
+  function handleAssessmentTypeDelete(type) {
+    if (!type) return;
+    if (!type.id) {
+      // Locally added but unsaved card — just drop it from working copy.
+      assessmentTypesWorkingCopy = assessmentTypesWorkingCopy.filter(function(t) { return t !== type; });
+      renderAssessmentTypesList();
+      return;
+    }
+    assessmentTypesWorkingCopy.forEach(function(item) { item.__confirmDelete = item === type; });
+    renderAssessmentTypesList();
+  }
+
+  function performAssessmentTypeDelete(type) {
+    if (!type || !type.id) return;
+    // Optimistic remove from local state.
+    const previousTypes = Array.isArray(state.assessmentTypes) ? state.assessmentTypes.slice() : [];
+    state.assessmentTypes = previousTypes.filter(function(t) { return t.id !== type.id; });
+    assessmentTypesWorkingCopy = assessmentTypesWorkingCopy.filter(function(t) { return t.id !== type.id; });
+    saveCache();
+    renderAssessmentTypesList();
+    setAssessmentTypesStatus('Deleting…');
+    google.script.run
+      .withSuccessHandler(function() {
+        setAssessmentTypesStatus('Deleted.', 'success');
+        loadAssessmentTypes();
+      })
+      .withFailureHandler(function(error) {
+        const msg = error && error.message ? error.message : String(error);
+        setAssessmentTypesStatus('Delete failed: ' + msg, 'error');
+        state.assessmentTypes = previousTypes;
+        assessmentTypesWorkingCopy = state.assessmentTypes.map(cloneTypeForEditing);
+        saveCache();
+        renderAssessmentTypesList();
+      })
+      .api_deleteAssessmentType(type.id);
+  }
+
+  function handleAddAssessmentType() {
+    assessmentTypesWorkingCopy.push({
+      id: '',
+      name: 'New type',
+      display_order: assessmentTypesWorkingCopy.length + 1,
+      is_built_in: false,
+      lines: [{ template: '{org} ... {surge_suffix}\nClearance Subject: {name} (DOB: {dob})', multiplier: 1.0 }]
+    });
+    renderAssessmentTypesList();
+  }
+
+  function showAssessmentTypesModal() {
+    if (!modalAssessmentTypes) return;
+    modalAssessmentTypes.style.display = 'flex';
+    loadAssessmentTypes();
+  }
+
+  function hideAssessmentTypesModal() {
+    if (!modalAssessmentTypes) return;
+    modalAssessmentTypes.style.display = 'none';
+  }
+
+  if (btnManageAssessmentTypes) {
+    btnManageAssessmentTypes.addEventListener('click', showAssessmentTypesModal);
+  }
+  if (btnAddAssessmentType) {
+    btnAddAssessmentType.addEventListener('click', handleAddAssessmentType);
+  }
+  if (btnCloseAssessmentTypes) {
+    btnCloseAssessmentTypes.addEventListener('click', hideAssessmentTypesModal);
+  }
+  if (btnCloseAssessmentTypesX) {
+    btnCloseAssessmentTypesX.addEventListener('click', hideAssessmentTypesModal);
+  }
+  if (modalAssessmentTypes) {
+    modalAssessmentTypes.addEventListener('click', function(event) {
+      if (event.target === modalAssessmentTypes) hideAssessmentTypesModal();
+    });
+  }
+
+  // Assessments page
+  const pageAssessmentsEl = document.getElementById('page-assessments');
+  const assessmentsSummaryEl = document.getElementById('assessments-summary');
+  const assessmentsEmptyEl = document.getElementById('assessments-empty');
+  const assessmentsTableWrapperEl = document.getElementById('assessments-table-wrapper');
+  const assessmentsTableBodyEl = document.getElementById('assessments-table-body');
+  const btnAssessmentNew = document.getElementById('btn-assessment-new');
+  const assessmentNavPrev = document.getElementById('assessment-nav-prev');
+  const assessmentNavNext = document.getElementById('assessment-nav-next');
+  const assessmentNavJump = document.getElementById('assessment-nav-jump');
+  const modalAssessmentDetail = document.getElementById('modal-assessment-detail');
+  const btnAssessmentModalCloseX = document.getElementById('btn-assessment-modal-close-x');
+  const btnAssessmentCancel = document.getElementById('btn-assessment-cancel');
+  const btnAssessmentSave = document.getElementById('btn-assessment-save');
+  const btnAssessmentDelete = document.getElementById('btn-assessment-delete');
+  const assessmentModalPrimaryActions = document.getElementById('assessment-modal-primary-actions');
+  const assessmentDeleteConfirm = document.getElementById('assessment-delete-confirm');
+  const btnAssessmentDeleteCancel = document.getElementById('btn-assessment-delete-cancel');
+  const btnAssessmentDeleteConfirm = document.getElementById('btn-assessment-delete-confirm');
+  const assessmentModalTitle = document.getElementById('assessment-modal-title');
+  const assessmentModalError = document.getElementById('assessment-modal-error');
+  const assessmentInterviewDateInput = document.getElementById('assessment-interview-date');
+  const assessmentContractSelect = document.getElementById('assessment-contract');
+  const assessmentTypeSelect = document.getElementById('assessment-type');
+  const assessmentIntervieweeNameInput = document.getElementById('assessment-interviewee-name');
+  const assessmentIntervieweeDobInput = document.getElementById('assessment-interviewee-dob');
+  const assessmentSurgeInput = document.getElementById('assessment-surge');
+  const assessmentNotesInput = document.getElementById('assessment-notes');
+  const assessmentFeePreviewEl = document.getElementById('assessment-fee-preview');
+  const assessmentFeeBreakdownEl = document.getElementById('assessment-fee-breakdown');
+  const assessmentTimeSpentHintEl = document.getElementById('assessment-time-spent-hint');
+  const assessmentTimeSpentEmptyEl = document.getElementById('assessment-time-spent-empty');
+  const assessmentTimeSpentListEl = document.getElementById('assessment-time-spent-list');
+  const assessmentTimeSpentTotalEl = document.getElementById('assessment-time-spent-total');
+  const btnAssessmentTimeAdd = document.getElementById('btn-assessment-time-add');
+  const assessmentMonthlyInvoicesSection = document.getElementById('assessment-monthly-invoices-section');
+  const assessmentInvoicesListEl = document.getElementById('assessment-invoices-list');
+  const assessmentInvoicesNoteEl = document.getElementById('assessment-invoices-note');
+  const btnGenerateMonthlyInvoice = document.getElementById('btn-generate-monthly-invoice');
+
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function formatCurrencyAud(value) {
+    const num = Number(value);
+    if (!isFinite(num)) return '$0.00';
+    return '$' + num.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function listNonIncomeHourTypes() {
+    const list = Array.isArray(state.hourTypes) ? state.hourTypes : [];
+    return list.filter(function(t) { return t && t.contributes_to_income !== true; }).slice().sort(function(a, b) {
+      const ao = Number(a.display_order) || 0;
+      const bo = Number(b.display_order) || 0;
+      if (ao !== bo) return ao - bo;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }
+
+  function renderAssessmentDefaultActualHourTypeOptions() {
+    const select = document.getElementById('set-assessment-default-actual-hour-type');
+    if (!select) return;
+    const previous = select.value || (state.settings && state.settings.assessment_default_actual_hour_type_id) || '';
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Assessment work (auto-created)';
+    select.appendChild(placeholder);
+    listNonIncomeHourTypes().forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name || '(unnamed)';
+      select.appendChild(opt);
+    });
+    select.value = previous;
+  }
+
+  function ensureAssessmentsMonthInitialised() {
+    if (!state.assessmentsView.year || !state.assessmentsView.month) {
+      const now = new Date();
+      state.assessmentsView.year = now.getFullYear();
+      state.assessmentsView.month = now.getMonth() + 1;
+    }
+  }
+
+  function assessmentMonthCacheKey(year, month) {
+    return Number(year) + '-' + Number(month);
+  }
+
+  function formatAssessmentDobAu(iso) {
+    if (!iso) return '';
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return String(iso);
+    return m[3] + '/' + m[2] + '/' + m[1];
+  }
+
+  function renderAssessmentSurgeSuffix(surge) {
+    const num = Number(surge);
+    if (!isFinite(num) || num <= 0) return '';
+    const pct = num * 100;
+    const rendered = Math.abs(pct - Math.round(pct)) < 1e-9 ? String(Math.round(pct)) : String(Math.round(pct * 100) / 100);
+    return ' + ' + rendered + '% Surge';
+  }
+
+  function substituteAssessmentLineTemplate(template, ctx) {
+    if (!template) return '';
+    return String(template)
+      .split('{org}').join(ctx.org || '')
+      .split('{name}').join(ctx.name || '')
+      .split('{dob}').join(ctx.dob || '')
+      .split('{surge_suffix}').join(ctx.surge_suffix || '');
+  }
+
+  function computeAssessmentLinesClient(contract, type, surgeDecimal, intervieweeName, intervieweeDob) {
+    if (!contract || !type) {
+      return { lines: [], total_amount: 0, total_multiplier: 0, base_rate: 0 };
+    }
+    const baseRate = Number(contract.hourly_rate) || 0;
+    const surge = Number(surgeDecimal) || 0;
+    const surgeMultiplier = 1 + surge;
+    const overrideMultipliers = parseContractTypeMultipliers(contract, type.id);
+    const lineDefs = Array.isArray(type.lines) ? type.lines : [];
+    const ctx = {
+      org: contract.name || '',
+      name: intervieweeName || '',
+      dob: formatAssessmentDobAu(intervieweeDob),
+      surge_suffix: renderAssessmentSurgeSuffix(surge)
+    };
+    let total = 0;
+    let totalMultiplier = 0;
+    const lines = lineDefs.map(function(line, idx) {
+      const mul = (overrideMultipliers && overrideMultipliers[idx] != null)
+        ? Number(overrideMultipliers[idx])
+        : (Number(line.multiplier) || 0);
+      const amount = Math.round(baseRate * mul * surgeMultiplier * 100) / 100;
+      total += amount;
+      totalMultiplier += mul;
+      return {
+        template: line.template,
+        description: substituteAssessmentLineTemplate(line.template, ctx),
+        multiplier: mul,
+        amount: amount
+      };
+    });
+    return {
+      lines: lines,
+      total_amount: Math.round(total * 100) / 100,
+      total_multiplier: totalMultiplier,
+      base_rate: baseRate
+    };
+  }
+
+  function buildOptimisticAssessment(draft, existing) {
+    const contract = (state.contracts || []).find(function(c) { return c.id === draft.contract_id; });
+    const type = (state.assessmentTypes || []).find(function(t) { return t.id === draft.assessment_type_id; });
+    const surge = (draft.surge_percentage === '' || draft.surge_percentage == null) ? '' : Number(draft.surge_percentage) || 0;
+    const resolved = computeAssessmentLinesClient(contract, type, surge || 0, draft.interviewee_name, draft.interviewee_dob);
+    const nowIso = new Date().toISOString();
+    return {
+      id: (existing && existing.id) || draft.id || ('temp_' + Date.now()),
+      interview_date: draft.interview_date || '',
+      contract_id: draft.contract_id || '',
+      contract_name: contract ? contract.name : (existing ? existing.contract_name : ''),
+      assessment_type_id: draft.assessment_type_id || '',
+      assessment_type_name: type ? type.name : (existing ? existing.assessment_type_name : ''),
+      interviewee_name: draft.interviewee_name || '',
+      interviewee_dob: draft.interviewee_dob || '',
+      surge_percentage: surge === '' ? '' : surge,
+      notes: draft.notes || '',
+      effective_fee: resolved.total_amount,
+      total_multiplier: resolved.total_multiplier,
+      base_rate: resolved.base_rate,
+      lines: resolved.lines,
+      actual_minutes: (existing && existing.actual_minutes) || 0,
+      actual_hours: (existing && existing.actual_hours) || 0,
+      created_at: (existing && existing.created_at) || nowIso,
+      updated_at: nowIso,
+      __optimistic: true
+    };
+  }
+
+  function getAssessmentMonthCacheEntry(year, month) {
+    const key = assessmentMonthCacheKey(year, month);
+    const cached = state.assessmentMonthCache && state.assessmentMonthCache[key];
+    if (!cached || !Array.isArray(cached.assessments)) return null;
+    return cached;
+  }
+
+  function setAssessmentMonthCacheEntry(year, month, payload) {
+    if (!state.assessmentMonthCache) state.assessmentMonthCache = {};
+    const key = assessmentMonthCacheKey(year, month);
+    state.assessmentMonthCache[key] = payload;
+  }
+
+  function dropAssessmentMonthCacheEntry(year, month) {
+    if (!state.assessmentMonthCache) return;
+    delete state.assessmentMonthCache[assessmentMonthCacheKey(year, month)];
+  }
+
+  function recomputeAssessmentMonthSummary(payload) {
+    const list = Array.isArray(payload.assessments) ? payload.assessments : [];
+    const totalFee = list.reduce(function(sum, a) { return sum + (Number(a.effective_fee) || 0); }, 0);
+    const totalActualMinutes = list.reduce(function(sum, a) { return sum + (Number(a.actual_minutes) || 0); }, 0);
+    payload.summary = {
+      count: list.length,
+      total_fee: Math.round(totalFee * 100) / 100,
+      total_actual_minutes: totalActualMinutes,
+      total_actual_hours: Math.round((totalActualMinutes / 60) * 100) / 100
+    };
+    return payload;
+  }
+
+  function applyOptimisticAssessmentToCache(year, month, assessment) {
+    const key = assessmentMonthCacheKey(year, month);
+    const entry = (state.assessmentMonthCache && state.assessmentMonthCache[key])
+      || { year: Number(year), month: Number(month), assessments: [], summary: { count: 0, total_fee: 0, total_actual_minutes: 0, total_actual_hours: 0 } };
+    const list = Array.isArray(entry.assessments) ? entry.assessments.slice() : [];
+    const idx = list.findIndex(function(a) { return a.id === assessment.id; });
+    if (idx === -1) list.push(assessment);
+    else list[idx] = assessment;
+    entry.assessments = list;
+    recomputeAssessmentMonthSummary(entry);
+    setAssessmentMonthCacheEntry(year, month, entry);
+    return entry;
+  }
+
+  function removeOptimisticAssessmentFromCache(year, month, assessmentId) {
+    const key = assessmentMonthCacheKey(year, month);
+    const entry = state.assessmentMonthCache && state.assessmentMonthCache[key];
+    if (!entry || !Array.isArray(entry.assessments)) return null;
+    entry.assessments = entry.assessments.filter(function(a) { return a.id !== assessmentId; });
+    recomputeAssessmentMonthSummary(entry);
+    setAssessmentMonthCacheEntry(year, month, entry);
+    return entry;
+  }
+
+  function renderAssessmentsPage() {
+    ensureAssessmentsMonthInitialised();
+    updateAssessmentsNav();
+    // Pre-warm the type catalogue so opening the edit modal is instantaneous.
+    ensureAssessmentTypesAvailable();
+    loadAssessmentsForCurrentMonth();
+  }
+
+  function updateAssessmentsNav() {
+    if (!assessmentNavJump) return;
+    const y = state.assessmentsView.year;
+    const m = state.assessmentsView.month;
+    assessmentNavJump.textContent = (MONTH_NAMES[m - 1] || '') + ' ' + y;
+  }
+
+  function loadAssessmentsForCurrentMonth() {
+    const y = state.assessmentsView.year;
+    const m = state.assessmentsView.month;
+    const cached = getAssessmentMonthCacheEntry(y, m);
+    if (cached) {
+      renderAssessmentsTable();
+      loadAssessmentInvoicesForMonth();
+    } else if (assessmentsSummaryEl) {
+      assessmentsSummaryEl.textContent = 'Loading…';
+    }
+    if (state.assessmentsView.loading) return;
+    state.assessmentsView.loading = true;
+    google.script.run
+      .withSuccessHandler(function(payload) {
+        state.assessmentsView.loading = false;
+        if (Number(y) !== state.assessmentsView.year || Number(m) !== state.assessmentsView.month) {
+          // The user navigated to a different month while we were fetching — still cache the response.
+          if (payload) setAssessmentMonthCacheEntry(y, m, payload);
+          saveCache();
+          return;
+        }
+        const normalized = payload || { year: y, month: m, assessments: [], summary: { count: 0, total_fee: 0 } };
+        setAssessmentMonthCacheEntry(y, m, normalized);
+        saveCache();
+        renderAssessmentsTable();
+        loadAssessmentInvoicesForMonth();
+      })
+      .withFailureHandler(function(error) {
+        state.assessmentsView.loading = false;
+        // Keep showing cached data on failure; only surface an error when there's nothing cached.
+        if (!getAssessmentMonthCacheEntry(state.assessmentsView.year, state.assessmentsView.month)) {
+          const msg = error && error.message ? error.message : String(error);
+          if (assessmentsSummaryEl) assessmentsSummaryEl.textContent = 'Failed to load: ' + msg;
+        } else {
+          const msg = error && error.message ? error.message : String(error);
+          setStatus('Assessment refresh failed: ' + msg, 'error');
+        }
+      })
+      .api_getAssessmentsForMonth(y, m);
+  }
+
+  function renderAssessmentsTable() {
+    const cached = getAssessmentMonthCacheEntry(state.assessmentsView.year, state.assessmentsView.month);
+    const payload = cached || { assessments: [], summary: {} };
+    const list = Array.isArray(payload.assessments) ? payload.assessments : [];
+    const summary = payload.summary || {};
+    if (assessmentsSummaryEl) {
+      if (list.length === 0) {
+        assessmentsSummaryEl.textContent = 'No assessments recorded for this month yet.';
+      } else {
+        const totalFee = formatCurrencyAud(summary.total_fee || 0);
+        const totalHours = (Number(summary.total_actual_hours) || 0).toFixed(2);
+        assessmentsSummaryEl.textContent = list.length + ' assessment' + (list.length === 1 ? '' : 's') + ' · ' + totalFee + ' to invoice · ' + totalHours + ' hours spent';
+      }
+    }
+    if (!assessmentsTableBodyEl) return;
+    assessmentsTableBodyEl.innerHTML = '';
+    if (!list.length) {
+      if (assessmentsEmptyEl) assessmentsEmptyEl.style.display = 'block';
+      if (assessmentsTableWrapperEl) assessmentsTableWrapperEl.style.display = 'none';
+      return;
+    }
+    if (assessmentsEmptyEl) assessmentsEmptyEl.style.display = 'none';
+    if (assessmentsTableWrapperEl) assessmentsTableWrapperEl.style.display = 'block';
+    list.forEach(function(a) {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', function() { openAssessmentModalForEdit(a); });
+      const cells = [
+        a.interview_date || '',
+        a.contract_name || '',
+        a.assessment_type_name || '',
+        a.interviewee_name || '',
+        a.surge_percentage ? (Math.round(Number(a.surge_percentage) * 10000) / 100) + '%' : '—',
+        formatCurrencyAud(a.effective_fee || 0),
+        (Number(a.actual_hours) || 0).toFixed(2) + ' h'
+      ];
+      cells.forEach(function(value) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      assessmentsTableBodyEl.appendChild(tr);
+    });
+  }
+
+  function shiftAssessmentsMonth(delta) {
+    ensureAssessmentsMonthInitialised();
+    let y = state.assessmentsView.year;
+    let m = state.assessmentsView.month + delta;
+    while (m < 1) { m += 12; y -= 1; }
+    while (m > 12) { m -= 12; y += 1; }
+    state.assessmentsView.year = y;
+    state.assessmentsView.month = m;
+    updateAssessmentsNav();
+    loadAssessmentsForCurrentMonth();
+  }
+
+  if (assessmentNavPrev) assessmentNavPrev.addEventListener('click', function() { shiftAssessmentsMonth(-1); });
+  if (assessmentNavNext) assessmentNavNext.addEventListener('click', function() { shiftAssessmentsMonth(1); });
+  if (assessmentNavJump) assessmentNavJump.addEventListener('click', function() {
+    const now = new Date();
+    state.assessmentsView.year = now.getFullYear();
+    state.assessmentsView.month = now.getMonth() + 1;
+    updateAssessmentsNav();
+    loadAssessmentsForCurrentMonth();
+  });
+
+  function showAssessmentModalError(message) {
+    if (!assessmentModalError) return;
+    if (!message) {
+      assessmentModalError.style.display = 'none';
+      assessmentModalError.textContent = '';
+    } else {
+      assessmentModalError.style.display = 'block';
+      assessmentModalError.textContent = message;
+    }
+  }
+
+  function setAssessmentDeleteConfirmVisible(visible) {
+    if (assessmentDeleteConfirm) assessmentDeleteConfirm.style.display = visible ? 'flex' : 'none';
+    if (btnAssessmentDelete) btnAssessmentDelete.style.display = visible ? 'none' : (state.editingAssessment && state.editingAssessment.id ? 'inline-flex' : 'none');
+    if (assessmentModalPrimaryActions) assessmentModalPrimaryActions.style.display = visible ? 'none' : 'flex';
+  }
+
+  function openAssessmentModalForNew() {
+    state.editingAssessment = {
+      isNew: true,
+      id: '',
+      interview_date: '',
+      contract_id: '',
+      assessment_type_id: '',
+      interviewee_name: '',
+      interviewee_dob: '',
+      surge_percentage: '',
+      notes: ''
+    };
+    state.editingAssessmentTimeEntries = [];
+    populateAssessmentModalFromState();
+    if (assessmentModalTitle) assessmentModalTitle.textContent = 'New assessment';
+    if (btnAssessmentDelete) btnAssessmentDelete.style.display = 'none';
+    setAssessmentDeleteConfirmVisible(false);
+    showAssessmentModalError('');
+    showAssessmentModal();
+  }
+
+  function openAssessmentModalForEdit(assessment) {
+    if (!assessment) return;
+    state.editingAssessment = {
+      isNew: false,
+      id: assessment.id || '',
+      interview_date: assessment.interview_date || '',
+      contract_id: assessment.contract_id || '',
+      assessment_type_id: assessment.assessment_type_id || '',
+      interviewee_name: assessment.interviewee_name || '',
+      interviewee_dob: assessment.interviewee_dob || '',
+      surge_percentage: assessment.surge_percentage != null && assessment.surge_percentage !== '' ? assessment.surge_percentage : '',
+      notes: assessment.notes || ''
+    };
+    populateAssessmentModalFromState();
+    if (assessmentModalTitle) assessmentModalTitle.textContent = 'Edit assessment';
+    if (btnAssessmentDelete) btnAssessmentDelete.style.display = 'inline-flex';
+    setAssessmentDeleteConfirmVisible(false);
+    showAssessmentModalError('');
+    showAssessmentModal();
+    loadAssessmentTimeEntriesForCurrentEditing();
+  }
+
+  function populateAssessmentModalFromState() {
+    const draft = state.editingAssessment || {};
+    if (assessmentInterviewDateInput) {
+      assessmentInterviewDateInput.value = draft.interview_date || new Date().toISOString().slice(0, 10);
+      if (!draft.interview_date) {
+        state.editingAssessment.interview_date = assessmentInterviewDateInput.value;
+      }
+    }
+    if (assessmentIntervieweeNameInput) assessmentIntervieweeNameInput.value = draft.interviewee_name || '';
+    if (assessmentIntervieweeDobInput) assessmentIntervieweeDobInput.value = draft.interviewee_dob || '';
+    if (assessmentSurgeInput) assessmentSurgeInput.value = draft.surge_percentage !== '' && draft.surge_percentage != null ? draft.surge_percentage : '';
+    if (assessmentNotesInput) assessmentNotesInput.value = draft.notes || '';
+    renderAssessmentContractOptions();
+    renderAssessmentTypeOptions();
+    renderAssessmentFeePreview();
+    renderAssessmentTimeEntries();
+  }
+
+  function renderAssessmentContractOptions() {
+    if (!assessmentContractSelect) return;
+    const draft = state.editingAssessment || {};
+    const dateIso = draft.interview_date || new Date().toISOString().slice(0, 10);
+    const active = state.contracts.filter(function(c) {
+      if (!contractIsValid(c, dateIso)) return false;
+      const hasTypes = c.assessment_type_multipliers_json && c.assessment_type_multipliers_json.length > 2;
+      return hasTypes;
+    });
+    if (!active.length && state.contracts.length) {
+      // Fall back to any active contract so the picker is still usable; user gets a warning at save.
+      state.contracts.forEach(function(c) {
+        if (contractIsValid(c, dateIso)) active.push(c);
+      });
+    }
+    assessmentContractSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = active.length ? 'Select organisation…' : 'No active contracts';
+    assessmentContractSelect.appendChild(placeholder);
+    active.forEach(function(c) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      assessmentContractSelect.appendChild(opt);
+    });
+    assessmentContractSelect.value = draft.contract_id || '';
+    if (assessmentContractSelect.value !== (draft.contract_id || '')) {
+      state.editingAssessment.contract_id = '';
+    }
+  }
+
+  function getEnabledTypeIdsForContract(contract) {
+    if (!contract || !contract.assessment_type_multipliers_json) return [];
+    try {
+      const parsed = JSON.parse(contract.assessment_type_multipliers_json);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map(function(entry) { return entry && entry.type_id ? String(entry.type_id) : ''; }).filter(Boolean);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function renderAssessmentTypeOptions() {
+    if (!assessmentTypeSelect) return;
+    const draft = state.editingAssessment || {};
+    const contract = (state.contracts || []).find(function(c) { return c.id === draft.contract_id; });
+    const enabledIds = getEnabledTypeIdsForContract(contract);
+    const allTypes = state.assessmentTypes || [];
+    const visibleTypes = enabledIds.length
+      ? allTypes.filter(function(t) { return enabledIds.indexOf(t.id) !== -1; })
+      : allTypes;
+    assessmentTypeSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = visibleTypes.length ? 'Select type…' : 'No types configured for this contract';
+    assessmentTypeSelect.appendChild(placeholder);
+    visibleTypes.slice().sort(function(a, b) {
+      return (a.display_order || 0) - (b.display_order || 0) || (a.name || '').localeCompare(b.name || '');
+    }).forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name;
+      assessmentTypeSelect.appendChild(opt);
+    });
+    assessmentTypeSelect.value = draft.assessment_type_id || '';
+    if (assessmentTypeSelect.value !== (draft.assessment_type_id || '')) {
+      state.editingAssessment.assessment_type_id = '';
+    }
+  }
+
+  function parseContractTypeMultipliers(contract, typeId) {
+    if (!contract || !typeId || !contract.assessment_type_multipliers_json) return null;
+    try {
+      const parsed = JSON.parse(contract.assessment_type_multipliers_json);
+      if (!Array.isArray(parsed)) return null;
+      for (let i = 0; i < parsed.length; i++) {
+        if (parsed[i] && parsed[i].type_id === typeId && Array.isArray(parsed[i].multipliers)) {
+          return parsed[i].multipliers.map(function(m) { return Number(m) || 0; });
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function renderAssessmentFeePreview() {
+    if (!assessmentFeePreviewEl) return;
+    const draft = state.editingAssessment || {};
+    const contract = (state.contracts || []).find(function(c) { return c.id === draft.contract_id; });
+    const type = (state.assessmentTypes || []).find(function(t) { return t.id === draft.assessment_type_id; });
+    if (!contract || !type) {
+      assessmentFeePreviewEl.textContent = '$0.00';
+      if (assessmentFeeBreakdownEl) assessmentFeeBreakdownEl.textContent = 'Choose an organisation and type to see the preview.';
+      return;
+    }
+    const baseRate = Number(contract.hourly_rate) || 0;
+    const surge = Number(draft.surge_percentage) || 0;
+    const surgeMultiplier = 1 + surge;
+    const overrideMultipliers = parseContractTypeMultipliers(contract, type.id);
+    const lines = Array.isArray(type.lines) ? type.lines : [];
+    let total = 0;
+    const parts = [];
+    lines.forEach(function(line, idx) {
+      const mul = overrideMultipliers && overrideMultipliers[idx] != null ? Number(overrideMultipliers[idx]) : (Number(line.multiplier) || 0);
+      const amount = Math.round(baseRate * mul * surgeMultiplier * 100) / 100;
+      total += amount;
+      parts.push(formatCurrencyAud(amount) + ' (×' + mul + ')');
+    });
+    assessmentFeePreviewEl.textContent = formatCurrencyAud(Math.round(total * 100) / 100);
+    if (assessmentFeeBreakdownEl) {
+      const surgeNote = surge > 0 ? ' · surge ' + Math.round(surge * 10000) / 100 + '%' : '';
+      assessmentFeeBreakdownEl.textContent = 'Base ' + formatCurrencyAud(baseRate) + '/hr · ' + parts.join(' + ') + surgeNote;
+    }
+  }
+
+  function showAssessmentModal() {
+    if (!modalAssessmentDetail) return;
+    modalAssessmentDetail.style.display = 'flex';
+  }
+  function hideAssessmentModal() {
+    if (!modalAssessmentDetail) return;
+    setAssessmentDeleteConfirmVisible(false);
+    modalAssessmentDetail.style.display = 'none';
+    state.editingAssessment = null;
+    state.editingAssessmentTimeEntries = [];
+  }
+
+  function readAssessmentForm() {
+    if (!state.editingAssessment) return null;
+    state.editingAssessment.interview_date = assessmentInterviewDateInput ? assessmentInterviewDateInput.value : '';
+    state.editingAssessment.contract_id = assessmentContractSelect ? assessmentContractSelect.value : '';
+    state.editingAssessment.assessment_type_id = assessmentTypeSelect ? assessmentTypeSelect.value : '';
+    state.editingAssessment.interviewee_name = assessmentIntervieweeNameInput ? assessmentIntervieweeNameInput.value.trim() : '';
+    state.editingAssessment.interviewee_dob = assessmentIntervieweeDobInput ? assessmentIntervieweeDobInput.value : '';
+    const surgeRaw = assessmentSurgeInput ? assessmentSurgeInput.value.trim() : '';
+    state.editingAssessment.surge_percentage = surgeRaw === '' ? '' : Number(surgeRaw);
+    state.editingAssessment.notes = assessmentNotesInput ? assessmentNotesInput.value : '';
+    return state.editingAssessment;
+  }
+
+  function handleAssessmentSave() {
+    const draft = readAssessmentForm();
+    if (!draft) return;
+    if (!draft.interview_date) { showAssessmentModalError('Interview date is required.'); return; }
+    if (!draft.contract_id) { showAssessmentModalError('Choose an organisation.'); return; }
+    if (!draft.assessment_type_id) { showAssessmentModalError('Choose an assessment type.'); return; }
+    if (!draft.interviewee_name) { showAssessmentModalError('Interviewee name is required.'); return; }
+    showAssessmentModalError('');
+    const wasNew = !!draft.isNew;
+    const payload = {
+      id: wasNew ? '' : draft.id,
+      interview_date: draft.interview_date,
+      contract_id: draft.contract_id,
+      assessment_type_id: draft.assessment_type_id,
+      interviewee_name: draft.interviewee_name,
+      interviewee_dob: draft.interviewee_dob,
+      surge_percentage: draft.surge_percentage,
+      notes: draft.notes
+    };
+
+    // Snapshot caches for rollback on failure.
+    const snapshotMonthCache = JSON.parse(JSON.stringify(state.assessmentMonthCache || {}));
+
+    // Locate the existing cached row (if any) so we can carry forward actual_minutes and original month placement.
+    let existing = null;
+    let existingMonthKey = null;
+    Object.keys(state.assessmentMonthCache || {}).forEach(function(key) {
+      const entry = state.assessmentMonthCache[key];
+      if (!entry || !Array.isArray(entry.assessments)) return;
+      const hit = entry.assessments.find(function(a) { return a.id === draft.id; });
+      if (hit) {
+        existing = hit;
+        existingMonthKey = key;
+      }
+    });
+
+    const optimistic = buildOptimisticAssessment(Object.assign({}, draft, { id: wasNew ? '' : draft.id }), existing);
+    // Place into the new month's cache (interview date may have moved).
+    const datePartsNew = (optimistic.interview_date || '').split('-');
+    const newYear = Number(datePartsNew[0]);
+    const newMonth = Number(datePartsNew[1]);
+    // Remove from any prior month if it's moving.
+    if (existing && existingMonthKey && existingMonthKey !== assessmentMonthCacheKey(newYear, newMonth)) {
+      const [eYear, eMonth] = existingMonthKey.split('-').map(Number);
+      removeOptimisticAssessmentFromCache(eYear, eMonth, optimistic.id);
+    }
+    applyOptimisticAssessmentToCache(newYear, newMonth, optimistic);
+    saveCache();
+    state.editingAssessment.id = optimistic.id;
+    if (!wasNew) state.editingAssessment.isNew = false;
+    if (Number(newYear) === state.assessmentsView.year && Number(newMonth) === state.assessmentsView.month) {
+      renderAssessmentsTable();
+    }
+    setStatus('Saving assessment…', 'warn');
+    if (btnAssessmentSave) { btnAssessmentSave.disabled = true; btnAssessmentSave.textContent = 'Saving…'; }
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (btnAssessmentSave) { btnAssessmentSave.disabled = false; btnAssessmentSave.textContent = 'Save'; }
+        const saved = response && response.assessment ? response.assessment : null;
+        const billable = response && response.billable_entry ? response.billable_entry : null;
+        if (saved) {
+          // Swap the optimistic id for the real id in the cache.
+          if (optimistic.id !== saved.id) {
+            // Remove the temp record and insert the saved one.
+            removeOptimisticAssessmentFromCache(newYear, newMonth, optimistic.id);
+            applyOptimisticAssessmentToCache(newYear, newMonth, saved);
+          } else {
+            applyOptimisticAssessmentToCache(newYear, newMonth, saved);
+          }
+          state.editingAssessment.id = saved.id;
+          state.editingAssessment.isNew = false;
+        }
+        if (billable) {
+          // Surface the billable timesheet entry on the calendar straight away.
+          upsertEntryInState(billable);
+        }
+        saveCache();
+        if (Number(newYear) === state.assessmentsView.year && Number(newMonth) === state.assessmentsView.month) {
+          renderAssessmentsTable();
+        }
+        setStatus('Assessment saved', 'success');
+        if (wasNew && saved) {
+          // Refresh modal so time-spent section enables.
+          openAssessmentModalForEdit(saved);
+        } else {
+          hideAssessmentModal();
+        }
+        // Background refresh of the surrounding month picks up any server-side adjustments (rounding, etc.).
+        loadAssessmentsForCurrentMonth();
+      })
+      .withFailureHandler(function(error) {
+        if (btnAssessmentSave) { btnAssessmentSave.disabled = false; btnAssessmentSave.textContent = 'Save'; }
+        const msg = error && error.message ? error.message : String(error);
+        // Restore previous cache snapshot.
+        state.assessmentMonthCache = snapshotMonthCache;
+        saveCache();
+        renderAssessmentsTable();
+        showAssessmentModalError(msg);
+        setStatus('Save failed', 'error');
+      })
+      .api_upsertAssessment(payload);
+  }
+
+  function handleAssessmentDeleteRequest() {
+    if (!state.editingAssessment || !state.editingAssessment.id) return;
+    setAssessmentDeleteConfirmVisible(true);
+  }
+
+  function handleAssessmentDelete() {
+    if (!state.editingAssessment || !state.editingAssessment.id) return;
+    const id = state.editingAssessment.id;
+    // Snapshot caches and entries for rollback.
+    const snapshotMonthCache = JSON.parse(JSON.stringify(state.assessmentMonthCache || {}));
+    const snapshotEntries = Array.isArray(state.entries)
+      ? state.entries.filter(function(e) { return e && e.assessment_id === id; }).map(function(e) { return { ...e }; })
+      : [];
+    // Optimistic remove from any cached month entry referencing this id.
+    Object.keys(state.assessmentMonthCache || {}).forEach(function(key) {
+      const [y, m] = key.split('-').map(Number);
+      removeOptimisticAssessmentFromCache(y, m, id);
+    });
+    removeEntriesFromStateByAssessmentId(id);
+    saveCache();
+    renderAssessmentsTable();
+    hideAssessmentModal();
+    setStatus('Deleting assessment…', 'warn');
+    if (btnAssessmentDelete) { btnAssessmentDelete.disabled = true; btnAssessmentDelete.textContent = 'Deleting…'; }
+    if (btnAssessmentDeleteConfirm) { btnAssessmentDeleteConfirm.disabled = true; btnAssessmentDeleteConfirm.textContent = 'Deleting…'; }
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (btnAssessmentDelete) { btnAssessmentDelete.disabled = false; btnAssessmentDelete.textContent = 'Delete'; }
+        if (btnAssessmentDeleteConfirm) { btnAssessmentDeleteConfirm.disabled = false; btnAssessmentDeleteConfirm.textContent = 'Delete'; }
+        // Reconcile with the server's list of removed entry ids (in case some optimistic ids didn't match).
+        if (response && Array.isArray(response.deleted_entry_ids)) {
+          response.deleted_entry_ids.forEach(function(entryId) { removeEntryFromStateById(entryId); });
+        }
+        setStatus('Assessment deleted', 'success');
+        saveCache();
+        loadAssessmentsForCurrentMonth();
+      })
+      .withFailureHandler(function(error) {
+        if (btnAssessmentDelete) { btnAssessmentDelete.disabled = false; btnAssessmentDelete.textContent = 'Delete'; }
+        if (btnAssessmentDeleteConfirm) { btnAssessmentDeleteConfirm.disabled = false; btnAssessmentDeleteConfirm.textContent = 'Delete'; }
+        const msg = error && error.message ? error.message : String(error);
+        // Rollback cache and restore the removed entries.
+        state.assessmentMonthCache = snapshotMonthCache;
+        snapshotEntries.forEach(function(entry) { upsertEntryInState(entry); });
+        saveCache();
+        renderAssessmentsTable();
+        setStatus('Delete failed: ' + msg, 'error');
+      })
+      .api_deleteAssessment(id);
+  }
+
+  function loadAssessmentTimeEntriesForCurrentEditing() {
+    const draft = state.editingAssessment;
+    if (!draft || !draft.id) return;
+    google.script.run
+      .withSuccessHandler(function(entries) {
+        state.editingAssessmentTimeEntries = Array.isArray(entries) ? entries : [];
+        renderAssessmentTimeEntries();
+      })
+      .withFailureHandler(function() {
+        state.editingAssessmentTimeEntries = [];
+        renderAssessmentTimeEntries();
+      })
+      .api_listAssessmentTimeEntries(draft.id);
+  }
+
+  function renderAssessmentTimeEntries() {
+    if (!assessmentTimeSpentListEl) return;
+    assessmentTimeSpentListEl.innerHTML = '';
+    const draft = state.editingAssessment || {};
+    const isPersisted = !!draft.id && !draft.isNew;
+    if (assessmentTimeSpentHintEl) assessmentTimeSpentHintEl.style.display = isPersisted ? 'none' : 'block';
+    if (btnAssessmentTimeAdd) btnAssessmentTimeAdd.disabled = !isPersisted;
+    const list = state.editingAssessmentTimeEntries || [];
+    if (assessmentTimeSpentEmptyEl) assessmentTimeSpentEmptyEl.style.display = (isPersisted && !list.length) ? 'block' : 'none';
+    let totalMinutes = 0;
+    list.forEach(function(entry) {
+      totalMinutes += Number(entry.duration_minutes) || 0;
+      assessmentTimeSpentListEl.appendChild(buildTimeEntryRow(entry));
+    });
+    if (assessmentTimeSpentTotalEl) {
+      const hours = totalMinutes > 0 ? (totalMinutes / 60).toFixed(2) : '0.00';
+      assessmentTimeSpentTotalEl.textContent = isPersisted ? ('Total: ' + hours + ' h') : '--';
+    }
+  }
+
+  function upsertEntryInState(rawEntry) {
+    if (!rawEntry || !rawEntry.id) return;
+    if (typeof sanitizeEntry !== 'function' || !Array.isArray(state.entries)) return;
+    const sanitized = sanitizeEntry(rawEntry);
+    const idx = state.entries.findIndex(function(e) { return e.id === sanitized.id; });
+    if (idx === -1) state.entries.push(sanitized);
+    else state.entries[idx] = sanitized;
+    if (typeof markIncomeSummaryDirtyForEntry === 'function') {
+      markIncomeSummaryDirtyForEntry(sanitized);
+    }
+    if (typeof entrySort === 'function') state.entries.sort(entrySort);
+    saveCache();
+    if (typeof renderEntries === 'function') renderEntries();
+  }
+
+  function removeEntryFromStateById(entryId) {
+    if (!entryId || !Array.isArray(state.entries)) return;
+    const idx = state.entries.findIndex(function(e) { return e.id === entryId; });
+    if (idx === -1) return;
+    const removed = state.entries.splice(idx, 1)[0];
+    if (typeof markIncomeSummaryDirtyForEntry === 'function' && removed) {
+      markIncomeSummaryDirtyForEntry(removed);
+    }
+    saveCache();
+    if (typeof renderEntries === 'function') renderEntries();
+  }
+
+  function removeEntriesFromStateByAssessmentId(assessmentId) {
+    if (!assessmentId || !Array.isArray(state.entries)) return;
+    const kept = [];
+    const removed = [];
+    state.entries.forEach(function(e) {
+      if (e && e.assessment_id === assessmentId) removed.push(e);
+      else kept.push(e);
+    });
+    if (!removed.length) return;
+    state.entries = kept;
+    if (typeof markIncomeSummaryDirtyForEntry === 'function') {
+      removed.forEach(function(entry) { markIncomeSummaryDirtyForEntry(entry); });
+    }
+    saveCache();
+    if (typeof renderEntries === 'function') renderEntries();
+  }
+
+  function refreshOptimisticActualMinutes(assessmentId) {
+    if (!assessmentId) return;
+    const totalMinutes = (state.editingAssessmentTimeEntries || []).reduce(function(sum, e) {
+      return sum + (Number(e.duration_minutes) || 0);
+    }, 0);
+    Object.keys(state.assessmentMonthCache || {}).forEach(function(key) {
+      const entry = state.assessmentMonthCache[key];
+      if (!entry || !Array.isArray(entry.assessments)) return;
+      const a = entry.assessments.find(function(x) { return x.id === assessmentId; });
+      if (!a) return;
+      a.actual_minutes = totalMinutes;
+      a.actual_hours = Math.round((totalMinutes / 60) * 100) / 100;
+      recomputeAssessmentMonthSummary(entry);
+    });
+    saveCache();
+    renderAssessmentsTable();
+  }
+
+  function buildTimeEntryRow(entry) {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns: 1fr 110px 1fr auto; gap:8px; align-items:center;';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = entry.date || '';
+    dateInput.disabled = !!entry.__confirmDelete;
+    const durationInput = document.createElement('input');
+    durationInput.type = 'number';
+    durationInput.step = '0.01';
+    durationInput.min = '0';
+    durationInput.value = entry.duration_minutes ? (Number(entry.duration_minutes) / 60).toFixed(2) : '';
+    durationInput.placeholder = 'Hours';
+    durationInput.disabled = !!entry.__confirmDelete;
+    const hourTypeSelect = document.createElement('select');
+    hourTypeSelect.style.minWidth = '0';
+    populateAssessmentTimeEntryHourTypeOptions(hourTypeSelect, entry.hour_type_id);
+    hourTypeSelect.disabled = !!entry.__confirmDelete;
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex; gap:6px;';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.className = 'ghost small';
+    saveBtn.disabled = !!entry.__confirmDelete;
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.className = 'ghost small';
+    deleteBtn.style.color = 'var(--danger)';
+    deleteBtn.disabled = !!entry.__confirmDelete;
+    saveBtn.addEventListener('click', function() {
+      const nextDate = dateInput.value;
+      const nextMinutes = Math.round((Number(durationInput.value) || 0) * 60);
+      if (!nextDate || nextMinutes <= 0) {
+        showAssessmentModalError('Date and duration are required.');
+        return;
+      }
+      const assessmentId = state.editingAssessment ? state.editingAssessment.id : '';
+      const previousState = { id: entry.id, date: entry.date, duration_minutes: entry.duration_minutes, hour_type_id: entry.hour_type_id };
+      // Optimistically update the row in state and the assessment's actual hours.
+      entry.date = nextDate;
+      entry.duration_minutes = nextMinutes;
+      entry.hour_type_id = hourTypeSelect.value || '';
+      refreshOptimisticActualMinutes(assessmentId);
+      renderAssessmentTimeEntries();
+      setStatus('Saving time entry…', 'warn');
+      const payload = {
+        id: entry.id || '',
+        assessment_id: assessmentId,
+        date: nextDate,
+        duration_minutes: nextMinutes,
+        hour_type_id: hourTypeSelect.value || ''
+      };
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (response && response.entry) {
+            const saved = response.entry;
+            entry.id = saved.id || entry.id;
+            if (saved.duration_minutes != null) entry.duration_minutes = Number(saved.duration_minutes) || entry.duration_minutes;
+            if (saved.date) entry.date = saved.date;
+            if (saved.hour_type_id) entry.hour_type_id = saved.hour_type_id;
+            upsertEntryInState(saved);
+            refreshOptimisticActualMinutes(assessmentId);
+            renderAssessmentTimeEntries();
+          }
+          setStatus('Time entry saved', 'success');
+        })
+        .withFailureHandler(function(error) {
+          // Rollback the optimistic mutation.
+          entry.id = previousState.id;
+          entry.date = previousState.date;
+          entry.duration_minutes = previousState.duration_minutes;
+          entry.hour_type_id = previousState.hour_type_id;
+          refreshOptimisticActualMinutes(assessmentId);
+          renderAssessmentTimeEntries();
+          const msg = error && error.message ? error.message : String(error);
+          showAssessmentModalError(msg);
+          setStatus('Time entry save failed', 'error');
+        })
+        .api_upsertAssessmentTimeEntry(payload);
+    });
+    deleteBtn.addEventListener('click', function() {
+      const assessmentId = state.editingAssessment ? state.editingAssessment.id : '';
+      if (!entry.id) {
+        state.editingAssessmentTimeEntries = state.editingAssessmentTimeEntries.filter(function(e) { return e !== entry; });
+        refreshOptimisticActualMinutes(assessmentId);
+        renderAssessmentTimeEntries();
+        return;
+      }
+      state.editingAssessmentTimeEntries.forEach(function(item) { item.__confirmDelete = item === entry; });
+      renderAssessmentTimeEntries();
+    });
+    actions.appendChild(saveBtn);
+    actions.appendChild(deleteBtn);
+    row.appendChild(dateInput);
+    row.appendChild(durationInput);
+    row.appendChild(hourTypeSelect);
+    row.appendChild(actions);
+    wrapper.appendChild(row);
+    if (entry.__confirmDelete) {
+      wrapper.appendChild(buildTimeEntryDeleteConfirm(entry));
+    }
+    return wrapper;
+  }
+
+  function buildTimeEntryDeleteConfirm(entry) {
+    const confirmBox = document.createElement('div');
+    confirmBox.className = 'ts-warning';
+    confirmBox.style.cssText = 'margin:0; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;';
+    const message = document.createElement('span');
+    message.textContent = 'Delete this logged time entry?';
+    const actions = document.createElement('span');
+    actions.style.cssText = 'display:flex; gap:8px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'ghost small';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() {
+      entry.__confirmDelete = false;
+      renderAssessmentTimeEntries();
+    });
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'ghost small';
+    confirmBtn.textContent = 'Delete';
+    confirmBtn.style.color = 'var(--danger)';
+    confirmBtn.addEventListener('click', function() {
+      performAssessmentTimeEntryDelete(entry);
+    });
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    confirmBox.appendChild(message);
+    confirmBox.appendChild(actions);
+    return confirmBox;
+  }
+
+  function performAssessmentTimeEntryDelete(entry) {
+    if (!entry || !entry.id) return;
+    const assessmentId = state.editingAssessment ? state.editingAssessment.id : '';
+    const removedIndex = state.editingAssessmentTimeEntries.indexOf(entry);
+    const removed = removedIndex !== -1 ? state.editingAssessmentTimeEntries.splice(removedIndex, 1)[0] : null;
+    const cachedEntry = Array.isArray(state.entries)
+      ? state.entries.find(function(e) { return e && e.id === entry.id; })
+      : null;
+    const cachedEntrySnapshot = cachedEntry ? { ...cachedEntry } : null;
+    // Optimistic remove from the calendar's entry list too.
+    removeEntryFromStateById(entry.id);
+    refreshOptimisticActualMinutes(assessmentId);
+    renderAssessmentTimeEntries();
+    setStatus('Deleting time entry…', 'warn');
+    google.script.run
+      .withSuccessHandler(function() {
+        setStatus('Time entry deleted', 'success');
+      })
+      .withFailureHandler(function(error) {
+        // Rollback the optimistic remove.
+        if (removed && removedIndex !== -1) {
+          removed.__confirmDelete = false;
+          state.editingAssessmentTimeEntries.splice(removedIndex, 0, removed);
+        }
+        if (cachedEntrySnapshot) upsertEntryInState(cachedEntrySnapshot);
+        refreshOptimisticActualMinutes(assessmentId);
+        renderAssessmentTimeEntries();
+        const msg = error && error.message ? error.message : String(error);
+        showAssessmentModalError(msg);
+        setStatus('Time entry delete failed', 'error');
+      })
+      .api_deleteAssessmentTimeEntry(entry.id);
+  }
+
+  function populateAssessmentTimeEntryHourTypeOptions(selectEl, selectedId) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Assessment work (default)';
+    selectEl.appendChild(placeholder);
+    listNonIncomeHourTypes().forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name || '(unnamed)';
+      selectEl.appendChild(opt);
+    });
+    const desired = selectedId || (state.settings && state.settings.assessment_default_actual_hour_type_id) || '';
+    selectEl.value = desired;
+    // If the desired id isn't in the list (e.g. type renamed/removed), fall back to the placeholder.
+    if (selectEl.value !== desired) selectEl.value = '';
+  }
+
+  function handleAddTimeEntryRow() {
+    const draft = state.editingAssessment;
+    if (!draft || !draft.id) return;
+    state.editingAssessmentTimeEntries.push({
+      id: '',
+      date: draft.interview_date || new Date().toISOString().slice(0, 10),
+      duration_minutes: 0
+    });
+    renderAssessmentTimeEntries();
+  }
+
+  function handleAssessmentFormChange() {
+    readAssessmentForm();
+    renderAssessmentTypeOptions();
+    renderAssessmentFeePreview();
+  }
+
+  function handleAssessmentContractChange() {
+    readAssessmentForm();
+    renderAssessmentTypeOptions();
+    renderAssessmentFeePreview();
+  }
+
+  if (btnAssessmentNew) btnAssessmentNew.addEventListener('click', function() {
+    ensureAssessmentTypesAvailable(function() { openAssessmentModalForNew(); });
+  });
+  if (btnAssessmentSave) btnAssessmentSave.addEventListener('click', handleAssessmentSave);
+  if (btnAssessmentCancel) btnAssessmentCancel.addEventListener('click', hideAssessmentModal);
+  if (btnAssessmentModalCloseX) btnAssessmentModalCloseX.addEventListener('click', hideAssessmentModal);
+  if (btnAssessmentDelete) btnAssessmentDelete.addEventListener('click', handleAssessmentDeleteRequest);
+  if (btnAssessmentDeleteCancel) btnAssessmentDeleteCancel.addEventListener('click', function() { setAssessmentDeleteConfirmVisible(false); });
+  if (btnAssessmentDeleteConfirm) btnAssessmentDeleteConfirm.addEventListener('click', handleAssessmentDelete);
+  if (btnAssessmentTimeAdd) btnAssessmentTimeAdd.addEventListener('click', handleAddTimeEntryRow);
+  if (modalAssessmentDetail) modalAssessmentDetail.addEventListener('click', function(event) {
+    if (event.target === modalAssessmentDetail) hideAssessmentModal();
+  });
+
+  if (assessmentInterviewDateInput) assessmentInterviewDateInput.addEventListener('change', function() {
+    readAssessmentForm();
+    renderAssessmentContractOptions();
+    renderAssessmentTypeOptions();
+    renderAssessmentFeePreview();
+  });
+  if (assessmentContractSelect) assessmentContractSelect.addEventListener('change', handleAssessmentContractChange);
+  if (assessmentTypeSelect) assessmentTypeSelect.addEventListener('change', handleAssessmentFormChange);
+  if (assessmentSurgeInput) assessmentSurgeInput.addEventListener('input', handleAssessmentFormChange);
+  if (assessmentIntervieweeNameInput) assessmentIntervieweeNameInput.addEventListener('input', function() { readAssessmentForm(); });
+  if (assessmentIntervieweeDobInput) assessmentIntervieweeDobInput.addEventListener('change', function() { readAssessmentForm(); });
+  if (assessmentNotesInput) assessmentNotesInput.addEventListener('input', function() { readAssessmentForm(); });
+
+  function ensureAssessmentTypesAvailable(callback) {
+    const hasCached = Array.isArray(state.assessmentTypes) && state.assessmentTypes.length;
+    if (hasCached && callback) callback();
+    // Always refresh in the background so the catalogue stays in sync.
+    google.script.run
+      .withSuccessHandler(function(types) {
+        const fresh = Array.isArray(types) ? types : [];
+        state.assessmentTypes = fresh;
+        state.assessmentTypesInitialized = true;
+        saveCache();
+        if (!hasCached && callback) callback();
+      })
+      .withFailureHandler(function() {
+        if (!hasCached && callback) callback();
+      })
+      .api_listAssessmentTypes();
+  }
+
+  // Assessment-driven monthly invoice section (Stage 7 frontend hooks)
+  function getAssessmentInvoicesCacheEntry(year, month) {
+    const key = assessmentMonthCacheKey(year, month);
+    const cached = state.assessmentInvoiceCache && state.assessmentInvoiceCache[key];
+    return Array.isArray(cached) ? cached : null;
+  }
+
+  function setAssessmentInvoicesCacheEntry(year, month, list) {
+    if (!state.assessmentInvoiceCache) state.assessmentInvoiceCache = {};
+    state.assessmentInvoiceCache[assessmentMonthCacheKey(year, month)] = Array.isArray(list) ? list : [];
+  }
+
+  function loadAssessmentInvoicesForMonth() {
+    if (!assessmentMonthlyInvoicesSection) return;
+    if (!getFeatureFlag('enable_assessments_mode')) {
+      assessmentMonthlyInvoicesSection.style.display = 'none';
+      return;
+    }
+    assessmentMonthlyInvoicesSection.style.display = 'block';
+    const y = state.assessmentsView.year;
+    const m = state.assessmentsView.month;
+    // Render from cache first if available.
+    if (getAssessmentInvoicesCacheEntry(y, m)) {
+      renderAssessmentInvoicesList();
+    }
+    google.script.run
+      .withSuccessHandler(function(invoices) {
+        if (Number(y) !== state.assessmentsView.year || Number(m) !== state.assessmentsView.month) {
+          setAssessmentInvoicesCacheEntry(y, m, invoices);
+          saveCache();
+          return;
+        }
+        setAssessmentInvoicesCacheEntry(y, m, invoices);
+        saveCache();
+        renderAssessmentInvoicesList();
+      })
+      .withFailureHandler(function() {
+        // Keep cached payload visible.
+        if (!getAssessmentInvoicesCacheEntry(state.assessmentsView.year, state.assessmentsView.month)) {
+          setAssessmentInvoicesCacheEntry(state.assessmentsView.year, state.assessmentsView.month, []);
+          renderAssessmentInvoicesList();
+        }
+      })
+      .api_listAssessmentInvoicesForMonth(y, m);
+  }
+
+  function renderAssessmentInvoicesList() {
+    if (!assessmentInvoicesListEl) return;
+    assessmentInvoicesListEl.innerHTML = '';
+    const list = getAssessmentInvoicesCacheEntry(state.assessmentsView.year, state.assessmentsView.month) || [];
+    if (assessmentInvoicesNoteEl) {
+      assessmentInvoicesNoteEl.textContent = list.length === 0
+        ? 'No invoices generated for this month yet.'
+        : list.length + ' invoice' + (list.length === 1 ? '' : 's') + ' for this month.';
+    }
+    list.forEach(function(invoice) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--border); border-radius:6px;';
+      const left = document.createElement('div');
+      left.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
+      const title = document.createElement('div');
+      title.style.cssText = 'font-weight:600;';
+      title.textContent = invoice.invoice_number + (invoice.contract_name ? ' — ' + invoice.contract_name : ' — combined');
+      const meta = document.createElement('div');
+      meta.className = 'ts-note';
+      const statusLabel = invoice.locked ? 'Sent (locked)' : (invoice.status || 'draft');
+      meta.textContent = statusLabel + ' · ' + (invoice.invoice_date || '');
+      left.appendChild(title);
+      left.appendChild(meta);
+      const right = document.createElement('div');
+      right.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
+      if (invoice.generated_doc_url) {
+        const docLink = document.createElement('a');
+        docLink.href = invoice.generated_doc_url;
+        docLink.textContent = 'Open Doc';
+        docLink.target = '_blank';
+        docLink.className = 'ghost small';
+        docLink.style.padding = '6px 10px';
+        right.appendChild(docLink);
+      }
+      if (invoice.pdf_file_url) {
+        const pdfLink = document.createElement('a');
+        pdfLink.href = invoice.pdf_file_url;
+        pdfLink.textContent = 'Open PDF';
+        pdfLink.target = '_blank';
+        pdfLink.className = 'ghost small';
+        pdfLink.style.padding = '6px 10px';
+        right.appendChild(pdfLink);
+      }
+      const regenerateBtn = document.createElement('button');
+      regenerateBtn.textContent = invoice.generated_doc_id ? 'Regenerate' : 'Generate';
+      regenerateBtn.className = 'ghost small';
+      regenerateBtn.disabled = !!invoice.locked;
+      regenerateBtn.title = invoice.locked ? 'Unlock before regenerating' : '';
+      regenerateBtn.addEventListener('click', function() { triggerInvoiceGenerationForMonth(); });
+      right.appendChild(regenerateBtn);
+      const sendBtn = document.createElement('button');
+      sendBtn.textContent = invoice.locked ? 'Sent' : 'Send';
+      sendBtn.className = 'ghost small';
+      sendBtn.disabled = !!invoice.locked || invoice.status !== 'generated' || !invoice.generated_doc_id;
+      if (sendBtn.disabled && !invoice.locked) {
+        sendBtn.title = 'Generate the document first';
+      }
+      sendBtn.addEventListener('click', function() { triggerInvoiceSend(invoice); });
+      right.appendChild(sendBtn);
+      if (invoice.locked) {
+        const unlockBtn = document.createElement('button');
+        unlockBtn.textContent = 'Unlock';
+        unlockBtn.className = 'ghost small';
+        unlockBtn.addEventListener('click', function() { triggerInvoiceUnlock(invoice); });
+        right.appendChild(unlockBtn);
+      }
+      row.appendChild(left);
+      row.appendChild(right);
+      assessmentInvoicesListEl.appendChild(row);
+    });
+  }
+
+  async function triggerInvoiceSend(invoice) {
+    if (!invoice || !invoice.id) return;
+    const confirmed = await customConfirm(
+      'Send invoice ' + (invoice.invoice_number || '') + ' as a PDF attachment? This will lock the invoice and block edits to its assessments until you unlock it.',
+      { title: 'Send invoice', okText: 'Send', cancelText: 'Cancel' }
+    );
+    if (!confirmed) return;
+    setStatus('Sending invoice…', 'warn');
+    google.script.run
+      .withSuccessHandler(function() {
+        setStatus('Invoice sent', 'success');
+        loadAssessmentInvoicesForMonth();
+      })
+      .withFailureHandler(function(error) {
+        const msg = error && error.message ? error.message : String(error);
+        setStatus('Send failed: ' + msg, 'error');
+      })
+      .api_sendAssessmentInvoice(invoice.id);
+  }
+
+  async function triggerInvoiceUnlock(invoice) {
+    if (!invoice || !invoice.id) return;
+    const confirmed = await customConfirm(
+      'Unlock invoice ' + (invoice.invoice_number || '') + '? This will allow edits to its underlying assessments. The "sent" date is preserved.',
+      { title: 'Unlock invoice', okText: 'Unlock', cancelText: 'Cancel' }
+    );
+    if (!confirmed) return;
+    // Optimistically toggle locked in the cached list.
+    const y = state.assessmentsView.year;
+    const m = state.assessmentsView.month;
+    const cachedList = getAssessmentInvoicesCacheEntry(y, m) || [];
+    const previousList = cachedList.map(function(inv) { return { ...inv }; });
+    const optimisticList = cachedList.map(function(inv) {
+      return inv.id === invoice.id ? Object.assign({}, inv, { locked: false }) : inv;
+    });
+    setAssessmentInvoicesCacheEntry(y, m, optimisticList);
+    saveCache();
+    renderAssessmentInvoicesList();
+    setStatus('Unlocking…', 'warn');
+    google.script.run
+      .withSuccessHandler(function() {
+        setStatus('Invoice unlocked', 'success');
+        loadAssessmentInvoicesForMonth();
+      })
+      .withFailureHandler(function(error) {
+        const msg = error && error.message ? error.message : String(error);
+        setAssessmentInvoicesCacheEntry(y, m, previousList);
+        saveCache();
+        renderAssessmentInvoicesList();
+        setStatus('Unlock failed: ' + msg, 'error');
+      })
+      .api_unlockAssessmentInvoice(invoice.id);
+  }
+
+  function triggerInvoiceGenerationForMonth() {
+    if (!getFeatureFlag('enable_assessments_mode')) return;
+    if (btnGenerateMonthlyInvoice) { btnGenerateMonthlyInvoice.disabled = true; btnGenerateMonthlyInvoice.textContent = 'Generating…'; }
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (btnGenerateMonthlyInvoice) { btnGenerateMonthlyInvoice.disabled = false; btnGenerateMonthlyInvoice.textContent = 'Generate monthly invoice'; }
+        setStatus('Invoice generation complete', 'success');
+        loadAssessmentInvoicesForMonth();
+      })
+      .withFailureHandler(function(error) {
+        if (btnGenerateMonthlyInvoice) { btnGenerateMonthlyInvoice.disabled = false; btnGenerateMonthlyInvoice.textContent = 'Generate monthly invoice'; }
+        const msg = error && error.message ? error.message : String(error);
+        setStatus('Generation failed: ' + msg, 'error');
+      })
+      .api_generateAssessmentInvoices(state.assessmentsView.year, state.assessmentsView.month);
+  }
+
+  if (btnGenerateMonthlyInvoice) btnGenerateMonthlyInvoice.addEventListener('click', triggerInvoiceGenerationForMonth);
 
   // Auto-generate slug from name
   const hourTypeNameInput = document.getElementById('hour-type-name');

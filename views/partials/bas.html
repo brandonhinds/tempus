@@ -36,6 +36,22 @@
       <tbody id="bas-table-body"></tbody>
     </table>
   </div>
+  <div id="bas-expense-report-section" style="display:none; margin-top:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <h4 style="margin:0;">Expense Report</h4>
+        <p class="ts-note" style="margin:0;">Company expenses grouped by category for the selected financial year. Download a CSV suited to sharing with an accountant.</p>
+      </div>
+      <button id="btn-expense-report-csv" class="ts-btn--primary">Download CSV</button>
+    </div>
+    <div id="bas-expense-report-summary" class="ts-note" style="margin-bottom:8px;">--</div>
+    <div class="ts-empty-state ts-empty-state--inline" id="bas-expense-report-empty" style="display:none;">
+      <div class="ts-empty-state__icon">📁</div>
+      <p class="ts-empty-state__title">No company expenses recorded</p>
+      <p class="ts-empty-state__text">Add deductions marked as company expenses to populate this report.</p>
+    </div>
+    <div id="bas-expense-report-groups" style="display:flex; flex-direction:column; gap:12px;"></div>
+  </div>
   <div id="bas-invoice-section" style="margin-top:16px;">
     <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
       <h4 style="margin:0;">Financial year invoices</h4>

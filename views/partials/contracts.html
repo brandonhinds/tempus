@@ -72,6 +72,31 @@
           </div>
           <button id="btn-contract-template-new" class="ghost" style="font-size:12px;">Add template</button>
         </div>
+        <div id="contract-assessment-config-section" style="display:none; margin-top:16px;">
+          <div style="font-weight:600; margin-bottom:8px;">Assessment configuration</div>
+          <div class="ts-note" style="margin-bottom:12px;">Choose which assessment types this organisation offers. Multipliers default to the catalogue values; override them here if this org pays differently.</div>
+          <div id="contract-assessment-types-empty" class="ts-empty-state ts-empty-state--inline" style="display:none; margin-bottom:12px;">
+            <div class="ts-empty-state__icon">📋</div>
+            <p class="ts-empty-state__title">No assessment types yet</p>
+            <p class="ts-empty-state__text">Add assessment types in Settings → Assessment types before configuring them on a contract.</p>
+          </div>
+          <div id="contract-assessment-types-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+        <div id="contract-invoice-email-section" style="display:none; margin-top:16px;">
+          <div style="font-weight:600; margin-bottom:8px;">Invoice email defaults</div>
+          <div class="ts-note" style="margin-bottom:12px;">Recipients and message used when sending the monthly invoice for this organisation. Placeholders: <code>{invoiceNumber}</code>, <code>{monthYear}</code>, <code>{org}</code>, <code>{total}</code>.</div>
+          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
+            <div class="ts-col-span-4"><label for="contract-invoice-email-to">To</label><input id="contract-invoice-email-to" type="text" placeholder="recipient@example.com" /></div>
+            <div class="ts-col-span-4"><label for="contract-invoice-email-cc">CC</label><input id="contract-invoice-email-cc" type="text" placeholder="optional, comma-separated" /></div>
+            <div class="ts-col-span-4"><label for="contract-invoice-email-bcc">BCC</label><input id="contract-invoice-email-bcc" type="text" placeholder="optional, comma-separated" /></div>
+          </div>
+          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
+            <div class="ts-col-span-12"><label for="contract-invoice-email-subject">Subject template</label><input id="contract-invoice-email-subject" type="text" placeholder="Invoice {invoiceNumber} - {monthYear}" /></div>
+          </div>
+          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
+            <div class="ts-col-span-12"><label for="contract-invoice-email-body">Body template</label><textarea id="contract-invoice-email-body" rows="6" style="font-family:monospace; font-size:12px;" placeholder="Hi,&#10;&#10;Please see attached invoice {invoiceNumber} for {monthYear}.&#10;&#10;Kind regards"></textarea></div>
+          </div>
+        </div>
         <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; gap:8px;">
           <button class="ghost" id="contract-cancel" style="display:none;">Cancel</button>
           <button id="contract-save">Save</button>

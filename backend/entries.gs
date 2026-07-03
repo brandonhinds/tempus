@@ -210,7 +210,8 @@ function normalizeEntryForWrite(entry, defaultHourTypeId) {
     punches_json: JSON.stringify(punches),
     entry_type: entry.entry_type || 'basic',
     hour_type_id: hourTypeId,
-    recurrence_id: entry.recurrence_id || entry.recurrenceId || ''
+    recurrence_id: entry.recurrence_id || entry.recurrenceId || '',
+    assessment_id: entry.assessment_id || entry.assessmentId || ''
   };
 }
 
@@ -230,7 +231,8 @@ function normalizeEntryForRead(entry, defaultHourTypeId) {
     punches_json: JSON.stringify(punches),
     entry_type: entry.entry_type || 'basic',
     hour_type_id: hourTypeId,
-    recurrence_id: entry.recurrence_id || entry.recurrenceId || ''
+    recurrence_id: entry.recurrence_id || entry.recurrenceId || '',
+    assessment_id: entry.assessment_id || entry.assessmentId || ''
   };
 }
 
@@ -245,7 +247,8 @@ function buildEntryRow(entry, createdAt) {
     normalized.punches_json || '[]',
     normalized.entry_type || 'basic',
     normalized.hour_type_id,
-    normalized.recurrence_id || ''
+    normalized.recurrence_id || '',
+    normalized.assessment_id || ''
   ];
 }
 
@@ -339,7 +342,8 @@ function api_addEntry(entry) {
       punches_json: row[5],
       entry_type: row[6],
       hour_type_id: row[7],
-      recurrence_id: row[8]
+      recurrence_id: row[8],
+      assessment_id: row[9]
     }, defaultHourTypeId) };
   } finally {
     lock.releaseLock();
@@ -377,6 +381,7 @@ function api_addEntriesBulk(payload) {
         entry_type: entry && entry.entry_type,
         hour_type_id: entry && entry.hour_type_id,
         recurrence_id: entry && entry.recurrence_id,
+        assessment_id: entry && entry.assessment_id,
         round_interval: entry && entry.round_interval
       }, defaultHourTypeId);
       normalized.id = normalized.id || Utilities.getUuid();
@@ -401,7 +406,8 @@ function api_addEntriesBulk(payload) {
         punches_json: row[5],
         entry_type: row[6],
         hour_type_id: row[7],
-        recurrence_id: row[8]
+        recurrence_id: row[8],
+        assessment_id: row[9]
       }, defaultHourTypeId));
     });
 
@@ -447,6 +453,9 @@ function api_updateEntry(update) {
     }
     if (payload.recurrence_id == null && update.recurrence_id != null) {
       payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
+    }
+    if (!payload.hasOwnProperty('assessment_id') && values[i][9] != null) {
+      payload = Object.assign({}, payload, { assessment_id: values[i][9] });
     }
     if (!payload.hasOwnProperty('duration_minutes') && values[i][2] != null) {
       payload = Object.assign({}, payload, { duration_minutes: values[i][2] });

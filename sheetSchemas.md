@@ -34,6 +34,7 @@ Every row represents a single time entry. Server APIs normalise dates to ISO-860
 | `entry_type` | string | Entry mode used: `basic` for total-hours entries, `advanced` for punch-based entries. | `basic` |
 | `hour_type_id` | string (UUID) | References the hour type for this entry. Defaults to "work" hour type if empty or invalid. | `b3e42da1-7b66-4aa0-9df0-aeae6402fd5b` |
 | `recurrence_id` | string (UUID) | Identifier of the recurring schedule that generated the entry (blank for manual entries). Stored so deleting or editing an individual occurrence never mutates the parent schedule. | `4f6bb21f-3a9e-4b9d-8a9d-b3e8f0efab2e` |
+| `assessment_id` | string (UUID) | Identifier of the assessment that generated or owns the entry (requires `enable_assessments_mode`). Blank for entries unrelated to an assessment. Set on the auto-created billable entry and on every actual-hours entry logged from the assessment detail screen. | `7a1c2d44-3f99-4b1a-8c45-7b3f1e9f0d22` |
 
 ### Suggested improvements
 - Enforce non-empty `date` client-side and ensure every punch range has both `in`/`out` set before submission (open punches are permitted but excluded from totals).
@@ -115,6 +116,12 @@ Contracts describe a billable agreement and govern whether time can be logged fo
 | `standard_hours_per_day` | number | Expected hours per working day, used for projections and capacity calculations. Defaults to `7.5`. | `7.5` |
 | `include_weekends` | boolean/string | `TRUE`/`FALSE` indicating whether weekends should count toward expected averages and projections. | `FALSE` |
 | `line_item_templates_json` | string (JSON) | JSON array of reusable line item templates with predefined descriptions and amounts. | `[{"label":"Standard","description":"Standard assessment","amount":150}]` |
+| `assessment_type_multipliers_json` | string (JSON) | JSON array of `{type_id, multipliers: [m1, m2, ...]}` overrides for assessment types. Entries opt the contract in to those types and override the type's per-line multipliers. Blank means the contract offers no assessment types. Requires `enable_assessments_mode`. | `[{"type_id":"...","multipliers":[1.0,0.105]}]` |
+| `invoice_email_to` | string | Default recipient email for assessment-driven monthly invoices for this contract. Requires `enable_assessments_mode`. | `accounts@example.com` |
+| `invoice_email_cc` | string | Default CC recipient(s), comma-separated. | `` |
+| `invoice_email_bcc` | string | Default BCC recipient(s), comma-separated. | `me@example.com` |
+| `invoice_email_subject_template` | string | Templated subject for the invoice email. Placeholders: `{invoiceNumber}`, `{monthYear}`, `{org}`, `{total}`. | `Invoice {invoiceNumber} - {monthYear}` |
+| `invoice_email_body_template` | string | Templated body for the invoice email. Same placeholder set as the subject. Newlines preserved. | `Hi,\n\nPlease see attached.\n\nKind regards` |
 | `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the contract row was created server-side. | `2024-05-06T10:15:00Z` |
 
 ### Suggested improvements
@@ -363,3 +370,71 @@ Stores Business Activity Statement (BAS) submission data for each period (monthl
 - Add validation to prevent duplicate submissions for the same financial year, period_type, and quarter/month combination
 - Track who submitted the BAS when multi-user support is added
 - Consider adding fields for other BAS sections (W1, W2, etc.) as needed
+
+## assessments
+Each row represents a single assessment Lilian conducts. Requires the `enable_assessments_mode` feature flag. The assessment is the canonical record; the billable `timesheet_entries` row and any actual-hours `timesheet_entries` rows are derived from it and linked back via `assessment_id`.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `7a1c2d44-3f99-4b1a-8c45-7b3f1e9f0d22` |
+| `interview_date` | string (ISO date) | The date the assessment interview was conducted. Used for the billable entry's date and for monthly invoice grouping. | `2026-05-12` |
+| `contract_id` | string (UUID) | References the organisation's contract active on the interview date. Required. | `a5e42da1-7b66-4aa0-9df0-aeae6402fd5a` |
+| `assessment_type_id` | string (UUID) | References the row in `assessment_types`. Must be a type enabled on the contract. | `c1b07355-8f76-4c69-9e2e-2b1f0ad2c1f7` |
+| `interviewee_name` | string | Name of the person assessed (referred to as "Clearance Subject" on the rendered invoice). | `Jane Smith` |
+| `interviewee_dob` | string (ISO date) | Interviewee date of birth. Rendered on the invoice when present. | `1985-09-23` |
+| `surge_percentage` | number | Per-assessment surge as a decimal (`0.2` = 20%). Blank means no surge. | `0.2` |
+| `notes` | string | Optional free-form notes for her records (not shown on the invoice). | `Re-scheduled from prior week` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp the record was created. | `2026-05-12T03:15:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2026-05-12T03:15:00Z` |
+
+### Behaviour
+- Save creates (or updates) a single billable `timesheet_entries` row with `duration_minutes = round(60 × sum(line.multipliers) × (1 + surge_percentage))`, `contract_id = assessments.contract_id`, `hour_type_id = Work`, and `assessment_id = assessments.id`. Income, BAS and Annual Views read this entry like any other.
+- Deleting the assessment cascades to the billable entry and every actual-hours entry sharing the same `assessment_id`.
+- Edits are blocked when the assessment's monthly invoice is `locked` (see `assessment_invoices`).
+
+## assessment_types
+Catalogue of assessment categories that drive invoice line breakdowns. Five built-in types are seeded on first read: Standard, Enhanced, Reval, Cancellation (<24 hrs), Cancellation (>24 hrs). Requires `enable_assessments_mode`.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `c1b07355-8f76-4c69-9e2e-2b1f0ad2c1f7` |
+| `name` | string | Human-readable type name. | `Enhanced` |
+| `display_order` | number | Numeric rank used by UI ordering. | `2` |
+| `default_lines_json` | string (JSON) | Array of `{template, multiplier}` describing the line breakdown for assessments of this type. The total multiplier is the sum of line multipliers; surge then scales the whole thing. Template placeholders: `{org}`, `{name}`, `{dob}`, `{surge_suffix}`. | `[{"template":"{org} ...","multiplier":1.0},{"template":"{org} Document Review Fee...","multiplier":0.105}]` |
+| `is_built_in` | boolean/string | `TRUE` for the five seeded defaults. Built-in types cannot be deleted. | `TRUE` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp recorded when the type row was created. | `2026-05-01T00:00:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2026-05-01T00:00:00Z` |
+
+### Behaviour
+- Default multipliers can be overridden per contract via `contracts.assessment_type_multipliers_json` (the override array must match the type's line count).
+- Renaming a type updates display everywhere because the assessment record references the type by id.
+
+## assessment_invoices
+Monthly invoice headers generated from assessments. Lines are derived on the fly from the assessment rows matching `(year, month[, contract_id])` — there is no separate lines sheet. Requires `enable_assessments_mode`.
+
+| Column | Type | Description | Example |
+| --- | --- | --- | --- |
+| `id` | string (UUID) | Unique identifier generated server-side. | `9d0e6f17-...` |
+| `year` | number | Calendar year of the invoice period. | `2026` |
+| `month` | number | Calendar month (1-12) of the invoice period. | `5` |
+| `contract_id` | string (UUID) | Reference to the contract this invoice covers in per-org grouping. Blank for combined invoices that span every contract for the month. | `a5e42da1-...` |
+| `invoice_number` | string | Auto-generated `YYMM{SEQ:3}` invoice number (e.g., `2605001`). Manual override allowed on save. Sequence resets monthly. | `2605001` |
+| `invoice_date` | string (ISO date) | Date shown on the rendered document. | `2026-05-31` |
+| `status` | string | Workflow state (`draft`, `generated`, `sent`). | `generated` |
+| `locked` | boolean/string | `TRUE` once the invoice has been sent; blocks downstream edits to its underlying assessments. Unlock from the UI to re-enable edits. | `FALSE` |
+| `generated_doc_id` | string | Drive file id of the most recently generated Google Doc. | `1w4rsDf0Md...` |
+| `generated_doc_url` | string | Share URL of the generated Doc. | `https://docs.google.com/document/d/.../edit` |
+| `generated_at` | string (ISO datetime, UTC) | Timestamp the Doc was last generated. | `2026-05-31T02:15:00Z` |
+| `pdf_file_id` | string | Drive file id of the exported PDF (set on send). | `1Aa2Bb...` |
+| `pdf_file_url` | string | Share URL of the exported PDF. | `https://drive.google.com/file/d/.../view` |
+| `sent_at` | string (ISO datetime, UTC) | Timestamp the invoice email was sent. Blank if not sent. | `2026-05-31T02:20:00Z` |
+| `template_doc_id` | string | Drive id of the template that was used; cached so regeneration is stable even if the setting changes later. | `1TmplD0c...` |
+| `output_folder_id` | string | Drive id of the folder Docs/PDFs were written to. | `12AbcFolder...` |
+| `notes` | string | Optional free-form notes. | `Includes reval for J. Smith` |
+| `created_at` | string (ISO datetime, UTC) | Timestamp the record was created. | `2026-05-01T09:10:00Z` |
+| `updated_at` | string (ISO datetime, UTC) | Timestamp of the most recent update. | `2026-05-31T02:20:00Z` |
+
+### Behaviour
+- Lines are not persisted; they are derived from the month's assessments at render time via the chosen `assessment_invoice_grouping` setting (`combined` or `per_org`).
+- Editing an underlying assessment while its invoice is `generated` but not `locked` resets the invoice's `status` to `draft` and flags it as needing regeneration.
+- Locked invoices reject edits and deletes to their underlying assessments. Unlock to re-enable changes; the lock can be re-applied manually.

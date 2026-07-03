@@ -3,3 +3,6 @@
 
 # Sensitive update scripts
 scripts/update-template-prod.sh
+
+# Reference files
+oldAssessmentSheet/

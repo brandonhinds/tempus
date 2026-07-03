@@ -79,6 +79,27 @@ Click any row with activity to open a detailed modal showing:
 
 The submission status persists and is indicated by the checkmark in the main table.
 
+## Expense Report
+
+Only visible when the *Enable expense report* feature flag is enabled.
+
+Appears below the BAS summary table, showing a category-grouped breakdown of every company-expense deduction for the selected financial year.
+
+### Data
+- One row per occurrence — recurring deductions are expanded across the year.
+- Columns: date, deduction name, notes, ex-GST amount, GST, inc-GST amount.
+- Grouped by category; per-category subtotals appear in the section header.
+- The page-level summary shows total ex-GST, total GST, and total inc-GST across all groups.
+
+### Download CSV
+The **Download CSV** button exports a flat file with the columns `date, category, name, notes, amount_ex_gst, gst, amount_inc_gst`, plus a TOTAL footer. The filename is `tempus-expense-report-fy-{startYear}-{endYear}.csv`. This format is intended to be ingested directly into an accountant's workpapers.
+
+### Workflow
+1. Enable the *Enable expense report* flag in Settings.
+2. Navigate to BAS Reporting and select the financial year you want to share.
+3. Review the grouped breakdown to spot any missing or miscategorised expenses.
+4. Click **Download CSV** to grab the file and forward it to your accountant.
+
 ## Financial Year Invoices Table
 
 Only visible when the *Enable invoices* feature flag is enabled.

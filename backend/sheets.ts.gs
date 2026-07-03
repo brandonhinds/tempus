@@ -5,7 +5,7 @@ function getOrCreateSheet(name) {
   if (!sh) {
     sh = ss.insertSheet(name);
     if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,9).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id']]);
+      sh.getRange(1,1,1,10).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id','assessment_id']]);
     } else if (name === 'user_settings') {
       sh.getRange(1,1,1,3).setValues([['key','value','type']]);
     } else if (name === 'contracts') {
@@ -166,6 +166,51 @@ function getOrCreateSheet(name) {
         'created_at',
         'updated_at'
       ]]);
+    } else if (name === 'assessments') {
+      sh.getRange(1,1,1,10).setValues([[
+        'id',
+        'interview_date',
+        'contract_id',
+        'assessment_type_id',
+        'interviewee_name',
+        'interviewee_dob',
+        'surge_percentage',
+        'notes',
+        'created_at',
+        'updated_at'
+      ]]);
+    } else if (name === 'assessment_types') {
+      sh.getRange(1,1,1,7).setValues([[
+        'id',
+        'name',
+        'display_order',
+        'default_lines_json',
+        'is_built_in',
+        'created_at',
+        'updated_at'
+      ]]);
+    } else if (name === 'assessment_invoices') {
+      sh.getRange(1,1,1,19).setValues([[
+        'id',
+        'year',
+        'month',
+        'contract_id',
+        'invoice_number',
+        'invoice_date',
+        'status',
+        'locked',
+        'generated_doc_id',
+        'generated_doc_url',
+        'generated_at',
+        'pdf_file_id',
+        'pdf_file_url',
+        'sent_at',
+        'template_doc_id',
+        'output_folder_id',
+        'notes',
+        'created_at',
+        'updated_at'
+      ]]);
     }
   }
   if (name === 'deduction_categories') {
@@ -182,7 +227,7 @@ function getOrCreateSheet(name) {
     sh.getRange('H:I').setNumberFormat('@'); // created_at, updated_at
   }
   if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id'];
+    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id','assessment_id'];
     const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
     const headerRange = sh.getRange(1, 1, 1, lastColumn);
     const headers = headerRange.getValues()[0];
@@ -238,6 +283,16 @@ function getOrCreateSheet(name) {
         sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
       }
     }
+    const refreshedHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    if (refreshedHeaders.indexOf('assessment_id') === -1) {
+      const lastCol = sh.getLastColumn();
+      sh.insertColumnAfter(lastCol);
+      sh.getRange(1, lastCol + 1).setValue('assessment_id');
+      const rowCount = sh.getLastRow();
+      if (rowCount > 1) {
+        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
+      }
+    }
     const sanitizedHeaders = sh.getRange(1, 1, 1, expectedHeaders.length).getValues()[0];
     if (expectedHeaders.some((header, idx) => sanitizedHeaders[idx] !== header)) {
       sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
@@ -248,6 +303,7 @@ function getOrCreateSheet(name) {
     sh.getRange('G:G').setNumberFormat('@');
     sh.getRange('H:H').setNumberFormat('@');
     sh.getRange('I:I').setNumberFormat('@');
+    sh.getRange('J:J').setNumberFormat('@');
   }
   if (name === 'invoices') {
     sh.getRange('A:A').setNumberFormat('@');

@@ -22,6 +22,7 @@ Table of contents for the Tempus docs set.
 ## Financial & Reporting
 - [Deductions](deductions.md)
 - [Invoices](invoices.md)
+- [Assessments](assessments.md)
 - [BAS Reporting](bas-reporting.md)
 - [Actual Income](actual-income.md)
 - [Payroll Helpers](payroll-helpers.md)
