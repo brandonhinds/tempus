@@ -1,4 +1,10 @@
 <section class="ts-card ts-card--wide" id="page-bas" style="display:none;">
+  <div class="ts-toolbar" style="margin-bottom:16px; align-items:flex-end;">
+    <div><div class="ts-kicker">Ledger reconciliation</div><h3 style="margin:2px 0 4px;">Actual, forecast and variance</h3><p class="ts-note" id="bas-ledger-period" style="margin:0;"></p></div>
+    <div><label for="bas-accounting-basis">Accounting basis</label><select id="bas-accounting-basis"><option value="cash">Cash</option><option value="accrual">Accrual</option></select></div>
+  </div>
+  <div id="bas-ledger-summary" class="ts-ledger-summary" style="margin-bottom:18px;"></div>
+  <div id="bas-ledger-warnings" class="ts-note" style="margin-bottom:20px;"></div>
   <div class="ts-toolbar" style="margin-bottom:12px;">
     <div style="display:flex; flex-direction:column; gap:4px;">
       <h3 style="margin:0;">BAS Reporting</h3>

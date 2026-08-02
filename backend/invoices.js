@@ -1077,6 +1077,10 @@ function upsertInvoiceUnlocked_(payload) {
 }
 
 function api_deleteInvoice(id, options) {
+  return withScriptLock_('invoice removal', function() { return deleteInvoiceUnlocked_(id, options); });
+}
+
+function deleteInvoiceUnlocked_(id, options) {
   if (!id) throw new Error('Invoice id is required');
   var invoice = findInvoiceById(id);
   if (!invoice) throw new Error('Invoice not found');
@@ -1350,6 +1354,10 @@ function navigateToFolder(parts) {
 }
 
 function api_generateInvoiceDocument(payload) {
+  return withScriptLock_('invoice document generation', function() { return generateInvoiceDocumentUnlocked_(payload); });
+}
+
+function generateInvoiceDocumentUnlocked_(payload) {
   if (!payload || !payload.invoice_id) {
     throw new Error('invoice_id is required to generate an invoice document.');
   }
@@ -1719,6 +1727,10 @@ function recalculateInvoiceLineAmounts(invoiceOrId, options) {
 }
 
 function api_upsertInvoiceLineItem(payload) {
+  return withScriptLock_('invoice line update', function() { return upsertInvoiceLineItemUnlocked_(payload); });
+}
+
+function upsertInvoiceLineItemUnlocked_(payload) {
   Logger.log('[Backend] api_upsertInvoiceLineItem called with payload: ' + JSON.stringify(payload));
   if (!payload) throw new Error('Line item payload is required');
   var isDefault = invoiceParseBoolean(payload.is_default);
@@ -1921,6 +1933,10 @@ function api_upsertInvoiceLineItem(payload) {
 }
 
 function api_deleteInvoiceLineItem(id, options) {
+  return withScriptLock_('invoice line removal', function() { return deleteInvoiceLineItemUnlocked_(id, options); });
+}
+
+function deleteInvoiceLineItemUnlocked_(id, options) {
   if (!id) throw new Error('Line item id is required');
   var item = findLineItemById(id);
   if (!item) throw new Error('Line item not found');

@@ -84,6 +84,13 @@ function api_getSettings() {
 }
 
 function api_updateSettings(settings) {
+  return withScriptLock_('settings update', function() { return updateSettingsUnlocked_(settings); });
+}
+
+function updateSettingsUnlocked_(settings) {
+  settings = settings || {};
+  if (Object.prototype.hasOwnProperty.call(settings, 'accounting_basis') && ['cash', 'accrual'].indexOf(String(settings.accounting_basis)) === -1) throw new Error('Accounting basis must be cash or accrual.');
+  ['tempus_url'].forEach(function(key) { if (settings[key]) settings[key] = requireHttpUrl_(settings[key], key.replace(/_/g, ' '), true); });
   var sh = getOrCreateSheet('user_settings');
   var values = sh.getDataRange().getValues();
   var map = {};

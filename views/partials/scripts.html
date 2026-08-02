@@ -288,6 +288,9 @@
   const pageInvoices = document.getElementById('page-invoices');
   const pagePublicHolidays = document.getElementById('page-public-holidays');
   const pageAbout = document.getElementById('page-about');
+  const pageExpenses = document.getElementById('page-expenses');
+  const pageAssessments = document.getElementById('page-assessments');
+  const pageHelp = document.getElementById('page-help');
   const aboutVersionDisplay = document.getElementById('about-version-display');
   const aboutVersionStatus = document.getElementById('about-version-status');
   const navToggle = document.getElementById('nav-toggle');
@@ -305,6 +308,8 @@
   const navSettingsBtn = document.getElementById('nav-settings');
   const navDocsLink = document.getElementById('nav-docs');
   const navAboutBtn = document.getElementById('nav-about');
+  const navExpensesBtn = document.getElementById('nav-expenses');
+  const navAssessmentsBtn = document.getElementById('nav-assessments');
   const navAboutUpdateBadge = document.getElementById('nav-about-update-badge');
   const navUpdateWarning = document.getElementById('nav-update-warning');
   const ratePreviewContractSelect = document.getElementById('rate-preview-contract');
@@ -1103,7 +1108,7 @@ let ratePreviewInputSyncing = false;
   let deductionCategoryDeleteId = null;
   let deductionCategorySavePending = false;
 
-  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'bas', 'public-holidays', 'annual-views', 'invoices', 'themes', 'settings', 'about'];
+  const PAGE_KEYS = ['time', 'contracts', 'rate-preview', 'hour-types', 'deductions', 'expenses', 'assessments', 'bas', 'public-holidays', 'annual-views', 'invoices', 'themes', 'settings', 'help', 'about'];
   const LAST_PAGE_KEY = 'ts_last_page';
   const SCRIPT_ID_CACHE_KEY = 'ts_script_id';
 
@@ -1163,8 +1168,11 @@ let ratePreviewInputSyncing = false;
       'public-holidays': pagePublicHolidays,
       'annual-views': pageAnnualViews,
       invoices: pageInvoices,
+      expenses: pageExpenses,
+      assessments: pageAssessments,
       themes: pageThemes,
       settings: pageSettings,
+      help: pageHelp,
       about: pageAbout
     };
     Object.keys(pages).forEach((key) => {
@@ -1201,6 +1209,8 @@ let ratePreviewInputSyncing = false;
     if (normalized === 'invoices') {
       renderInvoicesPage();
     }
+    if (normalized === 'expenses' && typeof renderExpensesPage === 'function') renderExpensesPage();
+    if (normalized === 'assessments' && typeof renderAssessmentsPage === 'function') renderAssessmentsPage();
     if (normalized === 'public-holidays') {
       renderPublicHolidaysPage();
     }
@@ -1709,12 +1719,14 @@ let ratePreviewInputSyncing = false;
   const btnNewThemePage = document.getElementById('btn-new-theme-page');
   if (btnNewThemePage) btnNewThemePage.onclick = () => { if (typeof openThemeEditor === 'function') openThemeEditor(null); };
   if (navInvoicesBtn) navInvoicesBtn.onclick = () => { closeNavMenu(); showPage('invoices'); };
+  if (navExpensesBtn) navExpensesBtn.onclick = () => { closeNavMenu(); showPage('expenses'); };
+  if (navAssessmentsBtn) navAssessmentsBtn.onclick = () => { closeNavMenu(); showPage('assessments'); };
   if (navPublicHolidaysBtn) navPublicHolidaysBtn.onclick = () => { closeNavMenu(); showPage('public-holidays'); };
   if (navSettingsBtn) navSettingsBtn.onclick = () => { closeNavMenu(); showPage('settings'); };
   if (navDocsLink) {
     navDocsLink.onclick = () => {
       closeNavMenu();
-      window.open('https://github.com/brandonhinds/tempus/blob/main/docs/README.md', '_blank', 'noopener');
+      showPage('help');
     };
   }
   if (navAboutBtn) navAboutBtn.onclick = () => { closeNavMenu(); showPage('about'); };
@@ -4375,6 +4387,7 @@ let ratePreviewInputSyncing = false;
     }
 
     renderBasInvoiceTable();
+    if (typeof renderBasLedgerSummary === 'function') renderBasLedgerSummary();
   }
 
   function renderBasInvoiceTable() {
@@ -8863,6 +8876,18 @@ function updateDeductionFormVisibility() {
       order: 330,
       group: 'company'
     },
+    enable_expenses: {
+      name: 'Enable business expense ledger',
+      description: 'Adds immutable expense transactions, payments, receipt evidence, reconciliation and financial-year exports.',
+      order: 332,
+      group: 'company'
+    },
+    enable_assessments: {
+      name: 'Enable configurable assessments',
+      description: 'Adds user-defined assessment fields and invoice-line templates backed by the canonical invoice ledger.',
+      order: 334,
+      group: 'company'
+    },
     enable_contract_line_item_templates: {
       name: 'Enable contract line item templates',
       description: 'Allows defining reusable line item templates with predefined descriptions and amounts on each contract.',
@@ -10330,7 +10355,7 @@ function updateDeductionFormVisibility() {
   function invoiceIsLocked() {
     const invoice = state.invoiceDetail && state.invoiceDetail.invoice;
     if (!invoice) return false;
-    return String(invoice.status || 'draft').toLowerCase() === 'generated';
+    return String(invoice.status || 'draft').toLowerCase() !== 'draft';
   }
 
   function validContractsForDate(dateIso) {
@@ -16449,6 +16474,16 @@ function updateDeductionFormVisibility() {
     } else {
       resetInvoicesState();
     }
+
+    const expensesFlag = state.featureFlags.enable_expenses || DEFAULT_FEATURE_FLAGS.enable_expenses || { enabled: false };
+    const expensesEnabled = state.companyTrackingEnabled && !!expensesFlag.enabled;
+    if (navExpensesBtn) navExpensesBtn.style.display = expensesEnabled ? 'block' : 'none';
+    if (!expensesEnabled && state.currentPage === 'expenses') showPage('time');
+
+    const assessmentsFlag = state.featureFlags.enable_assessments || DEFAULT_FEATURE_FLAGS.enable_assessments || { enabled: false };
+    const assessmentsEnabled = !!assessmentsFlag.enabled;
+    if (navAssessmentsBtn) navAssessmentsBtn.style.display = assessmentsEnabled ? 'block' : 'none';
+    if (!assessmentsEnabled && state.currentPage === 'assessments') showPage('time');
 
     // Show/hide public holidays nav item + state setting
     const publicHolidaysFlag = state.featureFlags.enable_public_holidays || DEFAULT_FEATURE_FLAGS.enable_public_holidays || { enabled: false };
@@ -26884,15 +26919,18 @@ function getCachedIncomeSummary(monthKey) {
     if (invoiceDetailNumberInput) invoiceDetailNumberInput.value = detail.invoice_number || '';
     setDatePickerValue(invoiceDetailDatePicker, invoiceDetailDateInput, detail.invoice_date || '');
     if (invoiceDetailStatusSelect) invoiceDetailStatusSelect.value = detail.status || 'draft';
+    if (invoiceDetailDateInput) invoiceDetailDateInput.disabled = isInvoiceLocked;
+    if (invoiceDetailStatusSelect) invoiceDetailStatusSelect.disabled = true;
     const hasInvoice = !!state.invoiceDetail && !!state.invoiceDetail.invoice;
-    if (btnInvoiceDelete) btnInvoiceDelete.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
-    if (btnInvoiceSave) btnInvoiceSave.disabled = !hasInvoice || !!state.invoicePending.savingInvoice;
+    if (btnInvoiceDelete) btnInvoiceDelete.disabled = !hasInvoice || isInvoiceLocked || !!state.invoicePending.savingInvoice;
+    if (btnInvoiceSave) btnInvoiceSave.disabled = !hasInvoice || isInvoiceLocked || !!state.invoicePending.savingInvoice;
     if (btnInvoiceAddLine) btnInvoiceAddLine.disabled = !hasInvoice || state.invoiceDetailLoading || isInvoiceLocked;
     if (btnInvoiceGenerate) {
       const templateConfigured = !!(state.settings.invoice_template_doc_id || state.settings.invoice_template_path || state.settings.invoice_template_reference);
       const folderConfigured = !!(state.settings.invoice_output_folder_id || state.settings.invoice_output_folder_path);
-      btnInvoiceGenerate.disabled = !templateConfigured || !folderConfigured || !!state.invoicePending.generating || !hasInvoice;
+      btnInvoiceGenerate.disabled = isInvoiceLocked || !templateConfigured || !folderConfigured || !!state.invoicePending.generating || !hasInvoice;
     }
+    if (typeof renderInvoiceLedgerControls === 'function') renderInvoiceLedgerControls(detail, state.invoiceDetail.payment_state || null);
     const summary = state.invoiceDetail.summary || { lineCount: 0, totalHours: 0, totalAmount: 0, gstAmount: 0, totalWithGst: 0 };
     if (invoiceLineSummary) {
       const countText = `${summary.lineCount} line${summary.lineCount === 1 ? '' : 's'}`;

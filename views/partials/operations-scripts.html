@@ -1,0 +1,236 @@
+<script>
+  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], assessmentTypes:[], assessments:[], expenseMode:'transaction' };
+
+  function operationsApi(name, ...args) {
+    return new Promise((resolve, reject) => {
+      const runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      runner[name](...args);
+    });
+  }
+
+  function operationsMoney(value) {
+    return new Intl.NumberFormat('en-AU', { style:'currency', currency:'AUD' }).format(Number(value) || 0);
+  }
+
+  function operationsStatus(message, kind) {
+    if (typeof setStatus === 'function') setStatus(message, kind || 'ok');
+  }
+
+  function ledgerText(parent, className, text) {
+    const el = document.createElement('div');
+    el.className = className;
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
+  async function renderExpensesPage() {
+    const list = document.getElementById('expense-transactions');
+    if (!list) return;
+    list.replaceChildren(ledgerText(document.createDocumentFragment(), '', ''));
+    list.textContent = 'Loading expense ledger…';
+    try {
+      const [transactions, rules] = await Promise.all([operationsApi('api_listExpenseTransactions', {}), operationsApi('api_listExpenseRules', { include_inactive:true })]);
+      operationsState.transactions = transactions || [];
+      operationsState.rules = rules || [];
+      renderExpenseTransactions();
+      renderExpenseRules();
+      await renderExpenseReport();
+    } catch (error) {
+      list.textContent = error && error.message ? error.message : 'Could not load expenses.';
+    }
+  }
+
+  function renderExpenseTransactions() {
+    const list = document.getElementById('expense-transactions');
+    list.replaceChildren();
+    if (!operationsState.transactions.length) {
+      ledgerText(list, 'ts-empty', 'No expense transactions yet. Record a purchase to start the ledger.');
+      return;
+    }
+    operationsState.transactions.forEach((transaction) => {
+      const row = document.createElement('div');
+      row.className = 'ts-ledger-row';
+      const identity = document.createElement('div');
+      ledgerText(identity, 'ts-ledger-row__title', transaction.vendor || transaction.description || 'Untitled expense');
+      ledgerText(identity, 'ts-ledger-row__meta', [transaction.purchase_date, transaction.category, transaction.gst_code].filter(Boolean).join(' · '));
+      row.appendChild(identity);
+      ledgerText(row, 'ts-ledger-row__meta', String(transaction.reconciliation_state || 'unreconciled').replace(/_/g, ' '));
+      ledgerText(row, 'ts-ledger-row__amount', operationsMoney(transaction.amount));
+      const actions = document.createElement('div');
+      actions.className = 'ts-ledger-row__actions';
+      const receipt = document.createElement('button');
+      receipt.type = 'button'; receipt.className = 'ghost small'; receipt.textContent = transaction.attachments && transaction.attachments.length ? 'Receipt ✓' : 'Add receipt';
+      receipt.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'receipt'));
+      const payment = document.createElement('button');
+      payment.type = 'button'; payment.className = 'ghost small'; payment.textContent = 'Payment';
+      payment.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'payment'));
+      const reconcile = document.createElement('button');
+      reconcile.type = 'button'; reconcile.className = 'ghost small'; reconcile.textContent = transaction.reconciliation_state === 'reconciled' ? 'Reconciled' : 'Reconcile';
+      reconcile.disabled = transaction.reconciliation_state === 'reconciled';
+      reconcile.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'reconcile'));
+      actions.append(receipt, payment, reconcile);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  }
+
+  function showExpenseInlineAction(row, transaction, mode) {
+    row.parentElement.querySelectorAll('.ts-ledger-inline').forEach((el) => el.remove());
+    const panel = document.createElement('form');
+    panel.className = 'ts-ledger-inline';
+    panel.style.gridColumn = '1 / -1';
+    panel.style.display = 'flex'; panel.style.gap = '8px'; panel.style.alignItems = 'end'; panel.style.flexWrap = 'wrap';
+    const input = document.createElement('input');
+    input.required = true;
+    if (mode === 'receipt') { input.type = 'url'; input.placeholder = 'https://… receipt link'; input.setAttribute('aria-label', 'Receipt URL'); }
+    if (mode === 'payment') { input.type = 'number'; input.min = '0.01'; input.step = '0.01'; input.placeholder = 'Amount paid'; input.setAttribute('aria-label', 'Payment amount'); }
+    const date = document.createElement('input');
+    date.type = 'date'; date.value = transaction.purchase_date || ''; date.required = true; date.setAttribute('aria-label', 'Payment date');
+    if (mode !== 'payment') date.hidden = true;
+    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = mode === 'reconcile' ? 'Confirm reconciliation' : 'Save';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => panel.remove());
+    if (mode !== 'reconcile') panel.append(input);
+    panel.append(date, submit, cancel);
+    panel.addEventListener('submit', async (event) => {
+      event.preventDefault(); submit.disabled = true;
+      let result;
+      if (mode === 'receipt') result = await operationsApi('api_attachExpenseReceipt', { expense_transaction_id:transaction.id, url:input.value, name:'Receipt' });
+      else if (mode === 'payment') result = await operationsApi('api_addExpensePayment', { expense_transaction_id:transaction.id, payment_date:date.value, amount:Number(input.value) });
+      else result = await operationsApi('api_reconcileExpenseTransaction', { id:transaction.id, claimable_gst_confirmed:transaction.gst_code === 'taxable' });
+      if (result && result.success === false) { operationsStatus(result.message, 'warn'); submit.disabled = false; return; }
+      operationsStatus(mode === 'reconcile' ? 'Expense reconciled' : 'Expense evidence updated');
+      await renderExpensesPage();
+    });
+    row.appendChild(panel);
+    if (mode !== 'reconcile') input.focus(); else submit.focus();
+  }
+
+  function renderExpenseRules() {
+    const list = document.getElementById('expense-rules');
+    list.replaceChildren();
+    if (!operationsState.rules.length) { ledgerText(list, 'ts-empty', 'No scheduled expense rules.'); return; }
+    operationsState.rules.forEach((rule) => {
+      const row = document.createElement('div'); row.className = 'ts-ledger-row';
+      const identity = document.createElement('div'); ledgerText(identity, 'ts-ledger-row__title', rule.vendor || rule.description || 'Untitled rule'); ledgerText(identity, 'ts-ledger-row__meta', [rule.frequency, rule.start_date, rule.active === true || String(rule.active).toLowerCase() === 'true' ? 'active' : 'archived'].join(' · ')); row.appendChild(identity);
+      ledgerText(row, 'ts-ledger-row__meta', rule.category || 'Uncategorised'); ledgerText(row, 'ts-ledger-row__amount', operationsMoney(rule.amount));
+      const actions = document.createElement('div'); actions.className = 'ts-ledger-row__actions';
+      if (rule.active === true || String(rule.active).toLowerCase() === 'true') { const archive = document.createElement('button'); archive.type='button'; archive.className='ghost small'; archive.textContent='Archive'; archive.addEventListener('click', async () => { const result = await operationsApi('api_archiveExpenseRule', rule.id); if (result.success === false) operationsStatus(result.message, 'warn'); else renderExpensesPage(); }); actions.appendChild(archive); }
+      row.appendChild(actions); list.appendChild(row);
+    });
+  }
+
+  async function renderExpenseReport() {
+    const target = document.getElementById('expense-report');
+    const fyInput = document.getElementById('expense-report-fy');
+    if (!target || !fyInput) return;
+    if (!fyInput.value) { const now = new Date(); fyInput.value = now.getMonth() >= 6 ? now.getFullYear() + 1 : now.getFullYear(); }
+    const report = await operationsApi('api_getExpenseReport', { financial_year:Number(fyInput.value) });
+    target.replaceChildren();
+    [['Actual', report.totals.actual], ['Scheduled', report.totals.scheduled], ['Unreconciled', report.totals.unreconciled], ['GST creditable', report.totals.gst_creditable], ['Non-creditable GST', report.totals.non_creditable_gst]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
+  }
+
+  function openExpenseForm(mode) {
+    operationsState.expenseMode = mode;
+    const form = document.getElementById('expense-form'); form.style.display='block'; form.reset();
+    document.getElementById('expense-business-use').value='100';
+    document.getElementById('expense-date').value=new Date().toISOString().slice(0,10);
+    document.getElementById('expense-frequency-wrap').style.display=mode === 'rule' ? 'block' : 'none';
+    form.querySelector('h4').textContent=mode === 'rule' ? 'New scheduled expense rule' : 'New expense transaction';
+    document.getElementById('expense-vendor').focus();
+  }
+
+  async function renderAssessmentsPage() {
+    const list = document.getElementById('assessment-list');
+    if (!list) return;
+    list.textContent='Loading assessments…';
+    try {
+      operationsState.assessmentTypes = await operationsApi('api_listAssessmentTypes', { include_inactive:true }) || [];
+      const today = new Date();
+      const response = await operationsApi('api_getAssessmentsForMonth', today.getFullYear(), today.getMonth()+1);
+      operationsState.assessments = response.assessments || [];
+      const typeSelect = document.getElementById('assessment-type'); typeSelect.replaceChildren();
+      operationsState.assessmentTypes.filter((type) => type.active).forEach((type) => { const option=document.createElement('option'); option.value=type.id; option.textContent=type.name; typeSelect.appendChild(option); });
+      const contractSelect = document.getElementById('assessment-contract'); contractSelect.replaceChildren();
+      (state.contracts || []).filter((contract) => !contract.archived).forEach((contract) => { const option=document.createElement('option'); option.value=contract.id; option.textContent=contract.name; contractSelect.appendChild(option); });
+      renderAssessmentList();
+    } catch (error) { list.textContent=error && error.message ? error.message : 'Could not load assessments.'; }
+  }
+
+  function renderAssessmentList() {
+    const list=document.getElementById('assessment-list'); list.replaceChildren();
+    if (!operationsState.assessmentTypes.length) { ledgerText(list,'ts-empty','Create an assessment type first. Your catalogue intentionally starts empty.'); return; }
+    if (!operationsState.assessments.length) { ledgerText(list,'ts-empty','No assessments in the current month.'); return; }
+    operationsState.assessments.forEach((assessment) => {
+      const row=document.createElement('label'); row.className='ts-ledger-row';
+      const identity=document.createElement('div'); const check=document.createElement('input'); check.type='checkbox'; check.value=assessment.id; check.disabled=assessment.locked; check.className='assessment-select'; identity.appendChild(check); const title=document.createElement('span'); title.className='ts-ledger-row__title'; title.style.marginLeft='10px'; title.textContent=assessment.organisation || 'Unspecified organisation'; identity.appendChild(title); ledgerText(identity,'ts-ledger-row__meta',[assessment.assessment_date,assessment.assessment_type_name].filter(Boolean).join(' · ')); row.appendChild(identity);
+      ledgerText(row,'ts-ledger-row__meta',assessment.locked ? 'Locked by issued invoice' : (assessment.invoice_id ? 'Draft invoice' : 'Ready'));
+      ledgerText(row,'ts-ledger-row__amount',assessment.contract_name || '');
+      const actions=document.createElement('div'); actions.className='ts-ledger-row__actions'; if (!assessment.locked) { const remove=document.createElement('button'); remove.type='button'; remove.className='ghost small'; remove.textContent='Delete'; remove.addEventListener('click',async (event)=>{ event.preventDefault(); remove.textContent=remove.dataset.confirm ? 'Delete' : 'Confirm delete'; if (!remove.dataset.confirm) { remove.dataset.confirm='1'; return; } const result=await operationsApi('api_deleteAssessment',assessment.id); if(result.success===false) operationsStatus(result.message,'warn'); else renderAssessmentsPage(); }); actions.appendChild(remove); } row.appendChild(actions); list.appendChild(row);
+    });
+  }
+
+  document.getElementById('expense-add')?.addEventListener('click',()=>openExpenseForm('transaction'));
+  document.getElementById('expense-rule-add')?.addEventListener('click',()=>openExpenseForm('rule'));
+  document.getElementById('expense-form-cancel')?.addEventListener('click',()=>document.getElementById('expense-form').style.display='none');
+  document.getElementById('expense-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); const payload={ vendor:document.getElementById('expense-vendor').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, start_date:document.getElementById('expense-date').value, frequency:document.getElementById('expense-frequency').value, active:true }; const api=operationsState.expenseMode==='rule'?'api_upsertExpenseRule':'api_upsertExpenseTransaction'; const result=await operationsApi(api,payload); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsStatus(operationsState.expenseMode==='rule'?'Expense rule saved':'Expense recorded'); renderExpensesPage(); });
+  document.querySelectorAll('[data-expense-tab]').forEach((button)=>button.addEventListener('click',()=>{ operationsState.expenseTab=button.dataset.expenseTab; document.querySelectorAll('[data-expense-tab]').forEach((item)=>{ const active=item===button; item.classList.toggle('is-active',active); item.setAttribute('aria-selected',String(active)); }); ['transactions','rules','report'].forEach((name)=>{ document.getElementById(`expense-${name}-panel`).style.display=name===operationsState.expenseTab?'block':'none'; }); }));
+  document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
+  document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });
+
+  document.getElementById('assessment-type-add')?.addEventListener('click',()=>{ document.getElementById('assessment-type-form').style.display='block'; document.getElementById('assessment-type-name').focus(); });
+  document.getElementById('assessment-add')?.addEventListener('click',()=>{ if(!operationsState.assessmentTypes.length){operationsStatus('Create an assessment type first.','warn');return;} const form=document.getElementById('assessment-form'); form.style.display='block'; form.reset(); document.getElementById('assessment-date').value=new Date().toISOString().slice(0,10); document.getElementById('assessment-date').focus(); });
+  document.querySelectorAll('[data-close-form]').forEach((button)=>button.addEventListener('click',()=>document.getElementById(button.dataset.closeForm).style.display='none'));
+  document.getElementById('assessment-type-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); try { const result=await operationsApi('api_upsertAssessmentType',{name:document.getElementById('assessment-type-name').value,field_definitions:JSON.parse(document.getElementById('assessment-type-fields').value||'[]'),line_templates:JSON.parse(document.getElementById('assessment-type-lines').value||'[]'),active:true}); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; event.currentTarget.reset(); operationsStatus('Assessment type saved'); renderAssessmentsPage(); } catch(error){operationsStatus(error.message||'Invalid assessment configuration.','warn');} });
+  document.getElementById('assessment-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); try { const result=await operationsApi('api_upsertAssessment',{assessment_date:document.getElementById('assessment-date').value,contract_id:document.getElementById('assessment-contract').value,assessment_type_id:document.getElementById('assessment-type').value,organisation:document.getElementById('assessment-organisation').value,percentage_adjustment:Number(document.getElementById('assessment-adjustment').value),field_values:JSON.parse(document.getElementById('assessment-values').value||'{}')}); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsStatus('Assessment saved'); renderAssessmentsPage(); } catch(error){operationsStatus(error.message||'Invalid field values.','warn');} });
+  document.getElementById('assessment-invoice')?.addEventListener('click',async()=>{ const ids=Array.from(document.querySelectorAll('.assessment-select:checked')).map((input)=>input.value); if(!ids.length){operationsStatus('Select at least one assessment.','warn');return;} const result=await operationsApi('api_generateAssessmentInvoices',{assessment_ids:ids,grouping:'combined',invoice_date:new Date().toISOString().slice(0,10)}); if(result.success===false){operationsStatus(result.message,'warn');return;} operationsStatus('Assessment invoice draft created'); renderAssessmentsPage(); if(typeof loadInvoicesList==='function') loadInvoicesList(); });
+
+  function renderInvoiceLedgerControls(invoice, paymentState) {
+    const status=String(invoice && invoice.status || 'draft');
+    const draft=status==='draft';
+    const issued=status==='issued'||status==='sent';
+    const paid=paymentState && paymentState.state==='paid';
+    const toggle=(id,show,disabled)=>{const el=document.getElementById(id);if(!el)return;el.style.display=show?'inline-flex':'none';el.disabled=!!disabled;};
+    toggle('btn-invoice-recalculate',draft,false); toggle('btn-invoice-issue',draft,false); toggle('btn-invoice-payment',issued,paid); toggle('btn-invoice-revise',status!=='draft',false); toggle('btn-invoice-void',issued,!!(paymentState&&paymentState.paid_amount));
+  }
+
+  async function refreshCurrentInvoice(result) {
+    if(result&&result.success===false){operationsStatus(result.message,'warn');return false;}
+    const detail=result&&result.invoice;
+    const id=detail&&detail.invoice?detail.invoice.id:(detail&&detail.id?detail.id:(state.invoiceSelectedId||''));
+    if(id&&typeof loadInvoiceDetail==='function') loadInvoiceDetail(id,{force:true});
+    if(typeof loadInvoicesList==='function') loadInvoicesList();
+    return true;
+  }
+
+  document.getElementById('btn-invoice-recalculate')?.addEventListener('click',async()=>{ const result=await operationsApi('api_recalculateInvoiceDraft',state.invoiceSelectedId); if(await refreshCurrentInvoice(result)) operationsStatus('Draft recalculated'); });
+  document.getElementById('btn-invoice-issue')?.addEventListener('click',async(event)=>{ const button=event.currentTarget; if(!button.dataset.confirm){button.dataset.confirm='1';button.textContent='Confirm issue';operationsStatus('Issuing locks the invoice and its line snapshots.','warn');return;} const result=await operationsApi('api_issueInvoice',state.invoiceSelectedId); button.dataset.confirm='';button.textContent='Issue'; if(await refreshCurrentInvoice(result)) operationsStatus('Invoice issued'); });
+  document.getElementById('btn-invoice-revise')?.addEventListener('click',async()=>{ const result=await operationsApi('api_reviseInvoice',{id:state.invoiceSelectedId}); if(await refreshCurrentInvoice(result)) operationsStatus('Revision draft created'); });
+  document.getElementById('btn-invoice-void')?.addEventListener('click',(event)=>{ const button=event.currentTarget; const existing=document.getElementById('invoice-void-form'); if(existing){existing.remove();return;} const form=document.createElement('form'); form.id='invoice-void-form'; form.style.cssText='display:flex;gap:8px;align-items:end;margin-top:12px;flex-wrap:wrap'; const wrap=document.createElement('div'); const label=document.createElement('label'); label.htmlFor='invoice-void-reason';label.textContent='Reason for void'; const input=document.createElement('input');input.id='invoice-void-reason';input.required=true;input.maxLength=500; wrap.append(label,input); const confirm=document.createElement('button');confirm.type='submit';confirm.className='danger';confirm.textContent='Confirm void'; const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='Cancel';cancel.addEventListener('click',()=>form.remove()); form.append(wrap,confirm,cancel); form.addEventListener('submit',async(e)=>{e.preventDefault();const result=await operationsApi('api_voidInvoice',{id:state.invoiceSelectedId,reason:input.value});if(await refreshCurrentInvoice(result))operationsStatus('Invoice voided');form.remove();}); button.closest('.ts-card--section').appendChild(form);input.focus(); });
+  document.getElementById('btn-invoice-payment')?.addEventListener('click',()=>{ const form=document.getElementById('invoice-payment-form');form.style.display='flex';document.getElementById('invoice-payment-date').value=new Date().toISOString().slice(0,10);document.getElementById('invoice-payment-amount').focus(); });
+  document.getElementById('invoice-payment-cancel')?.addEventListener('click',()=>document.getElementById('invoice-payment-form').style.display='none');
+  document.getElementById('invoice-payment-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const result=await operationsApi('api_addInvoicePayment',{invoice_id:state.invoiceSelectedId,payment_date:document.getElementById('invoice-payment-date').value,amount:Number(document.getElementById('invoice-payment-amount').value)});if(await refreshCurrentInvoice(result)){operationsStatus('Payment recorded');event.currentTarget.reset();event.currentTarget.style.display='none';}});
+
+  async function renderBasLedgerSummary() {
+    const target=document.getElementById('bas-ledger-summary');
+    if(!target)return;
+    const basisSelect=document.getElementById('bas-accounting-basis');
+    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    if(basisSelect)basisSelect.value=basis;
+    const now=new Date();
+    const fy=Number(state.basCurrentFy)||(now.getMonth()>=6?now.getFullYear()+1:now.getFullYear());
+    const calendarMonth=now.getMonth();
+    const quarter=Math.floor(((calendarMonth+6)%12)/3)+1;
+    const payload={financial_year:fy,period_type:state.companyBasQuarterly?'quarterly':'monthly',quarter:quarter,month:calendarMonth,accounting_basis:basis};
+    try {
+      const report=await operationsApi('api_calculateBasPeriod',payload);
+      target.replaceChildren();
+      [['Actual sales',report.actual.g1_total_sales],['GST on sales',report.actual.gst_on_sales],['GST credits',report.actual.gst_on_purchases],['Timesheet forecast',report.forecast.timesheet_income],['Scheduled expenses',report.forecast.scheduled_expenses],['Unpaid invoices',report.variance.unpaid_invoices],['Unreconciled expenses',report.variance.unreconciled_expenses]].forEach(([label,value])=>{const item=document.createElement('div');ledgerText(item,'ts-ledger-row__meta',label);const strong=document.createElement('strong');strong.textContent=operationsMoney(value);item.appendChild(strong);target.appendChild(item);});
+      document.getElementById('bas-ledger-period').textContent=`${report.period.from} to ${report.period.to} · ${report.accounting_basis} basis`;
+      document.getElementById('bas-ledger-warnings').textContent=(report.warnings||[]).join(' ');
+    } catch(error) {
+      target.textContent=error.message||'Could not calculate ledger actuals.';
+    }
+  }
+  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();});
+</script>
