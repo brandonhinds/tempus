@@ -1,0 +1,183 @@
+<!--
+  Mobile auto-detect & redirect.
+  Runs before the desktop app boots so phone users are sent to the quick-entry
+  view. Detection is client-side only because Apps Script's doGet() never
+  receives the User-Agent header.
+
+  IMPORTANT: Apps Script serves this page inside a sandboxed iframe that blocks
+  programmatic top-frame navigation unless it's triggered by a user gesture.
+  So we attempt an automatic redirect (works where the sandbox allows it) but
+  always render a real tappable link as the visible UI, which is guaranteed to
+  navigate the top frame on tap (same mechanism as the app's other links).
+
+  View preference is stored in localStorage under 'ts_view_pref':
+    'desktop' -> always stay on desktop (escape hatch, set by the mobile view's
+                 "Desktop view" link so phones are never bounced back)
+    'mobile'  -> always go to the mobile view
+    (unset)   -> auto-detect: phones go to mobile, tablets/laptops stay
+-->
+<script>
+  (function () {
+    var VIEW_PREF_KEY = 'ts_view_pref';
+
+    function getPref() {
+      try { return localStorage.getItem(VIEW_PREF_KEY) || ''; } catch (e) { return ''; }
+    }
+
+    // Layered phone detection: prefer the explicit Client Hints signal, then a
+    // coarse-pointer + small-screen heuristic (catches iPhones; excludes iPads,
+    // which report ~768px+ on their shortest side), then a UA regex as a last resort.
+    function isPhone() {
+      try {
+        var uaData = navigator.userAgentData;
+        if (uaData && typeof uaData.mobile === 'boolean') {
+          // Chromium: true only for phones, false for tablets/desktops.
+          return uaData.mobile;
+        }
+      } catch (e) {}
+
+      var coarseNoHover = false;
+      try {
+        coarseNoHover = window.matchMedia &&
+          window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+      } catch (e) {}
+
+      var shortestSide = Math.min(
+        window.screen ? (window.screen.width || 0) : 0,
+        window.screen ? (window.screen.height || 0) : 0
+      );
+      // Fall back to viewport if screen metrics are unavailable.
+      if (!shortestSide) {
+        shortestSide = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+      }
+      if (coarseNoHover && shortestSide && shortestSide <= 480) {
+        return true;
+      }
+
+      // Final tiebreaker for touch browsers without Client Hints.
+      var ua = navigator.userAgent || '';
+      return /iPhone|iPod|Android.*Mobile|Windows Phone/i.test(ua);
+    }
+
+    var pref = getPref();
+    var goMobile = pref === 'mobile' || (pref !== 'desktop' && isPhone());
+    if (!goMobile) return;
+
+    // Hide the desktop UI immediately so there's no flash while we resolve the
+    // /exec URL (the sandbox iframe can't read it directly).
+    // The gate paints before the app boots, so it can't read the theme from CSS.
+    // Prefer the device-local snapshot the mobile app writes (localStorage 'ts_mobile_gate_theme'): it
+    // reflects the theme THIS device actually boots into — a mobile-only override, or the synced default
+    // when there's no override — so the splash never shows a desktop-only theme (and mobile never bleeds
+    // onto desktop). Fall back to the server-injected active theme (window.__TEMPUS_GATE_THEME__, resolved
+    // in doGet — see views/index.html), then to the dark-brand teal-on-dark if anything's missing.
+    var GATE_FALLBACK = { bg: '#05060a', panel: '#0e1424', text: '#e4e6eb', muted: '#8b92a0', primary: '#136f63', primaryText: '#ffffff' };
+    var GT = {};
+    try {
+      var snapRaw = localStorage.getItem('ts_mobile_gate_theme');
+      if (snapRaw) { var snap = JSON.parse(snapRaw); if (snap && snap.bg) GT = snap; }
+    } catch (e) {}
+    if (!GT.bg) { try { GT = window.__TEMPUS_GATE_THEME__ || {}; } catch (e2) { GT = {}; } }
+    function c(k) { return GT[k] || GATE_FALLBACK[k]; }
+    // Subtle derived tints (color-mix is supported across modern mobile browsers, as in the app's CSS).
+    function mix(a, b, pct) { return 'color-mix(in srgb, ' + a + ' ' + pct + '%, ' + b + ')'; }
+
+    // Layout: the icon, wordmark and button are one tight unit nudged to the optical centre (slightly
+    // above geometric centre); the "Not on a phone?" line sits in a subtle grey strip pinned to the foot.
+    var style = document.createElement('style');
+    style.textContent =
+      'body{visibility:hidden!important}' +
+      '#ts-mobile-redirect{visibility:visible!important;position:fixed;inset:0;z-index:99999;' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'background:' + c('bg') + ';color:' + c('text') + ';font-family:system-ui,-apple-system,sans-serif;' +
+      'text-align:center;padding:28px;box-sizing:border-box}' +
+      '#ts-mobile-redirect .tsmr-group{display:flex;flex-direction:column;align-items:center;width:100%;transform:translateY(-12vh)}' +
+      '#ts-mobile-redirect .tsmr-icon{width:64px;height:64px;border-radius:18px;background:' + c('primary') + ';color:' + c('primaryText') + ';' +
+      'display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px ' + mix(c('primary'), 'transparent', 30) + ';margin-bottom:16px}' +
+      '#ts-mobile-redirect .tsmr-icon svg{width:34px;height:34px}' +
+      '#ts-mobile-redirect .tsmr-title{margin:0 0 24px;font-size:24px;font-weight:800;letter-spacing:-0.01em;color:' + c('text') + '}' +
+      '#ts-mobile-redirect .tsmr-spinner{width:40px;height:40px;border-radius:50%;' +
+      'border:4px solid ' + mix(c('muted'), 'transparent', 25) + ';border-top-color:' + c('primary') + ';animation:tsmr-spin 1s linear infinite}' +
+      '@keyframes tsmr-spin{to{transform:rotate(360deg)}}' +
+      '#ts-mobile-redirect .tsmr-cta{display:none;text-decoration:none;background:' + c('primary') + ';color:' + c('primaryText') + ';' +
+      'font-size:17px;font-weight:700;padding:17px 36px;border-radius:14px;width:100%;max-width:340px;box-sizing:border-box;' +
+      'box-shadow:0 6px 20px ' + mix(c('primary'), 'transparent', 30) + '}' +
+      '#ts-mobile-redirect .tsmr-footer{position:fixed;left:0;right:0;bottom:0;box-sizing:border-box;' +
+      'padding:15px 20px;padding-bottom:calc(15px + env(safe-area-inset-bottom));' +
+      'background:' + mix(c('text'), c('bg'), 7) + ';border-top:1px solid ' + mix(c('text'), c('bg'), 12) + ';text-align:center}' +
+      '#ts-mobile-redirect .tsmr-alt{margin:0;font-size:14px;color:' + c('muted') + '}' +
+      '#ts-mobile-redirect .tsmr-alt a{color:' + mix(c('primary'), c('text'), 65) + '}';
+    document.documentElement.appendChild(style);
+
+    var overlay, spinner, cta, footer;
+    function buildOverlay() {
+      if (document.getElementById('ts-mobile-redirect')) return;
+      overlay = document.createElement('div');
+      overlay.id = 'ts-mobile-redirect';
+      overlay.innerHTML =
+        '<div class="tsmr-group">' +
+          '<div class="tsmr-icon" aria-hidden="true"><svg viewBox="0 0 256 256"><polyline points="220 20 36 20 128 153.44 196 56 92 56 220 240 36 240 96 152 128 204" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
+          '<h1 class="tsmr-title">Tempus</h1>' +
+          '<div class="tsmr-spinner"></div>' +
+          '<a class="tsmr-cta" target="_top" href="#">Open</a>' +
+        '</div>' +
+        '<div class="tsmr-footer"><p class="tsmr-alt">Not on a phone? <a target="_top" href="#" id="tsmr-desktop">Use the desktop version</a></p></div>';
+      (document.body || document.documentElement).appendChild(overlay);
+      spinner = overlay.querySelector('.tsmr-spinner');
+      cta = overlay.querySelector('.tsmr-cta');
+      footer = overlay.querySelector('.tsmr-footer');
+    }
+    if (document.body) buildOverlay();
+    else document.addEventListener('DOMContentLoaded', buildOverlay);
+
+    function bareUrl(url) {
+      var sep = url.indexOf('?') === -1 ? '?' : '&';
+      return { mobile: url + sep + 'view=mobile', desktop: url };
+    }
+
+    function onUrl(url) {
+      // The script runs in <head>, so defer until there's a body to mount the overlay into.
+      if (!document.body) { document.addEventListener('DOMContentLoaded', function () { onUrl(url); }); return; }
+      buildOverlay();
+      if (!url) {
+        // Couldn't resolve the URL — fall back to the desktop app.
+        if (overlay) overlay.remove();
+        if (style) style.remove();
+        return;
+      }
+      var urls = bareUrl(url);
+
+      // Make the visible CTA a real link (guaranteed to work on tap).
+      cta.href = urls.mobile;
+      var desktopLink = overlay.querySelector('#tsmr-desktop');
+      desktopLink.href = urls.desktop;
+      desktopLink.addEventListener('click', function () {
+        try { localStorage.setItem(VIEW_PREF_KEY, 'desktop'); } catch (e) {}
+      });
+
+      // The URL is known, so reveal the button straight away (no spinner) — the tap is what reliably
+      // navigates the sandboxed top frame anyway.
+      if (spinner) spinner.style.display = 'none';
+      cta.style.display = 'inline-block';
+
+      // Best-effort automatic redirect; works only where the sandbox permits it, harmless otherwise.
+      try { window.top.location.href = urls.mobile; } catch (e) {}
+    }
+
+    // Prefer the URL injected at render time (instant); fall back to the async lookup if it's missing.
+    var injectedUrl = '';
+    try { injectedUrl = window.__TEMPUS_WEBAPP_URL__ || ''; } catch (e) {}
+    if (injectedUrl) {
+      onUrl(injectedUrl);
+    } else {
+      try {
+        google.script.run
+          .withSuccessHandler(onUrl)
+          .withFailureHandler(function () { onUrl(''); })
+          .api_getWebAppUrl();
+      } catch (e) {
+        onUrl('');
+      }
+    }
+  })();
+</script>

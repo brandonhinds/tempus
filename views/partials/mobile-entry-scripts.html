@@ -29,19 +29,23 @@
       status: document.getElementById('mobile-status'),
       date: document.getElementById('mobile-date'),
       dateLabel: document.getElementById('mobile-date-label'),
-      datePrev: document.getElementById('mobile-date-prev'),
-      dateNext: document.getElementById('mobile-date-next'),
-      dayCard: document.getElementById('mobile-day-card'),
-      dayNumber: document.getElementById('mobile-day-number'),
-      dayTotal: document.getElementById('mobile-day-total'),
-      dayHourTypes: document.getElementById('mobile-day-hour-types'),
+      dateMain: document.getElementById('mobile-date-main'),
+      dateSub: document.getElementById('mobile-date-sub'),
+      dateToday: document.getElementById('mobile-date-today'),
+      entriesCard: document.getElementById('mobile-entries-card'),
+      entriesList: document.getElementById('mobile-entries-list'),
+      dayTotalVal: document.getElementById('mobile-day-total-val'),
+      emptyState: document.getElementById('mobile-empty-state'),
+      quickBtn: document.getElementById('mobile-quick-entry'),
+      quickSheet: document.getElementById('mobile-quick-sheet'),
+      quickList: document.getElementById('mobile-quick-list'),
       datePicker: document.getElementById('mobile-date-picker'),
-      datePickerClose: document.getElementById('mobile-date-picker-close'),
       dateMonthPrev: document.getElementById('mobile-date-month-prev'),
       dateMonthNext: document.getElementById('mobile-date-month-next'),
       dateMonthLabel: document.getElementById('mobile-date-month-label'),
       dateWeekdays: document.getElementById('mobile-day-picker-weekdays'),
       dateGrid: document.getElementById('mobile-day-picker-grid'),
+      seg: document.getElementById('mobile-seg'),
       tabManual: document.getElementById('mobile-tab-manual'),
       tabPunch: document.getElementById('mobile-tab-punch'),
       manualHourType: document.getElementById('mobile-manual-hour-type'),
@@ -55,18 +59,67 @@
       panelManual: document.getElementById('mobile-panel-manual'),
       panelPunch: document.getElementById('mobile-panel-punch'),
       hours: document.getElementById('mobile-hours'),
-      punchList: document.getElementById('mobile-punch-list'),
-      punchSummary: document.getElementById('mobile-punch-summary'),
-      punchWarning: document.getElementById('mobile-punch-warning'),
       punchSuggestion: document.getElementById('mobile-punch-suggestion'),
       punchToggle: document.getElementById('mobile-punch-toggle'),
-      punchSave: document.getElementById('mobile-punch-save'),
-      punchDiscard: document.getElementById('mobile-punch-discard'),
-      punchDelete: document.getElementById('mobile-delete-punch'),
-      manualSave: document.getElementById('mobile-save'),
-      manualDelete: document.getElementById('mobile-delete'),
-      manualCancel: document.getElementById('mobile-cancel-edit')
+      punchClockstat: document.getElementById('mobile-punch-clockstat'),
+      punchSince: document.getElementById('mobile-punch-since'),
+      punchTimer: document.getElementById('mobile-punch-timer'),
+      appbarClock: document.getElementById('mobile-appbar-clock'),
+      appbarClockTime: document.getElementById('mobile-appbar-clock-time'),
+      punchEditor: document.getElementById('mobile-punch-editor'),
+      punchEditorSub: document.getElementById('mobile-punch-editor-sub'),
+      punchEditorList: document.getElementById('mobile-punch-editor-list'),
+      punchEditorDone: document.getElementById('mobile-punch-editor-done'),
+      themeTrigger: document.getElementById('mobile-theme-trigger'),
+      themeSheet: document.getElementById('mobile-theme-sheet'),
+      themeList: document.getElementById('mobile-theme-list'),
+      hoursDisplay: document.getElementById('mobile-hours-display'),
+      hoursVal: document.getElementById('mobile-hours-val'),
+      keypad: document.getElementById('mobile-keypad'),
+      keypadDone: document.getElementById('mobile-keypad-done'),
+      padVal: document.getElementById('mobile-pad-val'),
+      padGrid: document.getElementById('mobile-pad-grid')
     };
+
+    // Hour-type icons — mirrors HOUR_TYPE_ICONS in scripts.html so the mobile quick-log + entry rows show
+    // the same glyphs as desktop (the two bundles don't share code). Falls back to the clock.
+    const HOUR_TYPE_ICONS = {
+      clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+      sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>',
+      heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>',
+      plane: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3.5S18 3 16.5 4.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>',
+      umbrella: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2M12 20a2 2 0 0 0 4 0v-1M2 12a10 10 0 0 1 20 0Z"/></svg>',
+      coffee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M6 2v2M10 2v2M14 2v2"/></svg>',
+      book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>',
+      cap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1 2.7 2.5 6 2.5s6-1.5 6-2.5v-5M22 10v6"/></svg>',
+      home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>',
+      briefcase: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+      moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
+      zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/></svg>',
+      star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"/></svg>',
+      calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+      baby: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h.01M15 12h.01M10 16c.5.3 1.2.5 2 .5s1.5-.2 2-.5"/><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/></svg>',
+      tool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.1-2.1 2.5-2.5Z"/></svg>',
+      cross: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z"/></svg>',
+      pill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 20.5a5 5 0 0 1-7-7l6-6a5 5 0 0 1 7 7Z"/><path d="M8.5 8.5l7 7"/></svg>',
+      bed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8v12M2 14h20v6M22 14v-2a3 3 0 0 0-3-3H10v5"/><circle cx="6" cy="11.5" r="1.5"/></svg>',
+      users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+      phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>',
+      laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 20h20"/></svg>',
+      car: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13M5 13h14v4H5Z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/></svg>',
+      truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h12v10H2zM14 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>',
+      dollar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9 9.5 12 10.5s5 1.6 5 4-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>',
+      flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4s2-1 5-1 5 2 8 2 3-1 3-1v10s-1 1-3 1-5-2-8-2-5 1-5 1"/></svg>',
+      pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+      snow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M4 6l16 12M20 6 4 18M2 12h20"/></svg>',
+      gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v9H4v-9M2 7h20v5H2zM12 22V7M12 7S11 2 8.5 2 6 5 8 7M12 7s1-5 3.5-5S18 5 16 7"/></svg>',
+      music: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+      dumbbell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5 17.5 17.5M3 9l3-3 2 2-3 3zM16 19l3-3-2-2-3 3zM6.5 6.5 4 4M17.5 17.5 20 20"/></svg>',
+      leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13c0-6 7-10 16-10 0 9-4 16-10 16-2 0-5-1-5-1M5 21c2-6 7-10 12-12"/></svg>',
+      globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>',
+      palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .9-1.5 2-1.5h2a4 4 0 0 0 4-4c0-5-4.5-10-9-10Z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>'
+    };
+    const hourTypeIconSvg = (key) => HOUR_TYPE_ICONS[key] || HOUR_TYPE_ICONS.clock;
 
     const state = {
       currentDate: todayIso(),
@@ -90,19 +143,76 @@
       datePicker: { year: null, month: null }
     };
 
+    // The standard working day. Shared with desktop via the target_hours_per_day setting (falls back to
+    // 7.5h). Read lazily so it tracks the setting once it's hydrated, rather than freezing at load time.
+    const DEFAULT_TARGET_HOURS_PER_DAY = 7.5;
+    const targetHoursPerDay = () => {
+      const v = Number(state.settings ? state.settings.target_hours_per_day : NaN);
+      return Number.isFinite(v) && v > 0 ? v : DEFAULT_TARGET_HOURS_PER_DAY;
+    };
+    const standardDayMinutes = () => targetHoursPerDay() * 60;
+
+    // Scroll back to top after a delete. The real scroller inside the Apps Script sandbox is uncertain
+    // (our container, the iframe document, or the cross-origin outer frame we can't touch), so try every
+    // reachable candidate — whichever one actually owns the scroll wins.
+    const scrollToTop = () => {
+      const candidates = [
+        document.querySelector('.ts-mobile-container'),
+        document.scrollingElement,
+        document.documentElement,
+        document.body
+      ];
+      candidates.forEach((el) => {
+        if (!el) return;
+        try { if (el.scrollTo) el.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
+        try { el.scrollTop = 0; } catch (e) {}
+      });
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { try { window.scrollTo(0, 0); } catch (_) {} }
+      const top = document.getElementById('mobile-entry');
+      if (top && top.scrollIntoView) { try { top.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }
+    };
+
+    let statusTimer = null;
     const setStatus = (message, tone = 'info') => {
       if (!dom.status) return;
-      dom.status.textContent = message || '';
-      dom.status.className = 'ts-mobile-row ts-mobile-status';
-      if (tone === 'error') dom.status.classList.add('ts-warning');
-      else dom.status.classList.add('ts-note');
+      if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+      // In-progress chatter ("Saving…", "Deleting…", "Loading…") is silent since everything reflects
+      // optimistically. We only speak up for a brief success confirmation ("Saved."/"Deleted.") or a
+      // database-level failure. Success is transient; an error stays until the next action replaces it.
+      const isError = tone === 'error';
+      const isSuccess = tone === 'success';
+      const show = (isError || isSuccess) && !!message;
+      dom.status.textContent = show ? message : '';
+      dom.status.className = 'ts-m-status' + (isError && show ? ' is-error' : '');
+      if (show && isSuccess) {
+        statusTimer = window.setTimeout(() => {
+          dom.status.textContent = '';
+          dom.status.className = 'ts-m-status';
+          statusTimer = null;
+        }, 2000);
+      }
     };
 
     const formatDateLabel = (iso) => {
-      if (!iso) return '--/--/----';
-      const parts = iso.split('-');
-      if (parts.length !== 3) return '--/--/----';
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      const d = new Date(iso + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) return '--';
+      return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    };
+
+    const formatDateSub = (iso) => {
+      const d = new Date(iso + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) return '';
+      const today = new Date(todayIso() + 'T00:00:00');
+      const deltaDays = Math.round((d - today) / 86400000);
+      if (deltaDays === 0) return 'Today';
+      if (deltaDays === -1) return 'Yesterday';
+      if (deltaDays === 1) return 'Tomorrow';
+      return String(d.getFullYear());
+    };
+
+    const trimHours = (value) => {
+      const n = parseFloat(value);
+      return Number.isFinite(n) ? String(n) : '0';
     };
 
     const formatDayNumber = (iso) => {
@@ -139,7 +249,22 @@
       return (total / 60).toFixed(2);
     };
 
-    const validContractsForDate = (dateIso) => state.contracts.filter((c) => contractIsValid(c, dateIso));
+    // Archived contracts are excluded — you can't log new time against them — but they stay in
+    // state.contracts so existing entries keep their name. Mirrors desktop's validContractsForDate.
+    const validContractsForDate = (dateIso) => state.contracts.filter((c) => !c.archived && contractIsValid(c, dateIso));
+
+    // Mirrors of desktop's contract-mode helpers (the two bundles don't share code beyond entryCore).
+    // A type "needs" a contract when it requires one outright or contributes to income (billable time
+    // must land on a contract); a contract's effective entry mode is its own override else the global
+    // default. Quick actions use these so mobile resolves contracts by the same rules as desktop.
+    const hourTypeNeedsContract = (ht) => !!ht && (!!ht.requires_contract || !!ht.contributes_to_income);
+    const contractEffectiveEntryMode = (c) => {
+      const m = c && c.entry_mode;
+      if (m === 'simple' || m === 'detailed') return m;
+      return (state.settings && state.settings.default_entry_mode === 'detailed') ? 'detailed' : 'simple';
+    };
+    const validContractsForDateAndMode = (dateIso, mode) =>
+      validContractsForDate(dateIso).filter((c) => contractEffectiveEntryMode(c) === mode);
 
     const renderHourTypeSelect = (select) => {
       if (!select) return;
@@ -169,16 +294,19 @@
       if (dom.punchHourTypeCol) dom.punchHourTypeCol.style.display = shouldShow ? 'block' : 'none';
     };
 
-    const renderContractsForSelect = (select, warningEl, hourTypeId, preferredContractId) => {
+    // A contract only appears on the surface it's set up for (desktop parity): the Basic form writes
+    // Simple entries so it lists Simple-mode contracts; the Punch form writes Sessions so it lists
+    // Detailed-mode ones. `entryMode` picks the list.
+    const renderContractsForSelect = (select, warningEl, hourTypeId, preferredContractId, entryMode) => {
       if (!select) return;
       const dateIso = state.currentDate;
       const hourType = state.hourTypeMap[hourTypeId || defaultHourTypeId()] || {};
-      const requiresContract = !!hourType.requires_contract;
-      const valid = validContractsForDate(dateIso);
+      const needsContract = hourTypeNeedsContract(hourType);
+      const valid = validContractsForDateAndMode(dateIso, entryMode);
       select.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = requiresContract ? 'Select contract' : (valid.length ? 'Not required (optional)' : 'Not required');
+      placeholder.textContent = needsContract ? 'Select contract' : 'No contract';
       select.appendChild(placeholder);
       valid.forEach((c) => {
         const option = document.createElement('option');
@@ -188,9 +316,11 @@
       });
       const preferred = preferredContractId || '';
       const fallback = preferred && valid.some((c) => c.id === preferred) ? preferred : '';
-      select.value = fallback || (valid[0] ? valid[0].id : '');
-      select.disabled = requiresContract && !valid.length;
-      if (warningEl) warningEl.style.display = requiresContract && !select.value ? 'block' : 'none';
+      // Optional (non-contract) hour types default to "No contract"; required types keep auto-selecting a
+      // contract as before so the field is never left empty when one is mandatory.
+      select.value = fallback || (needsContract && valid[0] ? valid[0].id : '');
+      select.disabled = needsContract && !valid.length;
+      if (warningEl) warningEl.style.display = needsContract && !select.value ? 'block' : 'none';
     };
 
     const renderContracts = (opts = {}) => {
@@ -201,61 +331,161 @@
       const punchPreferred = opts.punchPreferred != null
         ? opts.punchPreferred
         : (dom.punchContract ? dom.punchContract.value : (state.currentEntry?.contract_id || ''));
-      renderContractsForSelect(dom.manualContract, dom.manualContractWarning, hourTypeId, manualPreferred);
-      renderContractsForSelect(dom.punchContract, dom.punchContractWarning, hourTypeId, punchPreferred);
+      renderContractsForSelect(dom.manualContract, dom.manualContractWarning, hourTypeId, manualPreferred, 'simple');
+      renderContractsForSelect(dom.punchContract, dom.punchContractWarning, hourTypeId, punchPreferred, 'detailed');
     };
 
-    const entryTypeForMode = (mode) => (mode === 'punch' ? 'advanced' : 'basic');
-
-    const findExistingForHourType = () => {
-      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
-      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === hourTypeId && e.date === state.currentDate) || null;
+    // Which entry surfaces the current day offers (desktop's dayEntryModes, mirrored): the union over the
+    // contracts valid that day (by effective mode), PLUS the kind of any entry already logged (so an
+    // existing entry never becomes unreachable if a contract's mode later changes), falling back to the
+    // global default when the day has no signal at all.
+    const dayEntryModes = () => {
+      let simple = false, detailed = false;
+      validContractsForDate(state.currentDate).forEach((c) => {
+        if (contractEffectiveEntryMode(c) === 'detailed') detailed = true; else simple = true;
+      });
+      (state.entries || []).forEach((e) => {
+        if (!e || e.date !== state.currentDate) return;
+        if ((e.entry_type || 'basic') === 'advanced') detailed = true; else simple = true;
+      });
+      if (!simple && !detailed) {
+        if (state.settings && state.settings.default_entry_mode === 'detailed') detailed = true; else simple = true;
+      }
+      return { simple, detailed, both: simple && detailed };
     };
 
-    const syncTabAvailability = () => {
-      const entry = findExistingForHourType();
-      const entryType = entry ? (entry.entry_type || 'basic') : null;
-      const basicAllowed = !entryType || entryType === 'basic';
-      const punchAllowed = !entryType || entryType === 'advanced';
-      if (dom.tabManual) dom.tabManual.classList.toggle('disabled', !basicAllowed);
-      if (dom.tabPunch) dom.tabPunch.classList.toggle('disabled', !punchAllowed);
+    // Collapse the Basic/Punch chrome to what the day actually offers: one mode → hide the segmented
+    // control and force the matching panel (a Sessions-only user never sees Total hours); both → keep the
+    // toggle and the user's chosen mode. Replaces the old whole-day entry-method lock — the real
+    // invariant (one Basic OR Punch entry per hour type + contract) is enforced at save, like desktop.
+    const applyDayModeChrome = () => {
+      const modes = dayEntryModes();
+      if (dom.seg) dom.seg.style.display = modes.both ? 'flex' : 'none';
+      const target = modes.both ? state.mode : (modes.detailed ? 'punch' : 'manual');
+      setMode(target);
     };
 
     const updateManualActions = () => {
-      if (!dom.manualSave) return;
-      const isEdit = !!state.currentEntry && entryTypeForMode('manual') === (state.currentEntry.entry_type || 'basic');
-      dom.manualSave.textContent = isEdit ? 'Update Entry' : 'Add Entry';
-      if (dom.manualDelete) dom.manualDelete.style.display = isEdit ? 'inline-flex' : 'none';
-      if (dom.manualCancel) dom.manualCancel.style.display = isEdit ? 'inline-flex' : 'none';
+      // The manual panel has no action buttons anymore — the keypad commits and swipe deletes. Just keep
+      // the Quick log trigger in sync.
+      renderQuickEntryButton();
     };
 
-    const updatePunchActions = () => {
-      if (dom.punchSave) dom.punchSave.textContent = state.currentEntry ? 'Update Entry' : 'Add Entry';
-      if (dom.punchDelete) dom.punchDelete.style.display = state.currentEntry ? 'inline-flex' : 'none';
-      if (dom.punchDiscard) dom.punchDiscard.style.display = state.punchDirty ? 'inline-flex' : 'none';
+    // "HH:MM" (24h) → "h:mm am/pm" for display. Times are stored 24h; the UI shows 12h.
+    const to12h = (hhmm) => {
+      const m = timeToMinutes(hhmm);
+      if (m === null) return hhmm || '--';
+      let h = Math.floor(m / 60);
+      const min = m % 60;
+      const ampm = h >= 12 ? 'pm' : 'am';
+      h = h % 12; if (h === 0) h = 12;
+      return h + ':' + String(min).padStart(2, '0') + ' ' + ampm;
     };
+    // Wall-clock time of the last Punch In this session — used to ignore an accidental double-tap clock-out.
+    let lastPunchInMs = 0;
 
-    const setMode = (mode, opts = {}) => {
-      const targetMode = mode === 'punch' ? 'punch' : 'manual';
-      const targetEntryType = entryTypeForMode(targetMode);
-      if (!opts.force) {
-        const entry = findExistingForHourType();
-        const entryType = entry ? (entry.entry_type || 'basic') : null;
-        if (entryType && entryType !== targetEntryType) {
-          const label = entryType === 'advanced' ? 'Advanced' : 'Basic';
-          setStatus(`This hour type uses ${label} entry. Switch hour type to change input mode.`, 'error');
-          syncTabAvailability();
-          return;
-        }
+    // The day's advanced (punch) entry for the currently-selected hour type + contract, if any.
+    const findDayPunchEntry = () => {
+      const ht = state.selectedHourTypeId || defaultHourTypeId();
+      const contractId = dom.punchContract ? dom.punchContract.value : '';
+      return (state.entries || []).find((e) => e && e.date === state.currentDate
+        && (e.entry_type || 'basic') === 'advanced'
+        && (e.hour_type_id || defaultHourTypeId()) === ht
+        && (e.contract_id || '') === (contractId || '')) || null;
+    };
+    const openSessionOf = (entry) => (entry && (entry.punches || []).find((p) => p && p.in && !p.out)) || null;
+
+    let clockTimer = null;
+    const fmtElapsed = (ms) => {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      return Math.floor(s / 3600) + 'h ' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm ' + String(s % 60).padStart(2, '0') + 's';
+    };
+    const tickClock = () => {
+      const open = openSessionOf(findDayPunchEntry());
+      if (!open || !dom.punchTimer) { if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } return; }
+      const inMin = timeToMinutes(open.in);
+      if (inMin === null) return;
+      const now = new Date();
+      const start = new Date(now); start.setHours(Math.floor(inMin / 60), inMin % 60, 0, 0);
+      dom.punchTimer.textContent = fmtElapsed(now.getTime() - start.getTime());
+    };
+    // Reflect the saved day's punch state into the clock: on the clock (open session) vs idle, the live
+    // timer, and the hero button label/enabled state. The saved entries are the source of truth now.
+    const updatePunchClock = () => {
+      if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+      const entry = findDayPunchEntry();
+      const open = openSessionOf(entry);
+      const ht = state.hourTypeMap[state.selectedHourTypeId || defaultHourTypeId()] || {};
+      const hasContract = dom.punchContract ? !!dom.punchContract.value : true;
+      if (dom.punchToggle) {
+        dom.punchToggle.textContent = open ? 'Punch Out' : 'Punch In';
+        dom.punchToggle.classList.toggle('is-out', !!open);
+        dom.punchToggle.disabled = state.loading || (hourTypeNeedsContract(ht) && !hasContract);
       }
-      state.mode = targetMode;
+      if (dom.punchClockstat) dom.punchClockstat.style.display = open ? 'flex' : 'none';
+      if (open && dom.punchSince) dom.punchSince.textContent = to12h(open.in);
+      // Only run the live timer for today; a past day's "open" punch shows just its start time.
+      if (open && state.currentDate === todayIso()) { tickClock(); clockTimer = setInterval(tickClock, 1000); }
+    };
+
+    // ----- App-bar live clock: shows next to the brand on EVERY view (Basic or Punch) while a punch is open
+    // today, so the running clock is always visible (not just on the Punch view's hero panel). -----
+    const fmtClock = (ms) => {
+      let s = Math.max(0, Math.floor(ms / 1000));
+      const h = Math.floor(s / 3600); s -= h * 3600;
+      const m = Math.floor(s / 60); s -= m * 60;
+      const p = (n) => String(n).padStart(2, '0');
+      return (h > 0 ? h + ':' + p(m) : String(m)) + ':' + p(s);
+    };
+    // The earliest open-session start (minutes-of-day) among the CURRENT day's entries — any hour type, so a
+    // forgotten open punch of a different type than the one selected still surfaces a clock. null if none.
+    const currentDayOpenStartMin = () => {
+      let earliest = null;
+      (state.entries || []).forEach((e) => {
+        if (!e || e.date !== state.currentDate || !Array.isArray(e.punches)) return;
+        e.punches.forEach((p) => {
+          if (p && p.in && !p.out) {
+            const m = timeToMinutes(p.in);
+            if (m !== null && (earliest === null || m < earliest)) earliest = m;
+          }
+        });
+      });
+      return earliest;
+    };
+    let headerClockTimer = null;
+    const tickHeaderClock = () => {
+      if (!dom.appbarClock || !dom.appbarClockTime) return;
+      const startMin = currentDayOpenStartMin();
+      // Only a live clock for an open punch on TODAY (a past/future open punch can't show sensible elapsed).
+      if (startMin === null || state.currentDate !== todayIso()) {
+        dom.appbarClock.style.display = 'none';
+        if (headerClockTimer) { clearInterval(headerClockTimer); headerClockTimer = null; }
+        return;
+      }
+      dom.appbarClock.style.display = 'inline-flex';
+      const now = new Date();
+      const start = new Date(now); start.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+      dom.appbarClockTime.textContent = fmtClock(now.getTime() - start.getTime());
+    };
+    const updateHeaderClock = () => {
+      if (headerClockTimer) { clearInterval(headerClockTimer); headerClockTimer = null; }
+      tickHeaderClock();
+      if (dom.appbarClock && dom.appbarClock.style.display !== 'none') {
+        headerClockTimer = setInterval(tickHeaderClock, 1000);
+      }
+    };
+
+    // Switching is always free — the old "can't switch, this day already has a X entry" guard is gone.
+    // A same-(hour type, contract) conflict surfaces at save via the duplicate guard instead, matching
+    // desktop's Basic/Sessions tabs.
+    const setMode = (mode) => {
+      state.mode = mode === 'punch' ? 'punch' : 'manual';
       if (dom.tabManual) dom.tabManual.classList.toggle('active', state.mode === 'manual');
       if (dom.tabPunch) dom.tabPunch.classList.toggle('active', state.mode === 'punch');
       if (dom.panelManual) dom.panelManual.style.display = state.mode === 'manual' ? 'block' : 'none';
       if (dom.panelPunch) dom.panelPunch.style.display = state.mode === 'punch' ? 'block' : 'none';
       updateManualActions();
-      updatePunchActions();
-      syncTabAvailability();
+      updatePunchClock();
     };
 
     const sortHourTypeIds = (ids) => {
@@ -273,51 +503,219 @@
       });
     };
 
+    // The old "logged today" hero card was removed; renderDayCard is now just the day's render orchestrator.
     const renderDayCard = () => {
-      if (dom.dayNumber) dom.dayNumber.textContent = formatDayNumber(state.currentDate);
-      if (!dom.dayTotal || !dom.dayHourTypes) return;
-      dom.dayHourTypes.innerHTML = '';
-      dom.dayTotal.textContent = '';
-      if (!dom.dayCard) return;
-      dom.dayCard.classList.remove('has-entries');
-      const totals = state.entries.reduce((map, entry) => {
-        if (!entry || entry.date !== state.currentDate) return map;
-        const hourTypeId = entry.hour_type_id || defaultHourTypeId();
-        map[hourTypeId] = (map[hourTypeId] || 0) + (Number(entry.duration_minutes) || 0);
-        return map;
-      }, {});
-      const totalMinutes = Object.keys(totals).reduce((acc, key) => acc + totals[key], 0);
-      if (totalMinutes > 0) dom.dayCard.classList.add('has-entries');
-      if (!hourTypesEnabled() || !Object.keys(totals).length) {
-        if (totalMinutes > 0) {
-          dom.dayTotal.textContent = formatHours(roundDuration(totalMinutes, roundInterval()));
-        }
+      renderEntriesList();
+      // Re-derive the day's Basic/Punch chrome from its current contracts + entries (adding or deleting
+      // an entry can change which surfaces the day offers).
+      applyDayModeChrome();
+      syncHoursDisplay();
+      updatePunchClock();
+      updateHeaderClock();
+    };
+
+    // Delete an entry given the entry object (used by swipe-to-delete, independent of the form's
+    // currentEntry). Optimistic: removes locally and re-renders at once, then syncs the server in the
+    // background and restores on failure. Backend delete is idempotent, so a phantom row clears too.
+    const swipeDelete = async (entry) => {
+      if (!entry) return;
+      const id = entry.id;
+      const isCurrent = state.currentEntry && state.currentEntry.id === id;
+      if (isCurrent) {
+        state.currentEntry = null;
+        state.draftHours = '';
+        state.draftPunches = [{ in: '', out: '' }];
+        state.punchDirty = false;
+        hydrateDraftFromEntry(null, { preserveMode: true });
+      }
+      const backup = getCachedEntriesForDate(state.currentDate).slice();
+      removeEntryLocally(id);
+      renderDayCard();
+      scrollToTop(); // user scrolled down to the entries list to delete — bring them back to the top
+      if (typeof id === 'string' && id.indexOf('temp_') === 0) {
+        setStatus('Removed.', 'success');
         return;
       }
-      const defaultId = defaultHourTypeId();
-      const defaultMinutes = totals[defaultId] || 0;
-      const otherIds = sortHourTypeIds(Object.keys(totals).filter((id) => id !== defaultId && totals[id] > 0));
-      otherIds.forEach((hourTypeId) => {
-        const hourType = state.hourTypeMap[hourTypeId];
-        if (!hourType) return;
-        const chip = document.createElement('span');
-        chip.className = 'ts-calendar-hour-type-indicator';
-        if (hourTypeId === state.selectedHourTypeId) chip.classList.add('active');
-        chip.style.color = hourType.color;
-        chip.textContent = formatHours(roundDuration(totals[hourTypeId], roundInterval()));
-        chip.title = `${hourType.name}: ${chip.textContent}`;
-        chip.dataset.hourTypeId = hourTypeId;
-        chip.addEventListener('click', (event) => {
-          event.stopPropagation();
-          selectHourType(hourTypeId);
-        });
-        dom.dayHourTypes.appendChild(chip);
-      });
-      if (defaultMinutes > 0 || !otherIds.length) {
-        dom.dayTotal.textContent = defaultMinutes > 0
-          ? formatHours(roundDuration(defaultMinutes, roundInterval()))
-          : '';
+      // Already removed optimistically above — no "Deleting…" flash; just confirm or roll back.
+      const res = await run('api_deleteEntry', id);
+      if (res === null) {
+        // Genuine server error — restore the entry and re-render.
+        state.entryCache[state.currentDate] = backup;
+        state.entries = backup;
+        persistCache();
+        renderDayCard();
+        setStatus('Delete failed. Please try again.', 'error');
+      } else {
+        setStatus('Deleted.', 'success');
       }
+    };
+
+    // Animate a row out (slide off in the swipe direction + collapse its height) before removing it,
+    // so a full-swipe or tapped delete feels like iOS rather than the row just vanishing in place.
+    const commitSwipeDelete = (wrapper, fg, entry) => {
+      if (wrapper.dataset.removing === '1') return;
+      wrapper.dataset.removing = '1';
+      fg.classList.add('snap');
+      fg.style.transform = 'translateX(-100%)';
+      const h = wrapper.offsetHeight;
+      wrapper.style.height = h + 'px';
+      void wrapper.offsetHeight; // force reflow so the height transition has a start value
+      wrapper.classList.add('removing');
+      wrapper.style.height = '0px';
+      window.setTimeout(() => swipeDelete(entry), 230);
+    };
+
+    // iOS-style swipe: drag the foreground row left over a red delete action. A short swipe snaps open
+    // to reveal the button; dragging past ~45% of the row width deletes immediately on release.
+    const SWIPE_REVEAL = 88;
+    const attachSwipe = (wrapper, fg, entry) => {
+      let startX = 0, startY = 0, dx = 0, dragging = false, decided = false, horizontal = false;
+      const width = () => wrapper.offsetWidth || 320;
+      const setX = (x) => { fg.style.transform = 'translateX(' + x + 'px)'; };
+      const closeOthers = () => {
+        if (!dom.entriesList) return;
+        dom.entriesList.querySelectorAll('.ts-m-swipe.open').forEach((w) => {
+          if (w === wrapper) return;
+          const other = w.querySelector('.ts-m-entry');
+          if (other) { other.classList.add('snap'); other.style.transform = 'translateX(0)'; }
+          w.classList.remove('open');
+        });
+      };
+      const onStart = (e) => {
+        const t = e.touches ? e.touches[0] : e;
+        startX = t.clientX; startY = t.clientY; dx = 0;
+        dragging = true; decided = false; horizontal = false;
+        fg.classList.remove('snap');
+      };
+      const onMove = (e) => {
+        if (!dragging) return;
+        const t = e.touches ? e.touches[0] : e;
+        const mx = t.clientX - startX;
+        const my = t.clientY - startY;
+        if (!decided) {
+          if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+          decided = true;
+          horizontal = Math.abs(mx) > Math.abs(my);
+          if (horizontal) closeOthers();
+        }
+        if (!horizontal) { dragging = false; return; }
+        e.preventDefault();
+        wrapper.classList.add('armed');
+        const base = wrapper.classList.contains('open') ? -SWIPE_REVEAL : 0;
+        dx = Math.min(0, base + mx);
+        setX(dx);
+        wrapper.classList.toggle('will-delete', dx <= -width() * 0.45);
+      };
+      const onEnd = () => {
+        if (!dragging) return;
+        dragging = false;
+        fg.classList.add('snap');
+        if (dx <= -width() * 0.45) {
+          wrapper.classList.remove('will-delete');
+          commitSwipeDelete(wrapper, fg, entry);
+        } else if (dx <= -SWIPE_REVEAL * 0.5) {
+          setX(-SWIPE_REVEAL);
+          wrapper.classList.add('open');
+        } else {
+          setX(0);
+          wrapper.classList.remove('open');
+          wrapper.classList.remove('armed');
+        }
+      };
+      fg.addEventListener('touchstart', onStart, { passive: true });
+      fg.addEventListener('touchmove', onMove, { passive: false });
+      fg.addEventListener('touchend', onEnd);
+      fg.addEventListener('touchcancel', onEnd);
+      // A tap closes an open row; a tap on a closed row edits it; a tap that ended a swipe is ignored.
+      fg.addEventListener('click', (ev) => {
+        if (wrapper.classList.contains('open')) {
+          ev.preventDefault(); ev.stopPropagation();
+          fg.classList.add('snap'); setX(0); wrapper.classList.remove('open'); wrapper.classList.remove('armed');
+          return;
+        }
+        if (decided) { ev.preventDefault(); ev.stopPropagation(); return; }
+        // Punch entries open the session editor; basic entries open the hours keypad.
+        if ((entry.entry_type || 'basic') === 'advanced') openPunchEditor(entry);
+        else openKeypad(entry);
+      });
+    };
+
+    const renderEntriesList = () => {
+      if (!dom.entriesList) return;
+      const entries = (state.entries || []).filter((e) => e && e.date === state.currentDate);
+      dom.entriesList.innerHTML = '';
+      if (!entries.length) {
+        if (dom.entriesCard) dom.entriesCard.style.display = 'none';
+        if (dom.emptyState) dom.emptyState.style.display = '';
+        return;
+      }
+      if (dom.entriesCard) dom.entriesCard.style.display = '';
+      if (dom.emptyState) dom.emptyState.style.display = 'none';
+      if (dom.dayTotalVal) {
+        const totalMins = entries.reduce((acc, e) => acc + roundDuration(Number(e.duration_minutes) || 0, roundInterval()), 0);
+        dom.dayTotalVal.textContent = trimHours(formatHours(totalMins)) + 'h';
+      }
+      const sortedIds = sortHourTypeIds(entries.map((e) => e.hour_type_id || defaultHourTypeId()));
+      entries
+        .slice()
+        .sort((a, b) => sortedIds.indexOf(a.hour_type_id || defaultHourTypeId()) - sortedIds.indexOf(b.hour_type_id || defaultHourTypeId()))
+        .forEach((entry) => {
+          const hourType = state.hourTypeMap[entry.hour_type_id || defaultHourTypeId()] || {};
+          const minutes = roundDuration(Number(entry.duration_minutes) || 0, roundInterval());
+          const row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'ts-m-entry';
+          const ic = document.createElement('span');
+          ic.className = 'ts-m-entry-ic';
+          ic.innerHTML = hourTypeIconSvg(hourType.icon);
+          const info = document.createElement('span');
+          info.className = 'ts-m-entry-info';
+          const title = document.createElement('span');
+          title.className = 'ts-m-entry-t';
+          title.textContent = hourType.name || 'Work';
+          info.appendChild(title);
+          const contract = state.contracts.find((c) => c.id === entry.contract_id);
+          if (contract && contract.name) {
+            const cEl = document.createElement('span');
+            cEl.className = 'ts-m-entry-contract';
+            cEl.textContent = contract.name;
+            info.appendChild(cEl);
+          }
+          // Punch entries show their session span (or a "running" badge while a session is open).
+          const isPunch = (entry.entry_type || 'basic') === 'advanced';
+          const punchSummary = isPunch ? summarizePunches(entry.punches || []) : null;
+          const isOpenNoHours = isPunch && punchSummary && punchSummary.openCount > 0 && minutes === 0;
+          if (isPunch && punchSummary) {
+            const sub = document.createElement('span');
+            sub.className = 'ts-m-entry-sub';
+            // First session span only; "…" if more. Open sessions end in "open". No separate "Open" badge that
+            // pushed the row up — the "Open" marker now lives in the hours slot on the right (matches desktop agenda).
+            const sessions = (entry.punches || []).filter((p) => p && p.in);
+            const first = sessions[0];
+            sub.textContent = first
+              ? to12h(first.in) + ' – ' + (first.out ? to12h(first.out) : 'open') + (sessions.length > 1 ? ' …' : '')
+              : '';
+            if (sub.textContent) info.appendChild(sub);
+          }
+          const hrs = document.createElement('span');
+          hrs.className = 'ts-m-entry-hrs' + (isOpenNoHours ? ' ts-m-entry-hrs--open' : '');
+          // Open punch with nothing logged yet → "Open" on the right (not a bare "–"); else the hours.
+          hrs.textContent = isOpenNoHours ? 'Open' : trimHours(formatHours(minutes)) + 'h';
+          row.appendChild(ic);
+          row.appendChild(info);
+          row.appendChild(hrs);
+          const wrapper = document.createElement('div');
+          wrapper.className = 'ts-m-swipe';
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'ts-m-swipe-action';
+          action.textContent = 'Delete';
+          action.addEventListener('click', (ev) => { ev.stopPropagation(); commitSwipeDelete(wrapper, row, entry); });
+          wrapper.appendChild(action);
+          wrapper.appendChild(row);
+          attachSwipe(wrapper, row, entry);
+          dom.entriesList.appendChild(wrapper);
+        });
     };
 
     const openDatePicker = () => {
@@ -373,84 +771,168 @@
       }
     };
 
-    const renderPunchList = () => {
-      if (!dom.punchList) return;
-      const punches = state.draftPunches || [];
-      dom.punchList.innerHTML = '';
-      const ensureRow = () => {
-        if (!state.draftPunches.length) state.draftPunches.push({ in: '', out: '' });
-      };
-      if (!punches.length || (punches.length === 1 && !punches[0].in && !punches[0].out)) {
-        ensureRow();
-      }
-      state.draftPunches.forEach((punch, index) => {
-        const row = document.createElement('div');
-        row.className = 'ts-punch-row';
-
-        const start = document.createElement('input');
-        start.type = 'time';
-        start.value = punch.in || '';
-        start.className = 'ts-punch-input';
-        start.onchange = () => {
-          state.draftPunches[index].in = start.value;
-          state.punchDirty = true;
-          updatePunchSummary();
-        };
-
-        const end = document.createElement('input');
-        end.type = 'time';
-        end.value = punch.out || '';
-        end.className = 'ts-punch-input';
-        end.onchange = () => {
-          state.draftPunches[index].out = end.value;
-          state.punchDirty = true;
-          updatePunchSummary();
-        };
-
-        const add = document.createElement('button');
-        add.type = 'button';
-        add.className = 'ghost';
-        add.textContent = 'Add';
-        add.onclick = () => {
-          state.draftPunches.splice(index + 1, 0, { in: '', out: '' });
-          state.punchDirty = true;
-          renderPunchList();
-        };
-
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'ghost';
-        remove.textContent = 'Remove';
-        remove.onclick = () => {
-          state.draftPunches.splice(index, 1);
-          if (!state.draftPunches.length) state.draftPunches.push({ in: '', out: '' });
-          state.punchDirty = true;
-          renderPunchList();
-        };
-
-        row.appendChild(start);
-        row.appendChild(document.createTextNode(' to '));
-        row.appendChild(end);
-        row.appendChild(add);
-        row.appendChild(remove);
-        dom.punchList.appendChild(row);
-      });
-      updatePunchSummary();
+    const addDaysIso = (iso, n) => {
+      const d = new Date(iso + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) return iso;
+      d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
     };
 
-    const togglePunch = () => {
-      const now = new Date();
-      const nowTime = now.toTimeString().slice(0, 5);
-      const punches = state.draftPunches || [];
-      const open = punches.find((p) => p.in && !p.out);
-      if (open) {
-        open.out = nowTime;
+    // Legacy hook: the punch panel no longer renders an inline draft list. Callers that used to refresh it
+    // now just re-sync the clock from the saved entries.
+    const renderPunchList = () => updatePunchClock();
+
+    // Build + save an advanced (punch) entry. `existing` is the entry being updated (null = new); the
+    // optional `dateOverride` lets the overnight split spill the remainder onto the next day.
+    const savePunchEntry = (existing, punches, hourTypeId, contractId, dateOverride) => {
+      const cleaned = normalizePunchList(punches);
+      const summary = summarizePunches(cleaned);
+      const rounded = roundDuration(summary.totalMinutes, roundInterval());
+      return saveEntry({
+        id: existing ? existing.id : undefined,
+        date: dateOverride || state.currentDate,
+        punches: cleaned,
+        duration_minutes: rounded,
+        contract_id: contractId,
+        hour_type_id: hourTypeId,
+        round_interval: roundInterval(),
+        entry_type: 'advanced'
+      });
+    };
+
+    // One-tap clock. Punch In saves an open session immediately; Punch Out closes it and saves. Mirrors
+    // desktop: overnight punches split across two days, and an accidental too-fast clock-out is abandoned
+    // (you stay on the clock) instead of logging a zero-length session.
+    const togglePunch = async () => {
+      if (state.loading) return;
+      const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
+      const hourType = state.hourTypeMap[hourTypeId] || {};
+      const contractId = dom.punchContract ? dom.punchContract.value : '';
+      if (hourTypeNeedsContract(hourType)) {
+        if (!contractId) { setStatus('Select a contract for this hour type.', 'error'); return; }
+        const contract = state.contracts.find((c) => c.id === contractId);
+        if (!contract || !contractIsValid(contract, state.currentDate)) {
+          setStatus('Selected contract is not valid for this date.', 'error');
+          return;
+        }
+      }
+      const nowTime = new Date().toTimeString().slice(0, 5);
+      const existing = findDayPunchEntry();
+      const punches = existing ? (existing.punches || []).map((p) => ({ ...p })) : [];
+      const openIdx = punches.findIndex((p) => p && p.in && !p.out);
+      if (openIdx !== -1) {
+        const inMin = timeToMinutes(punches[openIdx].in);
+        const outMin = timeToMinutes(nowTime);
+        if (inMin !== null && outMin !== null && outMin < inMin) {
+          punches[openIdx].out = '23:59';
+          await savePunchEntry(existing, punches, hourTypeId, contractId);
+          await savePunchEntry(null, [{ in: '00:00', out: nowTime }], hourTypeId, contractId, addDaysIso(state.currentDate, 1));
+          setStatus('Overnight punch split across two days', 'success');
+          return;
+        }
+        // Ignore only a genuine accidental double-tap (clock-out within a few seconds of clocking in);
+        // a deliberate clock-out always closes the session.
+        if (lastPunchInMs && Date.now() - lastPunchInMs < 3000) {
+          setStatus('Still on the clock.', 'info');
+          return;
+        }
+        punches[openIdx].out = nowTime;
+        lastPunchInMs = 0;
+        await savePunchEntry(existing, punches, hourTypeId, contractId);
+        setStatus('Punched out at ' + to12h(nowTime), 'success');
       } else {
         punches.push({ in: nowTime, out: '' });
+        lastPunchInMs = Date.now();
+        await savePunchEntry(existing, punches, hourTypeId, contractId);
+        setStatus('Punched in at ' + to12h(nowTime), 'success');
       }
-      state.draftPunches = punches;
-      state.punchDirty = true;
-      renderPunchList();
+    };
+
+    // ----- Session editor sheet: view/edit/delete a punch entry's sessions (reached by tapping the entry) -----
+    let punchEditorEntry = null;
+    let punchEditorSessions = [];
+    let punchEditorEdited = false; // becomes true once the user touches a time field → button reverts to "Done"
+    const editorHasOpenSession = () => punchEditorSessions.some((s) => s && s.in && !s.out);
+    // While a session is open AND untouched, the primary button is "Punch out" (clock it out now). Once the
+    // user edits any time (or fills the out field), it becomes "Done" — they're manually setting the times.
+    const updatePunchEditorButton = () => {
+      if (!dom.punchEditorDone) return;
+      const punchOut = editorHasOpenSession() && !punchEditorEdited;
+      dom.punchEditorDone.textContent = punchOut ? 'Punch out' : 'Done';
+      dom.punchEditorDone.dataset.mode = punchOut ? 'punchout' : 'done';
+    };
+    const renderPunchEditorSessions = () => {
+      if (!dom.punchEditorList) return;
+      dom.punchEditorList.innerHTML = '';
+      punchEditorSessions.forEach((sess, index) => {
+        const row = document.createElement('div');
+        row.className = 'ts-m-sess';
+        const start = document.createElement('input');
+        start.type = 'time'; start.value = sess.in || ''; start.className = 'ts-m-sess-time';
+        start.onchange = () => { punchEditorSessions[index].in = start.value; punchEditorEdited = true; updatePunchEditorButton(); };
+        const arrow = document.createElement('span');
+        arrow.className = 'ts-m-sess-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→';
+        const end = document.createElement('input');
+        end.type = 'time'; end.value = sess.out || ''; end.className = 'ts-m-sess-time';
+        end.onchange = () => { punchEditorSessions[index].out = end.value; punchEditorEdited = true; updatePunchEditorButton(); };
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'ts-m-sess-x'; del.setAttribute('aria-label', 'Remove session'); del.textContent = '×';
+        del.onclick = () => {
+          punchEditorSessions.splice(index, 1);
+          if (!punchEditorSessions.length) punchEditorSessions = [{ in: '', out: '' }];
+          renderPunchEditorSessions();
+          updatePunchEditorButton();
+        };
+        row.append(start, arrow, end, del);
+        dom.punchEditorList.appendChild(row);
+      });
+    };
+    const openPunchEditor = (entry) => {
+      if (!entry) return;
+      punchEditorEntry = entry;
+      punchEditorEdited = false;
+      // Only real sessions — never stray blank rows.
+      punchEditorSessions = (entry.punches || []).filter((p) => p && (p.in || p.out)).map((p) => ({ ...p }));
+      if (!punchEditorSessions.length) punchEditorSessions = [{ in: '', out: '' }];
+      const ht = state.hourTypeMap[entry.hour_type_id || defaultHourTypeId()] || {};
+      const contract = state.contracts.find((c) => c.id === entry.contract_id);
+      if (dom.punchEditorSub) dom.punchEditorSub.textContent = (ht.name || 'Work') + (contract && contract.name ? ' · ' + contract.name : '');
+      renderPunchEditorSessions();
+      updatePunchEditorButton();
+      if (dom.punchEditor) dom.punchEditor.style.display = 'flex';
+    };
+    // "Punch out" from the editor: close the open session at now and save (reuses the save path). Falls back
+    // to a plain save if nothing's open. Overnight (out < in) is rejected by validatePunches — rare from here.
+    const punchOutFromEditor = async () => {
+      const entry = punchEditorEntry;
+      if (!entry) { closePunchEditor(); return; }
+      const sessions = punchEditorSessions.map((s) => ({ ...s }));
+      const openIdx = sessions.findIndex((s) => s && s.in && !s.out);
+      if (openIdx === -1) { savePunchEditor(); return; }
+      const nowTime = new Date().toTimeString().slice(0, 5);
+      sessions[openIdx].out = nowTime;
+      const cleaned = normalizePunchList(sessions);
+      const err = validatePunches(cleaned);
+      if (err) { setStatus(err, 'error'); return; }
+      closePunchEditor();
+      await savePunchEntry(entry, cleaned, entry.hour_type_id || defaultHourTypeId(), entry.contract_id || '');
+      setStatus('Punched out at ' + to12h(nowTime), 'success');
+    };
+    const closePunchEditor = () => {
+      punchEditorEntry = null;
+      if (dom.punchEditor) dom.punchEditor.style.display = 'none';
+    };
+    const savePunchEditor = async () => {
+      const entry = punchEditorEntry;
+      if (!entry) { closePunchEditor(); return; }
+      const cleaned = normalizePunchList(punchEditorSessions);
+      // All sessions removed via × → nothing left to keep, so Done deletes the whole entry (a user who didn't
+      // know about swipe-to-delete shouldn't get stuck). swipeDelete handles both unsaved and server entries.
+      if (!cleaned.length) { closePunchEditor(); await swipeDelete(entry); return; }
+      const err = validatePunches(cleaned);
+      if (err) { setStatus(err, 'error'); return; }
+      closePunchEditor();
+      await savePunchEntry(entry, cleaned, entry.hour_type_id || defaultHourTypeId(), entry.contract_id || '');
     };
 
     const validatePunches = (punches) => {
@@ -468,28 +950,15 @@
       return '';
     };
 
-    const updatePunchSummary = () => {
-      const punches = normalizePunchList(state.draftPunches);
-      const summary = summarizePunches(punches);
-      if (dom.punchSummary) {
-        const rounded = roundDuration(summary.totalMinutes, roundInterval());
-        dom.punchSummary.textContent = punches.length ? `Recorded: ${formatHours(rounded)} hours` : '';
-      }
-      if (dom.punchWarning) {
-        dom.punchWarning.style.display = summary.openCount > 0 ? 'block' : 'none';
-        dom.punchWarning.textContent = summary.openCount > 0 ? 'Open punch detected. Remember to punch out.' : '';
-      }
-      if (dom.punchSuggestion) dom.punchSuggestion.style.display = 'none';
-      if (dom.punchToggle) dom.punchToggle.textContent = summary.openCount > 0 ? 'Punch Out' : 'Punch In';
-      const requiresContract = (state.hourTypeMap[state.selectedHourTypeId] || {}).requires_contract;
-      const hasContract = dom.punchContract ? !!dom.punchContract.value : true;
-      const hasPunches = punches.some((p) => p.in);
-      if (dom.punchToggle) dom.punchToggle.disabled = requiresContract && !hasContract;
-      if (dom.punchSave) dom.punchSave.disabled = (requiresContract && !hasContract) || !hasPunches;
-      updatePunchActions();
-    };
 
     const getCachedEntriesForDate = (dateIso) => state.entryCache[dateIso] || [];
+
+    const removeEntryLocally = (id) => {
+      const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
+      state.entryCache[state.currentDate] = filtered;
+      state.entries = filtered;
+      persistCache();
+    };
 
     const storeEntries = (entries) => {
       (entries || []).forEach((entry) => {
@@ -535,6 +1004,15 @@
           return;
         }
         state.entryCache = parsed.entries || {};
+        // Purge stale optimistic placeholders left in the cache by the earlier
+        // double-add bug so days don't show doubled hours after upgrading.
+        Object.keys(state.entryCache).forEach((d) => {
+          state.entryCache[d] = (state.entryCache[d] || []).filter(
+            // Also drop break/comment records — desktop day-shape/day-note rows, not entries here.
+            (e) => !(e && typeof e.id === 'string' && e.id.indexOf('temp_') === 0)
+              && !(e && (e.entry_type === 'break' || e.entry_type === 'comment'))
+          );
+        });
         state.prefetchedRange = parsed.prefetchedRange || derivePrefetchedRangeFromCache();
         state.hourTypes = Array.isArray(parsed.hourTypes) ? parsed.hourTypes : state.hourTypes;
         state.hourTypeMap = (state.hourTypes || []).reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
@@ -557,6 +1035,7 @@
         let maxDate = null;
         parsed.entries.map((e) => sanitizeEntry(e)).forEach((entry) => {
           if (!entry || !entry.date) return;
+          if (entry.entry_type === 'break' || entry.entry_type === 'comment') return; // desktop day-shape/day-note records aren't mobile entries
           if (!map[entry.date]) map[entry.date] = [];
           map[entry.date].push(entry);
           if (!minDate || entry.date < minDate) minDate = entry.date;
@@ -577,7 +1056,9 @@
 
     const fetchEntriesRange = async (startDate, endDate) => {
       const entries = await run('api_getEntries', { startDate, endDate }) || [];
-      const sanitized = entries.map(sanitizeEntry);
+      // Break and comment records are desktop Sessions concepts (day shape / day note) — never day
+      // entries here. Without the comment filter a day note rendered as a phantom 0h swipeable row.
+      const sanitized = entries.map(sanitizeEntry).filter((e) => !(e && (e.entry_type === 'break' || e.entry_type === 'comment')));
       storeEntries(sanitized);
     };
 
@@ -604,29 +1085,26 @@
     };
 
     const loadEntriesForDate = async (dateIso) => {
-      await prefetchRangeForDate(dateIso);
+      // Paint the selected day as fast as possible: use cache if we have it, else fetch JUST that day
+      // (a 1-day call returns quickly) before prefetching the surrounding range in the background. The old
+      // order fetched a 28-day range first, so today's punch took the whole range round-trip to appear.
       const cached = getCachedEntriesForDate(dateIso);
       if (cached.length) {
         state.entries = cached;
-        return;
+      } else {
+        await fetchEntriesRange(dateIso, dateIso);
+        state.entries = getCachedEntriesForDate(dateIso);
       }
-      await fetchEntriesRange(dateIso, dateIso);
-      state.entries = getCachedEntriesForDate(dateIso);
-    };
-
-    const pickEntryForHourType = (hourTypeId) => {
-      if (!state.entries.length) return null;
-      const targetId = hourTypeId || defaultHourTypeId();
-      return state.entries.find((e) => (e.hour_type_id || defaultHourTypeId()) === targetId) || null;
+      prefetchRangeForDate(dateIso); // background — don't block the first paint on the wider range
     };
 
     const selectHourType = (hourTypeId) => {
       state.selectedHourTypeId = hourTypeId || defaultHourTypeId();
       syncHourTypeSelects(state.selectedHourTypeId);
-      const entry = pickEntryForHourType(state.selectedHourTypeId);
-      hydrateDraftFromEntry(entry, { preserveMode: true });
+      // Add-mode form: changing the hour type just re-targets the new entry (and auto-selects a valid
+      // contract). It never loads an existing entry for editing — that's done by tapping the entry's row.
+      renderContracts();
       renderDayCard();
-      syncTabAvailability();
     };
 
     const hydrateDraftFromEntry = (entry, opts = {}) => {
@@ -657,8 +1135,12 @@
         if (!opts.preserveMode) state.mode = 'manual';
       }
       if (dom.hours) dom.hours.value = state.draftHours;
+      syncHoursDisplay();
       renderPunchList();
-      setMode(state.mode, { force: true });
+      // Apply through the day-mode chrome: it honours state.mode when the day offers both surfaces and
+      // forces the sole available one otherwise (a loaded entry's kind counts as a surface, so editing
+      // an off-mode entry still lands on its panel).
+      applyDayModeChrome();
     };
 
     const loadStaticData = async () => {
@@ -670,16 +1152,14 @@
       state.settings = base.settings || {};
       state.featureFlags = base.featureFlags || {};
       if (!state.hourTypes.length || !state.contracts.length) {
-        const [hourTypes, contracts] = await Promise.all([
-          state.hourTypes.length ? Promise.resolve(state.hourTypes) : run('api_getHourTypes'),
-          state.contracts.length ? Promise.resolve(state.contracts) : run('api_getContracts')
-        ]);
-        state.hourTypes = Array.isArray(hourTypes) ? hourTypes : [];
-        state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
-        state.contracts = Array.isArray(contracts) ? contracts : [];
-        persistCache();
+        // Cold boot (nothing cached): block the first paint on the fetch — there's nothing to show anyway.
+        await refreshStaticFromServer({ force: true });
       } else {
         state.hourTypeMap = state.hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+        // Warm boot: the cache painted instantly above; revalidate behind it so contracts and hour types
+        // edited on desktop actually arrive (the cache used to be trusted for its whole 24h TTL — a new
+        // contract created on desktop was invisible on the phone until the cache expired).
+        refreshStaticFromServer();
       }
       renderHourTypes();
       renderContracts();
@@ -687,22 +1167,73 @@
       return true;
     };
 
+    // Re-pull hour types + contracts and repaint everything they drive (pickers, quick actions, the
+    // day-mode chrome). The localStorage cache is only the first paint now, never the truth. `null` from
+    // a call is a transient GAS hiccup — keep what we have rather than blanking the UI; a real array
+    // (even empty) replaces the cache. Throttled so day-hopping doesn't fire a server call per tap;
+    // `force` skips the throttle where the user explicitly expects freshness (cold boot, tab return).
+    let staticRefreshedAt = 0;
+    const STATIC_REFRESH_MIN_MS = 60 * 1000;
+    const refreshStaticFromServer = async (opts = {}) => {
+      if (!opts.force && Date.now() - staticRefreshedAt < STATIC_REFRESH_MIN_MS) return;
+      staticRefreshedAt = Date.now();
+      const [hourTypes, contracts] = await Promise.all([run('api_getHourTypes'), run('api_getContracts')]);
+      if (Array.isArray(hourTypes) && hourTypes.length) {
+        state.hourTypes = hourTypes;
+        state.hourTypeMap = hourTypes.reduce((map, ht) => { map[ht.id] = ht; return map; }, {});
+      }
+      if (Array.isArray(contracts)) state.contracts = contracts;
+      persistCache();
+      renderHourTypes();
+      renderContracts();
+      renderQuickEntryButton();
+      renderDayCard();
+    };
+
+    // Returning to the tab silently resyncs the current day's entries from the server — replacing the
+    // day wholesale so desktop-side deletes disappear too (mirrors desktop's tab-return auto-resync).
+    // Skipped mid-save so an optimistic temp can't be clobbered; skipped on failure so a hiccup can't
+    // blank a day that was fine.
+    const refreshCurrentDayEntries = async () => {
+      if (state.loading) return;
+      const d = state.currentDate;
+      const fresh = await run('api_getEntries', { startDate: d, endDate: d });
+      if (!Array.isArray(fresh) || state.currentDate !== d || state.loading) return;
+      state.entryCache[d] = fresh.map(sanitizeEntry).filter((e) => !(e && (e.entry_type === 'break' || e.entry_type === 'comment')));
+      persistCache();
+      state.entries = getCachedEntriesForDate(d);
+      renderDayCard();
+    };
+
     const hydrateDate = async (dateIso) => {
-      state.currentDate = dateIso || todayIso();
-      if (dom.date) dom.date.value = state.currentDate;
-      if (dom.dateLabel) dom.dateLabel.textContent = formatDateLabel(state.currentDate);
-      setStatus('Loading...', 'info');
+      const target = dateIso || todayIso();
+      state.currentDate = target;
+      if (dom.date) dom.date.value = target;
+      if (dom.dateMain) dom.dateMain.textContent = formatDateLabel(target);
+      if (dom.dateSub) dom.dateSub.textContent = formatDateSub(target);
+      if (dom.dateToday) dom.dateToday.style.display = target === todayIso() ? 'none' : '';
       hydrateCacheFromStorage();
       hydrateFromDesktopCache();
       if (!state.prefetchedRange) state.prefetchedRange = derivePrefetchedRangeFromCache();
       if (!state.cacheHydrated) state.cacheHydrated = true;
-      await loadStaticData();
-      await loadEntriesForDate(state.currentDate);
+      // Optimistic paint: immediately show whatever we already have cached for this date (often everything,
+      // since adjacent days are prefetched in a range). Switching days snaps the new day's hours in rather
+      // than leaving the previous day's showing under "Loading...". Always land on a blank add-form.
+      state.entries = getCachedEntriesForDate(target);
+      hydrateDraftFromEntry(null, { preserveMode: true });
       renderHourTypes();
+      renderQuickEntryButton();
       renderDayCard();
-      const entry = pickEntryForHourType(state.selectedHourTypeId || defaultHourTypeId());
-      hydrateDraftFromEntry(entry, { preserveMode: true });
-      setStatus(state.currentEntry ? 'Loaded existing entry.' : 'Ready to add entry.');
+      // Only show a loading hint when there was nothing cached to paint.
+      if (!state.entries.length) setStatus('Loading...', 'info');
+      await loadStaticData();
+      await loadEntriesForDate(target);
+      if (state.currentDate !== target) return; // user already moved to another day — don't clobber it
+      renderHourTypes();
+      renderQuickEntryButton();
+      renderDayCard();
+      hydrateDraftFromEntry(null, { preserveMode: true });
+      setStatus('');
     };
 
     const findDuplicate = (payload) => {
@@ -725,7 +1256,7 @@
       const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId] || {};
       const contractId = dom.manualContract ? dom.manualContract.value : '';
-      if (hourType.requires_contract) {
+      if (hourTypeNeedsContract(hourType)) {
         if (!contractId) {
           setStatus('Select a contract for this hour type.', 'error');
           return null;
@@ -763,7 +1294,7 @@
       const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId] || {};
       const contractId = dom.punchContract ? dom.punchContract.value : '';
-      if (hourType.requires_contract) {
+      if (hourTypeNeedsContract(hourType)) {
         if (!contractId) {
           setStatus('Select a contract for this hour type.', 'error');
           return null;
@@ -788,49 +1319,456 @@
       };
     };
 
+    // Quick entry: surface the user's existing hour-type quick actions (the same ones configured via
+    // "Show in quick actions") as one-tap presets, so phone logging matches what they know on desktop.
+    const quickFillHourTypes = () => {
+      const defId = defaultHourTypeId();
+      // The default type always offers a quick action (its toggle is locked on in the editor); include it
+      // even if stored data has the flag off, so the quick-fill bar is never empty. Mirrors desktop.
+      const enabled = (state.hourTypes || []).filter((ht) => ht && (ht.quick_fill_enabled || ht.id === defId));
+      if (!enabled.length) return [];
+      const primary = enabled.filter((ht) => ht.id === defId);
+      const rest = enabled.filter((ht) => ht.id !== defId);
+      return primary.concat(rest);
+    };
+
+    // Hours a quick action logs: the type's own value, else the default type's, else the standard day.
+    // Mirrors the desktop quickFillHoursForType fallback so the two never disagree.
+    const quickFillHoursForType = (hourType) => {
+      if (hourType && hourType.quick_fill_hours != null && hourType.quick_fill_hours > 0) return hourType.quick_fill_hours;
+      const def = state.hourTypeMap[defaultHourTypeId()] || {};
+      if (def.quick_fill_hours != null && def.quick_fill_hours > 0) return def.quick_fill_hours;
+      return targetHoursPerDay();
+    };
+
+    // --- Day templates (a Detailed contract's saved days of sessions) ------------------------------
+    // Mirrors desktop's normalizeStandardDayTemplates/contractStandardDayTemplates: parse + validate a
+    // contract's standard_day_json into [{ name, comment, sessions: [{in,out,htId}] }], tolerating the
+    // legacy v1 bare-session-array shape; templates with no complete session are dropped.
+    const contractStandardDayTemplates = (contract) => {
+      if (!contract || !contract.standard_day_json) return [];
+      let parsed;
+      try { parsed = JSON.parse(contract.standard_day_json || '[]'); } catch (e) { return []; }
+      if (!Array.isArray(parsed)) return [];
+      if (parsed.length && parsed[0] && !Array.isArray(parsed[0].sessions) && (parsed[0].in != null || parsed[0].out != null)) {
+        parsed = [{ name: 'Standard day', sessions: parsed }];
+      }
+      return parsed.map((t) => ({
+        name: ((t && typeof t.name === 'string') ? t.name : '').trim() || 'Standard day',
+        comment: (t && typeof t.comment === 'string') ? t.comment.replace(/\s+/g, ' ').trim().slice(0, 200) : '',
+        sessions: ((t && Array.isArray(t.sessions)) ? t.sessions : [])
+          .map((s) => ({ in: (s && s.in) || '', out: (s && s.out) || '', htId: (s && (s.htId || s.hour_type_id)) || defaultHourTypeId() }))
+          .filter((s) => s.in && s.out)
+      })).filter((t) => t.sessions.length);
+    };
+    // Detailed contracts valid on `dateIso` that actually have at least one day template.
+    const standardDayContractsForDate = (dateIso) =>
+      validContractsForDateAndMode(dateIso, 'detailed').filter((c) => contractStandardDayTemplates(c).length > 0);
+
+    // Contracts a quick action may land on, by the same rules as desktop's quick menu: a fill action
+    // writes a Basic entry so only Simple-mode contracts qualify; a punch action takes any valid contract.
+    const quickContractCandidates = (hourType) => {
+      if (!hourTypeNeedsContract(hourType)) return [];
+      return hourType.quick_fill_mode === 'punch'
+        ? validContractsForDate(state.currentDate)
+        : validContractsForDateAndMode(state.currentDate, 'simple');
+    };
+
+    // Quick-fill types actually usable on the current day: punch types only on today (a punch is always
+    // "now" — matches desktop), and needs-contract fill types only when a Simple-mode contract is valid
+    // that day. Inapplicable actions are omitted entirely (James: don't grey them out, don't show them).
+    const applicableQuickFillTypes = () => quickFillHourTypes().filter((ht) => {
+      if (ht.quick_fill_mode === 'punch') return state.currentDate === todayIso();
+      return !hourTypeNeedsContract(ht) || quickContractCandidates(ht).length > 0;
+    });
+
+    const renderQuickEntryButton = () => {
+      if (!dom.quickBtn) return;
+      dom.quickBtn.hidden = applicableQuickFillTypes().length === 0
+        && standardDayContractsForDate(state.currentDate).length === 0;
+    };
+
+    // Pick a contract for a quick action: keep the form's current choice if it's a candidate, else the
+    // first candidate, else none. Optional-contract types always go contract-less ("No contract").
+    const resolveQuickContractId = (hourType) => {
+      const candidates = quickContractCandidates(hourType);
+      if (!candidates.length) return '';
+      const current = dom.manualContract ? dom.manualContract.value : '';
+      if (current && candidates.some((c) => c.id === current)) return current;
+      return candidates[0].id;
+    };
+
+    // One quick-sheet row: icon + name (+ optional sub line) on the left, an hours/mode tag on the right.
+    const buildQuickRow = ({ iconSvg, name, sub, tag, onTap }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ts-m-qa';
+      const ic = document.createElement('span');
+      ic.className = 'ts-m-qa-ic';
+      ic.innerHTML = iconSvg;
+      const info = document.createElement('span');
+      info.className = 'ts-m-qa-info';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ts-m-qa-name';
+      nameEl.textContent = name;
+      info.appendChild(nameEl);
+      if (sub) {
+        const subEl = document.createElement('span');
+        subEl.className = 'ts-m-qa-sub';
+        subEl.textContent = sub;
+        info.appendChild(subEl);
+      }
+      const hrs = document.createElement('span');
+      hrs.className = 'ts-m-qa-hrs';
+      hrs.textContent = tag;
+      btn.appendChild(ic);
+      btn.appendChild(info);
+      btn.appendChild(hrs);
+      btn.addEventListener('click', onTap);
+      return btn;
+    };
+
+    const QUICK_CLOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>';
+
+    const renderQuickList = () => {
+      if (!dom.quickList) return;
+      dom.quickList.innerHTML = '';
+      const types = applicableQuickFillTypes();
+      // Day templates of every Detailed contract valid this day — the Sessions-side quick actions.
+      const sdContracts = standardDayContractsForDate(state.currentDate);
+      if (!types.length && !sdContracts.length) {
+        const empty = document.createElement('p');
+        empty.className = 'ts-m-qa-empty';
+        empty.textContent = 'No quick actions yet. Turn on "Show in quick actions" for an hour type.';
+        dom.quickList.appendChild(empty);
+        return;
+      }
+      const addSection = (label) => {
+        const sec = document.createElement('p');
+        sec.className = 'ts-m-qa-sec';
+        sec.textContent = label;
+        dom.quickList.appendChild(sec);
+      };
+      // Section labels only when both kinds are present — a single-kind sheet needs no explaining.
+      const bothKinds = types.length && sdContracts.length;
+      if (bothKinds) addSection('Quick fill');
+      types.forEach((hourType) => {
+        dom.quickList.appendChild(buildQuickRow({
+          iconSvg: hourTypeIconSvg(hourType.icon),
+          name: hourType.name || 'Work',
+          // Punch types log via the clock, not a fixed duration — show "Punch", not a misleading hours value.
+          tag: hourType.quick_fill_mode === 'punch' ? 'Punch' : trimHours(String(quickFillHoursForType(hourType))) + 'h',
+          onTap: () => handleQuickFill(hourType)
+        }));
+      });
+      if (bothKinds) addSection('Day templates');
+      sdContracts.forEach((contract) => {
+        contractStandardDayTemplates(contract).forEach((tpl, ti) => {
+          const totalMins = tpl.sessions.reduce((acc, s) => {
+            const a = timeToMinutes(s.in); const b = timeToMinutes(s.out);
+            return acc + ((a !== null && b !== null && b > a) ? (b - a) : 0);
+          }, 0);
+          dom.quickList.appendChild(buildQuickRow({
+            iconSvg: QUICK_CLOCK_ICON,
+            name: tpl.name,
+            // Contract name only when more than one contract has templates this day (disambiguation).
+            sub: sdContracts.length > 1 ? contract.name : '',
+            tag: trimHours(formatHours(totalMins)) + 'h',
+            onTap: () => applyDayTemplate(contract, ti)
+          }));
+        });
+      });
+    };
+
+    const openQuickSheet = () => {
+      if (!dom.quickSheet) return;
+      renderQuickList();
+      dom.quickSheet.style.display = 'flex';
+    };
+
+    const closeQuickSheet = () => {
+      if (dom.quickSheet) dom.quickSheet.style.display = 'none';
+    };
+
+    // Start the clock straight from the quick sheet for a "Start punch" hour type — mirrors desktop's
+    // quickPunchInForDate. Appends a new session to a completed punch of the same type, else starts fresh.
+    // (Only reachable on today: renderQuickList hides punch types on other days.)
+    const quickPunchIn = (hourType) => {
+      if (!hourType || state.loading) return;
+      const hourTypeId = hourType.id;
+      const contractId = resolveQuickContractId(hourType);
+      if (hourTypeNeedsContract(hourType) && !contractId) {
+        closeQuickSheet();
+        setStatus('Select a contract for this hour type.', 'error');
+        return;
+      }
+      const nowTime = new Date().toTimeString().slice(0, 5);
+      const existing = (state.entries || []).find((e) => e && e.date === state.currentDate
+        && (e.hour_type_id || defaultHourTypeId()) === hourTypeId
+        && (e.entry_type || 'basic') === 'advanced'
+        && (e.contract_id || '') === (contractId || ''));
+      const punches = existing ? (existing.punches || []).map((p) => ({ ...p })) : [];
+      if (punches.some((p) => p && p.in && !p.out)) {
+        closeQuickSheet();
+        setStatus('Already on the clock.', 'info');
+        return;
+      }
+      punches.push({ in: nowTime, out: '' });
+      lastPunchInMs = Date.now();
+      closeQuickSheet();
+      savePunchEntry(existing, punches, hourTypeId, contractId);
+      setStatus('Punched in at ' + to12h(nowTime), 'success');
+    };
+
+    // Log a quick action onto the current day: synthesise a basic entry from the type's quick-fill hours
+    // and run it through the shared save path (duplicate guard, optimistic update, server confirm).
+    const handleQuickFill = (hourType) => {
+      if (!hourType || state.loading) return;
+      if (hourType.quick_fill_mode === 'punch') { quickPunchIn(hourType); return; }
+      const minutes = Math.round((quickFillHoursForType(hourType) || 0) * 60);
+      if (!minutes) { closeQuickSheet(); return; }
+      const contractId = resolveQuickContractId(hourType);
+      if (hourTypeNeedsContract(hourType) && !contractId) {
+        closeQuickSheet();
+        setStatus('Select a contract for this hour type.', 'error');
+        return;
+      }
+      const rounded = roundDuration(minutes, roundInterval());
+      closeQuickSheet();
+      saveEntry({
+        date: state.currentDate,
+        punches: [{ in: '00:00', out: minutesToTime(rounded) }],
+        duration_minutes: rounded,
+        contract_id: contractId,
+        hour_type_id: hourType.id,
+        round_interval: roundInterval(),
+        entry_type: 'basic'
+      });
+    };
+
+    // Apply one of a Detailed contract's day templates to the current day: group the template's sessions
+    // by hour type → one advanced entry per (contract, hour type) carrying its punches, created via the
+    // same dedup-safe api_addEntriesBulk path desktop uses. Optimistic: temps show at once and are
+    // swapped for the server's confirmed rows (or dropped, when the server skipped them as duplicates).
+    const applyDayTemplate = async (contract, tplIndex) => {
+      if (state.loading || !contract) return;
+      const tpl = contractStandardDayTemplates(contract)[tplIndex || 0];
+      closeQuickSheet();
+      if (!tpl) return;
+      const dateIso = state.currentDate;
+      const byHt = {};
+      tpl.sessions.forEach((s) => { const ht = s.htId || defaultHourTypeId(); (byHt[ht] = byHt[ht] || []).push({ in: s.in, out: s.out }); });
+      const payloads = Object.keys(byHt).map((ht) => ({
+        date: dateIso, contract_id: contract.id, hour_type_id: ht,
+        entry_type: 'advanced', punches_json: JSON.stringify(byHt[ht]), round_interval: roundInterval()
+      }));
+      setLoading(true);
+      // Temps only for payloads with no matching entry yet — mirrors the server's (date, hour type,
+      // contract) dedup key so nothing briefly double-shows that the server will skip.
+      const tempIds = [];
+      payloads.forEach((p, i) => {
+        const dup = getCachedEntriesForDate(dateIso).some((e) => e
+          && (e.hour_type_id || defaultHourTypeId()) === p.hour_type_id
+          && (e.contract_id || '') === (p.contract_id || ''));
+        if (dup) return;
+        const temp = sanitizeEntry({ ...p, id: 'temp_tpl_' + Date.now() + '_' + i, created_at: isoDateTime(new Date()) });
+        tempIds.push(temp.id);
+        storeEntries([temp]);
+      });
+      state.entries = getCachedEntriesForDate(dateIso);
+      renderDayCard();
+      const res = await run('api_addEntriesBulk', { entries: payloads });
+      // Drop the temps either way; the server's confirmed rows (if any) replace them below.
+      state.entryCache[dateIso] = getCachedEntriesForDate(dateIso).filter((e) => tempIds.indexOf(e.id) === -1);
+      if (res && res.success) {
+        (res.entries || []).forEach((raw) => storeEntries([sanitizeEntry(raw)]));
+        const added = res.added || 0;
+        const dupes = res.duplicates || 0;
+        if (added) {
+          setStatus('Added ' + added + (added === 1 ? ' entry' : ' entries') + ' from “' + tpl.name + '”.', 'success');
+          stampTemplateComment(dateIso, tpl.comment);
+        } else {
+          setStatus(dupes ? '“' + tpl.name + '” is already logged on this day.' : 'Nothing to add.', 'error');
+        }
+      } else {
+        // No response — but GAS can return null on a transient hiccup even after persisting. Re-read the
+        // day authoritatively and only flag an error if the entries truly didn't land (saveEntry's pattern).
+        state.entryCache[dateIso] = [];
+        await fetchEntriesRange(dateIso, dateIso);
+        const landed = payloads.every((p) => getCachedEntriesForDate(dateIso).some((e) => e
+          && (e.hour_type_id || defaultHourTypeId()) === p.hour_type_id
+          && (e.contract_id || '') === (p.contract_id || '')));
+        if (!landed) setStatus('Couldn’t apply “' + tpl.name + '”. Please try again.', 'error');
+      }
+      persistCache();
+      if (state.currentDate === dateIso) {
+        state.entries = getCachedEntriesForDate(dateIso);
+        renderDayCard();
+      }
+      setLoading(false);
+    };
+
+    // Stamp the template's comment onto the day (desktop parity: applying a template overwrites the day
+    // note). Comment records never enter the mobile cache, so this is fire-and-forget against the server:
+    // add, and on duplicate look up the existing record's id from a fresh day read and update that.
+    const stampTemplateComment = async (dateIso, comment) => {
+      const text = (comment || '').trim();
+      if (!text) return;
+      const res = await run('api_addEntry', { date: dateIso, contract_id: '', entry_type: 'comment', note: text, punches_json: '[]' });
+      if (!res || res.success || res.error !== 'duplicate_entry') return;
+      const rows = await run('api_getEntries', { startDate: dateIso, endDate: dateIso }) || [];
+      const existing = rows.find((e) => e && e.entry_type === 'comment');
+      if (!existing || (existing.note || '') === text) return;
+      await run('api_updateEntry', { id: existing.id, date: dateIso, contract_id: '', entry_type: 'comment', note: text, punches_json: '[]' });
+    };
+
+    // Hours entry: a tappable display backed by an in-app keypad (no native keyboard → no GAS viewport
+    // jump). The hidden #mobile-hours input stays the single source of truth so the save/draft paths are
+    // unchanged; the keypad and the display both read/write through it.
+    // The entry (if any) matching the form's current hour type + contract on the current date. Entries are
+    // unique per (date, hour type, contract), so this is the single entry the Hours field reflects/edits.
+    const findEntryForSelection = () => {
+      const htId = state.selectedHourTypeId || defaultHourTypeId();
+      const contractId = (dom.manualContract && dom.manualContract.value) || '';
+      return (state.entries || []).find((e) => e && e.date === state.currentDate
+        && (e.hour_type_id || defaultHourTypeId()) === htId
+        && (e.contract_id || '') === contractId) || null;
+    };
+    // The big Hours number always shows what's logged for the current selection (0.0 if nothing yet).
+    const syncHoursDisplay = () => {
+      if (!dom.hoursVal) return;
+      const entry = findEntryForSelection();
+      const mins = entry ? roundDuration(Number(entry.duration_minutes) || 0, roundInterval()) : 0;
+      dom.hoursVal.textContent = mins > 0 ? trimHours(formatHours(mins)) : '0.0';
+    };
+
+    let padBuffer = '';
+    let padFresh = false; // a pre-filled value acts as "selected" — the first keypress replaces it
+    const renderPad = () => { if (dom.padVal) dom.padVal.textContent = padBuffer || '0.0'; };
+    const commitPad = () => {
+      if (dom.hours) dom.hours.value = padBuffer;
+      state.draftHours = padBuffer;
+      syncHoursDisplay();
+    };
+    // The form is always an "add" form. Tapping the Hours field opens the keypad to add a new entry;
+    // tapping an existing entry row opens it pre-filled to update that specific entry. Either way the
+    // keypad's primary button is the only commit — there's no standalone Add/Update button on the form.
+    const openKeypad = (entry) => {
+      state.keypadEntry = entry || null;
+      if (entry) {
+        const mins = Number(entry.duration_minutes) || 0;
+        padBuffer = mins ? String(parseFloat((mins / 60).toFixed(2))) : '';
+      } else {
+        // Add: always start blank. (Never read the stale hidden input — that lingered after a swipe-delete.)
+        padBuffer = '';
+      }
+      padFresh = padBuffer !== '';
+      renderPad();
+      if (dom.keypadDone) dom.keypadDone.textContent = entry ? 'Update entry' : 'Add entry';
+      if (dom.keypad) dom.keypad.style.display = 'flex';
+    };
+    const closeKeypad = () => { if (dom.keypad) dom.keypad.style.display = 'none'; };
+    const saveFromKeypad = () => {
+      const buf = padBuffer;
+      const entry = state.keypadEntry;
+      state.keypadEntry = null;
+      closeKeypad();
+      const n = parseFloat(buf);
+      if (!isFinite(n) || n <= 0) return;
+      const minutes = Math.round(n * 60);
+      if (minutes > 24 * 60) { setStatus('Hours must be within a single day.', 'error'); return; }
+      const rounded = roundDuration(minutes, roundInterval());
+      if (entry) {
+        // Update just this entry's hours, keeping its own hour type + contract.
+        saveEntry({
+          id: entry.id,
+          date: entry.date,
+          punches: [{ in: '00:00', out: minutesToTime(rounded) }],
+          duration_minutes: rounded,
+          contract_id: entry.contract_id,
+          hour_type_id: entry.hour_type_id,
+          round_interval: roundInterval(),
+          entry_type: 'basic'
+        });
+      } else {
+        // New entry from the form's current hour type + contract.
+        commitPad();
+        saveEntry();
+      }
+    };
+    const padPress = (key) => {
+      if (padFresh) { padBuffer = ''; padFresh = false; }
+      if (key === 'back') {
+        padBuffer = padBuffer.slice(0, -1);
+      } else if (key === '.') {
+        if (padBuffer.indexOf('.') === -1) padBuffer += (padBuffer === '' ? '0.' : '.');
+      } else {
+        const dot = padBuffer.indexOf('.');
+        if (dot !== -1 && padBuffer.length - dot > 2) return; // max 2 decimals
+        if (padBuffer.replace('.', '').length >= 4) return;   // sensible overall length
+        padBuffer += key;
+      }
+      renderPad();
+      commitPad();
+    };
+
     const setLoading = (flag) => {
       state.loading = flag;
-      [dom.manualSave, dom.manualDelete, dom.manualCancel, dom.punchToggle, dom.punchSave, dom.punchDelete, dom.punchDiscard, dom.datePrev, dom.dateNext].forEach((el) => {
+      [dom.punchToggle, dom.punchEditorDone].forEach((el) => {
         if (!el) return;
         el.disabled = flag;
       });
     };
 
-    const saveEntry = async () => {
+    const saveEntry = async (overridePayload) => {
       if (state.loading) return;
-      const payload = state.mode === 'punch' ? getPunchPayload() : getManualPayload();
+      const payload = overridePayload || (state.mode === 'punch' ? getPunchPayload() : getManualPayload());
       if (!payload) return;
       const duplicate = findDuplicate(payload);
       if (duplicate) {
-        setStatus('An entry for this date/hour type already exists.', 'error');
-        hydrateDraftFromEntry(duplicate);
+        setStatus('An entry for this hour type already exists — tap it below to change it.', 'error');
+        hydrateDraftFromEntry(null, { preserveMode: true });
         return;
       }
       setLoading(true);
-      setStatus('Saving...', 'info');
       const isUpdate = !!payload.id;
       const fn = isUpdate ? 'api_updateEntry' : 'api_addEntry';
       const optimisticId = payload.id || ('temp_' + Date.now());
       const optimistic = sanitizeEntry({ ...payload, id: optimisticId, created_at: isoDateTime(new Date()) });
-      if (!isUpdate) {
-        state.entries.push(optimistic);
-        storeEntries([optimistic]);
-      }
+      // Optimistic: reflect the add OR update instantly (storeEntries upserts by id). Stay on a blank
+      // add-form; the entry lives in the list below.
+      const savedDate = state.currentDate;
+      storeEntries([optimistic]);
+      state.entries = getCachedEntriesForDate(savedDate);
+      hydrateDraftFromEntry(null, { preserveMode: true });
+      renderDayCard();
       const res = await run(fn, payload);
       if (res && res.success && res.entry) {
         const confirmed = sanitizeEntry(res.entry);
+        if (!isUpdate) {
+          // Drop the temp placeholder before storing the server id (temp id != real id → would double up).
+          state.entryCache[savedDate] = getCachedEntriesForDate(savedDate).filter((e) => e.id !== optimisticId);
+        }
         storeEntries([confirmed]);
-        state.entries = getCachedEntriesForDate(state.currentDate);
-        hydrateDraftFromEntry(confirmed);
-        renderDayCard();
         setStatus('Saved.', 'success');
       } else {
-        if (!isUpdate) {
-          const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== optimisticId);
-          state.entryCache[state.currentDate] = filtered;
-          state.entries = filtered;
-        }
-        setStatus('Save failed. Please try again.', 'error');
+        // No success response — but GAS can return null on a transient hiccup even after it persisted.
+        // Re-read this day authoritatively from the server rather than blindly rolling back (which could
+        // vanish a successfully-saved entry until reload). Only flag an error if the write truly didn't land.
+        state.entryCache[savedDate] = [];
+        await fetchEntriesRange(savedDate, savedDate);
+        const after = getCachedEntriesForDate(savedDate);
+        const landed = isUpdate
+          ? after.some((e) => e.id === payload.id)
+          : after.some((e) => (e.hour_type_id || defaultHourTypeId()) === payload.hour_type_id
+              && (e.contract_id || '') === (payload.contract_id || '')
+              && Math.abs((Number(e.duration_minutes) || 0) - payload.duration_minutes) < 1);
+        if (!landed) setStatus('Save failed. Please try again.', 'error');
+      }
+      if (state.currentDate === savedDate) {
+        state.entries = getCachedEntriesForDate(savedDate);
+        hydrateDraftFromEntry(null, { preserveMode: true });
+        renderDayCard();
       }
       setLoading(false);
     };
@@ -841,9 +1779,22 @@
         setStatus('Nothing to delete.', 'error');
         return;
       }
+      const id = state.currentEntry.id;
+      if (typeof id === 'string' && id.indexOf('temp_') === 0) {
+        // Never-persisted optimistic entry (e.g. left over from an earlier bug);
+        // just drop it locally — the backend has nothing to delete.
+        const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
+        state.entryCache[state.currentDate] = filtered;
+        state.entries = filtered;
+        state.currentEntry = null;
+        hydrateDraftFromEntry(null, { preserveMode: true });
+        renderDayCard();
+        persistCache();
+        setStatus('Removed.', 'success');
+        return;
+      }
       setLoading(true);
       setStatus('Deleting...', 'info');
-      const id = state.currentEntry.id;
       const res = await run('api_deleteEntry', id);
       if (res === null) {
         setStatus('Delete failed. Please try again.', 'error');
@@ -862,46 +1813,68 @@
       setLoading(false);
     };
 
-    const cancelManualEdit = () => {
-      state.currentEntry = null;
-      state.draftHours = '';
-      state.draftPunches = [{ in: '', out: '' }];
-      state.punchDirty = false;
-      renderContracts();
-      renderPunchList();
-      if (dom.hours) dom.hours.value = '';
-      setMode('manual');
-      setStatus('Ready to add entry.', 'info');
+    // ----- Theme picker (tap the Tempus brand). Sets a device-local theme that doesn't touch the synced
+    // desktop setting, so mobile can run a different look. -----
+    const MOBILE_THEME_KEY = 'ts_mobile_theme';
+    const THEME_LABELS = {
+      dark: 'Dark', light: 'Light', og: 'The OG', rose: 'Rose Gold', sierra117: 'Sierra 117',
+      gizmodo: 'Gizmodo', blaze: 'Blaze', 'velvet-espresso': 'Velvet Espresso',
+      protanopia: 'Protanopia', deuteranopia: 'Deuteranopia', tritanopia: 'Tritanopia', monochrome: 'Monochrome'
     };
-
-    const discardPunchChanges = () => {
-      if (state.currentEntry) {
-        hydrateDraftFromEntry(state.currentEntry, { preserveMode: true });
-      } else {
-        state.draftPunches = [{ in: '', out: '' }];
-        state.punchDirty = false;
-        renderPunchList();
-      }
+    const getMobileThemeOverride = () => { try { return localStorage.getItem(MOBILE_THEME_KEY) || ''; } catch (e) { return ''; } };
+    const currentThemeRef = () => getMobileThemeOverride() || ((mobileShell.state && mobileShell.state.settings && mobileShell.state.settings.theme) || 'dark');
+    const buildThemeOptions = () => {
+      const opts = ['dark', 'light', 'og', 'rose', 'sierra117', 'gizmodo', 'blaze', 'velvet-espresso'].map((k) => ({ key: k }));
+      // Custom + accessibility (colour-blind) themes are always offered now — their feature flags are
+      // retired (see RETIRED_FEATURE_FLAGS in scripts.html), so this mirrors the desktop theme gallery.
+      let raw = mobileShell.state && mobileShell.state.settings ? mobileShell.state.settings.custom_themes : null;
+      if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (e) { raw = []; } }
+      (Array.isArray(raw) ? raw : []).forEach((t) => { if (t && t.id) opts.push({ key: 'custom:' + t.id, label: t.name || 'Custom' }); });
+      ['protanopia', 'deuteranopia', 'tritanopia', 'monochrome'].forEach((k) => opts.push({ key: k }));
+      return opts.map((o) => ({ key: o.key, label: o.label || THEME_LABELS[o.key] || o.key }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
     };
-
-    const changeDate = (deltaDays) => {
-      hydrateDate(shiftIso(state.currentDate, deltaDays));
+    const applyMobileTheme = (key) => {
+      try { localStorage.setItem(MOBILE_THEME_KEY, key); } catch (e) {}
+      if (mobileShell.applyTheme) mobileShell.applyTheme(key);
     };
+    const renderThemeList = () => {
+      if (!dom.themeList) return;
+      const current = currentThemeRef();
+      dom.themeList.innerHTML = '';
+      buildThemeOptions().forEach((opt) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'ts-m-theme-row' + (opt.key === current ? ' is-active' : '');
+        const label = document.createElement('span');
+        label.textContent = opt.label;
+        row.appendChild(label);
+        if (opt.key === current) {
+          const tick = document.createElement('span');
+          tick.className = 'ts-m-theme-tick';
+          tick.textContent = '✓';
+          row.appendChild(tick);
+        }
+        row.onclick = () => { applyMobileTheme(opt.key); renderThemeList(); closeThemeSheet(); };
+        dom.themeList.appendChild(row);
+      });
+    };
+    const openThemeSheet = () => { renderThemeList(); if (dom.themeSheet) dom.themeSheet.style.display = 'flex'; };
+    const closeThemeSheet = () => { if (dom.themeSheet) dom.themeSheet.style.display = 'none'; };
 
     const bindEvents = () => {
       if (dom.tabManual) dom.tabManual.onclick = () => setMode('manual');
       if (dom.tabPunch) dom.tabPunch.onclick = () => setMode('punch');
       if (dom.punchToggle) dom.punchToggle.onclick = togglePunch;
-      if (dom.punchSave) dom.punchSave.onclick = saveEntry;
-      if (dom.punchDelete) dom.punchDelete.onclick = deleteEntry;
-      if (dom.punchDiscard) dom.punchDiscard.onclick = discardPunchChanges;
-      if (dom.manualSave) dom.manualSave.onclick = saveEntry;
-      if (dom.manualDelete) dom.manualDelete.onclick = deleteEntry;
-      if (dom.manualCancel) dom.manualCancel.onclick = cancelManualEdit;
-      if (dom.datePrev) dom.datePrev.onclick = () => changeDate(-1);
-      if (dom.dateNext) dom.dateNext.onclick = () => changeDate(1);
+      if (dom.punchEditorDone) dom.punchEditorDone.onclick = () => {
+        if (dom.punchEditorDone.dataset.mode === 'punchout') punchOutFromEditor();
+        else savePunchEditor();
+      };
+      if (dom.punchEditor) dom.punchEditor.addEventListener('click', (event) => { if (event.target === dom.punchEditor) closePunchEditor(); });
+      if (dom.themeTrigger) dom.themeTrigger.onclick = openThemeSheet;
+      if (dom.themeSheet) dom.themeSheet.addEventListener('click', (event) => { if (event.target === dom.themeSheet) closeThemeSheet(); });
+      if (dom.dateToday) dom.dateToday.onclick = () => hydrateDate(todayIso());
       if (dom.dateLabel) dom.dateLabel.onclick = openDatePicker;
-      if (dom.datePickerClose) dom.datePickerClose.onclick = closeDatePicker;
       if (dom.dateMonthPrev) dom.dateMonthPrev.onclick = () => {
         if (state.datePicker.year == null || state.datePicker.month == null) return;
         const prev = new Date(state.datePicker.year, state.datePicker.month - 1, 1);
@@ -921,11 +1894,29 @@
           if (event.target === dom.datePicker) closeDatePicker();
         });
       }
+      if (dom.quickBtn) dom.quickBtn.onclick = openQuickSheet;
+      if (dom.quickSheet) {
+        dom.quickSheet.addEventListener('click', (event) => {
+          if (event.target === dom.quickSheet) closeQuickSheet();
+        });
+      }
       if (dom.manualHourType) dom.manualHourType.onchange = () => selectHourType(dom.manualHourType.value);
       if (dom.punchHourType) dom.punchHourType.onchange = () => selectHourType(dom.punchHourType.value);
-      if (dom.manualContract) dom.manualContract.onchange = () => renderContracts({ manualPreferred: dom.manualContract.value });
-      if (dom.punchContract) dom.punchContract.onchange = () => renderContracts({ punchPreferred: dom.punchContract.value });
-      if (dom.hours) dom.hours.oninput = () => { state.draftHours = dom.hours.value; };
+      if (dom.manualContract) dom.manualContract.onchange = () => { renderContracts({ manualPreferred: dom.manualContract.value }); syncHoursDisplay(); };
+      if (dom.punchContract) dom.punchContract.onchange = () => { renderContracts({ punchPreferred: dom.punchContract.value }); updatePunchClock(); };
+      if (dom.hoursDisplay) dom.hoursDisplay.onclick = () => openKeypad(findEntryForSelection());
+      if (dom.keypadDone) dom.keypadDone.onclick = saveFromKeypad;
+      if (dom.keypad) dom.keypad.addEventListener('click', (event) => { if (event.target === dom.keypad) closeKeypad(); });
+      if (dom.padGrid) dom.padGrid.addEventListener('click', (event) => { const b = event.target.closest('[data-key]'); if (b) padPress(b.getAttribute('data-key')); });
+      // Coming back to the tab revalidates everything the user may have changed elsewhere meanwhile:
+      // contracts/hour types (forced — "I just made a contract on desktop" is exactly this moment) and
+      // the current day's entries. Mobile Safari often resumes the page instead of reloading it, so
+      // without this a stale view could linger indefinitely.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || !state.staticLoaded) return;
+        refreshStaticFromServer({ force: true });
+        refreshCurrentDayEntries();
+      });
     };
 
     const init = async () => {
@@ -934,15 +1925,24 @@
         const viewSwitch = document.getElementById('mobile-view-switch');
         if (desktopLink && url) {
           desktopLink.href = url;
+          // Remember the choice so auto-detect doesn't bounce a phone user
+          // straight back to the mobile view (redirect loop).
+          desktopLink.addEventListener('click', () => {
+            try { localStorage.setItem('ts_view_pref', 'desktop'); } catch (e) {}
+          });
           if (viewSwitch) viewSwitch.style.display = 'flex';
         }
       });
       bindEvents();
       await hydrateDate(todayIso());
-      if (mobileShell.applyTheme && state.settings && state.settings.theme) {
-        mobileShell.applyTheme(state.settings.theme);
+      // Re-sync the theme from the SHELL's live state, not this module's snapshot — the snapshot is
+      // captured at cache-time and goes stale once the shell's background refresh swaps in the fresh
+      // settings, so applying it would re-slap the old theme over the new one (the flash-back bug).
+      const liveSettings = (mobileShell.state && mobileShell.state.settings) || state.settings || {};
+      if (mobileShell.applyTheme && liveSettings.theme) {
+        mobileShell.applyTheme(liveSettings.theme);
       }
-      syncTabAvailability();
+      applyDayModeChrome();
     };
 
     init();

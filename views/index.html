@@ -2,7 +2,20 @@
 <html>
   <head>
     <base target="_top">
+    <!-- Server-injected time-view preference, set before the app boots so the first paint is the user's
+         saved view (Agenda/Calendar) on any browser — no flash. See doGet/getInitialTimeView. -->
+    <script>window.__TEMPUS_INITIAL_TIME_VIEW__ = '<?= initialTimeView ?>';</script>
+    <!-- Active theme's core colours, resolved server-side (see doGet/getGateThemeColours) so the mobile
+         redirect gate can paint in the user's theme before the app boots. Values are hex-sanitised. -->
+    <script>window.__TEMPUS_GATE_THEME__ = <?!= gateThemeJson ?>;</script>
+    <script>window.__TEMPUS_WEBAPP_URL__ = '<?= webAppUrl ?>';</script>
+    <?!= include('views/partials/mobile-detect'); ?>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http://www.w3.org/2000/svg'%20viewBox%3D'0%200%20256%20256'%3E%3Crect%20width%3D'256'%20height%3D'256'%20rx%3D'56'%20fill%3D'%232563eb'/%3E%3Cpolyline%20points%3D'220%2020%2036%2020%20128%20153.44%20196%2056%2092%2056%20220%20240%2036%20240%2096%20152%20128%20204'%20fill%3D'none'%20stroke%3D'%23ffffff'%20stroke-width%3D'22'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <!-- No flatpickr theme import: themes/dark.css hardcoded a navy calendar that ignored the active theme
+         (showed navy even in light themes like Velvet Espresso). The picker is fully themed via token-based
+         overrides in head.html (.flatpickr-* → var(--panel)/--text/--primary), which adapt to every theme. -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
     <?!= include('views/partials/head'); ?>
   </head>
   <body class="ts-body ts-theme-dark">
@@ -19,12 +32,52 @@
       <?!= include('views/partials/hourtypes'); ?>
       <?!= include('views/partials/deductions'); ?>
       <?!= include('views/partials/invoices'); ?>
-      <?!= include('views/partials/assessments'); ?>
       <?!= include('views/partials/bas'); ?>
+      <?!= include('views/partials/public-holidays'); ?>
       <?!= include('views/partials/annualviews'); ?>
+      <?!= include('views/partials/themes'); ?>
       <?!= include('views/partials/settings'); ?>
       <?!= include('views/partials/about'); ?>
     </main>
+    <!-- Shared quick-actions menu (kept outside all pages so it works on both the grid and the Day List) -->
+    <div class="ts-calendar-context-menu" id="calendar-context-menu" style="display:none;">
+      <div class="ts-calendar-context-header">Quick actions</div>
+      <div class="ts-calendar-context-empty" id="calendar-context-empty" style="display:none;">
+        No quick actions yet. Turn on "Show in quick actions" for an hour type on the Hour Types screen.
+      </div>
+      <div class="ts-calendar-context-section" data-section="quickfill">
+        <div class="ts-calendar-context-list" id="calendar-context-quickfill"></div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="entries" style="display:none;">
+        <div class="ts-calendar-context-divider"></div>
+        <div class="ts-calendar-context-title">On this day</div>
+        <div class="ts-calendar-context-list" id="calendar-context-entries"></div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="copy" style="display:none;">
+        <div class="ts-calendar-context-divider"></div>
+        <div class="ts-calendar-context-list">
+          <button class="ts-calendar-context-item" id="calendar-copy-yesterday" type="button"><span class="ts-calendar-context-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span class="ts-calendar-context-label">Copy yesterday</span></button>
+          <button class="ts-calendar-context-item" id="calendar-copy-lastweek" type="button"><span class="ts-calendar-context-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M7 14h10"/></svg></span><span class="ts-calendar-context-label">Copy last week</span></button>
+        </div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="sessions" style="display:none;">
+        <div class="ts-calendar-context-divider"></div>
+        <div class="ts-calendar-context-title">Sessions</div>
+        <div class="ts-calendar-context-list" id="calendar-context-sessions"></div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="actions">
+        <div class="ts-calendar-context-divider"></div>
+        <div class="ts-calendar-context-list">
+          <button class="ts-calendar-context-item danger" id="calendar-clear-day" type="button"><span class="ts-calendar-context-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg></span><span class="ts-calendar-context-label">Clear day</span></button>
+        </div>
+      </div>
+      <div class="ts-calendar-context-section" data-section="punch" style="display:none;">
+        <div class="ts-calendar-context-divider"></div>
+        <div class="ts-calendar-context-list">
+          <button class="ts-calendar-context-item" id="calendar-punch-out" type="button"><span class="ts-calendar-context-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg></span><span class="ts-calendar-context-label">Punch out</span></button>
+        </div>
+      </div>
+    </div>
     <?!= include('views/partials/scripts'); ?>
   </body>
 </html>

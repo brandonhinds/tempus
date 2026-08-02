@@ -3,8 +3,11 @@
   <head>
     <base target="_top">
     <?!= include('views/partials/head'); ?>
+    <!-- First-paint theming (see doGet): for a custom theme this overrides the empty .ts-theme-custom
+         placeholder with its dominant colours so the page renders in-theme immediately; '' for built-ins. -->
+    <?!= customThemeFirstPaintCss ?>
   </head>
-  <body class="ts-body ts-theme-dark ts-mobile-shell">
+  <body class="ts-body <?= bodyThemeClass ?> ts-mobile-shell">
     <?!= include('views/partials/mobile-shell-scripts'); ?>
     <div id="ts-toast-container" class="ts-toast-container" aria-live="polite" aria-atomic="true"></div>
     <main class="ts-container ts-mobile-container">

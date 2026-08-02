@@ -2,18 +2,18 @@
   <div>
       <div class="ts-toolbar" style="margin-bottom:12px;">
         <div class="ts-gap-md" style="display:flex; align-items:center;">
-          <h3 style="margin:0;">Contracts</h3>
+          <h3 style="margin:0;">Contract View</h3>
         </div>
         <button id="contract-toggle-add">Add Contract</button>
       </div>
       <div class="ts-note" style="margin-bottom:16px;">Contracts define which engagements you can log time against. Only contracts active on a given date appear in the Time Entry dropdowns.</div>
-      <div class="ts-grid ts-grid--gap-md" style="margin-bottom:12px;">
-        <div class="ts-col-span-4" style="max-width:320px;">
-          <label for="contract-selector">View contract</label>
-          <select id="contract-selector">
-            <option value="">Select a contract...</option>
-          </select>
+      <div class="contract-selector-row" style="margin-bottom:16px;">
+        <div class="contract-selector-main">
+          <div class="contract-selector-heading">View contract</div>
+          <div id="contract-selector-chips" class="contract-selector-chips"></div>
         </div>
+        <!-- Edit/Delete for the selected contract sit here, beside the chips; populated by renderContractDetail. -->
+        <div id="contract-detail-actions-slot" class="contract-detail-actions"></div>
       </div>
       <div id="contract-detail" class="contract-detail"></div>
       <div id="contract-unlimited-note" class="ts-note" style="display:none; margin-top:12px;"></div>
@@ -22,18 +22,28 @@
       <div id="contract-form-container" style="display:none; margin-top:16px;">
         <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
           <div class="ts-col-span-4"><label>Contract Name</label><input id="contract-name" /></div>
-          <div class="ts-col-span-4"><label>Start Date</label><input type="date" id="contract-start" /></div>
-          <div class="ts-col-span-4"><label>End Date</label><input type="date" id="contract-end" /></div>
+          <div class="ts-col-span-4"><label>Start Date</label><input type="text" id="contract-start" placeholder="Select date" /></div>
+          <div class="ts-col-span-4"><label>End Date</label><input type="text" id="contract-end" placeholder="Select date" /></div>
         </div>
         <div class="ts-grid ts-grid--gap-md" style="margin-top:8px;">
           <div class="ts-col-span-6" style="min-width:160px;"><label>Hourly Rate</label><input type="number" id="contract-rate" min="0" step="0.01" /></div>
-          <div class="ts-col-span-6" style="min-width:160px;"><label>Total Hours (optional) <span class="ts-info-icon" title="Leave blank or set to 0 for an unlimited-hours contract.">i</span></label><input type="number" id="contract-total-hours" min="0" step="0.1" /></div>
+          <div class="ts-col-span-6" style="min-width:160px;"><label>Total Hours (optional) <span class="ts-info-icon" data-tip="Leave blank or set to 0 for an unlimited-hours contract.">i</span></label><input type="number" id="contract-total-hours" min="0" step="0.1" /></div>
         </div>
         <div class="ts-grid ts-grid--gap-md" style="margin-top:8px;">
-          <div class="ts-col-span-6" style="min-width:160px;"><label>Standard Hours Per Day <span class="ts-info-icon" title="Used to calculate fractional business days from future entries (e.g., 3.75 hours = 0.5 days for 7.5 hour standard).">i</span></label><input type="number" id="contract-standard-hours" min="0.1" step="0.1" value="7.5" /></div>
+          <div class="ts-col-span-6" style="min-width:160px;"><label>Standard Hours Per Day <span class="ts-info-icon" data-tip="Used to calculate fractional business days from future entries (e.g., 3.75 hours = 0.5 days for 7.5 hour standard).">i</span></label><input type="number" id="contract-standard-hours" min="0.1" step="0.1" value="7.5" /></div>
+          <div class="ts-col-span-6" style="min-width:160px;">
+            <label>Entry Mode <span class="ts-info-icon" data-tip="How you log time against this contract. Simple = a single total-hours field. Detailed = a session timeline (start/end times, breaks). 'Use default' follows the global Default Entry Mode in Settings.">i</span></label>
+            <select id="contract-entry-mode" aria-label="Entry mode">
+              <option value="">Use default</option>
+              <option value="simple">Simple — total hours</option>
+              <option value="detailed">Detailed — sessions</option>
+            </select>
+          </div>
         </div>
-        <div class="ts-grid ts-grid--gap-md" id="contract-weekends-row" style="margin-top:8px; display:none;">
-          <div class="ts-col-span-6" style="max-width:420px;">
+        <!-- Weekends toggle (left, shown only when the expected-monthly flag is on) and Colour (right)
+             share one row. When the weekends column is hidden, Colour reflows to the left. -->
+        <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:8px;">
+          <div class="ts-col-span-6" id="contract-weekends-row" style="max-width:420px; display:none;">
             <div class="ts-gap-lg" style="display:flex; justify-content:space-between; align-items:center;">
               <div style="flex:1 1 auto;">
                 <div style="font-weight:600;">Count weekends when projecting average daily hours</div>
@@ -45,12 +55,18 @@
               </label>
             </div>
           </div>
+          <div class="ts-col-span-6">
+            <label>Colour</label>
+            <input type="color" id="contract-color" value="#3b82f6" class="ts-color-native" tabindex="-1" aria-hidden="true" />
+            <div class="ts-color-swatches" id="contract-color-swatches" role="radiogroup" aria-label="Contract colour"></div>
+            <div class="ts-note">Used to tell contracts apart in the Time Entry filter. Leave it and one is picked for you.</div>
+          </div>
         </div>
         <div id="contract-line-item-templates-section" style="display:none; margin-top:16px;">
           <div style="font-weight:600; margin-bottom:8px;">Invoice Line Item Templates</div>
           <div class="ts-note" style="margin-bottom:12px;">Define reusable line items with predefined descriptions and amounts for this contract.</div>
           <div id="contract-template-empty" class="ts-empty-state ts-empty-state--inline" style="display:none; margin-bottom:12px;">
-            <div class="ts-empty-state__icon">📋</div>
+            <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></div>
             <p class="ts-empty-state__title">No templates defined</p>
             <p class="ts-empty-state__text">Add templates to quickly insert common line items when creating invoices.</p>
           </div>
@@ -70,34 +86,31 @@
               </div>
             </div>
           </div>
-          <button id="btn-contract-template-new" class="ghost" style="font-size:12px;">Add template</button>
+          <button id="btn-contract-template-new" class="ghost" style="font-size:var(--font-size-xs);">Add template</button>
         </div>
-        <div id="contract-assessment-config-section" style="display:none; margin-top:16px;">
-          <div style="font-weight:600; margin-bottom:8px;">Assessment configuration</div>
-          <div class="ts-note" style="margin-bottom:12px;">Choose which assessment types this organisation offers. Multipliers default to the catalogue values; override them here if this org pays differently.</div>
-          <div id="contract-assessment-types-empty" class="ts-empty-state ts-empty-state--inline" style="display:none; margin-bottom:12px;">
-            <div class="ts-empty-state__icon">📋</div>
-            <p class="ts-empty-state__title">No assessment types yet</p>
-            <p class="ts-empty-state__text">Add assessment types in Settings → Assessment types before configuring them on a contract.</p>
-          </div>
-          <div id="contract-assessment-types-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <!-- Day-template editor (Phase 4). Only shown for Detailed contracts. Named templates, each a set of
+             start · end · hour-type sessions; applied via the calendar/agenda right-click "Sessions" menu,
+             where each template appears under its own name. -->
+        <div id="contract-standard-day-section" style="display:none; margin-top:16px;">
+          <div style="font-weight:600; margin-bottom:8px;">Day templates <span class="ts-info-icon" data-tip="Typical days for this contract, each a named set of sessions. Right-click a day → they're listed by name for one-click fill. Work sessions only for now.">i</span></div>
+          <div class="ts-note" style="margin-bottom:12px;">Define the days you work again and again — a standard day, a half day, an after-school shift. Each template appears by name in the calendar / agenda right-click menu. Only add the sessions you <em>work</em> — breaks are picked up automatically from the gaps between them.</div>
+          <!-- Two-column grid; the render always appends a dashed "Add template" tile as the next free cell
+               (theme-gallery pattern), which is also the empty state — no separate Add button. -->
+          <div id="contract-standard-day-list"></div>
         </div>
-        <div id="contract-invoice-email-section" style="display:none; margin-top:16px;">
-          <div style="font-weight:600; margin-bottom:8px;">Invoice email defaults</div>
-          <div class="ts-note" style="margin-bottom:12px;">Recipients and message used when sending the monthly invoice for this organisation. Placeholders: <code>{invoiceNumber}</code>, <code>{monthYear}</code>, <code>{org}</code>, <code>{total}</code>.</div>
-          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
-            <div class="ts-col-span-4"><label for="contract-invoice-email-to">To</label><input id="contract-invoice-email-to" type="text" placeholder="recipient@example.com" /></div>
-            <div class="ts-col-span-4"><label for="contract-invoice-email-cc">CC</label><input id="contract-invoice-email-cc" type="text" placeholder="optional, comma-separated" /></div>
-            <div class="ts-col-span-4"><label for="contract-invoice-email-bcc">BCC</label><input id="contract-invoice-email-bcc" type="text" placeholder="optional, comma-separated" /></div>
-          </div>
-          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
-            <div class="ts-col-span-12"><label for="contract-invoice-email-subject">Subject template</label><input id="contract-invoice-email-subject" type="text" placeholder="Invoice {invoiceNumber} - {monthYear}" /></div>
-          </div>
-          <div class="ts-grid ts-grid--gap-md" style="margin-bottom:8px;">
-            <div class="ts-col-span-12"><label for="contract-invoice-email-body">Body template</label><textarea id="contract-invoice-email-body" rows="6" style="font-family:monospace; font-size:12px;" placeholder="Hi,&#10;&#10;Please see attached invoice {invoiceNumber} for {monthYear}.&#10;&#10;Kind regards"></textarea></div>
-          </div>
-        </div>
-        <div style="margin-top:8px; text-align:right; display:flex; justify-content:flex-end; gap:8px;">
+        <div style="margin-top:36px; margin-bottom:8px; display:flex; align-items:center; gap:10px;">
+          <!-- Delete + Archive group on the left (edit-only); Cancel/Save on the right. Delete's default
+               margin-right:auto is overridden so the spacer below does the left/right split. -->
+          <button type="button" class="ts-modal-delete-link" id="contract-delete-inline" style="display:none; margin-right:0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>Delete contract</span>
+          </button>
+          <!-- Archive sits beside Delete (edit-only). Neutral, not red — it's a safe, reversible action. -->
+          <button type="button" class="ts-modal-archive-link" id="contract-archive-inline" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            <span>Archive contract</span>
+          </button>
+          <div style="flex:1 1 auto;"></div>
           <button class="ghost" id="contract-cancel" style="display:none;">Cancel</button>
           <button id="contract-save">Save</button>
         </div>

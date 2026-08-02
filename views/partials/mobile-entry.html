@@ -1,104 +1,198 @@
-<section class="ts-card ts-mobile-card" id="mobile-entry">
-  <div class="ts-mobile-header">
-    <div class="ts-calendar-nav ts-mobile-day-nav" aria-label="Day navigation">
-      <button class="ghost" id="mobile-date-prev" type="button" aria-label="Previous day">◀</button>
-      <button class="ghost" id="mobile-date-label" type="button" aria-label="Selected date">--/--/----</button>
-      <button class="ghost" id="mobile-date-next" type="button" aria-label="Next day">▶</button>
-    </div>
-  </div>
+<section class="ts-m-app" id="mobile-entry">
+  <header class="ts-m-appbar">
+    <button class="ts-m-brand" id="mobile-theme-trigger" type="button" aria-label="Change theme">
+      <span class="ts-m-logo" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><polyline points="220 20 36 20 128 153.44 196 56 92 56 220 240 36 240 96 152 128 204" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="ts-m-appbar-title">
+        <h1>Tempus</h1>
+        <span class="ts-m-status" id="mobile-status" role="status" aria-live="polite"></span>
+      </span>
+    </button>
+    <!-- Live on-the-clock timer next to the brand — shows on every view (Basic or Punch) while a punch is
+         open today, so you always know the clock's running. Sits OUTSIDE the theme-trigger button. -->
+    <span class="ts-m-appbar-clock" id="mobile-appbar-clock" style="display:none;" role="status" aria-live="off" aria-label="On the clock">
+      <span class="ts-m-appbar-clock-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg></span>
+      <span class="ts-m-appbar-clock-time" id="mobile-appbar-clock-time">0:00</span>
+    </span>
+    <button class="ts-m-today" id="mobile-date-today" type="button">Today</button>
+  </header>
 
-  <div class="ts-mobile-row" aria-live="polite" id="mobile-status" role="status"></div>
+  <div class="ts-m-card ts-m-datebar">
+    <button class="ts-m-datemid" id="mobile-date-label" type="button" aria-label="Selected date — tap to change">
+      <span class="ts-m-date-main" id="mobile-date-main">--</span>
+      <span class="ts-m-date-sub" id="mobile-date-sub"></span>
+    </button>
+  </div>
 
   <input type="date" id="mobile-date" class="ts-mobile-date-input" />
 
-  <div class="ts-mobile-day-card">
-    <div class="ts-calendar-cell ts-calendar-cell--mobile" id="mobile-day-card">
-      <div class="ts-calendar-day" id="mobile-day-number">--</div>
-      <div class="ts-calendar-hour-types" id="mobile-day-hour-types"></div>
-      <div class="ts-calendar-total" id="mobile-day-total"></div>
-    </div>
+  <div class="ts-m-seg" id="mobile-seg" role="tablist">
+    <button class="ts-m-seg-btn active" id="mobile-tab-manual" data-mode="manual" role="tab" aria-controls="mobile-panel-manual">Basic</button>
+    <button class="ts-m-seg-btn" id="mobile-tab-punch" data-mode="punch" role="tab" aria-controls="mobile-panel-punch">Punch</button>
   </div>
 
-  <div class="ts-mobile-row ts-mobile-segment">
-    <div class="ts-tabs ts-tabs--tight" role="tablist">
-      <button class="ts-tab active" id="mobile-tab-manual" data-mode="manual" role="tab" aria-controls="mobile-panel-manual">Basic</button>
-      <button class="ts-tab" id="mobile-tab-punch" data-mode="punch" role="tab" aria-controls="mobile-panel-punch">Advanced</button>
-    </div>
-  </div>
-
-  <div id="mobile-panel-manual" class="ts-mobile-panel" role="tabpanel">
-    <div class="ts-grid ts-grid--gap-md ts-grid--align-start ts-mobile-form-grid">
-      <div class="ts-col-span-4" id="mobile-manual-hour-type-col" style="display:none;">
-        <label>Hour Type</label>
+  <div id="mobile-panel-manual" class="ts-m-card ts-m-panel" role="tabpanel">
+    <div class="ts-m-field-row">
+      <div class="ts-m-field" id="mobile-manual-hour-type-col" style="display:none;">
+        <label>Hour type</label>
         <select id="mobile-manual-hour-type"></select>
       </div>
-      <div class="ts-col-span-4">
+      <div class="ts-m-field">
         <label>Contract</label>
         <select id="mobile-manual-contract"></select>
-        <div class="ts-warning" id="mobile-manual-contract-warning" style="display:none;">Select a valid contract for this date.</div>
       </div>
     </div>
-    <div class="ts-grid ts-grid--gap-md" style="margin-top:8px;">
-      <div class="ts-col-span-4">
-        <label>Total hours</label>
-        <input type="number" id="mobile-hours" min="0" step="0.01" inputmode="decimal" placeholder="" />
-      </div>
-    </div>
-    <p class="ts-note" style="margin-top:8px;">Whole day only; rounding uses your settings.</p>
-    <div class="ts-mobile-actions-row">
-      <div class="ts-gap-md" style="display:flex; flex-wrap:wrap; gap:8px;">
-        <button class="ghost" id="mobile-cancel-edit" type="button" style="display:none;">Cancel Edit</button>
-        <button class="ghost" id="mobile-delete" type="button" style="display:none;">Delete Entry</button>
-        <button id="mobile-save" type="button">Add Entry</button>
-      </div>
+    <div class="ts-warning" id="mobile-manual-contract-warning" style="display:none; margin:-4px 0 12px;">Select a valid contract for this date.</div>
+    <div class="ts-m-field">
+      <label>Total hours</label>
+      <button type="button" class="ts-m-hours-display" id="mobile-hours-display" aria-haspopup="dialog">
+        <span class="ts-m-hours-val" id="mobile-hours-val">0.0</span>
+        <span class="ts-m-hours-unit">hours</span>
+      </button>
+      <input type="hidden" id="mobile-hours" />
     </div>
   </div>
 
-  <div id="mobile-panel-punch" class="ts-mobile-panel" style="display:none;" role="tabpanel">
-    <div class="ts-grid ts-grid--gap-md ts-grid--align-start ts-mobile-form-grid">
-      <div class="ts-col-span-4" id="mobile-punch-hour-type-col" style="display:none;">
-        <label>Hour Type</label>
+  <div id="mobile-panel-punch" class="ts-m-card ts-m-panel" style="display:none;" role="tabpanel">
+    <div class="ts-m-field-row">
+      <div class="ts-m-field" id="mobile-punch-hour-type-col" style="display:none;">
+        <label>Hour type</label>
         <select id="mobile-punch-hour-type"></select>
       </div>
-      <div class="ts-col-span-4">
+      <div class="ts-m-field">
         <label>Contract</label>
         <select id="mobile-punch-contract"></select>
-        <div class="ts-warning" id="mobile-punch-contract-warning" style="display:none;">Select a valid contract for this date.</div>
       </div>
     </div>
-    <div class="ts-note" id="mobile-punch-summary" style="margin-top:8px;"></div>
-    <div class="ts-warning" id="mobile-punch-warning" style="display:none; margin-top:4px;"></div>
-    <div class="ts-note" id="mobile-punch-suggestion" style="display:none; margin-top:4px; color: var(--success);"></div>
-    <div id="mobile-punch-list" class="ts-punch-list ts-punch-list--compact"></div>
-    <div class="ts-mobile-actions-row">
-      <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px;">
-        <button id="mobile-punch-toggle" type="button">Punch In</button>
-        <button class="ghost" id="mobile-punch-discard" type="button" style="display:none;">Discard Changes</button>
-        <button class="ghost" id="mobile-delete-punch" type="button" style="display:none;">Delete Entry</button>
-        <button id="mobile-punch-save" type="button">Add Entry</button>
-      </div>
+    <div class="ts-warning" id="mobile-punch-contract-warning" style="display:none; margin:-4px 0 0;">Select a valid contract for this date.</div>
+    <button class="ts-m-punchbtn" id="mobile-punch-toggle" type="button">Punch In</button>
+    <div class="ts-m-clockstat" id="mobile-punch-clockstat" style="display:none;">
+      <span class="ts-m-clock-dot" aria-hidden="true"></span>
+      <span>On the clock since <b id="mobile-punch-since">--</b> · <span class="ts-m-clock-timer" id="mobile-punch-timer">0h 00m 00s</span></span>
+    </div>
+    <div class="ts-m-note" id="mobile-punch-suggestion" style="display:none; margin-top:8px; color: var(--success);"></div>
+  </div>
+
+  <!-- Lives between the panels and the entries list (not inside the Basic panel) so quick actions —
+       including a Detailed contract's day templates — stay one tap away on the Punch tab too. -->
+  <button class="ts-m-quicklog" id="mobile-quick-entry" type="button" hidden aria-haspopup="dialog">Quick fill hours</button>
+
+  <div class="ts-m-card ts-m-list" id="mobile-entries-card" style="display:none;">
+    <div class="ts-m-list-head">
+      <h3>Entries this day</h3>
+      <span class="ts-m-list-hint">&lt;-- Swipe to delete</span>
+    </div>
+    <div id="mobile-entries-list"></div>
+    <div class="ts-m-day-total">
+      <span>Total logged</span>
+      <span id="mobile-day-total-val">0h</span>
     </div>
   </div>
 
-  <div class="ts-view-switch" id="mobile-view-switch" style="margin-top:auto; display:none;">
-    <a class="ghost" id="mobile-view-desktop-link" href="#">Desktop view</a>
+  <div class="ts-m-empty" id="mobile-empty-state" style="display:none;" aria-hidden="true">
+    <div class="ts-m-tw">
+      <!-- Night sky — shown only on dark themes (CSS gated by .ts-theme--dark). -->
+      <div class="ts-m-tw-night" aria-hidden="true">
+        <span class="ts-m-tw-moon"></span>
+        <span class="ts-m-tw-star ts-m-tw-star1"></span>
+        <span class="ts-m-tw-star ts-m-tw-star2"></span>
+        <span class="ts-m-tw-star ts-m-tw-star3"></span>
+        <span class="ts-m-tw-star ts-m-tw-star4"></span>
+        <span class="ts-m-tw-star ts-m-tw-star5"></span>
+        <span class="ts-m-tw-star ts-m-tw-star6"></span>
+        <span class="ts-m-tw-star ts-m-tw-star7"></span>
+        <span class="ts-m-tw-star ts-m-tw-star8"></span>
+      </div>
+      <div class="ts-m-tw-cacti">
+        <svg viewBox="0 0 140 120" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M34 116 V26" stroke-width="16"/><path d="M34 72 H21 V50" stroke-width="11"/><path d="M34 56 H48 V34" stroke-width="11"/>
+          <path d="M70 116 V72" stroke-width="13"/><path d="M70 92 H80 V80" stroke-width="8"/>
+          <path d="M104 116 V46" stroke-width="15"/><path d="M104 78 H92 V60" stroke-width="10"/>
+        </svg>
+      </div>
+      <div class="ts-m-tw-cactus-solo">
+        <svg viewBox="0 0 64 120" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M32 116 V24" stroke-width="16"/><path d="M32 72 H18 V48" stroke-width="11"/><path d="M32 54 H47 V32" stroke-width="11"/>
+        </svg>
+      </div>
+      <div class="ts-m-tw-bounce"></div>
+      <div class="ts-m-tw-peb1"></div>
+      <div class="ts-m-tw-peb2"></div>
+      <div class="ts-m-tw-peb3"></div>
+    </div>
   </div>
 </section>
 
-<div class="ts-modal ts-modal--mobile-date" id="mobile-date-picker" style="display:none;">
+<div class="ts-modal ts-modal--mobile-date ts-modal--mobile-sheet" id="mobile-date-picker" style="display:none;">
   <div class="ts-modal-content">
-    <div class="ts-modal-header">
-      <h3>Select day</h3>
-      <button class="ts-modal-close" id="mobile-date-picker-close">&times;</button>
-    </div>
     <div class="ts-modal-body">
       <div class="ts-month-picker-header">
-        <button class="ghost" id="mobile-date-month-prev">◀</button>
+        <button class="ghost" id="mobile-date-month-prev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
         <div id="mobile-date-month-label" class="ts-month-picker-year">--</div>
-        <button class="ghost" id="mobile-date-month-next">▶</button>
+        <button class="ghost" id="mobile-date-month-next" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
       </div>
       <div class="ts-day-picker-weekdays" id="mobile-day-picker-weekdays"></div>
       <div class="ts-day-picker-grid" id="mobile-day-picker-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal ts-modal--mobile-sheet" id="mobile-punch-editor" style="display:none;" role="dialog" aria-label="Edit punch sessions">
+  <div class="ts-modal-content">
+    <div class="ts-modal-body">
+      <div class="ts-m-sheet-head">
+        <h3 id="mobile-punch-editor-title">Edit punch</h3>
+        <p class="ts-m-note" id="mobile-punch-editor-sub"></p>
+      </div>
+      <div id="mobile-punch-editor-list" class="ts-m-sess-list"></div>
+      <p class="ts-m-note ts-m-sess-hint">Tap a time to adjust it, or × to remove a session. To clock in a new session, use Punch In. Swipe the entry to delete it.</p>
+      <div class="ts-m-sheet-actions">
+        <button class="ts-m-primary" id="mobile-punch-editor-done" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal ts-modal--mobile-sheet" id="mobile-theme-sheet" style="display:none;" role="dialog" aria-label="Choose theme">
+  <div class="ts-modal-content">
+    <div class="ts-modal-body">
+      <div class="ts-m-sheet-head">
+        <h3>Theme</h3>
+        <p class="ts-m-note">Sets the look on this device only.</p>
+      </div>
+      <div id="mobile-theme-list" class="ts-m-theme-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal ts-modal--mobile-sheet" id="mobile-quick-sheet" style="display:none;" role="dialog" aria-label="Quick fill">
+  <div class="ts-modal-content">
+    <div class="ts-modal-body">
+      <div class="ts-m-qa-list" id="mobile-quick-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="ts-modal ts-modal--mobile-sheet ts-modal--keypad" id="mobile-keypad" style="display:none;" role="dialog" aria-label="Enter total hours">
+  <div class="ts-modal-content">
+    <div class="ts-modal-body">
+      <div class="ts-m-pad-readout"><span id="mobile-pad-val">0.0</span><span class="ts-m-pad-unit">hours</span></div>
+      <div class="ts-m-pad-grid" id="mobile-pad-grid">
+        <button type="button" data-key="1">1</button>
+        <button type="button" data-key="2">2</button>
+        <button type="button" data-key="3">3</button>
+        <button type="button" data-key="4">4</button>
+        <button type="button" data-key="5">5</button>
+        <button type="button" data-key="6">6</button>
+        <button type="button" data-key="7">7</button>
+        <button type="button" data-key="8">8</button>
+        <button type="button" data-key="9">9</button>
+        <button type="button" data-key=".">.</button>
+        <button type="button" data-key="0">0</button>
+        <button type="button" data-key="back" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg></button>
+      </div>
+      <button class="ts-m-primary" id="mobile-keypad-done" type="button">Done</button>
     </div>
   </div>
 </div>
