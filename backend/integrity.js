@@ -1,9 +1,18 @@
 /** Shared mutation, validation and export safety helpers. */
 
+var TEMPUS_SCRIPT_LOCK_ACTIVE = false;
+
 function withScriptLock_(operationName, callback) {
+  if (TEMPUS_SCRIPT_LOCK_ACTIVE) return callback();
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('concurrent_update: Another ' + operationName + ' is still being saved. Please retry.');
-  try { return callback(); } finally { lock.releaseLock(); }
+  try {
+    TEMPUS_SCRIPT_LOCK_ACTIVE = true;
+    return callback();
+  } finally {
+    TEMPUS_SCRIPT_LOCK_ACTIVE = false;
+    lock.releaseLock();
+  }
 }
 
 function apiRecoverableFailure_(code, message, details) {

@@ -331,8 +331,8 @@ function entryIdentityKey_(entry, defaultHourTypeId) {
 }
 
 function api_addEntry(entry) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = TEMPUS_SCRIPT_LOCK_ACTIVE ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(20000);
   var defaultHourTypeId = resolveDefaultHourTypeId();
   var sh = getOrCreateSheet('timesheet_entries');
   var id = Utilities.getUuid();
@@ -380,7 +380,7 @@ function api_addEntry(entry) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
     return { success: true, entry: normalizeEntryForRead(rowObjectFromHeaders_(headers, row), defaultHourTypeId) };
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -388,8 +388,8 @@ function api_addEntriesBulk(payload) {
   var entries = payload && Array.isArray(payload.entries) ? payload.entries : [];
   if (!entries.length) return { success: true, added: 0, duplicates: 0, failed: 0, entries: [], results: [] };
 
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = TEMPUS_SCRIPT_LOCK_ACTIVE ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(20000);
   try {
     var defaultHourTypeId = resolveDefaultHourTypeId();
     var sh = getOrCreateSheet('timesheet_entries');
@@ -464,13 +464,13 @@ function api_addEntriesBulk(payload) {
       entries: normalizedOut
     };
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
 function api_updateEntry(update) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = TEMPUS_SCRIPT_LOCK_ACTIVE ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(20000);
   var defaultHourTypeId = resolveDefaultHourTypeId();
   var sh = getOrCreateSheet('timesheet_entries');
   var values = sh.getDataRange().getValues();
@@ -521,13 +521,13 @@ function api_updateEntry(update) {
     }
     throw new Error('Entry not found');
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
 function api_deleteEntry(id) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  var lock = TEMPUS_SCRIPT_LOCK_ACTIVE ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(20000);
   try {
     var sh = getOrCreateSheet('timesheet_entries');
     var lastRow = sh.getLastRow();
@@ -546,7 +546,7 @@ function api_deleteEntry(id) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
     return { success: true, missing: true };
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 

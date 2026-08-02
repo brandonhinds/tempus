@@ -344,6 +344,10 @@ function api_getContracts() {
 }
 
 function api_addContract(contract) {
+  return withScriptLock_('contract creation', function() { return addContractUnlocked_(contract); });
+}
+
+function addContractUnlocked_(contract) {
   var sh = getContractsSheet();
   var now = new Date();
   var normalized = normalizeContractObject(contract || {});
@@ -362,6 +366,10 @@ function api_addContract(contract) {
 }
 
 function api_updateContract(contract) {
+  return withScriptLock_('contract update', function() { return updateContractUnlocked_(contract); });
+}
+
+function updateContractUnlocked_(contract) {
   if (!contract || !contract.id) throw new Error('Contract id is required.');
   var sh = getContractsSheet();
   var values = sh.getDataRange().getValues();
@@ -403,7 +411,13 @@ function api_updateContract(contract) {
 }
 
 function api_deleteContract(id) {
+  return withScriptLock_('contract removal', function() { return deleteContractUnlocked_(id); });
+}
+
+function deleteContractUnlocked_(id) {
   if (!id) throw new Error('Contract id is required.');
+  var references = contractReferenceSummary_(id);
+  if (references.assessments || references.schedules || references.invoice_lines) return apiRecoverableFailure_('referenced_contract', 'This contract is referenced by assessments, schedules or invoice history and cannot be deleted.', references);
   if (contractHasEntries(id)) {
     throw new Error('Cannot delete a contract that has timesheet entries.');
   }
@@ -423,9 +437,17 @@ function api_deleteContract(id) {
 // time-entry contract pickers (you can't log new time against it). Reversible — the everyday way to
 // retire a contract without destroying its record.
 function api_setContractArchived(payload) {
+  return withScriptLock_('contract archive', function() { return setContractArchivedUnlocked_(payload); });
+}
+
+function setContractArchivedUnlocked_(payload) {
   var id = payload && payload.id;
   var archived = !!(payload && payload.archived);
   if (!id) throw new Error('Contract id is required.');
+  if (archived) {
+    var references = contractReferenceSummary_(id);
+    if (references.assessments || references.schedules || references.invoice_lines) return apiRecoverableFailure_('referenced_contract', 'This contract cannot be archived while assessments, schedules or invoice lines reference it.', references);
+  }
   var sh = getContractsSheet();
   var values = sh.getDataRange().getValues();
   var headers = values.length ? values[0] : [];
@@ -441,11 +463,35 @@ function api_setContractArchived(payload) {
   throw new Error('Contract not found');
 }
 
+function contractReferenceSummary_(contractId) {
+  var result = { assessments: 0, schedules: 0, invoice_lines: 0, locked_invoices: 0 };
+  ['assessments', 'recurring_time_entries', 'bulk_time_entries', 'invoice_line_items'].forEach(function(name) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var values = sheet.getDataRange().getValues();
+    var contractIndex = values[0].indexOf('contract_id');
+    var invoiceIndex = values[0].indexOf('invoice_id');
+    if (contractIndex === -1) return;
+    for (var row = 1; row < values.length; row++) {
+      if (String(values[row][contractIndex]) !== String(contractId)) continue;
+      if (name === 'assessments') result.assessments++;
+      else if (name === 'invoice_line_items') {
+        result.invoice_lines++;
+        var invoice = invoiceIndex === -1 ? null : findInvoiceById(String(values[row][invoiceIndex] || ''));
+        if (invoice && invoice.status !== 'draft' && invoice.status !== 'void') result.locked_invoices++;
+      } else result.schedules++;
+    }
+  });
+  return result;
+}
+
 // Hard delete that also removes every timesheet entry logged against the contract. The destructive
 // escape hatch (e.g. clearing out test data) — distinct from api_deleteContract, which refuses when
 // entries exist. Returns the number of entries removed so the UI can confirm what happened.
 function api_deleteContractWithEntries(id) {
   if (!id) throw new Error('Contract id is required.');
+  var externalReferences = contractReferenceSummary_(id);
+  if (externalReferences.assessments || externalReferences.schedules || externalReferences.invoice_lines) return apiRecoverableFailure_('referenced_contract', 'Timesheet entries can be removed, but this contract is still referenced elsewhere.', externalReferences);
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
