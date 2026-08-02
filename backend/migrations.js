@@ -11,6 +11,7 @@ function listMigrations() {
     { id: '2026-07-contract-column-swap', run: migration_repairContractColumnSwap },
     { id: '2026-08-canonical-header-schemas-v3', run: migrationCanonicalHeaderSchemas_ },
     { id: '2026-08-source-aware-timesheet-entries', run: migrationTimesheetSources_ },
+    { id: '2026-08-region-aware-holiday-catalogue', run: migrationPublicHolidayCatalogue_ },
     { id: '2026-08-company-expense-ledger', run: migrationCompanyExpenses_ },
     { id: '2026-08-generic-assessments-unified-invoices', run: migrationAssessmentsAndInvoices_ }
   ];
@@ -225,6 +226,38 @@ function migrationTimesheetSources_() {
     archiveMigrationRow_('2026-08-source-aware-timesheet-entries', sheet, duplicates[index], 'duplicate_derived_source');
     sheet.deleteRow(duplicates[index]);
   }
+}
+
+function migrationPublicHolidayCatalogue_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('public_holidays');
+  if (!sheet) return;
+  canonicalizeSheet_('public_holidays');
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return;
+  var headers = values[0];
+  var idIndex = headers.indexOf('id');
+  var dateIndex = headers.indexOf('date');
+  var nameIndex = headers.indexOf('name');
+  var regionIndex = headers.indexOf('region');
+  var countiesIndex = headers.indexOf('counties');
+  var sourceIndex = headers.indexOf('source');
+  var activeIndex = headers.indexOf('active');
+  for (var row = 1; row < values.length; row++) {
+    var date = String(values[row][dateIndex] || '');
+    var name = String(values[row][nameIndex] || 'Public holiday');
+    if (!values[row][idIndex]) values[row][idIndex] = 'holiday-' + date + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!values[row][regionIndex]) {
+      var counties = assessmentJsonSafeMigration_(countiesIndex === -1 ? '' : values[row][countiesIndex], null);
+      values[row][regionIndex] = JSON.stringify(Array.isArray(counties) && counties.length ? counties : ['AU']);
+    }
+    if (!values[row][sourceIndex]) values[row][sourceIndex] = 'legacy';
+    if (!values[row][activeIndex]) values[row][activeIndex] = 'TRUE';
+  }
+  sheet.getRange(2, 1, values.length - 1, headers.length).setValues(values.slice(1));
+}
+
+function assessmentJsonSafeMigration_(value, fallback) {
+  try { return JSON.parse(value || ''); } catch (error) { return fallback; }
 }
 
 function migrationIdSet_(sheetName) {

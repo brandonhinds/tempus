@@ -67,27 +67,12 @@ function normalizeHolidayName(name) {
 function ensurePublicHolidaysSchema() {
   var sh = getOrCreateSheet('public_holidays');
   var values = sh.getDataRange().getValues();
-
-  // If sheet is completely empty, add headers
-  if (values.length === 0) {
-    sh.appendRow(['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at']);
-    return;
-  }
-
-  // Check if row 1 contains valid headers
-  var firstRow = values[0];
-  var expectedHeaders = ['date', 'name', 'local_name', 'counties', 'types', 'year', 'fetched_at'];
-
-  // If first cell is 'date', assume headers are present
-  if (firstRow[0] === 'date') {
-    return; // Headers already exist, nothing to do
-  }
-
-  // Headers are missing - insert them at the top
-  sh.insertRowBefore(1);
-  sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
-
-  Logger.log('Public holidays schema repaired: inserted missing headers');
+  if (!values.length) return;
+  var headers = normalizeSheetHeaders_(values[0]);
+  validateSheetHeaders_('public_holidays', headers, values.slice(1));
+  ['id', 'date', 'name', 'region', 'counties', 'year'].forEach(function(header) {
+    if (headers.indexOf(header) === -1) throw new Error('Public holiday schema is incomplete. Run the Tempus upgrade.');
+  });
 }
 
 /**
@@ -159,17 +144,12 @@ function replaceYearHolidays(year, holidays) {
   });
 
   var timestamp = new Date().toISOString();
+  var nowIso = timestamp;
   var rows = order.map(function(key) {
     var h = byKey[key];
-    return [
-      h.date,
-      h.name,
-      h.localName,
-      h.counties ? JSON.stringify(h.counties) : '',
-      '["Public"]',
-      h.year,
-      timestamp
-    ];
+    var regions = h.counties ? h.counties : ['AU'];
+    var stableId = 'holiday-' + h.date + '-' + String(h.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return rowValuesFromObject_(headers, { id: stableId, date: h.date, name: h.name, region: JSON.stringify(regions), source: 'nager', active: 'TRUE', created_at: nowIso, updated_at: nowIso, local_name: h.localName, counties: h.counties ? JSON.stringify(h.counties) : '', types: '["Public"]', year: h.year, fetched_at: timestamp });
   });
 
   // One bulk write instead of an appendRow per holiday — far fewer round-trips.
