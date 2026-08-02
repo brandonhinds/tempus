@@ -205,7 +205,11 @@ function api_previewAssessmentInvoices(payload) {
   return { success: true, grouping: grouping, groups: Object.keys(groups).map(function(key) { groups[key].total = roundMoney_(groups[key].total); return groups[key]; }) };
 }
 
-function api_generateAssessmentInvoices(payload) {
+function api_generateAssessmentInvoices(payload, legacyMonth) {
+  if (typeof payload === 'number') {
+    var legacyAssessments = api_getAssessmentsForMonth(payload, legacyMonth).assessments.filter(function(item) { return !item.invoice_id; });
+    payload = { assessment_ids: legacyAssessments.map(function(item) { return item.id; }), grouping: 'combined' };
+  }
   return withScriptLock_('assessment invoice generation', function() {
     var preview = api_previewAssessmentInvoices(payload || {});
     if (!preview.groups.length) return apiRecoverableFailure_('no_assessments', 'Select at least one available assessment.');
@@ -276,6 +280,10 @@ function api_deleteAssessmentTimeEntry(id) {
   var entry = findTimesheetEntryById(id);
   if (!entry || entry.source_type !== 'assessment') return apiRecoverableFailure_('not_found', 'Assessment time entry not found.');
   return api_deleteEntry(id);
+}
+
+function api_getAssessmentWorkHourTypeId() {
+  return resolveDefaultHourTypeId();
 }
 
 function api_exportAssessmentDocument(payload) {

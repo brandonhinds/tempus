@@ -234,6 +234,23 @@ function api_attachExpenseReceipt(payload) {
   });
 }
 
+function api_detachExpenseReceipt(payload) {
+  return withScriptLock_('receipt removal', function() {
+    var found = expenseFind_('expense_transactions', payload && payload.expense_transaction_id);
+    if (!found.item) return apiRecoverableFailure_('not_found', 'Expense transaction not found.');
+    if (String(found.item.reconciliation_state) === 'reconciled') return apiRecoverableFailure_('immutable_transaction', 'Receipt evidence on a reconciled transaction cannot be removed.');
+    var attachments = [];
+    try { attachments = JSON.parse(found.item.attachments_json || '[]'); } catch (error) { attachments = []; }
+    attachments = attachments.filter(function(item) { return String(item.id) !== String(payload.attachment_id); });
+    var attachmentIndex = found.data.headers.indexOf('attachments_json');
+    var updatedIndex = found.data.headers.indexOf('updated_at');
+    found.data.sheet.getRange(found.item.__row, attachmentIndex + 1).setValue(JSON.stringify(attachments));
+    if (updatedIndex !== -1) found.data.sheet.getRange(found.item.__row, updatedIndex + 1).setValue(expenseNow_());
+    cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+    return { success: true, attachments: attachments };
+  });
+}
+
 function api_reconcileExpenseTransaction(payload) {
   return withScriptLock_('expense reconciliation', function() {
     var found = expenseFind_('expense_transactions', payload && payload.id);
