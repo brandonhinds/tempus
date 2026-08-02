@@ -1,0 +1,8 @@
+{
+  "description": "Canonical timesheets with legacy invoices and existing ledger rows",
+  "sheets": {
+    "timesheet_entries": [["id", "date", "duration_minutes", "contract_id", "created_at", "punches_json", "entry_type", "hour_type_id", "recurrence_id", "note", "assessment_id", "source_type", "source_id", "source_occurrence_key", "client_request_id"], ["entry-1", "2026-07-01", 60, "contract-1", "2026-07-01T00:00:00Z", "[]", "basic", "work", "", "", "", "manual", "", "", "request-1"]],
+    "expense_rules": [["id", "vendor", "amount", "frequency", "start_date", "active"], ["legacy-rule-deduction-1", "Hosting", 55, "monthly", "2026-01-31", "FALSE"]],
+    "expense_transactions": [["id", "vendor", "purchase_date", "amount", "status", "reconciliation_state", "source_rule_id", "source_occurrence_key"], ["legacy-expense-deduction-1-2026-01-31", "Hosting", "2026-01-31", 55, "legacy_unreconciled", "legacy_unreconciled", "legacy-rule-deduction-1", "2026-01-31"]]
+  }
+}

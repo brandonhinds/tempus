@@ -1,0 +1,8 @@
+{
+  "description": "Original repository shape with legacy aliases and an extension column",
+  "sheets": {
+    "timesheet_entries": [["id", "date", "duration_minutes", "project", "comments", "legacy_marker"], ["entry-1", "2026-06-30", 60, "contract-1", "Original note", "keep-me"]],
+    "assessment_types": [["id", "name", "field_definitions_json", "line_templates_json", "active"], ["type-1", "Configured type", "[]", "[]", "TRUE"]],
+    "assessments": [["id", "assessment_type_id", "contract_id", "organisation", "assessment_date"], ["assessment-1", "type-1", "contract-1", "Organisation", "2026-06-30"]]
+  }
+}

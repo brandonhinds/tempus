@@ -1,0 +1,6 @@
+{
+  "description": "Populated unnamed column must stop migration",
+  "sheets": {
+    "timesheet_entries": [["id", "date", ""], ["entry-1", "2026-07-01", "orphaned value"]]
+  }
+}

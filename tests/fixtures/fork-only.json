@@ -1,0 +1,8 @@
+{
+  "description": "Coworker fork spreadsheet before canonical migration",
+  "sheets": {
+    "timesheet_entries": [["id", "date", "duration_minutes", "contract_id", "note"], ["entry-1", "2026-07-01", 450, "contract-1", "Fork note"]],
+    "contracts": [["id", "name", "start_date", "end_date", "hourly_rate"], ["contract-1", "Client", "2026-07-01", "", 120]],
+    "deductions": [["id", "name", "company_expense", "amount_value", "frequency", "start_date", "active"], ["deduction-1", "Software", "TRUE", 110, "monthly", "2026-07-01", "TRUE"]]
+  }
+}

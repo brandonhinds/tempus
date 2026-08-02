@@ -1,0 +1,9 @@
+{
+  "name": "tempus-apps-script",
+  "private": true,
+  "version": "3.0.0-integration",
+  "scripts": {
+    "test": "node tests/run.js",
+    "check": "node tests/run.js"
+  }
+}
