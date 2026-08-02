@@ -7,7 +7,7 @@ var __migrationsSettledMemo = false;
 
 function listMigrations() {
   return [
-    { id: '2026-07-clear-legacy-cache-properties', run: migration_clearLegacyCacheProperties },
+    { id: '2026-07-clear-legacy-cache-properties', run: migration_clearLegacyCachePropertiesV3_ },
     { id: '2026-07-contract-column-swap', run: migration_repairContractColumnSwap },
     { id: '2026-08-canonical-header-schemas-v3', run: migrationCanonicalHeaderSchemas_ },
     { id: '2026-08-source-aware-timesheet-entries', run: migrationTimesheetSources_ },
@@ -156,7 +156,7 @@ function migrationIsoNow_() {
   return Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
 }
 
-function migration_clearLegacyCacheProperties() {
+function migration_clearLegacyCachePropertiesV3_() {
   var props = PropertiesService.getScriptProperties();
   props.getKeys().forEach(function(key) {
     if (key.indexOf('cache_') === 0 || key.indexOf('tempus_cache_') === 0) props.deleteProperty(key);
@@ -211,7 +211,7 @@ function migrationTimesheetSources_() {
     else if (String(record.entry_type || '').toLowerCase() === 'public_holiday') sourceType = 'public_holiday';
     else if (!sourceType) sourceType = 'manual';
     var occurrence = String(record.source_occurrence_key || '').trim();
-    if (!occurrence && sourceType !== 'manual') occurrence = String(record.date || '');
+    if (!occurrence && sourceType !== 'manual') occurrence = toIsoDate(record.date || '');
     values[row][indexes.source_type] = sourceType;
     values[row][indexes.source_id] = sourceId;
     values[row][indexes.source_occurrence_key] = occurrence;
@@ -243,7 +243,7 @@ function migrationPublicHolidayCatalogue_() {
   var sourceIndex = headers.indexOf('source');
   var activeIndex = headers.indexOf('active');
   for (var row = 1; row < values.length; row++) {
-    var date = String(values[row][dateIndex] || '');
+    var date = toIsoDate(values[row][dateIndex] || '');
     var name = String(values[row][nameIndex] || 'Public holiday');
     if (!values[row][idIndex]) values[row][idIndex] = 'holiday-' + date + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     if (!values[row][regionIndex]) {
@@ -275,7 +275,17 @@ function archiveMigrationRow_(migrationId, sourceSheet, rowNumber, reason) {
   var archive = getOrCreateSheet('migration_archive');
   var sourceValues = sourceSheet.getRange(rowNumber, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
   var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
-  archive.appendRow([Utilities.getUuid(), migrationId, sourceSheet.getName(), JSON.stringify(rowObjectFromHeaders_(headers, sourceValues)), reason, migrationIsoNow_()]);
+  var sourceJson = JSON.stringify(rowObjectFromHeaders_(headers, sourceValues));
+  var existing = archive.getDataRange().getValues();
+  if (existing.length > 1) {
+    var migrationIndex = existing[0].indexOf('migration_id');
+    var sheetIndex = existing[0].indexOf('source_sheet');
+    var jsonIndex = existing[0].indexOf('source_row_json');
+    for (var row = 1; row < existing.length; row++) {
+      if (String(existing[row][migrationIndex]) === String(migrationId) && String(existing[row][sheetIndex]) === sourceSheet.getName() && String(existing[row][jsonIndex]) === sourceJson) return;
+    }
+  }
+  archive.appendRow([Utilities.getUuid(), migrationId, sourceSheet.getName(), sourceJson, reason, migrationIsoNow_()]);
 }
 
 function migrationCompanyExpenses_() {
@@ -293,6 +303,17 @@ function migrationCompanyExpenses_() {
   var transactionHeaders = transactionValues[0];
   var existingRules = migrationIdSet_('expense_rules');
   var existingTransactions = migrationIdSet_('expense_transactions');
+  var exceptionSheet = spreadsheet.getSheetByName('deduction_occurrence_exceptions');
+  var exceptionsByDeduction = {};
+  if (exceptionSheet && exceptionSheet.getLastRow() > 1) {
+    var exceptionValues = exceptionSheet.getDataRange().getValues();
+    exceptionValues.slice(1).forEach(function(exceptionRow) {
+      var exception = rowObjectFromHeaders_(exceptionValues[0], exceptionRow);
+      var key = String(exception.deduction_id || '');
+      if (!exceptionsByDeduction[key]) exceptionsByDeduction[key] = {};
+      exceptionsByDeduction[key][toIsoDate(exception.original_date || '')] = exception;
+    });
+  }
   var rowsToRemove = [];
   for (var row = 1; row < deductionValues.length; row++) {
     var deduction = rowObjectFromHeaders_(deductionHeaders, deductionValues[row]);
@@ -301,30 +322,33 @@ function migrationCompanyExpenses_() {
     var note = String(deduction.notes || '');
     var proposedCutoff = '';
     if (!migrationBoolean_(deduction.active) && !deduction.end_date) {
-      proposedCutoff = String(deduction.updated_at || deduction.created_at || '').slice(0, 10);
+      proposedCutoff = toIsoDate(deduction.updated_at || deduction.created_at || '');
       note += (note ? '\n' : '') + 'Migration review: inactive rule had no end date; proposed cutoff ' + proposedCutoff + '.';
     }
     if (!existingRules[ruleId]) {
       ruleSheet.appendRow(rowValuesFromObject_(ruleHeaders, {
         id: ruleId, vendor: deduction.name || '', vendor_abn: '', description: deduction.name || '', category: deduction.category_id || '', amount: Number(deduction.amount_value) || 0,
         gst_code: migrationBoolean_(deduction.gst_inclusive) ? 'taxable' : 'out_of_scope', gst_amount: Number(deduction.gst_amount) || 0, business_use_percentage: 1,
-        claimable_gst_confirmed: 'FALSE', frequency: deduction.frequency || 'once', start_date: deduction.start_date || '', end_date: deduction.end_date || proposedCutoff,
+        claimable_gst_confirmed: 'FALSE', frequency: deduction.frequency || 'once', start_date: toIsoDate(deduction.start_date || ''), end_date: toIsoDate(deduction.end_date || proposedCutoff || ''),
         active: migrationBoolean_(deduction.active) ? 'TRUE' : 'FALSE', notes: note, created_at: deduction.created_at || migrationIsoNow_(), updated_at: deduction.updated_at || migrationIsoNow_()
       }));
       existingRules[ruleId] = true;
     }
-    var start = String(deduction.start_date || deduction.created_at || '').slice(0, 10);
-    var cutoff = String(deduction.end_date || proposedCutoff || migrationToday_()).slice(0, 10);
+    var start = toIsoDate(deduction.start_date || deduction.created_at || '');
+    var cutoff = toIsoDate(deduction.end_date || proposedCutoff || migrationToday_());
     migrationOccurrenceDates_(start, cutoff, deduction.frequency || 'once').forEach(function(date) {
+      var exception = (exceptionsByDeduction[String(deduction.id || '')] || {})[date];
+      if (exception && String(exception.exception_type) === 'skip') return;
+      var effectiveDate = exception && (String(exception.exception_type) === 'move' || String(exception.exception_type) === 'move_and_adjust') ? (toIsoDate(exception.new_date || '') || date) : date;
       var transactionId = 'legacy-expense-' + String(deduction.id || row) + '-' + date;
       if (existingTransactions[transactionId]) return;
-      var amount = Number(deduction.amount_value) || 0;
+      var amount = exception && (String(exception.exception_type) === 'adjust_amount' || String(exception.exception_type) === 'move_and_adjust') ? Number(exception.new_amount) || 0 : Number(deduction.amount_value) || 0;
       var gst = Number(deduction.gst_amount) || (migrationBoolean_(deduction.gst_inclusive) ? Math.round((amount / 11) * 100) / 100 : 0);
       transactionSheet.appendRow(rowValuesFromObject_(transactionHeaders, {
-        id: transactionId, vendor: deduction.name || '', vendor_abn: '', description: deduction.name || '', category: deduction.category_id || '', purchase_date: date,
-        supplier_invoice_date: date, amount: amount, gst_code: migrationBoolean_(deduction.gst_inclusive) ? 'taxable' : 'out_of_scope', gst_amount: gst,
+        id: transactionId, vendor: deduction.name || '', vendor_abn: '', description: deduction.name || '', category: deduction.category_id || '', purchase_date: effectiveDate,
+        supplier_invoice_date: effectiveDate, amount: amount, gst_code: migrationBoolean_(deduction.gst_inclusive) ? 'taxable' : 'out_of_scope', gst_amount: gst,
         business_use_percentage: 1, claimable_gst_confirmed: 'FALSE', gst_override_amount: '', status: 'legacy_unreconciled', reconciliation_state: 'legacy_unreconciled',
-        source_rule_id: ruleId, source_occurrence_key: date, attachments_json: '[]', notes: note, created_at: migrationIsoNow_(), updated_at: migrationIsoNow_()
+        source_rule_id: ruleId, source_occurrence_key: date, attachments_json: '[]', notes: note + (exception ? '\nLegacy exception applied: ' + String(exception.exception_type) + '.' : ''), created_at: migrationIsoNow_(), updated_at: migrationIsoNow_()
       }));
       existingTransactions[transactionId] = true;
     });
@@ -415,7 +439,7 @@ function migrationAssessmentsAndInvoices_() {
     var assessmentHeaders = assessmentValues[0];
     for (var assessmentRow = 1; assessmentRow < assessmentValues.length; assessmentRow++) {
       var assessment = rowObjectFromHeaders_(assessmentHeaders, assessmentValues[assessmentRow]);
-      if (!assessment.assessment_date) assessment.assessment_date = assessment.interview_date || '';
+      assessment.assessment_date = toIsoDate(assessment.assessment_date || assessment.interview_date || '');
       if (!assessment.field_values_json) assessment.field_values_json = JSON.stringify({ subject_name: assessment.interviewee_name || '', subject_date_of_birth: assessment.interviewee_dob || '' });
       if (!assessment.status) assessment.status = 'draft';
       assessmentSheet.getRange(assessmentRow + 1, 1, 1, assessmentHeaders.length).setValues([rowValuesFromObject_(assessmentHeaders, assessment, assessmentValues[assessmentRow])]);

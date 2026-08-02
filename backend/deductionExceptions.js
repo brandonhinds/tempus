@@ -145,6 +145,10 @@ function buildDeductionExceptionRow(payload, timestamps) {
 }
 
 function api_upsertDeductionException(payload) {
+  return withScriptLock_('deduction exception update', function() { return upsertDeductionExceptionUnlocked_(payload); });
+}
+
+function upsertDeductionExceptionUnlocked_(payload) {
   var list = listDeductionExceptionsInternal(payload.deduction_id);
   var existing = null;
   if (payload && payload.id) {
@@ -201,6 +205,10 @@ function api_upsertDeductionException(payload) {
 }
 
 function api_deleteDeductionException(id) {
+  return withScriptLock_('deduction exception removal', function() { return deleteDeductionExceptionUnlocked_(id); });
+}
+
+function deleteDeductionExceptionUnlocked_(id) {
   if (!id) throw new Error('Exception id is required.');
 
   var sh = getDeductionExceptionsSheet();
@@ -223,6 +231,10 @@ function api_deleteDeductionException(id) {
 }
 
 function api_deleteExceptionsByDeductionId(deductionId) {
+  return withScriptLock_('deduction exception cleanup', function() { return deleteExceptionsByDeductionIdUnlocked_(deductionId); });
+}
+
+function deleteExceptionsByDeductionIdUnlocked_(deductionId) {
   if (!deductionId) throw new Error('Deduction id is required.');
 
   var sh = getDeductionExceptionsSheet();

@@ -30,16 +30,14 @@ function doGet(e) {
     // hosting page, which is what actually controls mobile scaling — without this
     // phones render the app at desktop width and zoom out (tiny, big margins).
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
-    .setFaviconUrl('https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/images/favicon.ico')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .setFaviconUrl('https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/images/favicon.ico');
   return html;
 }
 
 function buildPreUpgradePage_() {
   return HtmlService.createHtmlOutputFromFile('views/upgrade')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
-    .setTitle('Upgrade Tempus')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .setTitle('Upgrade Tempus');
 }
 
 function include(name) {
@@ -75,8 +73,7 @@ function buildUpgradeSplashPage_() {
     cta +
     autoRetry +
     '</body></html>';
-  return HtmlService.createHtmlOutput(html)
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return HtmlService.createHtmlOutput(html);
 }
 
 // One settings read for everything doGet injects on first paint (avoids hitting the sheet twice).

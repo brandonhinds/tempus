@@ -455,6 +455,9 @@ function api_runTimesheet1Import(payload) {
   };
 
   if (continuation) {
+    if (!Array.isArray(continuation.workItems)) return { success: false, error: 'invalid_continuation', message: 'Import continuation is missing its work items.' };
+    if (spreadsheetId && continuation.spreadsheetId && String(spreadsheetId) !== String(continuation.spreadsheetId)) return { success: false, error: 'invalid_continuation', message: 'Import continuation belongs to a different spreadsheet.' };
+    if (continuation.workItems.length > 20000) return { success: false, error: 'invalid_continuation', message: 'Import continuation is too large.' };
     Logger.log('[Timesheet1] Import continuation received with %s work items', (continuation.workItems || []).length);
     workItems = continuation.workItems || [];
     contractSelections = continuation.contractSelections || contractSelections;
@@ -467,6 +470,21 @@ function api_runTimesheet1Import(payload) {
       progress.importSummary = continuation.progress.importSummary || {};
     }
     preview = continuation.preview || payload.preview || null;
+    var continuationContracts = {};
+    api_getContracts().forEach(function(contract) { continuationContracts[String(contract.id)] = contract; });
+    for (var continuationIndex = 0; continuationIndex < workItems.length; continuationIndex++) {
+      var continuationItem = workItems[continuationIndex] || {};
+      var continuationDate = toIsoDate(continuationItem.date);
+      var continuationDuration = Number(continuationItem.durationMinutes);
+      var continuationHourType = hourTypeMap[String(continuationItem.hourTypeId || '')];
+      if (!continuationDate || !continuationHourType || !isFinite(continuationDuration) || continuationDuration <= 0 || continuationDuration > 1440) return { success: false, error: 'invalid_continuation', message: 'Import continuation contains an invalid date, duration, or hour type.' };
+      continuationItem.date = continuationDate;
+      continuationItem.durationMinutes = Math.round(continuationDuration);
+      if (continuationHourType.requires_contract) {
+        var continuationContract = continuationContracts[String(continuationItem.contractId || '')];
+        if (!continuationContract || !contractIsValidForDate(continuationContract, continuationDate)) return { success: false, error: 'invalid_continuation', message: 'Import continuation contains a contract that does not cover its entry date.' };
+      }
+    }
   } else {
     var providedPreview = payload && payload.preview;
     var canReusePreview = providedPreview && providedPreview.success && providedPreview.spreadsheetId === spreadsheetId && providedPreview.skipPublicHolidays === skipPublicHolidays;
@@ -501,6 +519,7 @@ function api_runTimesheet1Import(payload) {
       return {
         success: false,
         error: 'unmapped_hour_types',
+        message: 'Map every imported hour type before continuing.',
         details: blockingUnmapped
       };
     }
@@ -508,6 +527,7 @@ function api_runTimesheet1Import(payload) {
       return {
         success: false,
         error: 'missing_contract_selection',
+        message: 'Select a contract that covers every imported date.',
         details: blockingMissing
       };
     }

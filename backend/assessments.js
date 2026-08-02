@@ -54,6 +54,9 @@ function api_upsertAssessmentType(payload) {
   return withScriptLock_('assessment type update', function() {
     var found = payload && payload.id ? assessmentFind_('assessment_types', payload.id) : assessmentFind_('assessment_types', '');
     var id = found.item ? found.item.id : (payload.id || Utilities.getUuid());
+    if (found.item && expenseBoolean_(found.item.active) && payload.active !== undefined && !expenseBoolean_(payload.active) && assessmentReferenceCount_(id)) {
+      return apiRecoverableFailure_('referenced_record', 'This assessment type is referenced and cannot be archived.');
+    }
     var fields = normalizeAssessmentFields_(payload.field_definitions || payload.fields || assessmentJson_(payload.field_definitions_json, []));
     var lines = normalizeAssessmentLines_(payload.line_templates || payload.lines || assessmentJson_(payload.line_templates_json, []), id);
     if (!String(payload.name || '').trim()) return apiRecoverableFailure_('name_required', 'Assessment type name is required.');
@@ -114,12 +117,12 @@ function normalizeAssessmentRecord_(payload, existing) {
 function decorateAssessment_(item) {
   var type = assessmentTypeById_(String(item.assessment_type_id));
   var contract = assessmentContractById_(String(item.contract_id));
-  return { id: String(item.id), assessment_type_id: String(item.assessment_type_id), assessment_type_name: type ? type.name : '', contract_id: String(item.contract_id), contract_name: contract ? contract.name : '', organisation: String(item.organisation || ''), assessment_date: String(item.assessment_date || ''), field_values: assessmentJson_(item.field_values_json, {}), percentage_adjustment: Number(item.percentage_adjustment) || 0, status: String(item.status || 'draft'), invoice_id: String(item.invoice_id || ''), locked: assessmentInvoiceLocked_(item), notes: String(item.notes || ''), created_at: item.created_at || '', updated_at: item.updated_at || '' };
+  return { id: String(item.id), assessment_type_id: String(item.assessment_type_id), assessment_type_name: type ? type.name : '', contract_id: String(item.contract_id), contract_name: contract ? contract.name : '', organisation: String(item.organisation || ''), assessment_date: invoiceToIsoDate(item.assessment_date || ''), field_values: assessmentJson_(item.field_values_json, {}), percentage_adjustment: Number(item.percentage_adjustment) || 0, status: String(item.status || 'draft'), invoice_id: String(item.invoice_id || ''), locked: assessmentInvoiceLocked_(item), notes: String(item.notes || ''), created_at: item.created_at || '', updated_at: item.updated_at || '' };
 }
 
 function api_getAssessmentsForMonth(year, month) {
   var prefix = Number(year) + '-' + ('0' + Number(month)).slice(-2) + '-';
-  var assessments = assessmentRows_('assessments').rows.filter(function(item) { return String(item.assessment_date || '').indexOf(prefix) === 0; }).map(decorateAssessment_);
+  var assessments = assessmentRows_('assessments').rows.map(decorateAssessment_).filter(function(item) { return String(item.assessment_date || '').indexOf(prefix) === 0; });
   return { year: Number(year), month: Number(month), assessments: assessments, summary: { count: assessments.length, invoiced: assessments.filter(function(item) { return !!item.invoice_id; }).length } };
 }
 
@@ -153,7 +156,7 @@ function api_deleteAssessment(id) {
 function assessmentTokenValues_(assessment, type, contract) {
   var values = assessmentJson_(assessment.field_values_json, {});
   values.organisation = assessment.organisation || '';
-  values.assessment_date = assessment.assessment_date || '';
+  values.assessment_date = invoiceToIsoDate(assessment.assessment_date || '');
   values.contract = contract ? contract.name : '';
   values.assessment_type = type ? type.name : '';
   return values;
@@ -197,7 +200,7 @@ function api_previewAssessmentInvoices(payload) {
     if (!groups[key]) groups[key] = { key: key, organisation: grouping === 'per_organisation' ? key : '', assessments: [], lines: [], total: 0 };
     var lines = resolveAssessmentLines_(assessment);
     groups[key].assessments.push(String(assessment.id));
-    lines.forEach(function(line) { groups[key].lines.push({ assessment_id: assessment.id, source_line_id: line.id, description: line.description, amount: line.amount, gst_code: line.gst_code, gst_rate: line.gst_rate, gst_amount: line.gst_amount, line_date: assessment.assessment_date, contract_id: assessment.contract_id }); groups[key].total += line.amount + line.gst_amount; });
+    lines.forEach(function(line) { groups[key].lines.push({ assessment_id: assessment.id, source_line_id: line.id, description: line.description, amount: line.amount, gst_code: line.gst_code, gst_rate: line.gst_rate, gst_amount: line.gst_amount, line_date: invoiceToIsoDate(assessment.assessment_date), contract_id: assessment.contract_id }); groups[key].total += line.amount + line.gst_amount; });
   });
   return { success: true, grouping: grouping, groups: Object.keys(groups).map(function(key) { groups[key].total = roundMoney_(groups[key].total); return groups[key]; }) };
 }
@@ -250,6 +253,52 @@ function api_sendAssessmentInvoice(payload) {
   if (invoice.generated_doc_id) attachments.push(DriveApp.getFileById(invoice.generated_doc_id).getAs(MimeType.PDF));
   MailApp.sendEmail({ to: recipients.join(','), subject: subject, body: body, attachments: attachments });
   return api_markInvoiceSent(invoice.id);
+}
+
+function api_listAssessmentTimeEntries(assessmentId) {
+  return api_getEntries({}).filter(function(entry) {
+    return entry.source_type === 'assessment' && (!assessmentId || String(entry.source_id) === String(assessmentId));
+  });
+}
+
+function api_upsertAssessmentTimeEntry(payload) {
+  payload = payload || {};
+  var assessmentId = String(payload.assessment_id || payload.source_id || '').trim();
+  if (!assessmentId || !assessmentFind_('assessments', assessmentId).item) return apiRecoverableFailure_('assessment_required', 'A valid assessment is required.');
+  payload.source_type = 'assessment';
+  payload.source_id = assessmentId;
+  payload.assessment_id = assessmentId;
+  payload.source_occurrence_key = payload.source_occurrence_key || payload.date || '';
+  return payload.id ? api_updateEntry(payload) : api_addEntry(payload);
+}
+
+function api_deleteAssessmentTimeEntry(id) {
+  var entry = findTimesheetEntryById(id);
+  if (!entry || entry.source_type !== 'assessment') return apiRecoverableFailure_('not_found', 'Assessment time entry not found.');
+  return api_deleteEntry(id);
+}
+
+function api_exportAssessmentDocument(payload) {
+  return withScriptLock_('assessment document export', function() {
+    var found = assessmentFind_('assessments', payload && payload.assessment_id);
+    if (!found.item) return apiRecoverableFailure_('not_found', 'Assessment not found.');
+    var settings = api_getSettings();
+    var templateId = String((payload && payload.template_id) || settings.assessment_document_template_id || '').trim();
+    if (!templateId) return apiRecoverableFailure_('template_required', 'Configure an assessment document template ID.');
+    var folderId = String((payload && payload.folder_id) || settings.assessment_output_folder_id || '').trim();
+    var source = DriveApp.getFileById(templateId);
+    var folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+    var type = assessmentTypeById_(found.item.assessment_type_id);
+    var contract = assessmentContractById_(found.item.contract_id);
+    var tokens = assessmentTokenValues_(found.item, type, contract);
+    var filenamePattern = String((payload && payload.filename_pattern) || settings.assessment_filename_pattern || '{assessment_type} - {assessment_date}');
+    var filename = renderAssessmentTemplate_(filenamePattern, tokens).replace(/[\\/:*?"<>|]+/g, '-').trim() || 'Assessment';
+    var copy = source.makeCopy(filename, folder);
+    var document = DocumentApp.openById(copy.getId());
+    Object.keys(tokens).forEach(function(key) { replacePlaceholderAcrossDoc(document, '{' + key + '}', tokens[key]); });
+    document.saveAndClose();
+    return { success: true, id: copy.getId(), name: copy.getName(), url: copy.getUrl() };
+  });
 }
 
 /** One-release wrappers for the removed assessment-invoice store. */

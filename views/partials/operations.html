@@ -1,7 +1,7 @@
 <section class="ts-card ts-card--wide" id="page-expenses" style="display:none;">
   <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
     <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Actual purchases and their evidence live here. Recurring rules are forecasts until they create a transaction.</p></div>
-    <div style="display:flex; gap:8px;"><button class="ghost" id="expense-export">Export FY CSV</button><button id="expense-add">Record expense</button></div>
+    <div style="display:flex; gap:8px;"><button type="button" class="ghost" id="expense-export">Export FY CSV</button><button type="button" id="expense-add">Record expense</button></div>
   </div>
   <div class="ts-view-toggle" role="tablist" aria-label="Expense view" style="margin-bottom:18px;">
     <button type="button" role="tab" class="ts-view-toggle-btn is-active" aria-selected="true" data-expense-tab="transactions">Transactions</button>
@@ -12,18 +12,21 @@
     <div class="ts-toolbar"><h4 style="margin:0;">New expense transaction</h4><button type="button" class="ghost" id="expense-form-cancel">Cancel</button></div>
     <div class="ts-grid ts-grid--gap-md">
       <div class="ts-col-span-4"><label for="expense-vendor">Vendor</label><input id="expense-vendor" required maxlength="160"></div>
+      <div class="ts-col-span-4"><label for="expense-abn">Vendor ABN (optional)</label><input id="expense-abn" maxlength="20"></div>
       <div class="ts-col-span-4"><label for="expense-date">Purchase date</label><input id="expense-date" type="date" required></div>
+      <div class="ts-col-span-4" id="expense-supplier-date-wrap"><label for="expense-supplier-date">Supplier invoice date</label><input id="expense-supplier-date" type="date"></div>
       <div class="ts-col-span-4"><label for="expense-amount">Amount including GST</label><input id="expense-amount" type="number" min="0" step="0.01" required></div>
       <div class="ts-col-span-4"><label for="expense-category">Category</label><input id="expense-category" maxlength="100"></div>
       <div class="ts-col-span-4"><label for="expense-gst-code">GST treatment</label><select id="expense-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
       <div class="ts-col-span-4"><label for="expense-business-use">Business use (%)</label><input id="expense-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
       <div class="ts-col-span-4" id="expense-frequency-wrap" style="display:none;"><label for="expense-frequency">Frequency</label><select id="expense-frequency"><option value="once">Once</option><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div>
       <div class="ts-col-span-12"><label for="expense-description">Description</label><input id="expense-description" maxlength="500"></div>
+      <div class="ts-col-span-12"><label for="expense-notes">Notes</label><textarea id="expense-notes" rows="3" maxlength="2000"></textarea></div>
     </div>
     <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save transaction</button></div>
   </form>
-  <div id="expense-transactions-panel"><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
-  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar"><p class="ts-note">Changing a rule never rewrites transactions already created from it.</p><button id="expense-rule-add" class="ghost">Add rule</button></div><div id="expense-rules" class="ts-ledger-list"></div></div>
+  <div id="expense-transactions-panel"><div class="ts-toolbar" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;"><div><label for="expense-filter-from">From</label><input id="expense-filter-from" type="date"></div><div><label for="expense-filter-to">To</label><input id="expense-filter-to" type="date"></div><div><label for="expense-filter-state">Reconciliation</label><select id="expense-filter-state"><option value="">All</option><option value="unreconciled">Unreconciled</option><option value="legacy_unreconciled">Legacy unreconciled</option><option value="reconciled">Reconciled</option><option value="scheduled">Scheduled</option></select></div><button type="button" class="ghost" id="expense-filter-apply">Apply filters</button></div><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
+  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar"><p class="ts-note">Changing a rule never rewrites recorded transactions.</p><div style="display:flex;gap:8px;"><button type="button" id="expense-rule-generate" class="ghost">Generate next 12 months</button><button type="button" id="expense-rule-add" class="ghost">Add rule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
   <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year ending</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
 </section>
 
@@ -63,6 +66,7 @@
     <details><summary>Invoice lifecycle</summary><p>Drafts can be edited and recalculated. Issued, sent and paid invoices are immutable. Correct history by voiding the original and creating a revision; payments are tracked separately.</p></details>
     <details><summary>Assessments</summary><p>Enable assessments, configure stable field keys and invoice line templates, then create records. Issued assessment invoices lock their source records. Voiding releases the sources for revision.</p></details>
     <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense rules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
+    <details><summary>Tax estimates</summary><p id="help-tax-table-status">Checking the bundled PAYG table…</p><p class="ts-note">Estimates use ATO Scale 2 and are guidance only. Confirm payroll and tax obligations with the ATO or your adviser.</p></details>
     <details><summary>Keyboard access</summary><p>Use Tab to move through controls. Quick-action menus support the Menu key or Shift+F10, arrow keys, Enter and Escape. Focus remains visible in every theme.</p></details>
   </div>
 </section>

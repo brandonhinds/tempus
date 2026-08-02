@@ -503,14 +503,16 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     }
   }
 
-  // Calculate taxable income (add recovered amount when in add_to_taxable mode)
-  var taxableIncome = grossIncome - superGuarantee - superLost - extraSuper - otherDeductions + recoveredToSuperBase;
+  // Gross is already the cash salary component after package super has been
+  // removed. Use the same taxable-income formula as Dashboard and Rate Preview;
+  // employer SG is not subtracted a second time.
+  var taxableIncome = Math.max(0, grossIncome - extraSuper - otherDeductions + recoveredToSuperBase);
 
   // Estimate tax (using existing tax function)
   var tax = 0;
   if (taxableIncome > 0) {
     try {
-      tax = estimateTax(grossIncome, periodStart.toISOString());
+      tax = estimateTax(taxableIncome, periodStart.toISOString());
     } catch (e) {
       Logger.log('Tax estimation failed: ' + e.message);
       tax = 0;
@@ -615,14 +617,14 @@ function calculateDeductionOccurrences(frequency, startDate, endDate, periodStar
   if (current > upperBound) return 0;
 
   while (current < periodStart) {
-    current = advanceDateByFrequency(current, frequency);
+    current = advanceDateByFrequency(current, frequency, startDate);
     if (!current || current > upperBound) return 0;
   }
 
   var occurrences = 0;
   while (current && current >= periodStart && current <= upperBound) {
     occurrences++;
-    current = advanceDateByFrequency(current, frequency);
+    current = advanceDateByFrequency(current, frequency, startDate);
   }
 
   return occurrences;
@@ -648,13 +650,13 @@ function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodS
   if (current > upperBound) return dates;
 
   while (current < periodStart) {
-    current = advanceDateByFrequency(current, frequency);
+    current = advanceDateByFrequency(current, frequency, startDate);
     if (!current || current > upperBound) return dates;
   }
 
   while (current && current >= periodStart && current <= upperBound) {
     dates.push(toIsoDate(current));
-    current = advanceDateByFrequency(current, frequency);
+    current = advanceDateByFrequency(current, frequency, startDate);
   }
 
   return dates;
@@ -683,8 +685,9 @@ function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate
   return occurrencesWithExceptions;
 }
 
-function advanceDateByFrequency(date, frequency) {
+function advanceDateByFrequency(date, frequency, anchorDate) {
   var next = new Date(date.getTime());
+  var anchor = anchorDate instanceof Date ? anchorDate : date;
   switch (frequency) {
     case 'weekly':
       next.setDate(next.getDate() + 7);
@@ -693,13 +696,20 @@ function advanceDateByFrequency(date, frequency) {
       next.setDate(next.getDate() + 14);
       break;
     case 'monthly':
+      next.setDate(1);
       next.setMonth(next.getMonth() + 1);
+      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
       break;
     case 'quarterly':
+      next.setDate(1);
       next.setMonth(next.getMonth() + 3);
+      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
       break;
     case 'yearly':
+      next.setDate(1);
+      next.setMonth(anchor.getMonth());
       next.setFullYear(next.getFullYear() + 1);
+      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), anchor.getMonth() + 1, 0).getDate()));
       break;
     default:
       return null;

@@ -982,6 +982,7 @@
         localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
       } catch (err) {
         state.cacheHydrated = false;
+        setStatus('Offline cache is unavailable; saved server data is unaffected.', 'error');
       }
     };
 
@@ -1026,9 +1027,10 @@
     const hydrateFromDesktopCache = () => {
       if (state.cacheHydrated) return;
       try {
-        const raw = localStorage.getItem('ts_cache');
+        const raw = localStorage.getItem('tempus_cache_v3_core') || localStorage.getItem('ts_cache');
         if (!raw) return;
-        const parsed = JSON.parse(raw);
+        const stored = JSON.parse(raw);
+        const parsed = stored && stored.version === 3 && stored.data ? stored.data : stored;
         if (!parsed || !Array.isArray(parsed.entries)) return;
         const map = {};
         let minDate = null;

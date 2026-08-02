@@ -1,5 +1,5 @@
 <script>
-  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], assessmentTypes:[], assessments:[], expenseMode:'transaction' };
+  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], assessmentTypes:[], assessments:[], expenseMode:'transaction', expenseEditId:'' };
 
   function operationsApi(name, ...args) {
     return new Promise((resolve, reject) => {
@@ -30,7 +30,8 @@
     list.replaceChildren(ledgerText(document.createDocumentFragment(), '', ''));
     list.textContent = 'Loading expense ledger…';
     try {
-      const [transactions, rules] = await Promise.all([operationsApi('api_listExpenseTransactions', {}), operationsApi('api_listExpenseRules', { include_inactive:true })]);
+      const filters={from:document.getElementById('expense-filter-from')?.value||'',to:document.getElementById('expense-filter-to')?.value||'',reconciliation_state:document.getElementById('expense-filter-state')?.value||''};
+      const [transactions, rules] = await Promise.all([operationsApi('api_listExpenseTransactions', filters), operationsApi('api_listExpenseRules', { include_inactive:true })]);
       operationsState.transactions = transactions || [];
       operationsState.rules = rules || [];
       renderExpenseTransactions();
@@ -59,17 +60,21 @@
       ledgerText(row, 'ts-ledger-row__amount', operationsMoney(transaction.amount));
       const actions = document.createElement('div');
       actions.className = 'ts-ledger-row__actions';
+      if (transaction.status === 'scheduled') { const record=document.createElement('button'); record.type='button'; record.className='ghost small'; record.textContent='Record purchase'; record.addEventListener('click',async()=>{ const result=await operationsApi('api_upsertExpenseTransaction',{...transaction,status:'recorded',reconciliation_state:'unreconciled'}); if(result.success===false)operationsStatus(result.message,'warn'); else renderExpensesPage(); }); actions.appendChild(record); }
+      if (transaction.reconciliation_state !== 'reconciled' && transaction.status !== 'void') { const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit'; edit.addEventListener('click',()=>openExpenseForm('transaction',transaction)); actions.appendChild(edit); }
       const receipt = document.createElement('button');
       receipt.type = 'button'; receipt.className = 'ghost small'; receipt.textContent = transaction.attachments && transaction.attachments.length ? 'Receipt ✓' : 'Add receipt';
       receipt.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'receipt'));
       const payment = document.createElement('button');
       payment.type = 'button'; payment.className = 'ghost small'; payment.textContent = 'Payment';
+      payment.disabled = transaction.status === 'scheduled' || transaction.status === 'void';
       payment.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'payment'));
       const reconcile = document.createElement('button');
       reconcile.type = 'button'; reconcile.className = 'ghost small'; reconcile.textContent = transaction.reconciliation_state === 'reconciled' ? 'Reconciled' : 'Reconcile';
-      reconcile.disabled = transaction.reconciliation_state === 'reconciled';
+      reconcile.disabled = transaction.reconciliation_state === 'reconciled' || transaction.status === 'scheduled' || transaction.status === 'void';
       reconcile.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'reconcile'));
       actions.append(receipt, payment, reconcile);
+      if (transaction.status !== 'void' && transaction.status !== 'scheduled') { const voidButton=document.createElement('button'); voidButton.type='button'; voidButton.className='ghost small'; voidButton.textContent='Void'; voidButton.addEventListener('click',async()=>{ if(!voidButton.dataset.confirm){voidButton.dataset.confirm='1';voidButton.textContent='Confirm void';return;} const result=await operationsApi('api_voidExpenseTransaction',{id:transaction.id,reason:'Voided from expense ledger'}); if(result.success===false)operationsStatus(result.message,'warn'); else renderExpensesPage(); }); actions.appendChild(voidButton); }
       row.appendChild(actions);
       list.appendChild(row);
     });
@@ -115,6 +120,7 @@
       const identity = document.createElement('div'); ledgerText(identity, 'ts-ledger-row__title', rule.vendor || rule.description || 'Untitled rule'); ledgerText(identity, 'ts-ledger-row__meta', [rule.frequency, rule.start_date, rule.active === true || String(rule.active).toLowerCase() === 'true' ? 'active' : 'archived'].join(' · ')); row.appendChild(identity);
       ledgerText(row, 'ts-ledger-row__meta', rule.category || 'Uncategorised'); ledgerText(row, 'ts-ledger-row__amount', operationsMoney(rule.amount));
       const actions = document.createElement('div'); actions.className = 'ts-ledger-row__actions';
+      const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit future rule'; edit.addEventListener('click',()=>openExpenseForm('rule',rule)); actions.appendChild(edit);
       if (rule.active === true || String(rule.active).toLowerCase() === 'true') { const archive = document.createElement('button'); archive.type='button'; archive.className='ghost small'; archive.textContent='Archive'; archive.addEventListener('click', async () => { const result = await operationsApi('api_archiveExpenseRule', rule.id); if (result.success === false) operationsStatus(result.message, 'warn'); else renderExpensesPage(); }); actions.appendChild(archive); }
       row.appendChild(actions); list.appendChild(row);
     });
@@ -130,13 +136,16 @@
     [['Actual', report.totals.actual], ['Scheduled', report.totals.scheduled], ['Unreconciled', report.totals.unreconciled], ['GST creditable', report.totals.gst_creditable], ['Non-creditable GST', report.totals.non_creditable_gst]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
   }
 
-  function openExpenseForm(mode) {
+  function openExpenseForm(mode, item) {
     operationsState.expenseMode = mode;
+    operationsState.expenseEditId=item&&item.id?item.id:'';
     const form = document.getElementById('expense-form'); form.style.display='block'; form.reset();
-    document.getElementById('expense-business-use').value='100';
-    document.getElementById('expense-date').value=new Date().toISOString().slice(0,10);
+    document.getElementById('expense-vendor').value=item?.vendor||''; document.getElementById('expense-abn').value=item?.vendor_abn||''; document.getElementById('expense-description').value=item?.description||''; document.getElementById('expense-category').value=item?.category||''; document.getElementById('expense-amount').value=item?.amount??''; document.getElementById('expense-gst-code').value=item?.gst_code||'taxable'; document.getElementById('expense-notes').value=item?.notes||'';
+    document.getElementById('expense-business-use').value=item?Math.round((Number(item.business_use_percentage)||0)*10000)/100:100;
+    document.getElementById('expense-date').value=(mode==='rule'?item?.start_date:item?.purchase_date)||new Date().toISOString().slice(0,10); document.getElementById('expense-supplier-date').value=item?.supplier_invoice_date||''; document.getElementById('expense-frequency').value=item?.frequency||'monthly';
     document.getElementById('expense-frequency-wrap').style.display=mode === 'rule' ? 'block' : 'none';
-    form.querySelector('h4').textContent=mode === 'rule' ? 'New scheduled expense rule' : 'New expense transaction';
+    document.getElementById('expense-supplier-date-wrap').style.display=mode === 'rule' ? 'none' : 'block';
+    form.querySelector('h4').textContent=(item?'Edit ':'New ')+(mode === 'rule' ? 'scheduled expense rule' : 'expense transaction');
     document.getElementById('expense-vendor').focus();
   }
 
@@ -173,7 +182,9 @@
   document.getElementById('expense-add')?.addEventListener('click',()=>openExpenseForm('transaction'));
   document.getElementById('expense-rule-add')?.addEventListener('click',()=>openExpenseForm('rule'));
   document.getElementById('expense-form-cancel')?.addEventListener('click',()=>document.getElementById('expense-form').style.display='none');
-  document.getElementById('expense-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); const payload={ vendor:document.getElementById('expense-vendor').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, start_date:document.getElementById('expense-date').value, frequency:document.getElementById('expense-frequency').value, active:true }; const api=operationsState.expenseMode==='rule'?'api_upsertExpenseRule':'api_upsertExpenseTransaction'; const result=await operationsApi(api,payload); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsStatus(operationsState.expenseMode==='rule'?'Expense rule saved':'Expense recorded'); renderExpensesPage(); });
+  document.getElementById('expense-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); const payload={ id:operationsState.expenseEditId||'', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, supplier_invoice_date:document.getElementById('expense-supplier-date').value, start_date:document.getElementById('expense-date').value, frequency:document.getElementById('expense-frequency').value, notes:document.getElementById('expense-notes').value, active:true }; const api=operationsState.expenseMode==='rule'?'api_upsertExpenseRule':'api_upsertExpenseTransaction'; const result=await operationsApi(api,payload); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsState.expenseEditId=''; operationsStatus(operationsState.expenseMode==='rule'?'Expense rule saved':'Expense recorded'); renderExpensesPage(); });
+  document.getElementById('expense-filter-apply')?.addEventListener('click',renderExpensesPage);
+  document.getElementById('expense-rule-generate')?.addEventListener('click',async()=>{const end=new Date();end.setFullYear(end.getFullYear()+1);const result=await operationsApi('api_generateExpenseRuleOccurrences',{through_date:end.toISOString().slice(0,10)});if(result.success===false)operationsStatus(result.message,'warn');else{operationsStatus(`${result.created_count} scheduled expense${result.created_count===1?'':'s'} created`);renderExpensesPage();}});
   document.querySelectorAll('[data-expense-tab]').forEach((button)=>button.addEventListener('click',()=>{ operationsState.expenseTab=button.dataset.expenseTab; document.querySelectorAll('[data-expense-tab]').forEach((item)=>{ const active=item===button; item.classList.toggle('is-active',active); item.setAttribute('aria-selected',String(active)); }); ['transactions','rules','report'].forEach((name)=>{ document.getElementById(`expense-${name}-panel`).style.display=name===operationsState.expenseTab?'block':'none'; }); }));
   document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
   document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });

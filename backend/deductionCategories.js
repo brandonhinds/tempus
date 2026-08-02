@@ -98,6 +98,10 @@ function buildDeductionCategoryRow(payload, timestamps) {
 }
 
 function api_upsertDeductionCategory(payload) {
+  return withScriptLock_('deduction category update', function() { return upsertDeductionCategoryUnlocked_(payload); });
+}
+
+function upsertDeductionCategoryUnlocked_(payload) {
   var list = listDeductionCategoriesInternal();
   var existing = null;
   if (payload && payload.id) {
@@ -154,6 +158,10 @@ function api_upsertDeductionCategory(payload) {
 }
 
 function api_deleteDeductionCategory(id) {
+  return withScriptLock_('deduction category removal', function() { return deleteDeductionCategoryUnlocked_(id); });
+}
+
+function deleteDeductionCategoryUnlocked_(id) {
   if (!id) throw new Error('Category id is required.');
   var sh = getDeductionCategoriesSheet();
   var values = sh.getDataRange().getValues();

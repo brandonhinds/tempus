@@ -162,6 +162,10 @@ function canonicalizeSheet_(name) {
     });
   });
   ensureSheetCapacity_(sheet, Math.max(1, outputRows.length + 1), outputHeaders.length);
+  // Clear the previous used rectangle before the name-based rewrite so a
+  // discarded blank legacy column cannot leave hidden values beyond the new
+  // header boundary.
+  sheet.getDataRange().clearContent();
   sheet.getRange(1, 1, 1, outputHeaders.length).setValues([outputHeaders]);
   if (outputRows.length) sheet.getRange(2, 1, outputRows.length, outputHeaders.length).setValues(outputRows);
   applyCanonicalFormats_(sheet, schema, outputHeaders);

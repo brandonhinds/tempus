@@ -21,6 +21,19 @@ function apiRecoverableFailure_(code, message, details) {
   return result;
 }
 
+function deleteSheetRowsDescending_(sheet, rowNumbers) {
+  var rows = (rowNumbers || []).map(Number).filter(function(row) { return isFinite(row) && row >= 2; }).sort(function(a, b) { return b - a; });
+  var deleted = 0;
+  while (rows.length) {
+    var high = rows.shift();
+    var low = high;
+    while (rows.length && rows[0] === low - 1) low = rows.shift();
+    sheet.deleteRows(low, high - low + 1);
+    deleted += high - low + 1;
+  }
+  return deleted;
+}
+
 function requireHttpUrl_(value, label, allowEmpty) {
   var url = String(value == null ? '' : value).trim();
   if (!url && allowEmpty) return '';

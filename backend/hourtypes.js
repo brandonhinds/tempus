@@ -199,6 +199,10 @@ function normalizeHourTypeRow(headers, row) {
 }
 
 function api_createHourType(data) {
+  return withScriptLock_('hour type creation', function() { return createHourTypeUnlocked_(data); });
+}
+
+function createHourTypeUnlocked_(data) {
   if (!data.name || !data.slug) {
     throw new Error('Name and slug are required for hour types');
   }
@@ -309,6 +313,10 @@ function api_createHourType(data) {
 }
 
 function api_updateHourType(id, data) {
+  return withScriptLock_('hour type update', function() { return updateHourTypeUnlocked_(id, data); });
+}
+
+function updateHourTypeUnlocked_(id, data) {
   var sh = getHourTypesSheet();
   var allData = sh.getDataRange().getValues();
   var headers = allData[0];
@@ -426,6 +434,29 @@ function api_updateHourType(id, data) {
 }
 
 function api_deleteHourType(id) {
+  return withScriptLock_('hour type removal', function() { return deleteHourTypeUnlocked_(id); });
+}
+
+function hourTypeReferenceCount_(id) {
+  var references = [
+    ['timesheet_entries', 'hour_type_id'],
+    ['recurring_time_entries', 'hour_type_id'],
+    ['bulk_time_entries', 'hour_type_id'],
+    ['invoice_line_items', 'hour_type_id']
+  ];
+  var count = 0;
+  references.forEach(function(reference) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(reference[0]);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var values = sheet.getDataRange().getValues();
+    var column = values[0].indexOf(reference[1]);
+    if (column === -1) return;
+    for (var row = 1; row < values.length; row++) if (String(values[row][column]) === String(id)) count++;
+  });
+  return count;
+}
+
+function deleteHourTypeUnlocked_(id) {
   var sh = getHourTypesSheet();
   var allData = sh.getDataRange().getValues();
   var headers = allData[0];
@@ -451,22 +482,7 @@ function api_deleteHourType(id) {
     throw new Error('Cannot delete the work hour type');
   }
 
-  // Check if hour type is being used by any entries
-  var entriesSh = getOrCreateSheet('timesheet_entries');
-  var entriesData = entriesSh.getDataRange().getValues();
-  var entriesHeaders = entriesData[0];
-  var entriesRows = entriesData.slice(1);
-  var hourTypeIdIndex = entriesHeaders.indexOf('hour_type_id');
-
-  if (hourTypeIdIndex !== -1) {
-    var isUsed = entriesRows.some(function(row) {
-      return row[hourTypeIdIndex] === id;
-    });
-
-    if (isUsed) {
-      throw new Error('Cannot delete hour type that is used by existing entries');
-    }
-  }
+  if (hourTypeReferenceCount_(id) > 0) throw new Error('Cannot delete an hour type referenced by entries, schedules, or invoice lines.');
 
   sh.deleteRow(rowIndex + 2);
 
@@ -476,10 +492,12 @@ function api_deleteHourType(id) {
 }
 
 function api_reorderHourTypes(payload) {
-  var order = Array.isArray(payload && payload.order) ? payload.order : [];
-  applyDisplayOrderToSheet('hour_types', order);
-  cacheClearPrefix('hour_types');
-  return { success: true };
+  return withScriptLock_('hour type reorder', function() {
+    var order = Array.isArray(payload && payload.order) ? payload.order : [];
+    applyDisplayOrderToSheet('hour_types', order);
+    cacheClearPrefix('hour_types');
+    return { success: true };
+  });
 }
 
 function ensureWorkHourType() {

@@ -318,6 +318,10 @@ function buildDeductionRow(payload, timestamps) {
 }
 
 function api_upsertDeduction(payload) {
+  return withScriptLock_('deduction update', function() { return upsertDeductionUnlocked_(payload); });
+}
+
+function upsertDeductionUnlocked_(payload) {
   var list = listDeductionsInternal();
   var existing = null;
   if (payload && payload.id) {
@@ -374,6 +378,10 @@ function api_upsertDeduction(payload) {
 }
 
 function api_deleteDeduction(id) {
+  return withScriptLock_('deduction removal', function() { return deleteDeductionUnlocked_(id); });
+}
+
+function deleteDeductionUnlocked_(id) {
   if (!id) throw new Error('Deduction id is required.');
   var sh = getDeductionsSheet();
   var values = sh.getDataRange().getValues();
@@ -390,4 +398,3 @@ function api_deleteDeduction(id) {
   }
   return { success: true };
 }
-

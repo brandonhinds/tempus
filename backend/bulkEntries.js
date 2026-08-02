@@ -22,7 +22,7 @@ var BULK_ENTRY_HEADERS = [
 ];
 var BULK_MAX_RANGE_DAYS = 366; // inclusive days (roughly 1 year)
 
-function clampRoundInterval(value) {
+function clampBulkRoundInterval(value) {
   var num = Number(value);
   if (!isFinite(num) || num <= 0) return 0;
   if (num > 60) return 60;
@@ -210,6 +210,10 @@ function api_getBulkTimeEntries() {
 }
 
 function api_upsertBulkTimeEntry(payload) {
+  return withScriptLock_('bulk schedule update', function() { return upsertBulkTimeEntryUnlocked_(payload); });
+}
+
+function upsertBulkTimeEntryUnlocked_(payload) {
   var normalized = normalizeBulkPayload(payload);
   var entries = listBulkEntriesInternal();
   var now = new Date();
@@ -246,24 +250,17 @@ function deleteEntriesForBulkSchedule(recurrenceId) {
   if (values.length <= 1) return 0;
   var headers = values[0];
   var recurrenceIdx = headers.indexOf('recurrence_id');
-  if (recurrenceIdx === -1) return 0;
-  var idIdx = headers.indexOf('id');
-  var deleted = 0;
+  var sourceTypeIdx = headers.indexOf('source_type');
+  var sourceIdIdx = headers.indexOf('source_id');
+  if (recurrenceIdx === -1 && sourceIdIdx === -1) return 0;
+  var rowsToDelete = [];
   for (var i = values.length - 1; i >= 1; i--) {
     var recurrence = String(values[i][recurrenceIdx] || '').trim();
-    if (recurrence !== recurrenceId) continue;
-    var entryId = idIdx !== -1 ? values[i][idIdx] : '';
-    if (entryId) {
-      try {
-        api_deleteEntry(entryId);
-      } catch (e) {
-        sh.deleteRow(i + 1);
-      }
-    } else {
-      sh.deleteRow(i + 1);
-    }
-    deleted += 1;
+    var sourceMatch = sourceIdIdx !== -1 && String(values[i][sourceIdIdx] || '').trim() === recurrenceId && (sourceTypeIdx === -1 || String(values[i][sourceTypeIdx] || '') === 'bulk');
+    if (recurrence !== recurrenceId && !sourceMatch) continue;
+    rowsToDelete.push(i + 1);
   }
+  var deleted = deleteSheetRowsDescending_(sh, rowsToDelete);
   if (deleted > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
@@ -280,14 +277,22 @@ function detachEntriesFromBulkSchedule(recurrenceId) {
   if (values.length <= 1) return 0;
   var headers = values[0];
   var recurrenceIdx = headers.indexOf('recurrence_id');
-  if (recurrenceIdx === -1) return 0;
+  var sourceTypeIdx = headers.indexOf('source_type');
+  var sourceIdIdx = headers.indexOf('source_id');
+  var sourceOccurrenceIdx = headers.indexOf('source_occurrence_key');
+  if (recurrenceIdx === -1 && sourceIdIdx === -1) return 0;
   var detached = 0;
   for (var i = 1; i < values.length; i++) {
-    var recurrence = String(values[i][recurrenceIdx] || '').trim();
-    if (recurrence !== recurrenceId) continue;
-    sh.getRange(i + 1, recurrenceIdx + 1).setValue('');
+    var recurrence = recurrenceIdx === -1 ? '' : String(values[i][recurrenceIdx] || '').trim();
+    var sourceMatch = sourceIdIdx !== -1 && String(values[i][sourceIdIdx] || '').trim() === recurrenceId && (sourceTypeIdx === -1 || String(values[i][sourceTypeIdx] || '') === 'bulk');
+    if (recurrence !== recurrenceId && !sourceMatch) continue;
+    if (recurrenceIdx !== -1) values[i][recurrenceIdx] = '';
+    if (sourceTypeIdx !== -1) values[i][sourceTypeIdx] = 'manual';
+    if (sourceIdIdx !== -1) values[i][sourceIdIdx] = '';
+    if (sourceOccurrenceIdx !== -1) values[i][sourceOccurrenceIdx] = '';
     detached += 1;
   }
+  if (detached) sh.getRange(2, 1, values.length - 1, headers.length).setValues(values.slice(1));
   if (detached > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
@@ -297,6 +302,10 @@ function detachEntriesFromBulkSchedule(recurrenceId) {
 // keepEntries: when true, the generated entries are detached and left on the sheet; otherwise they are
 // deleted along with the range card (the original cascade behaviour).
 function api_deleteBulkTimeEntry(id, keepEntries) {
+  return withScriptLock_('bulk schedule removal', function() { return deleteBulkTimeEntryUnlocked_(id, keepEntries); });
+}
+
+function deleteBulkTimeEntryUnlocked_(id, keepEntries) {
   if (!id) throw new Error('Bulk entry id is required.');
   var sh = getBulkEntriesSheet();
   var values = sh.getDataRange().getValues();
@@ -317,7 +326,7 @@ function api_deleteBulkTimeEntry(id, keepEntries) {
 }
 
 function api_syncBulkTimeEntries(options) {
-  return syncBulkTimeEntries(options || {});
+  return withScriptLock_('bulk schedule sync', function() { return syncBulkTimeEntries(options || {}); });
 }
 
 function syncBulkTimeEntries(options) {
@@ -347,7 +356,7 @@ function syncBulkTimeEntries(options) {
   }
   var existingEntryCache = buildBulkExistingEntryCache();
   var settings = api_getSettings();
-  var roundInterval = clampRoundInterval(settings && settings.round_to_nearest);
+  var roundInterval = clampBulkRoundInterval(settings && settings.round_to_nearest);
   var context = {
     contracts: contractMap,
     hourTypes: hourTypeMap,
@@ -601,7 +610,7 @@ function distributeMonthlyDurations(entry, dates, context) {
   if (!dates || !dates.length) {
     return { durations: map, warning: 'No days met the selected filters.' };
   }
-  var interval = clampRoundInterval(context.roundInterval);
+  var interval = clampBulkRoundInterval(context.roundInterval);
   var quantum = interval > 0 ? interval : 1;
   var totalUnits = Math.round(totalMinutes / quantum);
   if (totalUnits <= 0) {

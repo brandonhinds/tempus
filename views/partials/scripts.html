@@ -498,6 +498,7 @@ let ratePreviewInputSyncing = false;
 
   const state = {
     cacheKey: 'ts_cache',
+    cacheKeys: { core: 'tempus_cache_v3_core', income: 'tempus_cache_v3_income', reports: 'tempus_cache_v3_reports' },
     cacheHadStoredData: false,
     tempusUrlWriteAttempted: false,
     entriesSyncSucceeded: false,
@@ -6976,7 +6977,7 @@ function hideAnnualLoadingState() {
       } catch (e) {}
     }
     const feed = document.getElementById('av-feed');
-    if (feed) feed.innerHTML = items.map(it => '<div class="ts-av-feed-item"><div class="ts-av-feed-ic ' + it.k + '">' + AV_ICONS[it.k] + '</div><div><p class="ts-av-feed-title">' + it.t + '</p><p class="ts-av-feed-text">' + it.x + '</p></div></div>').join('') || '<p class="ts-note">No insights yet for this period.</p>';
+    if (feed) feed.innerHTML = items.map(it => '<div class="ts-av-feed-item"><div class="ts-av-feed-ic ' + escapeHtmlSafe(it.k) + '">' + AV_ICONS[it.k] + '</div><div><p class="ts-av-feed-title">' + escapeHtmlSafe(it.t) + '</p><p class="ts-av-feed-text">' + escapeHtmlSafe(it.x) + '</p></div></div>').join('') || '<p class="ts-note">No insights yet for this period.</p>';
   }
 
   // Full gross→net waterfall, each line as a % of gross. Respects the Actual / Projected scope.
@@ -10403,10 +10404,20 @@ function updateDeductionFormVisibility() {
 
   function loadCache() {
     try {
-      const raw = localStorage.getItem(state.cacheKey);
-      state.cacheHadStoredData = !!raw;
-      if (!raw) return;
-      const obj = JSON.parse(raw);
+      const unwrap = (raw) => {
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && parsed.version === 3 && parsed.data && typeof parsed.data === 'object' ? parsed.data : parsed;
+      };
+      const legacyRaw = localStorage.getItem(state.cacheKey);
+      const coreRaw = localStorage.getItem(state.cacheKeys.core);
+      const incomeRaw = localStorage.getItem(state.cacheKeys.income);
+      const reportsRaw = localStorage.getItem(state.cacheKeys.reports);
+      state.cacheHadStoredData = !!(legacyRaw || coreRaw || incomeRaw || reportsRaw);
+      if (!state.cacheHadStoredData) return;
+      const obj = legacyRaw && !coreRaw
+        ? unwrap(legacyRaw)
+        : { ...unwrap(coreRaw), ...unwrap(incomeRaw), ...unwrap(reportsRaw) };
       // Drop temp_ rows at load: a temp id from a PREVIOUS page load can never confirm (its in-flight
       // create died with that page), so a cached temp is always an orphan — keeping it duplicates the
       // real entry the server echoes back on sync.
@@ -10527,7 +10538,10 @@ function updateDeductionFormVisibility() {
       state.pendingEntryUpdates = new Map();
       state.pendingEntryDeletes = new Set();
       pendingDeleteRecordedAt.clear();
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[Tempus cache] Cached data could not be restored:', e);
+      setTimeout(() => setStatus('Some saved browser data could not be restored. Fresh data will be loaded from Tempus.', 'warn'), 0);
+    }
   }
 
   function maybePersistTempusUrlSetting() {
@@ -10562,7 +10576,7 @@ function updateDeductionFormVisibility() {
       })
       .api_getWebAppUrl();
   }
-  function saveCache() {
+  function saveCacheNow_() {
     try {
       const invoicesForCache = Array.isArray(state.invoices) ? state.invoices.map((invoice) => ({ ...invoice })) : [];
       const invoiceDefaultsForCache = Array.isArray(state.invoiceDefaults) ? state.invoiceDefaults.map((item) => ({ ...item })) : [];
@@ -10610,8 +10624,27 @@ function updateDeductionFormVisibility() {
         potentialIncomeCache: state.potentialIncomeCache,
         loadingTiers: serializeLoadingTierCache()
       };
-      localStorage.setItem(state.cacheKey, JSON.stringify(payload));
-    } catch (e) {}
+      const incomeKeys = ['actualIncome', 'incomeSummaryCache', 'incomeCacheMetadata', 'potentialIncomeCache'];
+      const reportKeys = ['annualCategoryFilters', 'annualCategoryExpansion', 'annualContractsExpanded', 'annualYearType', 'annualCurrentYear', 'annualAllTime', 'basCurrentFy', 'publicHolidays'];
+      const core = { ...payload };
+      const income = {};
+      const reports = {};
+      incomeKeys.forEach((key) => { income[key] = core[key]; delete core[key]; });
+      reportKeys.forEach((key) => { reports[key] = core[key]; delete core[key]; });
+      localStorage.setItem(state.cacheKeys.core, JSON.stringify({ version: 3, data: core }));
+      localStorage.setItem(state.cacheKeys.income, JSON.stringify({ version: 3, data: income }));
+      localStorage.setItem(state.cacheKeys.reports, JSON.stringify({ version: 3, data: reports }));
+      localStorage.removeItem(state.cacheKey);
+    } catch (e) {
+      console.warn('[Tempus cache] Browser storage write failed:', e);
+      setStatus('Browser storage is full or unavailable. Your server data is safe, but offline state may not persist.', 'warn');
+    }
+  }
+
+  let cacheSaveTimer = null;
+  function saveCache() {
+    if (cacheSaveTimer) clearTimeout(cacheSaveTimer);
+    cacheSaveTimer = setTimeout(() => { cacheSaveTimer = null; saveCacheNow_(); }, 150);
   }
 
   // Tabs
@@ -16267,7 +16300,7 @@ function updateDeductionFormVisibility() {
 
         const meta = document.createElement('div');
         meta.className = 'ts-flag-meta';
-        meta.innerHTML = `<div class="ts-flag-title">${flag.name}</div>` + (flag.description ? `<div class="ts-flag-desc">${flag.description}</div>` : '');
+        meta.innerHTML = `<div class="ts-flag-title">${escapeHtmlSafe(flag.name)}</div>` + (flag.description ? `<div class="ts-flag-desc">${escapeHtmlSafe(flag.description)}</div>` : '');
 
         const toggleLabel = document.createElement('label');
         toggleLabel.className = 'ts-toggle';
@@ -16642,6 +16675,7 @@ function updateDeductionFormVisibility() {
       if (!confirmed) return;
       try {
         localStorage.removeItem(state.cacheKey);
+        Object.values(state.cacheKeys).forEach((key) => localStorage.removeItem(key));
         localStorage.removeItem(LAST_PAGE_KEY);
       } catch (e) {}
       setStatus('Local cache cleared. Data will be reloaded from the server on next sync.', 'success');
@@ -18374,7 +18408,7 @@ function getCachedIncomeSummary(monthKey) {
       const label = document.createElement('div');
       label.className = 'ts-col-span-4';
       const monthLabel = formatMonthLabel(item.month, item.month);
-      label.innerHTML = `<div style="font-weight:600;">${item.hourTypeName}</div><div class="ts-note">${monthLabel}</div>`;
+      label.innerHTML = `<div style="font-weight:600;">${escapeHtmlSafe(item.hourTypeName)}</div><div class="ts-note">${escapeHtmlSafe(monthLabel)}</div>`;
 
       const selectCell = document.createElement('div');
       selectCell.className = 'ts-col-span-8';
@@ -22045,6 +22079,9 @@ function getCachedIncomeSummary(monthKey) {
       const cell = document.createElement('div');
       cell.className = 'ts-calendar-cell';
       cell.dataset.date = iso;
+      cell.tabIndex = 0;
+      cell.setAttribute('role', 'button');
+      cell.setAttribute('aria-label', current.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
       if (current.getMonth() !== state.calendar.month) cell.classList.add('inactive');
       const _dow = current.getDay();
       const _isActiveWeekday = current.getMonth() === state.calendar.month && _dow !== 0 && _dow !== 6;
@@ -24600,6 +24637,9 @@ function getCachedIncomeSummary(monthKey) {
         const row = document.createElement('div');
         row.className = 'ts-agenda-row';
         row.dataset.date = iso;
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-label', d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
         if (iso === todayIso()) row.classList.add('is-today');
         if (!info.primary && !info.hasHoliday) row.classList.add('is-empty');
         if (info.hasHoliday) row.classList.add('is-holiday');
@@ -24694,8 +24734,9 @@ function getCachedIncomeSummary(monthKey) {
     state.selectedCalendarDate = row.dataset.date;
     calendarDaySelected = true;
     renderAgendaView();
+    if (event.keyboard) calendarContextMenuOpener = document.querySelector('.ts-agenda-row[data-date="' + calendarContextMenuDate + '"]');
     renderCalendarContextMenuSections();
-    positionCalendarContextMenu(event.clientX, event.clientY);
+    positionCalendarContextMenu(event.clientX, event.clientY, !!event.keyboard);
   }
 
   function agendaInit() {
@@ -24715,6 +24756,16 @@ function getCachedIncomeSummary(monthKey) {
     const aToday = document.getElementById('agenda-today'); if (aToday) aToday.addEventListener('click', agendaGoToToday);
     // Right-click any day row → shared quick-actions menu (delegated; survives list re-renders).
     if (els.list) els.list.addEventListener('contextmenu', handleAgendaContextMenu);
+    if (els.list) els.list.addEventListener('keydown', (event) => {
+      const row = event.target.closest('.ts-agenda-row');
+      if (!row) return;
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click(); return; }
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        const rect = row.getBoundingClientRect();
+        calendarContextMenuOpener = row;
+        handleAgendaContextMenu({ target: row, preventDefault: () => event.preventDefault(), clientX: rect.left + 16, clientY: rect.top + 16, keyboard: true });
+      }
+    });
   }
   agendaInit();
 
@@ -24867,6 +24918,7 @@ function getCachedIncomeSummary(monthKey) {
   const calendarContextEntriesList = document.getElementById('calendar-context-entries');
   const calendarClearDayBtn = document.getElementById('calendar-clear-day');
   let calendarContextMenuDate = null;
+  let calendarContextMenuOpener = null;
 
   function renderCalendarFilters() {
     // Hour types are now surfaced in the calendar cells and the Total Hours card, so they're no longer
@@ -25788,6 +25840,19 @@ function getCachedIncomeSummary(monthKey) {
   async function loadTier3BackgroundEager() {
     const tasks = [];
     checkForUpdateInBackground();
+
+    tasks.push(new Promise((resolve) => {
+      google.script.run
+        .withSuccessHandler((status) => {
+          state.taxTableStatus = status || null;
+          const target = document.getElementById('help-tax-table-status');
+          if (target && status) target.textContent = status.stale ? status.warning : 'PAYG coefficients are current through ' + status.latest_supported_financial_year + '.';
+          if (status && status.stale) setStatus(status.warning, 'warn');
+          resolve(true);
+        })
+        .withFailureHandler(() => resolve(false))
+        .api_getTaxTableStatus(new Date().toISOString());
+    }));
 
     updateLoadingFeatureState('basSubmissions', { loading: true });
     tasks.push(fetchBasSubmissionsFromServer().then((success) => {
@@ -30060,9 +30125,21 @@ function getCachedIncomeSummary(monthKey) {
     calendarClearDayBtn.title = hasEntries ? 'Delete all entries for this day.' : '';
   }
 
-  function positionCalendarContextMenu(x, y) {
+  function calendarContextMenuItems() {
+    if (!calendarContextMenu) return [];
+    return Array.from(calendarContextMenu.querySelectorAll('button')).filter((item) => item.offsetParent !== null && !item.disabled);
+  }
+
+  function prepareCalendarContextMenuA11y(focusFirst) {
+    const items = calendarContextMenuItems();
+    items.forEach((item, index) => { item.setAttribute('role', 'menuitem'); item.tabIndex = index === 0 ? 0 : -1; });
+    if (focusFirst && items[0]) items[0].focus();
+  }
+
+  function positionCalendarContextMenu(x, y, focusFirst) {
     if (!calendarContextMenu) return;
     calendarContextMenu.style.display = 'block';
+    calendarContextMenu.setAttribute('aria-hidden', 'false');
     calendarContextMenu.style.left = '0px';
     calendarContextMenu.style.top = '0px';
     const rect = calendarContextMenu.getBoundingClientRect();
@@ -30079,12 +30156,16 @@ function getCachedIncomeSummary(monthKey) {
     top = Math.max(padding, top);
     calendarContextMenu.style.left = left + 'px';
     calendarContextMenu.style.top = top + 'px';
+    prepareCalendarContextMenuA11y(!!focusFirst);
   }
 
-  function hideCalendarContextMenu() {
+  function hideCalendarContextMenu(restoreFocus) {
     if (!calendarContextMenu) return;
     calendarContextMenu.style.display = 'none';
+    calendarContextMenu.setAttribute('aria-hidden', 'true');
     calendarContextMenuDate = null;
+    if (restoreFocus && calendarContextMenuOpener && document.contains(calendarContextMenuOpener)) calendarContextMenuOpener.focus();
+    calendarContextMenuOpener = null;
     // In Agenda view the row ring tracks the menu's open state — re-render so it clears now the menu's gone.
     if (state.timeView === 'agenda' && typeof renderAgendaView === 'function') renderAgendaView();
   }
@@ -30105,8 +30186,9 @@ function getCachedIncomeSummary(monthKey) {
     state.selectedCalendarDate = calendarContextMenuDate;
     calendarDaySelected = true;
     renderCalendar();
+    if (event.keyboard) calendarContextMenuOpener = document.querySelector('.ts-calendar-cell[data-date="' + calendarContextMenuDate + '"]');
     renderCalendarContextMenuSections();
-    positionCalendarContextMenu(event.clientX, event.clientY);
+    positionCalendarContextMenu(event.clientX, event.clientY, !!event.keyboard);
   }
 
   function handleCalendarDefaultSelection(type, defaultData) {
@@ -30219,9 +30301,34 @@ function getCachedIncomeSummary(monthKey) {
 
   if (calendarGridEl) {
     calendarGridEl.addEventListener('contextmenu', handleCalendarContextMenu);
+    calendarGridEl.addEventListener('keydown', (event) => {
+      const cell = event.target.closest('.ts-calendar-cell');
+      if (!cell) return;
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); cell.click(); return; }
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        const rect = cell.getBoundingClientRect();
+        calendarContextMenuOpener = cell;
+        handleCalendarContextMenu({ target: cell, preventDefault: () => event.preventDefault(), clientX: rect.left + 16, clientY: rect.top + 16, keyboard: true });
+      }
+    });
   }
   if (calendarContextMenu) {
     calendarContextMenu.addEventListener('contextmenu', (event) => event.preventDefault());
+    calendarContextMenu.addEventListener('keydown', (event) => {
+      const items = calendarContextMenuItems();
+      if (!items.length) return;
+      const current = Math.max(0, items.indexOf(document.activeElement));
+      let next = current;
+      if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+      else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = items.length - 1;
+      else if (event.key === 'Escape') { event.preventDefault(); hideCalendarContextMenu(true); return; }
+      else return;
+      event.preventDefault();
+      items.forEach((item, index) => { item.tabIndex = index === next ? 0 : -1; });
+      items[next].focus();
+    });
   }
   if (calendarClearDayBtn) {
     calendarClearDayBtn.addEventListener('click', handleCalendarClearDay);
@@ -30267,10 +30374,11 @@ function getCachedIncomeSummary(monthKey) {
     }
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') hideCalendarContextMenu();
+    if (event.key === 'Escape') hideCalendarContextMenu(true);
   });
   window.addEventListener('resize', hideCalendarContextMenu);
   window.addEventListener('scroll', hideCalendarContextMenu, true);
+  window.addEventListener('beforeunload', saveCacheNow_);
 
   // Event handlers for default entry buttons
   const manageBasicDefaultsBtn = document.getElementById('btn-manage-basic-defaults');

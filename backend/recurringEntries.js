@@ -304,6 +304,10 @@ function api_getRecurringTimeEntries() {
 }
 
 function api_upsertRecurringTimeEntry(payload) {
+  return withScriptLock_('recurring schedule update', function() { return upsertRecurringTimeEntryUnlocked_(payload); });
+}
+
+function upsertRecurringTimeEntryUnlocked_(payload) {
   var normalized = normalizeRecurringPayload(payload);
   var now = new Date();
   var isoNow = toIsoDateTime(now);
@@ -343,6 +347,10 @@ function findRecurringEntryById(entries, id) {
 }
 
 function api_deleteRecurringTimeEntry(id) {
+  return withScriptLock_('recurring schedule removal', function() { return deleteRecurringTimeEntryUnlocked_(id); });
+}
+
+function deleteRecurringTimeEntryUnlocked_(id) {
   if (!id) throw new Error('Schedule id is required.');
   var sh = getRecurringEntriesSheet();
   var values = sh.getDataRange().getValues();
@@ -358,6 +366,10 @@ function api_deleteRecurringTimeEntry(id) {
 }
 
 function api_deleteFutureRecurringEntries(payload) {
+  return withScriptLock_('recurring entry cleanup', function() { return deleteFutureRecurringEntriesUnlocked_(payload); });
+}
+
+function deleteFutureRecurringEntriesUnlocked_(payload) {
   if (!payload || !payload.recurrenceId) {
     throw new Error('Recurrence identifier is required.');
   }
@@ -377,15 +389,15 @@ function api_deleteFutureRecurringEntries(payload) {
   if (recurrenceIdx === -1 || dateIdx === -1) {
     return { success: true, deleted: 0 };
   }
-  var deleted = 0;
+  var rowsToDelete = [];
   for (var i = values.length - 1; i >= 1; i--) {
     var rowRecurrence = String(values[i][recurrenceIdx] || '').trim();
     if (rowRecurrence !== recurrenceId) continue;
     var rowDate = toIsoDate(values[i][dateIdx]);
     if (fromDate && rowDate && rowDate < fromDate) continue;
-    sh.deleteRow(i + 1);
-    deleted += 1;
+    rowsToDelete.push(i + 1);
   }
+  var deleted = deleteSheetRowsDescending_(sh, rowsToDelete);
   if (deleted > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
@@ -393,8 +405,7 @@ function api_deleteFutureRecurringEntries(payload) {
 }
 
 function api_syncRecurringTimeEntries(options) {
-  var result = syncRecurringTimeEntries(options);
-  return result;
+  return withScriptLock_('recurring schedule sync', function() { return syncRecurringTimeEntries(options); });
 }
 
 function syncRecurringTimeEntries(options) {
@@ -629,7 +640,11 @@ function processRecurringEntry(entry, context) {
 function matchesWeeklySchedule(entry, dateObj, anchorDate) {
   var weekdays = entry.weekly_weekdays || [];
   if (!weekdays.length) return false;
-  var diffDays = Math.floor((startOfDay(dateObj) - startOfDay(anchorDate)) / (24 * 60 * 60 * 1000));
+  // Compare civil dates in UTC so Sydney's 23/25-hour DST transition days do
+  // not shift the fortnight bucket.
+  var dateDay = Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+  var anchorDay = Date.UTC(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate());
+  var diffDays = Math.floor((dateDay - anchorDay) / (24 * 60 * 60 * 1000));
   if (diffDays < 0) return false;
   var weekIndex = Math.floor(diffDays / 7);
   if (weekIndex % entry.weekly_interval !== 0) return false;

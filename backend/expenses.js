@@ -18,6 +18,22 @@ function expenseFind_(name, id) {
   return { data: data, item: null };
 }
 
+function removeFutureScheduledExpenseOccurrences_(ruleId, fromDate) {
+  var data = expenseReadSheet_('expense_transactions');
+  var rows = data.rows.filter(function(item) {
+    return String(item.source_rule_id) === String(ruleId) && String(item.status) === 'scheduled' && String(item.purchase_date) >= String(fromDate);
+  }).map(function(item) { return item.__row; }).sort(function(a, b) { return b - a; });
+  var deleted = 0;
+  while (rows.length) {
+    var high = rows.shift();
+    var low = high;
+    while (rows.length && rows[0] === low - 1) low = rows.shift();
+    data.sheet.deleteRows(low, high - low + 1);
+    deleted += high - low + 1;
+  }
+  return deleted;
+}
+
 function normalizeExpenseRule_(payload, existing) {
   var value = payload || {};
   var amount = roundMoney_(value.amount);
@@ -51,6 +67,7 @@ function api_upsertExpenseRule(payload) {
     var row = rowValuesFromObject_(found.data.headers, normalized, found.item ? found.data.sheet.getRange(found.item.__row, 1, 1, found.data.headers.length).getValues()[0] : null);
     if (found.item) found.data.sheet.getRange(found.item.__row, 1, 1, row.length).setValues([row]);
     else found.data.sheet.appendRow(row);
+    if (found.item) removeFutureScheduledExpenseOccurrences_(normalized.id, Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
     cacheClearPrefix(EXPENSE_CACHE_PREFIX);
     return { success: true, rule: normalized };
   });
@@ -66,8 +83,40 @@ function api_archiveExpenseRule(id) {
     found.data.sheet.getRange(found.item.__row, activeIndex + 1).setValue('FALSE');
     if (endIndex !== -1 && !found.item.end_date) found.data.sheet.getRange(found.item.__row, endIndex + 1).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
     if (updatedIndex !== -1) found.data.sheet.getRange(found.item.__row, updatedIndex + 1).setValue(expenseNow_());
+    removeFutureScheduledExpenseOccurrences_(id, Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
     cacheClearPrefix(EXPENSE_CACHE_PREFIX);
     return { success: true };
+  });
+}
+
+function api_generateExpenseRuleOccurrences(payload) {
+  return withScriptLock_('expense rule generation', function() {
+    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var through = normalizeIsoDateStrict_((payload && payload.through_date) || addDaysIso(today, 365), 'Generation end date', false);
+    if (through < today) return apiRecoverableFailure_('invalid_range', 'Generation end date cannot be before today.');
+    var transactionData = expenseReadSheet_('expense_transactions');
+    var existing = {};
+    transactionData.rows.forEach(function(item) { if (item.source_rule_id && item.source_occurrence_key) existing[String(item.source_rule_id) + '|' + String(item.source_occurrence_key)] = true; });
+    var created = [];
+    api_listExpenseRules({ include_inactive: false }).forEach(function(rule) {
+      var ruleEnd = rule.end_date && rule.end_date < through ? rule.end_date : through;
+      migrationOccurrenceDates_(rule.start_date, ruleEnd, rule.frequency).forEach(function(date) {
+        if (date < today) return;
+        var tuple = String(rule.id) + '|' + date;
+        if (existing[tuple]) return;
+        var transaction = normalizeExpenseTransaction_({
+          id: 'expense-rule-' + sha256Hex_(tuple).substring(0, 24), vendor: rule.vendor, vendor_abn: rule.vendor_abn, description: rule.description,
+          category: rule.category, purchase_date: date, supplier_invoice_date: '', amount: rule.amount, gst_code: rule.gst_code, gst_amount: rule.gst_amount,
+          business_use_percentage: rule.business_use_percentage, claimable_gst_confirmed: false, status: 'scheduled', reconciliation_state: 'scheduled',
+          source_rule_id: rule.id, source_occurrence_key: date, notes: rule.notes
+        }, null);
+        transactionData.sheet.appendRow(rowValuesFromObject_(transactionData.headers, transaction));
+        existing[tuple] = true;
+        created.push(transaction);
+      });
+    });
+    cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+    return { success: true, through_date: through, created_count: created.length, transactions: created };
   });
 }
 
@@ -143,9 +192,12 @@ function api_addExpensePayment(payload) {
     var transaction = expenseFind_('expense_transactions', payload && payload.expense_transaction_id).item;
     if (!transaction) return apiRecoverableFailure_('not_found', 'Expense transaction not found.');
     if (String(transaction.status) === 'void') return apiRecoverableFailure_('void_transaction', 'A payment cannot be added to a void transaction.');
+    if (String(transaction.status) === 'scheduled') return apiRecoverableFailure_('scheduled_transaction', 'Record the scheduled expense before adding a payment.');
     var amount = roundMoney_(payload.amount);
     if (amount <= 0) return apiRecoverableFailure_('invalid_amount', 'Payment amount must be greater than zero.');
     var data = expenseReadSheet_('expense_payments');
+    var paid = data.rows.filter(function(item) { return String(item.expense_transaction_id) === String(transaction.id); }).reduce(function(sum, item) { return sum + Number(item.amount || 0); }, 0);
+    if (paid + amount > Number(transaction.amount || 0) + 0.005) return apiRecoverableFailure_('overpayment', 'Payment exceeds the remaining expense balance.', { balance_due: Math.max(0, roundMoney_(Number(transaction.amount || 0) - paid)) });
     var payment = { id: Utilities.getUuid(), expense_transaction_id: transaction.id, payment_date: normalizeIsoDateStrict_(payload.payment_date, 'Payment date', false), amount: amount, reference: String(payload.reference || ''), notes: String(payload.notes || ''), created_at: expenseNow_(), updated_at: expenseNow_() };
     data.sheet.appendRow(rowValuesFromObject_(data.headers, payment));
     cacheClearPrefix(EXPENSE_CACHE_PREFIX);
@@ -218,7 +270,7 @@ function api_getExpenseReport(filters) {
   var transactions = api_listExpenseTransactions({ from: from, to: to });
   var actual = 0, gstCreditable = 0, unreconciled = 0, nonCreditable = 0;
   transactions.forEach(function(transaction) {
-    if (String(transaction.status) === 'void') return;
+    if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return;
     var amount = Number(transaction.amount) || 0;
     actual += amount;
     var gst = expenseClaimableGst_(transaction);
@@ -226,7 +278,11 @@ function api_getExpenseReport(filters) {
     if (String(transaction.reconciliation_state) !== 'reconciled') unreconciled += amount;
     else nonCreditable += Math.max(0, (Number(transaction.gst_amount) || 0) - gst);
   });
-  var scheduled = api_listExpenseRules({ include_inactive: false }).reduce(function(sum, rule) { return sum + (Number(rule.amount) || 0); }, 0);
+  var scheduled = api_listExpenseRules({ include_inactive: false }).reduce(function(sum, rule) {
+    var start = rule.start_date > from ? rule.start_date : from;
+    var end = rule.end_date && rule.end_date < to ? rule.end_date : to;
+    return sum + migrationOccurrenceDates_(rule.start_date, end, rule.frequency).filter(function(date) { return date >= start; }).length * (Number(rule.amount) || 0);
+  }, 0);
   return { success: true, financial_year: financialYear, from: from, to: to, totals: { actual: roundMoney_(actual), scheduled: roundMoney_(scheduled), unreconciled: roundMoney_(unreconciled), gst_creditable: roundMoney_(gstCreditable), non_creditable_gst: roundMoney_(nonCreditable) }, transactions: transactions };
 }
 

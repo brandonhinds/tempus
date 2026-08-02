@@ -36,7 +36,7 @@ function expenseActualForPeriod_(basis, from, to) {
   var payments = expenseReadSheet_('expense_payments').rows;
   var totals = { purchases: 0, gst: 0 };
   transactions.forEach(function(transaction) {
-    if (String(transaction.status) === 'void') return;
+    if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return;
     if (basis === 'accrual') {
       var eventDate = String(transaction.supplier_invoice_date || transaction.purchase_date || '');
       if (eventDate < from || eventDate > to) return;
