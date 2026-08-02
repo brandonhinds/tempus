@@ -5,7 +5,9 @@ var TIMESHEET1_IMPORT_TIME_BUDGET_MS = (5 * 60 * 1000) - 30000; // leave buffer 
 function buildPunchesForDuration(durationMinutes) {
   var mins = Math.max(0, Math.round(Number(durationMinutes) || 0));
   if (!mins) return [];
-  var capped = Math.min(mins, (24 * 60) - 1); // keep within a single day
+  // A full day is represented by its explicit 1,440-minute duration, not a fake 00:00–23:59 span.
+  if (mins >= 24 * 60) return [];
+  var capped = mins;
   var hours = Math.floor(capped / 60);
   var minutesPart = capped % 60;
   var pad = function(n) { return (n < 10 ? '0' : '') + n; };
@@ -34,8 +36,8 @@ function normalizeSheetDate(value) {
     var month = Number(match[2]);
     var yearPart = match[3];
     var year = Number(yearPart.length === 2 ? '20' + yearPart : yearPart);
-    var dateObj = new Date(year, month - 1, day);
-    if (!isNaN(dateObj.getTime())) return dateObj;
+    var dateObj = new Date(year, month - 1, day, 12);
+    if (!isNaN(dateObj.getTime()) && dateObj.getFullYear() === year && dateObj.getMonth() === month - 1 && dateObj.getDate() === day) return dateObj;
   }
   var parsed = new Date(str);
   if (!isNaN(parsed.getTime())) return parsed;
@@ -513,19 +515,8 @@ function api_runTimesheet1Import(payload) {
     workItems = buildImportWorkItemsFromPreview(preview, contractSelections, hourTypeMap);
   }
 
-  var existingEntries = api_getEntries({});
-  var existingIndex = existingEntries.reduce(function(acc, entry) {
-    // Break records don't occupy an (date, hour type, contract) slot — their empty hour_type_id would
-    // otherwise resolve to the default type here and falsely block a real import.
-    if (entry && entry.entry_type === 'break') return acc;
-    var hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-    var contractId = entry.contract_id || '';
-    var key = entry.date + '|' + hourTypeId + '|' + contractId;
-    acc[key] = true;
-    return acc;
-  }, {});
-
   var batchEntries = [];
+  var batchItems = [];
   var remaining = [];
   for (var i = 0; i < workItems.length; i++) {
     if ((Date.now() - start) > TIMESHEET1_IMPORT_TIME_BUDGET_MS) {
@@ -533,27 +524,28 @@ function api_runTimesheet1Import(payload) {
       break;
     }
     var item = workItems[i];
-    var key = item.date + '|' + item.hourTypeId + '|' + (item.contractId || '');
-    if (existingIndex[key]) {
-      progress.skippedDuplicates += 1;
-      continue;
-    }
-    existingIndex[key] = true;
+    if (!item.sourceOccurrenceKey) item.sourceOccurrenceKey = [item.date, item.hourTypeId, item.contractId || '', item.durationMinutes, i].join('|');
     batchEntries.push({
       date: item.date,
       duration_minutes: item.durationMinutes,
       contract_id: item.contractId || '',
       hour_type_id: item.hourTypeId,
       entry_type: 'basic',
-      punches: buildPunchesForDuration(item.durationMinutes)
+      punches: buildPunchesForDuration(item.durationMinutes),
+      source_type: 'import',
+      source_id: spreadsheetId,
+      source_occurrence_key: item.sourceOccurrenceKey
     });
-    mergeImportSummaryMap(progress.importSummary, item);
+    batchItems.push(item);
   }
 
   if (batchEntries.length) {
     var bulkRes = api_addEntriesBulk({ entries: batchEntries });
     progress.imported += bulkRes && bulkRes.added ? bulkRes.added : 0;
     progress.skippedDuplicates += bulkRes && bulkRes.duplicates ? bulkRes.duplicates : 0;
+    (bulkRes.results || []).forEach(function(result, index) {
+      if (result.status === 'added' && batchItems[index]) mergeImportSummaryMap(progress.importSummary, batchItems[index]);
+    });
   }
 
   var response = {

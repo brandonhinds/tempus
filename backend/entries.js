@@ -222,7 +222,12 @@ function normalizeEntryForWrite(entry, defaultHourTypeId) {
     entry_type: entryType,
     hour_type_id: hourTypeId,
     recurrence_id: entry.recurrence_id || entry.recurrenceId || '',
-    note: normalizeEntryNote(entry.note)
+    note: normalizeEntryNote(entry.note),
+    assessment_id: entry.assessment_id || entry.assessmentId || '',
+    source_type: entry.source_type || entry.sourceType || (entry.assessment_id ? 'assessment' : (entry.recurrence_id ? 'recurring' : 'manual')),
+    source_id: entry.source_id || entry.sourceId || entry.assessment_id || entry.recurrence_id || '',
+    source_occurrence_key: entry.source_occurrence_key || entry.sourceOccurrenceKey || '',
+    client_request_id: entry.client_request_id || entry.clientRequestId || ''
   };
 }
 
@@ -253,24 +258,24 @@ function normalizeEntryForRead(entry, defaultHourTypeId) {
     entry_type: entryType,
     hour_type_id: hourTypeId,
     recurrence_id: entry.recurrence_id || entry.recurrenceId || '',
-    note: normalizeEntryNote(entry.note)
+    note: normalizeEntryNote(entry.note),
+    assessment_id: entry.assessment_id || entry.assessmentId || '',
+    source_type: entry.source_type || entry.sourceType || (entry.assessment_id ? 'assessment' : (entry.recurrence_id ? 'recurring' : 'manual')),
+    source_id: entry.source_id || entry.sourceId || entry.assessment_id || entry.recurrence_id || '',
+    source_occurrence_key: entry.source_occurrence_key || entry.sourceOccurrenceKey || '',
+    client_request_id: entry.client_request_id || entry.clientRequestId || ''
   };
 }
 
-function buildEntryRow(entry, createdAt) {
+function buildEntryRow(entry, createdAt, headers, existingRow) {
   var normalized = entry || {};
-  return [
-    normalized.id,
-    normalized.date,
-    normalized.duration_minutes,
-    normalized.contract_id,
-    createdAt || normalized.created_at || toIsoDateTime(new Date()),
-    normalized.punches_json || '[]',
-    normalized.entry_type || 'basic',
-    normalized.hour_type_id,
-    normalized.recurrence_id || '',
-    normalized.note || ''
-  ];
+  var value = {
+    id: normalized.id, date: normalized.date, duration_minutes: normalized.duration_minutes, contract_id: normalized.contract_id,
+    created_at: createdAt || normalized.created_at || toIsoDateTime(new Date()), punches_json: normalized.punches_json || '[]', entry_type: normalized.entry_type || 'basic',
+    hour_type_id: normalized.hour_type_id, recurrence_id: normalized.recurrence_id || '', note: normalized.note || '', assessment_id: normalized.assessment_id || '',
+    source_type: normalized.source_type || 'manual', source_id: normalized.source_id || '', source_occurrence_key: normalized.source_occurrence_key || '', client_request_id: normalized.client_request_id || ''
+  };
+  return rowValuesFromObject_(headers || getOrCreateSheet('timesheet_entries').getDataRange().getValues()[0], value, existingRow);
 }
 
 // NO server-side caching here (removed 2026-07-07). Entries are the hottest-mutated dataset AND the
@@ -304,22 +309,25 @@ function api_getEntries(filters) {
 
 function buildEntryIndexFromValues(values, headers, defaultHourTypeId) {
   if (!values || !values.length || !headers) return {};
-  var dateIdx = headers.indexOf('date');
-  var hourTypeIdx = headers.indexOf('hour_type_id');
-  var contractIdx = headers.indexOf('contract_id');
-  var entryTypeIdx = headers.indexOf('entry_type');
   var index = {};
-  var fallbackHourTypeId = resolveDefaultHourTypeId(defaultHourTypeId);
   for (var i = 1; i < values.length; i++) {
-    var row = values[i];
-    var dateIso = dateIdx === -1 ? '' : toIsoDate(row[dateIdx]);
-    var hourTypeId = hourTypeIdx === -1 ? '' : row[hourTypeIdx] || '';
-    var contractId = contractIdx === -1 ? '' : row[contractIdx] || '';
-    var entryType = entryTypeIdx === -1 ? '' : row[entryTypeIdx] || '';
-    var key = entryCompositeKey(dateIso, hourTypeId, contractId, fallbackHourTypeId, entryType);
-    if (dateIso) index[key] = true;
+    var entry = normalizeEntryForRead(rowObjectFromHeaders_(headers, values[i]), defaultHourTypeId);
+    var key = entryIdentityKey_(entry, defaultHourTypeId);
+    if (key) index[key] = true;
   }
   return index;
+}
+
+function entryIdentityKey_(entry, defaultHourTypeId) {
+  if (!entry) return '';
+  var sourceType = String(entry.source_type || 'manual');
+  var sourceId = String(entry.source_id || '');
+  var occurrence = String(entry.source_occurrence_key || '');
+  if (sourceType !== 'manual' && sourceId && occurrence) return ['source', sourceType, sourceId, occurrence].join('|');
+  if (entry.client_request_id) return 'request|' + String(entry.client_request_id);
+  if (entry.entry_type === 'break' || entry.entry_type === 'comment') return entryCompositeKey(entry.date, entry.hour_type_id, entry.contract_id, defaultHourTypeId, entry.entry_type);
+  // Manual work sessions are intentionally distinct even when date, contract and hour type match.
+  return '';
 }
 
 function api_addEntry(entry) {
@@ -341,6 +349,11 @@ function api_addEntry(entry) {
     hour_type_id: entry && entry.hour_type_id ? entry.hour_type_id : defaultHourTypeId,
     recurrence_id: entry && entry.recurrence_id,
     note: entry && entry.note,
+    assessment_id: entry && entry.assessment_id,
+    source_type: entry && entry.source_type,
+    source_id: entry && entry.source_id,
+    source_occurrence_key: entry && entry.source_occurrence_key,
+    client_request_id: entry && entry.client_request_id,
     round_interval: entry && entry.round_interval
   }, defaultHourTypeId);
   normalized.id = normalized.id || id;
@@ -352,8 +365,8 @@ function api_addEntry(entry) {
     var existingData = sh.getDataRange().getValues();
     var headers = existingData && existingData.length ? existingData[0] : [];
     var existingIndex = buildEntryIndexFromValues(existingData, headers, defaultHourTypeId);
-    var targetKey = entryCompositeKey(normalized.date, normalized.hour_type_id, normalized.contract_id, defaultHourTypeId, normalized.entry_type);
-    if (existingIndex[targetKey]) {
+    var targetKey = entryIdentityKey_(normalized, defaultHourTypeId);
+    if (targetKey && existingIndex[targetKey]) {
       // Return the EXISTING sheet row, not the attempted payload: duplicate-adopt consumers (comment/break
       // create, the duplicate-conflict form handler) take res.entry's id and update/edit that record, so a
       // made-up id here sends their follow-up api_updateEntry into 'Entry not found'. Matches api_updateEntry's
@@ -362,21 +375,10 @@ function api_addEntry(entry) {
       var existingDuplicate = findDuplicateEntryForKey(sh, normalized, null, existingData, defaultHourTypeId);
       return { success: false, error: 'duplicate_entry', entry: existingDuplicate || normalizeEntryForRead(normalized, defaultHourTypeId) };
     }
-    var row = buildEntryRow(normalized, normalized.created_at);
+    var row = buildEntryRow(normalized, normalized.created_at, headers);
     sh.appendRow(row);
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
-    return { success: true, entry: normalizeEntryForRead({
-      id: row[0],
-      date: row[1],
-      duration_minutes: row[2],
-      contract_id: row[3],
-      created_at: row[4],
-      punches_json: row[5],
-      entry_type: row[6],
-      hour_type_id: row[7],
-      recurrence_id: row[8],
-      note: row[9]
-    }, defaultHourTypeId) };
+    return { success: true, entry: normalizeEntryForRead(rowObjectFromHeaders_(headers, row), defaultHourTypeId) };
   } finally {
     lock.releaseLock();
   }
@@ -384,7 +386,7 @@ function api_addEntry(entry) {
 
 function api_addEntriesBulk(payload) {
   var entries = payload && Array.isArray(payload.entries) ? payload.entries : [];
-  if (!entries.length) return { success: true, added: 0, duplicates: 0, entries: [] };
+  if (!entries.length) return { success: true, added: 0, duplicates: 0, failed: 0, entries: [], results: [] };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -400,8 +402,11 @@ function api_addEntriesBulk(payload) {
     var added = 0;
     var duplicates = 0;
     var normalizedOut = [];
+    var results = [];
+    var failed = 0;
 
-    entries.forEach(function(entry) {
+    entries.forEach(function(entry, inputIndex) {
+      try {
       var normalized = normalizeEntryForWrite({
         id: entry && entry.id,
         date: entry && entry.date,
@@ -414,33 +419,34 @@ function api_addEntriesBulk(payload) {
         hour_type_id: entry && entry.hour_type_id,
         recurrence_id: entry && entry.recurrence_id,
         note: entry && entry.note,
+        assessment_id: entry && entry.assessment_id,
+        source_type: entry && entry.source_type,
+        source_id: entry && entry.source_id,
+        source_occurrence_key: entry && entry.source_occurrence_key,
+        client_request_id: entry && entry.client_request_id,
         round_interval: entry && entry.round_interval
       }, defaultHourTypeId);
       normalized.id = normalized.id || Utilities.getUuid();
       normalized.created_at = normalized.created_at || nowIso;
 
-      var key = entryCompositeKey(normalized.date, normalized.hour_type_id, normalized.contract_id, defaultHourTypeId, normalized.entry_type);
-      if (existingIndex[key]) {
+      var key = entryIdentityKey_(normalized, defaultHourTypeId);
+      if (key && existingIndex[key]) {
         duplicates += 1;
+        results.push({ index: inputIndex, status: 'duplicate', entry: findDuplicateEntryForKey(sh, normalized, null, data, defaultHourTypeId) });
         return;
       }
 
-      existingIndex[key] = true;
-      var row = buildEntryRow(normalized, normalized.created_at);
+      if (key) existingIndex[key] = true;
+      var row = buildEntryRow(normalized, normalized.created_at, headers);
       rows.push(row);
       added += 1;
-      normalizedOut.push(normalizeEntryForRead({
-        id: row[0],
-        date: row[1],
-        duration_minutes: row[2],
-        contract_id: row[3],
-        created_at: row[4],
-        punches_json: row[5],
-        entry_type: row[6],
-        hour_type_id: row[7],
-        recurrence_id: row[8],
-        note: row[9]
-      }, defaultHourTypeId));
+      var output = normalizeEntryForRead(rowObjectFromHeaders_(headers, row), defaultHourTypeId);
+      normalizedOut.push(output);
+      results.push({ index: inputIndex, status: 'added', entry: output });
+      } catch (error) {
+        failed += 1;
+        results.push({ index: inputIndex, status: 'failed', error: error && error.message ? error.message : String(error) });
+      }
     });
 
     if (rows.length) {
@@ -453,6 +459,8 @@ function api_addEntriesBulk(payload) {
       success: true,
       added: added,
       duplicates: duplicates,
+      failed: failed,
+      results: results,
       entries: normalizedOut
     };
   } finally {
@@ -486,6 +494,11 @@ function api_updateEntry(update) {
     if (!payload.hasOwnProperty('note') && values[i][9] != null) {
       payload = Object.assign({}, payload, { note: values[i][9] });
     }
+    var updateHeaders = values[0];
+    ['assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'].forEach(function(header) {
+      var index = updateHeaders.indexOf(header);
+      if (!payload.hasOwnProperty(header) && index !== -1) payload[header] = values[i][index];
+    });
     if (payload.recurrence_id == null && update.recurrence_id != null) {
       payload = Object.assign({}, payload, { recurrence_id: update.recurrence_id });
     }
@@ -500,7 +513,7 @@ function api_updateEntry(update) {
     if (duplicate) {
           return { success: false, error: 'duplicate_entry', entry: duplicate };
         }
-        var newRow = buildEntryRow(normalized, normalized.created_at);
+        var newRow = buildEntryRow(normalized, normalized.created_at, values[0], values[i]);
         sh.getRange(i+1,1,1,newRow.length).setValues([newRow]);
         cacheClearPrefix(ENTRY_CACHE_PREFIX);
         return { success: true, entry: normalized };
@@ -565,11 +578,18 @@ function findDuplicateEntryForKey(sh, normalizedEntry, excludeId, values, defaul
   var createdIdx = headers.indexOf('created_at');
   var punchesIdx = headers.indexOf('punches_json');
   var entryTypeIdx = headers.indexOf('entry_type');
+  var sourceTypeIdx = headers.indexOf('source_type');
   var hourTypeIdx = headers.indexOf('hour_type_id');
   var recurrenceIdx = headers.indexOf('recurrence_id');
   var noteIdx = headers.indexOf('note');
+  var assessmentIdx = headers.indexOf('assessment_id');
+  var sourceTypeIdx = headers.indexOf('source_type');
+  var sourceIdIdx = headers.indexOf('source_id');
+  var occurrenceIdx = headers.indexOf('source_occurrence_key');
+  var requestIdx = headers.indexOf('client_request_id');
   var fallbackHourTypeId = resolveDefaultHourTypeId(defaultHourTypeId);
-  var targetKey = entryCompositeKey(normalizedEntry.date, normalizedEntry.hour_type_id, normalizedEntry.contract_id, fallbackHourTypeId, normalizedEntry.entry_type);
+  var targetKey = entryIdentityKey_(normalizedEntry, fallbackHourTypeId);
+  if (!targetKey) return null;
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     var rowId = idIdx === -1 ? '' : row[idIdx];
@@ -578,7 +598,12 @@ function findDuplicateEntryForKey(sh, normalizedEntry, excludeId, values, defaul
     var rowHourType = hourTypeIdx === -1 ? '' : row[hourTypeIdx];
     var rowContract = contractIdx === -1 ? '' : row[contractIdx];
     var rowEntryType = entryTypeIdx === -1 ? 'basic' : row[entryTypeIdx];
-    var key = entryCompositeKey(rowDate, rowHourType, rowContract, fallbackHourTypeId, rowEntryType);
+    var candidate = {
+      date: rowDate, hour_type_id: rowHourType, contract_id: rowContract, entry_type: rowEntryType,
+      source_type: sourceTypeIdx === -1 ? 'manual' : row[sourceTypeIdx], source_id: sourceIdIdx === -1 ? '' : row[sourceIdIdx],
+      source_occurrence_key: occurrenceIdx === -1 ? '' : row[occurrenceIdx], client_request_id: requestIdx === -1 ? '' : row[requestIdx]
+    };
+    var key = entryIdentityKey_(candidate, fallbackHourTypeId);
     if (key === targetKey) {
       return normalizeEntryForRead({
         id: rowId,
@@ -590,7 +615,12 @@ function findDuplicateEntryForKey(sh, normalizedEntry, excludeId, values, defaul
         entry_type: rowEntryType,
         hour_type_id: rowHourType || fallbackHourTypeId,
         recurrence_id: recurrenceIdx === -1 ? '' : row[recurrenceIdx],
-        note: noteIdx === -1 ? '' : row[noteIdx]
+        note: noteIdx === -1 ? '' : row[noteIdx],
+        assessment_id: assessmentIdx === -1 ? '' : row[assessmentIdx],
+        source_type: candidate.source_type,
+        source_id: candidate.source_id,
+        source_occurrence_key: candidate.source_occurrence_key,
+        client_request_id: candidate.client_request_id
       }, fallbackHourTypeId);
     }
   }
@@ -616,6 +646,7 @@ function reroundTimesheetEntries(roundInterval) {
     var row = values[i];
     // Break records aren't worked time — re-rounding (and its ≥1-interval floor) doesn't apply.
     if (entryTypeIdx !== -1 && row[entryTypeIdx] === 'break') continue;
+    if (sourceTypeIdx !== -1 && row[sourceTypeIdx] === 'assessment') continue;
     var punches = punchesIdx === -1 ? [] : normalizePunches(row[punchesIdx]);
     var existing = row[durationIdx];
     var recalculated = deriveDurationMinutes(punches, existing, quantum);

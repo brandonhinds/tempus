@@ -371,11 +371,18 @@ function syncBulkTimeEntries(options) {
   });
   if (context.batchCreates.length) {
     var bulkRes = api_addEntriesBulk({ entries: context.batchCreates });
-    var created = bulkRes && bulkRes.entries ? bulkRes.entries : [];
-    for (var c = 0; c < created.length && c < context.batchMeta.length; c++) {
+    var alignedResults = bulkRes && bulkRes.results ? bulkRes.results : [];
+    for (var c = 0; c < alignedResults.length && c < context.batchMeta.length; c++) {
       var meta = context.batchMeta[c];
-      var item = created[c];
-      if (!meta || !item) continue;
+      var result = alignedResults[c];
+      var item = result && result.entry;
+      if (!meta || !result) continue;
+      if (result.status === 'failed') {
+        var failedSummary = summaries.filter(function(summary) { return summary.id === meta.recurrenceId; })[0];
+        if (failedSummary) failedSummary.warning = 'Entry for ' + meta.date + ' failed: ' + (result.error || 'unknown error');
+        continue;
+      }
+      if (!item) continue;
       if (!context.existingEntries[meta.recurrenceId]) context.existingEntries[meta.recurrenceId] = {};
       context.existingEntries[meta.recurrenceId][meta.date] = {
         id: item.id,
@@ -722,7 +729,10 @@ function createBulkEntryInstance(entry, dateIso, durationMinutes, context) {
           entry_type: 'advanced',
           hour_type_id: entry.hour_type_id,
           punches: sessions,
-          recurrence_id: entry.id
+          recurrence_id: entry.id,
+          source_type: 'bulk',
+          source_id: entry.id,
+          source_occurrence_key: dateIso
         }
       : {
           date: dateIso,
@@ -731,7 +741,10 @@ function createBulkEntryInstance(entry, dateIso, durationMinutes, context) {
           entry_type: 'basic',
           hour_type_id: entry.hour_type_id,
           punches: buildBasicPunches(minutes),
-          recurrence_id: entry.id
+          recurrence_id: entry.id,
+          source_type: 'bulk',
+          source_id: entry.id,
+          source_occurrence_key: dateIso
         };
     if (context && context.batchCreates && context.batchMeta) {
       context.batchCreates.push(payload);

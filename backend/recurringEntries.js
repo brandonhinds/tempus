@@ -428,6 +428,7 @@ function syncRecurringTimeEntries(options) {
   var batchMeta = [];
   var totalCreated = 0;
   var summaries = [];
+  var changedEntries = {};
   var todayIso = toIsoDate(new Date());
   entries.forEach(function(entry) {
     var summary = processRecurringEntry(entry, {
@@ -439,28 +440,38 @@ function syncRecurringTimeEntries(options) {
       batchEntries: batchEntries,
       batchMeta: batchMeta
     });
-    totalCreated += summary.createdEntries;
     summaries.push(summary.summary);
     if (summary.entryChanged) {
-      persistRecurringEntry(entry);
+      changedEntries[entry.id] = true;
     }
   });
   if (batchEntries.length) {
     var bulkRes = api_addEntriesBulk({ entries: batchEntries });
-    var addedEntries = bulkRes && bulkRes.entries ? bulkRes.entries : [];
     var addedCount = bulkRes && bulkRes.added ? bulkRes.added : 0;
     totalCreated += addedCount;
-    // Update existingIndex with created recurrence/date combos
-    for (var i = 0; i < addedEntries.length && i < batchMeta.length; i++) {
+    var alignedResults = bulkRes && bulkRes.results ? bulkRes.results : [];
+    for (var i = 0; i < alignedResults.length && i < batchMeta.length; i++) {
+      var result = alignedResults[i];
       var meta = batchMeta[i];
       if (!meta) continue;
-      var recKey = meta.recurrenceId + '__' + meta.date;
-      existingIndex[recKey] = true;
+      if (result.status === 'added' || result.status === 'duplicate') {
+        existingIndex[meta.recurrenceId + '__' + meta.date] = true;
+      } else {
+        var failedEntry = findRecurringEntryById(entries, meta.recurrenceId);
+        if (failedEntry) {
+          var rollbackDate = addDaysIso(meta.date, -1);
+          if (!failedEntry.generated_until || rollbackDate < failedEntry.generated_until) failedEntry.generated_until = rollbackDate;
+          failedEntry.warning_message = 'Generation stopped at ' + meta.date + ': ' + (result.error || 'entry write failed');
+          changedEntries[failedEntry.id] = true;
+        }
+      }
     }
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   } else if (totalCreated > 0) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
+  // Cursor progress is persisted only after the corresponding entry batch has been written.
+  entries.forEach(function(entry) { if (changedEntries[entry.id]) persistRecurringEntry(entry); });
   return {
     success: true,
     entries: entries.map(cloneRecurringEntryForReturn),
@@ -726,7 +737,10 @@ function createRecurringEntryInstance(entry, dateIso, context) {
           entry_type: 'advanced',
           hour_type_id: entry.hour_type_id,
           punches: sessions,
-          recurrence_id: entry.id
+          recurrence_id: entry.id,
+          source_type: 'recurring',
+          source_id: entry.id,
+          source_occurrence_key: dateIso
         }
       : {
           date: dateIso,
@@ -735,7 +749,10 @@ function createRecurringEntryInstance(entry, dateIso, context) {
           entry_type: 'basic',
           hour_type_id: entry.hour_type_id,
           punches: buildBasicPunches(entry.duration_minutes),
-          recurrence_id: entry.id
+          recurrence_id: entry.id,
+          source_type: 'recurring',
+          source_id: entry.id,
+          source_occurrence_key: dateIso
         };
     if (context && context.batchEntries && context.batchMeta) {
       context.batchEntries.push(payload);
