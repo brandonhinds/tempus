@@ -71,6 +71,71 @@ function validateSheetHeaders_(name, headers, rows) {
   });
 }
 
+function sheetCellIsEmpty_(value) {
+  return value === '' || value == null;
+}
+
+function sheetCellValuesEqual_(left, right) {
+  if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
+  return left === right || String(left) === String(right);
+}
+
+/**
+ * Legacy releases could append the same optional column more than once. During
+ * the explicit upgrade, collapse those columns only when doing so is lossless:
+ * blank cells are ignored and equal values are kept once. If a row contains
+ * two different values for the same header, stop and let the user resolve it
+ * from the verified backup instead of choosing one silently.
+ */
+function coalesceDuplicateHeaders_(name, headers, rows) {
+  var indexesByHeader = {};
+  headers.forEach(function(header, index) {
+    if (!header) return;
+    if (!indexesByHeader[header]) indexesByHeader[header] = [];
+    indexesByHeader[header].push(index);
+  });
+  var duplicateHeaders = Object.keys(indexesByHeader).filter(function(header) {
+    return indexesByHeader[header].length > 1;
+  });
+  if (!duplicateHeaders.length) return { headers: headers, rows: rows, coalesced: [] };
+
+  var mergedByHeader = {};
+  duplicateHeaders.forEach(function(header) {
+    var indexes = indexesByHeader[header];
+    mergedByHeader[header] = rows.map(function(row, rowIndex) {
+      var populated = indexes.map(function(index) { return row[index]; }).filter(function(value) {
+        return !sheetCellIsEmpty_(value);
+      });
+      if (!populated.length) return '';
+      var selected = populated[0];
+      var conflict = populated.some(function(value) { return !sheetCellValuesEqual_(selected, value); });
+      if (conflict) {
+        throw new Error('Schema error in "' + name + '": duplicate header "' + header + '" has conflicting values in row ' + (rowIndex + 2) + '.');
+      }
+      return selected;
+    });
+  });
+
+  var kept = {};
+  var outputHeaders = [];
+  var sourceIndexes = [];
+  headers.forEach(function(header, index) {
+    if (header && indexesByHeader[header].length > 1) {
+      if (kept[header]) return;
+      kept[header] = true;
+    }
+    outputHeaders.push(header);
+    sourceIndexes.push(index);
+  });
+  var outputRows = rows.map(function(row, rowIndex) {
+    return sourceIndexes.map(function(sourceIndex, outputIndex) {
+      var header = outputHeaders[outputIndex];
+      return mergedByHeader[header] ? mergedByHeader[header][rowIndex] : row[sourceIndex];
+    });
+  });
+  return { headers: outputHeaders, rows: outputRows, coalesced: duplicateHeaders };
+}
+
 function ensureSheetCapacity_(sheet, rows, columns) {
   if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
   if (sheet.getMaxColumns() < columns) sheet.insertColumnsAfter(sheet.getMaxColumns(), columns - sheet.getMaxColumns());
@@ -142,6 +207,9 @@ function canonicalizeSheet_(name) {
   var values = sheet.getDataRange().getValues();
   var headers = normalizeSheetHeaders_(values[0]);
   var rows = values.slice(1);
+  var coalesced = coalesceDuplicateHeaders_(name, headers, rows);
+  headers = coalesced.headers;
+  rows = coalesced.rows;
   validateSheetHeaders_(name, headers, rows);
   Object.keys(schema.aliases || {}).forEach(function(alias) {
     var canonical = schema.aliases[alias];
@@ -169,7 +237,7 @@ function canonicalizeSheet_(name) {
   sheet.getRange(1, 1, 1, outputHeaders.length).setValues([outputHeaders]);
   if (outputRows.length) sheet.getRange(2, 1, outputRows.length, outputHeaders.length).setValues(outputRows);
   applyCanonicalFormats_(sheet, schema, outputHeaders);
-  return { sheet: name, state: 'canonical', rows: outputRows.length, extra_headers: extras };
+  return { sheet: name, state: 'canonical', rows: outputRows.length, extra_headers: extras, coalesced_headers: coalesced.coalesced };
 }
 
 function rowObjectFromHeaders_(headers, row) {

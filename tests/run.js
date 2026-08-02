@@ -42,6 +42,34 @@ test('malformed populated header fails loudly', () => {
   assert.throws(() => context.canonicalizeSheet_('timesheet_entries'), /data but no header/);
 });
 
+test('canonical migration losslessly coalesces duplicate legacy columns', () => {
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      ['id', 'name', 'icon', 'quick_fill_enabled', 'icon'],
+      ['work', 'Work', '⏱️', 'TRUE', ''],
+      ['leave', 'Leave', '', 'TRUE', '🌴'],
+      ['sick', 'Sick', '🤒', 'TRUE', '🤒']
+    ]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  load(context, 'backend/sheets.ts.js');
+  const result = context.canonicalizeSheet_('hour_types');
+  const output = spreadsheet.getSheetByName('hour_types').snapshot();
+  const iconIndex = output[0].indexOf('icon');
+  assert.deepStrictEqual(Array.from(result.coalesced_headers), ['icon']);
+  assert.equal(output[0].filter((header) => header === 'icon').length, 1);
+  assert.deepStrictEqual([output[1][iconIndex], output[2][iconIndex], output[3][iconIndex]], ['⏱️', '🌴', '🤒']);
+});
+
+test('canonical migration rejects conflicting duplicate legacy values', () => {
+  const { context } = createAppsScriptContext({
+    hour_types: [['id', 'icon', 'icon'], ['work', '⏱️', '💼']]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  load(context, 'backend/sheets.ts.js');
+  assert.throws(() => context.canonicalizeSheet_('hour_types'), /duplicate header "icon" has conflicting values in row 2/);
+});
+
 test('upgrade verifies a backup, records failure, and resumes without rerunning completed work', () => {
   const { context, spreadsheet, properties } = createAppsScriptContext({});
   const backup = new MockSpreadsheet({});
