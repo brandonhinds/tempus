@@ -35,7 +35,9 @@ function doGet(e) {
 }
 
 function buildPreUpgradePage_() {
-  return HtmlService.createHtmlOutputFromFile('views/upgrade')
+  var template = HtmlService.createTemplateFromFile('views/upgrade');
+  template.webAppUrlJson = JSON.stringify(api_getWebAppUrl());
+  return template.evaluate()
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .setTitle('Upgrade Tempus');
 }

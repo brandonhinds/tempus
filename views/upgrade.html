@@ -13,9 +13,11 @@
     section { border-block:1px solid var(--line); padding:22px 0; }
     ol { margin:0; padding-left:22px; display:grid; gap:10px; }
     .actions { display:flex; align-items:center; gap:14px; margin-top:28px; flex-wrap:wrap; }
-    button { appearance:none; border:0; border-radius:9px; padding:13px 19px; background:var(--accent); color:#07120f; font:inherit; font-weight:800; cursor:pointer; }
-    button:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 48%,white); outline-offset:3px; }
+    button, .button-link { appearance:none; border:0; border-radius:9px; padding:13px 19px; background:var(--accent); color:#07120f; font:inherit; font-weight:800; cursor:pointer; }
+    .button-link { display:inline-flex; align-items:center; text-decoration:none; }
+    button:focus-visible, .button-link:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 48%,white); outline-offset:3px; }
     button[disabled] { cursor:wait; opacity:.62; }
+    [hidden] { display:none !important; }
     #status { min-height:24px; color:var(--muted); }
     #status[data-state="error"] { color:var(--danger); }
     .backup { margin-top:16px; color:var(--muted); overflow-wrap:anywhere; }
@@ -38,6 +40,7 @@
     </section>
     <div class="actions">
       <button id="run" type="button">Back up and upgrade</button>
+      <a id="continue" class="button-link" href="" target="_top" hidden>Open Tempus</a>
       <div id="status" role="status" aria-live="polite">Ready to begin.</div>
     </div>
     <div id="backup" class="backup"></div>
@@ -45,8 +48,10 @@
   <script>
     (function () {
       var button = document.getElementById('run');
+      var continueLink = document.getElementById('continue');
       var status = document.getElementById('status');
       var backup = document.getElementById('backup');
+      var webAppUrl = <?!= webAppUrlJson ?>;
       function fail(error) {
         button.disabled = false;
         status.dataset.state = 'error';
@@ -66,8 +71,16 @@
             link.textContent = result.backup.name || 'Open verified backup';
             backup.replaceChildren(document.createTextNode('Verified backup: '), link);
           }
-          status.textContent = 'Upgrade complete. Opening Tempus…';
-          window.setTimeout(function () { window.top.location.reload(); }, 700);
+          button.hidden = true;
+          status.dataset.state = 'complete';
+          if (webAppUrl) {
+            continueLink.href = webAppUrl;
+            continueLink.hidden = false;
+            status.textContent = 'Upgrade complete. Select Open Tempus to continue. If it does not open, refresh this page.';
+            continueLink.focus();
+          } else {
+            status.textContent = 'Upgrade complete. Refresh this page to open Tempus.';
+          }
         }).withFailureHandler(fail).api_runUpgrade();
       });
     }());

@@ -257,4 +257,11 @@ test('quick actions expose menu semantics and keyboard controls', () => {
   });
 });
 
+test('upgrade completion provides a top-level continuation link and refresh fallback', () => {
+  const upgrade = fs.readFileSync(path.join(root, 'views/upgrade.html'), 'utf8');
+  assert.match(upgrade, /id="continue"[^>]+target="_top"/);
+  assert.match(upgrade, /Upgrade complete\. Refresh this page to open Tempus\./);
+  assert.doesNotMatch(upgrade, /window\.top\.location\.reload/);
+});
+
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');
