@@ -334,6 +334,25 @@ function migrationBoolean_(value) { return value === true || /^(true|1|yes|y)$/i
 
 function migrationAssessmentsAndInvoices_() {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var invoiceSheet = spreadsheet.getSheetByName('invoices');
+  if (invoiceSheet) {
+    canonicalizeSheet_('invoices');
+    var invoiceValues = invoiceSheet.getDataRange().getValues();
+    var invoiceHeaders = invoiceValues[0];
+    var invoiceStatusIndex = invoiceHeaders.indexOf('status');
+    var issuedAtIndex = invoiceHeaders.indexOf('issued_at');
+    var generatedAtIndex = invoiceHeaders.indexOf('generated_at');
+    var kindIndex = invoiceHeaders.indexOf('kind');
+    for (var invoiceRow = 1; invoiceRow < invoiceValues.length; invoiceRow++) {
+      if (!invoiceValues[invoiceRow][kindIndex]) invoiceValues[invoiceRow][kindIndex] = 'standard';
+      if (String(invoiceValues[invoiceRow][invoiceStatusIndex]).toLowerCase() === 'generated') {
+        invoiceValues[invoiceRow][invoiceStatusIndex] = 'issued';
+        if (!invoiceValues[invoiceRow][issuedAtIndex]) invoiceValues[invoiceRow][issuedAtIndex] = invoiceValues[invoiceRow][generatedAtIndex] || '';
+      }
+    }
+    if (invoiceValues.length > 1) invoiceSheet.getRange(2, 1, invoiceValues.length - 1, invoiceHeaders.length).setValues(invoiceValues.slice(1));
+  }
+  if (spreadsheet.getSheetByName('invoice_line_items')) canonicalizeSheet_('invoice_line_items');
   var typeSheet = spreadsheet.getSheetByName('assessment_types');
   if (typeSheet) {
     canonicalizeSheet_('assessment_types');

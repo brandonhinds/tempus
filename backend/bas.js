@@ -13,6 +13,10 @@ var BAS_SUBMISSIONS_HEADERS = [
   't2_instalment_rate',
   'submitted',
   'submitted_at',
+  'accounting_basis',
+  'source_hash',
+  'calculation_snapshot_json',
+  'submission_state',
   'created_at',
   'updated_at'
 ];
@@ -25,19 +29,11 @@ function getBasSubmissionsSheet() {
 }
 
 function ensureBasSubmissionsSchema(sh) {
-  var lastColumn = Math.max(sh.getLastColumn(), BAS_SUBMISSIONS_HEADERS.length);
-  var headerRange = sh.getRange(1, 1, 1, lastColumn);
-  var headers = headerRange.getValues()[0];
-  var needsRewrite = false;
-  for (var i = 0; i < BAS_SUBMISSIONS_HEADERS.length; i++) {
-    if (headers[i] !== BAS_SUBMISSIONS_HEADERS[i]) {
-      needsRewrite = true;
-      break;
-    }
-  }
-  if (needsRewrite) {
-    sh.getRange(1, 1, 1, BAS_SUBMISSIONS_HEADERS.length).setValues([BAS_SUBMISSIONS_HEADERS]);
-  }
+  var values = sh.getDataRange().getValues();
+  if (!values.length) return;
+  var headers = normalizeSheetHeaders_(values[0]);
+  validateSheetHeaders_(BAS_SUBMISSIONS_SHEET_NAME, headers, values.slice(1));
+  BAS_SUBMISSIONS_HEADERS.forEach(function(header) { if (headers.indexOf(header) === -1) throw new Error('BAS schema is incomplete. Run the Tempus upgrade.'); });
 }
 
 function normalizeBasSubmissionRow(row, headers) {
@@ -67,6 +63,10 @@ function normalizeBasSubmissionRow(row, headers) {
     t2_instalment_rate: Number(map.t2_instalment_rate) || 0,
     submitted: parseBoolean(map.submitted),
     submitted_at: toIsoDateTime(map.submitted_at || ''),
+    accounting_basis: map.accounting_basis === 'accrual' ? 'accrual' : 'cash',
+    source_hash: String(map.source_hash || ''),
+    calculation_snapshot_json: String(map.calculation_snapshot_json || ''),
+    submission_state: String(map.submission_state || (parseBoolean(map.submitted) ? 'submitted' : 'draft')),
     created_at: toIsoDateTime(map.created_at || ''),
     updated_at: toIsoDateTime(map.updated_at || '')
   };
@@ -165,27 +165,22 @@ function normalizeBasSubmissionPayload(payload, existing) {
   };
 }
 
-function buildBasSubmissionRow(payload, timestamps) {
-  return [
-    payload.id,
-    payload.financial_year,
-    payload.period_type,
-    payload.quarter !== null && payload.quarter !== undefined ? payload.quarter : '',
-    payload.month !== null && payload.month !== undefined ? payload.month : '',
-    Number(payload.g1_total_sales),
-    payload.g1_includes_gst ? 'TRUE' : 'FALSE',
-    Number(payload.field_1a_gst_on_sales),
-    Number(payload.field_1b_gst_on_purchases),
-    Number(payload.t1_payg_income),
-    Number(payload.t2_instalment_rate),
-    payload.submitted ? 'TRUE' : 'FALSE',
-    timestamps.submitted_at,
-    timestamps.created_at,
-    timestamps.updated_at
-  ];
+function buildBasSubmissionRow(payload, timestamps, headers) {
+  return rowValuesFromObject_(headers || BAS_SUBMISSIONS_HEADERS, {
+    id: payload.id, financial_year: payload.financial_year, period_type: payload.period_type,
+    quarter: payload.quarter !== null && payload.quarter !== undefined ? payload.quarter : '', month: payload.month !== null && payload.month !== undefined ? payload.month : '',
+    g1_total_sales: Number(payload.g1_total_sales), g1_includes_gst: payload.g1_includes_gst ? 'TRUE' : 'FALSE', field_1a_gst_on_sales: Number(payload.field_1a_gst_on_sales),
+    field_1b_gst_on_purchases: Number(payload.field_1b_gst_on_purchases), t1_payg_income: Number(payload.t1_payg_income), t2_instalment_rate: Number(payload.t2_instalment_rate),
+    submitted: payload.submitted ? 'TRUE' : 'FALSE', submitted_at: timestamps.submitted_at, accounting_basis: payload.accounting_basis || 'cash', source_hash: payload.source_hash || '',
+    calculation_snapshot_json: payload.calculation_snapshot_json || '', submission_state: payload.submission_state || (payload.submitted ? 'submitted' : 'draft'), created_at: timestamps.created_at, updated_at: timestamps.updated_at
+  });
 }
 
 function api_upsertBasSubmission(payload) {
+  return withScriptLock_('BAS submission', function() { return upsertBasSubmissionUnlocked_(payload); });
+}
+
+function upsertBasSubmissionUnlocked_(payload) {
   var list = listBasSubmissionsInternal();
   var existing = null;
 
@@ -204,6 +199,22 @@ function api_upsertBasSubmission(payload) {
   }
 
   var normalizedPayload = normalizeBasSubmissionPayload(payload, existing);
+  if (existing && existing.submission_state === 'submitted') return apiRecoverableFailure_('immutable_bas_submission', 'A submitted BAS snapshot cannot be edited.');
+
+  var accountingBasis = payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
+  var calculation = api_calculateBasPeriod({ financial_year: normalizedPayload.financial_year, period_type: normalizedPayload.period_type, quarter: normalizedPayload.quarter, month: normalizedPayload.month, accounting_basis: accountingBasis });
+  if (normalizedPayload.submitted) {
+    normalizedPayload.g1_total_sales = calculation.actual.g1_total_sales;
+    normalizedPayload.field_1a_gst_on_sales = calculation.actual.gst_on_sales;
+    normalizedPayload.field_1b_gst_on_purchases = calculation.actual.gst_on_purchases;
+    normalizedPayload.accounting_basis = accountingBasis;
+    normalizedPayload.source_hash = calculation.source_hash;
+    normalizedPayload.calculation_snapshot_json = JSON.stringify(calculation);
+    normalizedPayload.submission_state = 'submitted';
+  } else {
+    normalizedPayload.accounting_basis = accountingBasis;
+    normalizedPayload.submission_state = 'draft';
+  }
 
   var sh = getBasSubmissionsSheet();
   var values = sh.getDataRange().getValues();
@@ -240,7 +251,7 @@ function api_upsertBasSubmission(payload) {
     timestamps.created_at = nowIso;
   }
 
-  var row = buildBasSubmissionRow(normalizedPayload, timestamps);
+  var row = buildBasSubmissionRow(normalizedPayload, timestamps, headers);
 
   if (targetRow === -1) {
     sh.appendRow(row);

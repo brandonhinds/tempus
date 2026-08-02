@@ -22,6 +22,12 @@ var INVOICE_LINE_ITEM_HEADERS = [
   'entry_snapshot_json',
   'last_synced_at',
   'source_default_id',
+  'gst_code',
+  'gst_rate',
+  'gst_amount',
+  'source_type',
+  'source_id',
+  'source_line_id',
   'created_at',
   'updated_at'
 ];
@@ -97,7 +103,14 @@ function getInvoiceSheet() {
 }
 
 function ensureInvoiceLineItemSchema(sh) {
-  ensureInvoiceLineItemSchemaInternal(sh, false);
+  if (!sh) return;
+  var values = sh.getDataRange().getValues();
+  if (!values.length) return;
+  var headers = normalizeSheetHeaders_(values[0]);
+  validateSheetHeaders_(INVOICE_LINE_ITEM_SHEET_NAME, headers, values.slice(1));
+  INVOICE_LINE_ITEM_HEADERS.forEach(function(header) {
+    if (headers.indexOf(header) === -1) throw new Error('SCHEMA ERROR: invoice_line_items is missing "' + header + '". Run the Tempus upgrade.');
+  });
 }
 
 function ensureInvoiceLineItemSchemaInternal(sh, attemptedRepair) {
@@ -240,12 +253,14 @@ function normalizeInvoiceRow(headers, row) {
   }
   return {
     id: cell('id'),
+    kind: cell('kind') || 'standard',
     year: invoiceParseNumber(cell('year')),
     month: invoiceParseNumber(cell('month')),
     sequence: invoiceParseNumber(cell('sequence')),
     invoice_number: cell('invoice_number') || '',
     invoice_date: invoiceToIsoDate(cell('invoice_date')),
-    status: cell('status') || 'draft',
+    status: String(cell('status') || 'draft').toLowerCase() === 'generated' ? 'issued' : (cell('status') || 'draft'),
+    revision_of_invoice_id: cell('revision_of_invoice_id') || '',
     generated_doc_id: cell('generated_doc_id') || '',
     generated_doc_url: cell('generated_doc_url') || '',
     generated_at: invoiceToIsoDateTime(cell('generated_at')),
@@ -254,6 +269,10 @@ function normalizeInvoiceRow(headers, row) {
     output_folder_id: cell('output_folder_id') || '',
     output_folder_path: cell('output_folder_path') || '',
     notes: cell('notes') || '',
+    issued_at: invoiceToIsoDateTime(cell('issued_at')),
+    sent_at: invoiceToIsoDateTime(cell('sent_at')),
+    voided_at: invoiceToIsoDateTime(cell('voided_at')),
+    void_reason: cell('void_reason') || '',
     created_at: invoiceToIsoDateTime(cell('created_at')),
     updated_at: invoiceToIsoDateTime(cell('updated_at'))
   };
@@ -286,6 +305,12 @@ function normalizeLineItemRow(headers, row) {
     entry_snapshot_json: cell('entry_snapshot_json') || '',
     last_synced_at: invoiceToIsoDateTime(cell('last_synced_at')),
     source_default_id: cell('source_default_id') || '',
+    gst_code: cell('gst_code') || 'taxable',
+    gst_rate: invoiceParseNumber(cell('gst_rate'), 0.1),
+    gst_amount: invoiceParseNumber(cell('gst_amount'), Math.round(amount * 0.1 * 100) / 100),
+    source_type: cell('source_type') || 'manual',
+    source_id: cell('source_id') || '',
+    source_line_id: cell('source_line_id') || '',
     created_at: invoiceToIsoDateTime(cell('created_at')),
     updated_at: invoiceToIsoDateTime(cell('updated_at'))
   };
@@ -391,10 +416,11 @@ function summarizeInvoiceLineItems(items) {
   for (var i = 0; i < items.length; i++) {
     totals.totalAmount += invoiceParseNumber(items[i].amount, 0);
     totals.totalHours += invoiceParseNumber(items[i].hours, 0);
+    totals.gstAmount += invoiceParseNumber(items[i].gst_amount, Math.round(invoiceParseNumber(items[i].amount, 0) * invoiceParseNumber(items[i].gst_rate, 0.1) * 100) / 100);
   }
   totals.totalAmount = Math.round(totals.totalAmount * 100) / 100;
   totals.totalHours = Math.round(totals.totalHours * 10000) / 10000;
-  totals.gstAmount = Math.round(totals.totalAmount * INVOICE_GST_RATE * 100) / 100;
+  totals.gstAmount = Math.round(totals.gstAmount * 100) / 100;
   totals.totalWithGst = Math.round((totals.totalAmount + totals.gstAmount) * 100) / 100;
   return totals;
 }
@@ -441,6 +467,14 @@ function api_listInvoices(filters) {
   }
 
   var cloned = invoices.map(cloneInvoice);
+  var paymentSummary = invoicePaymentSummaryByInvoice_();
+  cloned.forEach(function(invoice) {
+    var paid = paymentSummary[invoice.id] || 0;
+    var total = invoiceLedgerTotal_(invoice.id);
+    invoice.paid_amount = paid;
+    invoice.balance_due = Math.max(0, roundMoney_(total - paid));
+    invoice.payment_state = paid <= 0 ? 'unpaid' : (paid + 0.005 >= total ? 'paid' : 'part_paid');
+  });
 
   if (includeSummary) {
     var allItems = listInvoiceLineItemsInternal().filter(function(item) {
@@ -465,8 +499,6 @@ function api_getInvoice(id) {
   if (!id) throw new Error('Invoice id is required');
   var invoice = findInvoiceById(id);
   if (!invoice) throw new Error('Invoice not found');
-  var invoiceLocked = String(invoice.status || 'draft').toLowerCase() === 'generated';
-  recalculateInvoiceLineAmounts(invoice, { lock: invoiceLocked });
   var items = listInvoiceLineItemsByInvoiceId(id);
   var defaults = listDefaultInvoiceLineItems();
   var enrichedItems = enrichLineItemsWithEntryState(items);
@@ -474,7 +506,9 @@ function api_getInvoice(id) {
     invoice: invoice,
     lineItems: enrichedItems,
     defaults: defaults,
-    summary: summarizeInvoiceLineItems(enrichedItems)
+    summary: summarizeInvoiceLineItems(enrichedItems),
+    payments: invoicePaymentsForInvoice_(id),
+    payment_state: invoicePaymentState_(invoice, enrichedItems)
   };
 }
 
@@ -608,6 +642,8 @@ function buildInvoiceRow(headers, invoice) {
     switch (header) {
       case 'id':
         return invoice.id || '';
+      case 'kind':
+        return invoice.kind || 'standard';
       case 'year':
         return invoiceParseNumber(invoice.year);
       case 'month':
@@ -620,6 +656,8 @@ function buildInvoiceRow(headers, invoice) {
         return invoice.invoice_date || '';
       case 'status':
         return invoice.status || 'draft';
+      case 'revision_of_invoice_id':
+        return invoice.revision_of_invoice_id || '';
       case 'generated_doc_id':
         return invoice.generated_doc_id || '';
       case 'generated_doc_url':
@@ -636,6 +674,14 @@ function buildInvoiceRow(headers, invoice) {
         return invoice.output_folder_path || '';
       case 'notes':
         return invoice.notes || '';
+      case 'issued_at':
+        return invoice.issued_at || '';
+      case 'sent_at':
+        return invoice.sent_at || '';
+      case 'voided_at':
+        return invoice.voided_at || '';
+      case 'void_reason':
+        return invoice.void_reason || '';
       case 'created_at':
         return invoice.created_at || '';
       case 'updated_at':
@@ -690,6 +736,18 @@ function buildInvoiceLineItemRow(headers, item) {
         return item.last_synced_at || '';
       case 'source_default_id':
         return item.source_default_id || '';
+      case 'gst_code':
+        return item.gst_code || 'taxable';
+      case 'gst_rate':
+        return invoiceParseNumber(item.gst_rate, 0.1);
+      case 'gst_amount':
+        return invoiceParseNumber(item.gst_amount, 0);
+      case 'source_type':
+        return item.source_type || 'manual';
+      case 'source_id':
+        return item.source_id || '';
+      case 'source_line_id':
+        return item.source_line_id || '';
       case 'created_at':
         return item.created_at || '';
       case 'updated_at':
@@ -894,6 +952,10 @@ function getContractRateById(id) {
 }
 
 function api_upsertInvoice(payload) {
+  return withScriptLock_('invoice update', function() { return upsertInvoiceUnlocked_(payload); });
+}
+
+function upsertInvoiceUnlocked_(payload) {
   if (!payload) throw new Error('Invoice payload is required');
   var now = new Date();
   var nowIso = invoiceToIsoDateTime(now);
@@ -911,10 +973,9 @@ function api_upsertInvoice(payload) {
   }
   var targetYear = invoiceParseNumber(payload.year || derivedYear, invoiceParseNumber(Utilities.formatDate(now, INVOICE_SHEET_TZ, 'yyyy')));
   var targetMonth = invoiceParseNumber(payload.month || derivedMonth, invoiceParseNumber(Utilities.formatDate(now, INVOICE_SHEET_TZ, 'M')));
-  var invoiceNumber = payload.invoice_number != null ? String(payload.invoice_number).trim() : '';
-  if (!invoiceNumber) {
-    invoiceNumber = targetYear + '-' + ('0' + targetMonth).slice(-2) + '-' + Utilities.getUuid().slice(0, 8);
-  }
+  // Invoice numbers are assigned only here while the script lock is held. Client-supplied numbers
+  // are deliberately ignored so concurrent tabs cannot race or renumber an issued document.
+  var invoiceNumber = '';
 
   if (!invoiceDate) {
     var constructedDate = new Date(targetYear, Math.max(0, targetMonth - 1), 1);
@@ -927,7 +988,9 @@ function api_upsertInvoice(payload) {
   var outputFolderId = payload.output_folder_id || '';
   var outputFolderPath = payload.output_folder_path || '';
   var notes = payload.notes || '';
-  var status = payload.status || 'draft';
+  var status = String(payload.status || 'draft').toLowerCase();
+  if (status === 'generated') status = 'issued';
+  if (['draft', 'issued', 'sent', 'void'].indexOf(status) === -1) throw new Error('Unknown invoice status.');
 
   var sh = getInvoiceSheet();
   var invoiceId = payload && payload.id ? payload.id : '';
@@ -937,19 +1000,23 @@ function api_upsertInvoice(payload) {
     var existing = findInvoiceById(payload.id);
     if (!existing) throw new Error('Invoice not found');
     previousStatus = String(existing.status || 'draft');
+    if (previousStatus !== 'draft') return apiRecoverableFailure_('immutable_invoice', 'Issued, sent, paid and void invoices cannot be edited. Use void and revise.');
     if (!sequence || sequence <= 0 || existing.year !== targetYear || existing.month !== targetMonth) {
       sequence = getNextInvoiceSequence(targetYear, targetMonth);
     }
+    invoiceNumber = existing.invoice_number || (targetYear + '-' + ('0' + targetMonth).slice(-2) + '-' + ('000' + sequence).slice(-3));
     var rowIndex = getInvoiceRowIndexById(existing.id);
     if (rowIndex === -1) throw new Error('Invoice row not found');
     var invoice = {
       id: existing.id,
+      kind: payload.kind || existing.kind || 'standard',
       year: targetYear,
       month: targetMonth,
       sequence: sequence,
       invoice_number: invoiceNumber,
       invoice_date: invoiceDate,
       status: status,
+      revision_of_invoice_id: existing.revision_of_invoice_id || '',
       generated_doc_id: existing.generated_doc_id || '',
       generated_doc_url: existing.generated_doc_url || '',
       generated_at: existing.generated_at || '',
@@ -958,6 +1025,10 @@ function api_upsertInvoice(payload) {
       output_folder_id: outputFolderId || existing.output_folder_id || '',
       output_folder_path: outputFolderPath || existing.output_folder_path || '',
       notes: notes,
+      issued_at: status === 'issued' ? (existing.issued_at || nowIso) : '',
+      sent_at: status === 'sent' ? (existing.sent_at || nowIso) : '',
+      voided_at: '',
+      void_reason: '',
       created_at: existing.created_at || nowIso,
       updated_at: nowIso
     };
@@ -968,14 +1039,17 @@ function api_upsertInvoice(payload) {
     if (!sequence || sequence <= 0) {
       sequence = getNextInvoiceSequence(targetYear, targetMonth);
     }
+    invoiceNumber = targetYear + '-' + ('0' + targetMonth).slice(-2) + '-' + ('000' + sequence).slice(-3);
     var newInvoice = {
       id: payload.id || Utilities.getUuid(),
+      kind: payload.kind === 'assessment' ? 'assessment' : 'standard',
       year: targetYear,
       month: targetMonth,
       sequence: sequence,
       invoice_number: invoiceNumber,
       invoice_date: invoiceDate,
       status: status,
+      revision_of_invoice_id: payload.revision_of_invoice_id || '',
       generated_doc_id: '',
       generated_doc_url: '',
       generated_at: '',
@@ -984,6 +1058,10 @@ function api_upsertInvoice(payload) {
       output_folder_id: outputFolderId,
       output_folder_path: outputFolderPath,
       notes: notes,
+      issued_at: status === 'issued' ? nowIso : '',
+      sent_at: status === 'sent' ? nowIso : '',
+      voided_at: '',
+      void_reason: '',
       created_at: nowIso,
       updated_at: nowIso
     };
@@ -995,10 +1073,6 @@ function api_upsertInvoice(payload) {
   clearInvoiceCaches();
   var savedInvoice = findInvoiceById(invoiceId);
   var savedStatus = String(savedInvoice && savedInvoice.status ? savedInvoice.status : 'draft');
-  if (savedInvoice && savedStatus.toLowerCase() === 'generated' && savedStatus.toLowerCase() !== String(previousStatus || 'draft').toLowerCase()) {
-    recalculateInvoiceLineAmounts(savedInvoice, { lock: true });
-    savedInvoice = findInvoiceById(invoiceId);
-  }
   return savedInvoice;
 }
 
@@ -1006,6 +1080,7 @@ function api_deleteInvoice(id, options) {
   if (!id) throw new Error('Invoice id is required');
   var invoice = findInvoiceById(id);
   if (!invoice) throw new Error('Invoice not found');
+  if (String(invoice.status || 'draft') !== 'draft') return apiRecoverableFailure_('immutable_invoice', 'Only draft invoices can be deleted. Void an issued invoice instead.');
   var deleteEntries = options && invoiceParseBoolean(options.deleteEntries);
   var sh = getInvoiceSheet();
   var rowIndex = getInvoiceRowIndexById(id);
@@ -1282,6 +1357,7 @@ function api_generateInvoiceDocument(payload) {
   if (!invoice) {
     throw new Error('Invoice not found.');
   }
+  if (String(invoice.status || 'draft') !== 'draft') return apiRecoverableFailure_('immutable_invoice', 'Only a draft invoice can generate a new document. Use void and revise for corrections.');
   var settings = api_getSettings();
   var templateId = payload.template_doc_id || invoice.template_doc_id || settings.invoice_template_doc_id || settings.invoice_template_reference || '';
   var templatePath = payload.template_doc_path || invoice.template_doc_path || settings.invoice_template_path || '';
@@ -1317,7 +1393,8 @@ function api_generateInvoiceDocument(payload) {
     template_doc_path: templateResolution.path,
     output_folder_id: folderResolution.id,
     output_folder_path: folderResolution.path,
-    status: 'generated'
+    status: 'issued',
+    issued_at: invoice.issued_at || invoiceToIsoDateTime(new Date())
   };
   updateInvoiceRecord(invoice.id, metadataUpdates);
   return {
@@ -1411,7 +1488,10 @@ function syncTimesheetEntryForLineItem(lineItem, invoice, existing) {
     duration_minutes: durationMinutes,
     hour_type_id: hourTypeId,
     entry_type: 'basic',
-    contract_id: contractId
+    contract_id: contractId,
+    source_type: 'invoice_line',
+    source_id: lineItem.id,
+    source_occurrence_key: entryDate
   };
 
   var entry;
@@ -1431,7 +1511,10 @@ function syncTimesheetEntryForLineItem(lineItem, invoice, existing) {
           duration_minutes: durationMinutes,
           hour_type_id: hourTypeId,
           entry_type: 'basic',
-          contract_id: contractId
+          contract_id: contractId,
+          source_type: 'invoice_line',
+          source_id: lineItem.id,
+          source_occurrence_key: entryDate
         });
         entry = recreated.entry;
         existingEntryId = entry.id;
@@ -1484,6 +1567,31 @@ function calculateMonthlyHourTypeTotal(year, month, hourTypeId, contractId) {
   return Math.round((totalMinutes / 60) * 10000) / 10000;
 }
 
+function buildMonthlyHourTypeTotals_(year, month) {
+  var totals = {};
+  var sh = getOrCreateSheet('timesheet_entries');
+  var values = sh.getDataRange().getValues();
+  if (!values.length) return totals;
+  var headers = values[0];
+  var dateIdx = headers.indexOf('date');
+  var durationIdx = headers.indexOf('duration_minutes');
+  var hourTypeIdx = headers.indexOf('hour_type_id');
+  var contractIdx = headers.indexOf('contract_id');
+  if (dateIdx === -1 || durationIdx === -1 || hourTypeIdx === -1) return totals;
+  for (var i = 1; i < values.length; i++) {
+    var date = invoiceToIsoDate(values[i][dateIdx]);
+    if (!date || Number(date.slice(0, 4)) !== Number(year) || Number(date.slice(5, 7)) !== Number(month)) continue;
+    var hourTypeId = String(values[i][hourTypeIdx] || '');
+    var contractId = contractIdx === -1 ? '' : String(values[i][contractIdx] || '');
+    var exactKey = hourTypeId + '|' + contractId;
+    var allContractsKey = hourTypeId + '|';
+    totals[exactKey] = (totals[exactKey] || 0) + invoiceParseNumber(values[i][durationIdx], 0);
+    if (exactKey !== allContractsKey) totals[allContractsKey] = (totals[allContractsKey] || 0) + invoiceParseNumber(values[i][durationIdx], 0);
+  }
+  Object.keys(totals).forEach(function(key) { totals[key] = Math.round((totals[key] / 60) * 10000) / 10000; });
+  return totals;
+}
+
 function recalculateInvoiceLineAmounts(invoiceOrId, options) {
   if (!invoiceOrId) return 0;
   var invoice = invoiceOrId;
@@ -1502,9 +1610,11 @@ function recalculateInvoiceLineAmounts(invoiceOrId, options) {
   if (missingRequired) return 0;
 
   var lockRequested = options && invoiceParseBoolean(options.lock);
-  var invoiceLocked = String(invoice.status || 'draft').toLowerCase() === 'generated';
+  var invoiceLocked = String(invoice.status || 'draft').toLowerCase() !== 'draft';
   var shouldLock = lockRequested || invoiceLocked;
   var updatedCount = 0;
+  // One sheet read per recalculation, regardless of line count.
+  var monthlyTotals = buildMonthlyHourTypeTotals_(invoice.year, invoice.month);
 
   for (var rowIndex = 1; rowIndex < values.length; rowIndex++) {
     var normalized = normalizeLineItemRow(headers, values[rowIndex]);
@@ -1558,7 +1668,7 @@ function recalculateInvoiceLineAmounts(invoiceOrId, options) {
     } else if (amountMode === 'monthly_hour_type' && contractRate > 0 && normalized.hour_type_id) {
       var invoiceYear = invoiceParseNumber(invoice.year);
       var invoiceMonth = invoiceParseNumber(invoice.month);
-      var monthlyHours = calculateMonthlyHourTypeTotal(invoiceYear, invoiceMonth, normalized.hour_type_id, contractId);
+      var monthlyHours = monthlyTotals[normalized.hour_type_id + '|' + contractId] || 0;
       var computedMonthlyAmount = Math.round(monthlyHours * contractRate * 100) / 100;
       if (Math.abs(computedMonthlyAmount - invoiceParseNumber(normalized.amount, 0)) > 0.0001) {
         normalized.amount = computedMonthlyAmount;
@@ -1582,6 +1692,12 @@ function recalculateInvoiceLineAmounts(invoiceOrId, options) {
 
     if (shouldLock && amountMode !== 'amount') {
       normalized.amount_mode = 'amount';
+      changed = true;
+    }
+
+    var recalculatedGst = normalized.gst_code === 'taxable' ? roundMoney_(invoiceParseNumber(normalized.amount, 0) * invoiceParseNumber(normalized.gst_rate, 0.1)) : 0;
+    if (Math.abs(recalculatedGst - invoiceParseNumber(normalized.gst_amount, 0)) > 0.0001) {
+      normalized.gst_amount = recalculatedGst;
       changed = true;
     }
 
@@ -1619,8 +1735,8 @@ function api_upsertInvoiceLineItem(payload) {
     if (!invoice) {
       throw new Error('Invoice not found');
     }
-    if (String(invoice.status || 'draft').toLowerCase() === 'generated') {
-      throw new Error('Generated invoices are read-only.');
+    if (String(invoice.status || 'draft').toLowerCase() !== 'draft') {
+      throw new Error('Issued invoices are read-only.');
     }
   }
 
@@ -1674,7 +1790,7 @@ function api_upsertInvoiceLineItem(payload) {
   var amountMode = payload.amount_mode || (existing ? existing.amount_mode : 'hours');
 
   var invoiceStatus = invoice ? (invoice.status || 'draft') : 'draft';
-  var shouldRecalculate = invoiceStatus !== 'generated';
+  var shouldRecalculate = invoiceStatus === 'draft';
 
   if (amountMode === 'monthly_hour_type') {
     var invYear = invoice && invoice.year ? invoiceParseNumber(invoice.year) : null;
@@ -1702,6 +1818,9 @@ function api_upsertInvoiceLineItem(payload) {
     throw new Error('Default line items require a label.');
   }
   var sourceDefaultId = payload.source_default_id || (existing ? existing.source_default_id : '');
+  var gstCode = payload.gst_code || (existing ? existing.gst_code : 'taxable');
+  var gstRate = gstCode === 'taxable' ? normalizePercentageDecimal_(payload.gst_rate, existing ? invoiceParseNumber(existing.gst_rate, 0.1) : 0.1) : 0;
+  var gstAmount = payload.gst_amount !== undefined ? roundMoney_(payload.gst_amount) : roundMoney_(amount * gstRate);
   var createdAt = isUpdate ? (existing.created_at || nowIso) : nowIso;
   var updatedAt = nowIso;
   var timesheetEntryId = existing ? existing.timesheet_entry_id : '';
@@ -1752,6 +1871,12 @@ function api_upsertInvoiceLineItem(payload) {
     entry_snapshot_json: entrySnapshotJson,
     last_synced_at: lastSyncedAt,
     source_default_id: sourceDefaultId,
+    gst_code: gstCode,
+    gst_rate: gstRate,
+    gst_amount: gstAmount,
+    source_type: payload.source_type || (existing ? existing.source_type : 'manual'),
+    source_id: payload.source_id || (existing ? existing.source_id : ''),
+    source_line_id: payload.source_line_id || (existing ? existing.source_line_id : ''),
     created_at: createdAt,
     updated_at: updatedAt
   };
@@ -1801,8 +1926,8 @@ function api_deleteInvoiceLineItem(id, options) {
   if (!item) throw new Error('Line item not found');
   if (!item.is_default && item.invoice_id) {
     var parentInvoice = findInvoiceById(item.invoice_id);
-    if (parentInvoice && String(parentInvoice.status || 'draft').toLowerCase() === 'generated') {
-      throw new Error('Generated invoices are read-only.');
+    if (parentInvoice && String(parentInvoice.status || 'draft').toLowerCase() !== 'draft') {
+      throw new Error('Issued invoices are read-only.');
     }
   }
   var sh = getInvoiceLineItemSheet();
