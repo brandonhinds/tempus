@@ -1,464 +1,189 @@
-/** Sheets accessors and bootstrap */
+/** Canonical, header-driven spreadsheet access. */
+
+var TEMPUS_SCHEMA_VERSION = 3;
+
+var TEMPUS_SHEET_SCHEMAS = {
+  timesheet_entries: {
+    headers: ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'],
+    aliases: { project: 'contract_id', comments: 'note' },
+    defaults: { punches_json: '[]', entry_type: 'basic', source_type: 'manual' },
+    text: ['id', 'date', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id']
+  },
+  user_settings: { headers: ['key', 'value', 'type'], text: ['key', 'type'] },
+  feature_flags: { headers: ['feature', 'enabled', 'name', 'description'], text: ['feature', 'enabled', 'name', 'description'] },
+  contracts: {
+    headers: ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at'],
+    defaults: { total_hours: 0, include_weekends: 'FALSE', standard_hours_per_day: 7.5, archived: 'FALSE' },
+    text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at']
+  },
+  hour_types: {
+    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'created_at', 'display_order'],
+    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5 },
+    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'created_at']
+  },
+  deductions: {
+    headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order'],
+    text: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'gst_inclusive', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at']
+  },
+  deduction_categories: { headers: ['id', 'name', 'color', 'created_at', 'updated_at'], text: ['id', 'name', 'color', 'created_at', 'updated_at'] },
+  deduction_occurrence_exceptions: { headers: ['id', 'deduction_id', 'original_date', 'exception_type', 'new_date', 'new_amount', 'notes', 'created_at', 'updated_at'], text: ['id', 'deduction_id', 'original_date', 'exception_type', 'new_date', 'notes', 'created_at', 'updated_at'] },
+  recurring_time_entries: { headers: ['id', 'label', 'recurrence_type', 'weekly_interval', 'weekly_weekdays_json', 'monthly_interval', 'monthly_mode', 'monthly_day', 'monthly_week', 'monthly_weekday', 'duration_minutes', 'hour_type_id', 'contract_id', 'start_date', 'end_date', 'generated_until', 'warning_message', 'created_at', 'updated_at', 'sessions_json'], text: ['id', 'label', 'recurrence_type', 'weekly_weekdays_json', 'monthly_mode', 'hour_type_id', 'contract_id', 'start_date', 'end_date', 'generated_until', 'warning_message', 'created_at', 'updated_at', 'sessions_json'] },
+  bulk_time_entries: { headers: ['id', 'label', 'duration_minutes', 'hour_type_id', 'contract_id', 'start_date', 'end_date', 'include_weekends', 'skip_public_holidays', 'last_synced_at', 'last_synced_count', 'warning_message', 'distribution_mode', 'monthly_total_minutes', 'created_at', 'updated_at', 'sessions_json'], text: ['id', 'label', 'hour_type_id', 'contract_id', 'start_date', 'end_date', 'include_weekends', 'skip_public_holidays', 'last_synced_at', 'warning_message', 'distribution_mode', 'created_at', 'updated_at', 'sessions_json'] },
+  invoices: {
+    headers: ['id', 'kind', 'year', 'month', 'sequence', 'invoice_number', 'invoice_date', 'status', 'revision_of_invoice_id', 'generated_doc_id', 'generated_doc_url', 'generated_at', 'template_doc_id', 'template_doc_path', 'output_folder_id', 'output_folder_path', 'notes', 'issued_at', 'sent_at', 'voided_at', 'void_reason', 'created_at', 'updated_at'],
+    defaults: { kind: 'standard', status: 'draft' },
+    text: ['id', 'kind', 'invoice_number', 'invoice_date', 'status', 'revision_of_invoice_id', 'generated_doc_id', 'generated_doc_url', 'generated_at', 'template_doc_id', 'template_doc_path', 'output_folder_id', 'output_folder_path', 'notes', 'issued_at', 'sent_at', 'voided_at', 'void_reason', 'created_at', 'updated_at']
+  },
+  invoice_line_items: {
+    headers: ['id', 'invoice_id', 'is_default', 'default_label', 'position', 'line_date', 'description', 'hours', 'hour_type_id', 'hour_type_name_snapshot', 'amount', 'amount_mode', 'contract_id', 'contract_name_snapshot', 'timesheet_entry_id', 'entry_snapshot_json', 'last_synced_at', 'source_default_id', 'gst_code', 'gst_rate', 'gst_amount', 'source_type', 'source_id', 'source_line_id', 'created_at', 'updated_at'],
+    defaults: { gst_code: 'taxable', gst_rate: 0.1, source_type: 'manual' },
+    text: ['id', 'invoice_id', 'is_default', 'default_label', 'line_date', 'description', 'hour_type_id', 'hour_type_name_snapshot', 'amount_mode', 'contract_id', 'contract_name_snapshot', 'timesheet_entry_id', 'entry_snapshot_json', 'last_synced_at', 'source_default_id', 'gst_code', 'source_type', 'source_id', 'source_line_id', 'created_at', 'updated_at']
+  },
+  invoice_payments: { headers: ['id', 'invoice_id', 'payment_date', 'amount', 'reference', 'notes', 'created_at', 'updated_at'], text: ['id', 'invoice_id', 'payment_date', 'reference', 'notes', 'created_at', 'updated_at'] },
+  expense_rules: { headers: ['id', 'vendor', 'vendor_abn', 'description', 'category', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'frequency', 'start_date', 'end_date', 'active', 'notes', 'created_at', 'updated_at'], text: ['id', 'vendor', 'vendor_abn', 'description', 'category', 'gst_code', 'claimable_gst_confirmed', 'frequency', 'start_date', 'end_date', 'active', 'notes', 'created_at', 'updated_at'] },
+  expense_transactions: { headers: ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'], text: ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'gst_code', 'claimable_gst_confirmed', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'] },
+  expense_payments: { headers: ['id', 'expense_transaction_id', 'payment_date', 'amount', 'reference', 'notes', 'created_at', 'updated_at'], text: ['id', 'expense_transaction_id', 'payment_date', 'reference', 'notes', 'created_at', 'updated_at'] },
+  bas_submissions: { headers: ['id', 'financial_year', 'period_type', 'quarter', 'month', 'g1_total_sales', 'g1_includes_gst', 'field_1a_gst_on_sales', 'field_1b_gst_on_purchases', 't1_payg_income', 't2_instalment_rate', 'submitted', 'submitted_at', 'accounting_basis', 'source_hash', 'calculation_snapshot_json', 'submission_state', 'created_at', 'updated_at'], defaults: { accounting_basis: 'cash', submission_state: 'draft' }, text: ['id', 'period_type', 'g1_includes_gst', 'submitted', 'submitted_at', 'accounting_basis', 'source_hash', 'calculation_snapshot_json', 'submission_state', 'created_at', 'updated_at'] },
+  assessment_types: { headers: ['id', 'name', 'description', 'field_definitions_json', 'line_templates_json', 'active', 'created_at', 'updated_at'], text: ['id', 'name', 'description', 'field_definitions_json', 'line_templates_json', 'active', 'created_at', 'updated_at'] },
+  assessments: { headers: ['id', 'assessment_type_id', 'contract_id', 'organisation', 'assessment_date', 'field_values_json', 'status', 'invoice_id', 'notes', 'created_at', 'updated_at'], text: ['id', 'assessment_type_id', 'contract_id', 'organisation', 'assessment_date', 'field_values_json', 'status', 'invoice_id', 'notes', 'created_at', 'updated_at'] },
+  public_holidays: { headers: ['id', 'date', 'name', 'region', 'source', 'active', 'created_at', 'updated_at'], text: ['id', 'date', 'name', 'region', 'source', 'active', 'created_at', 'updated_at'] },
+  migration_archive: { headers: ['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'], text: ['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'] }
+};
+
+function getCanonicalSheetSchema_(name) {
+  return TEMPUS_SHEET_SCHEMAS[name] || null;
+}
+
+function normalizeSheetHeaders_(values) {
+  return (values || []).map(function(value) { return String(value == null ? '' : value).trim(); });
+}
+
+function validateSheetHeaders_(name, headers, rows) {
+  var seen = {};
+  headers.forEach(function(header, index) {
+    if (!header) {
+      var containsData = (rows || []).some(function(row) { return row[index] !== '' && row[index] != null; });
+      if (containsData) throw new Error('Schema error in "' + name + '": column ' + (index + 1) + ' has data but no header.');
+      return;
+    }
+    if (seen[header]) throw new Error('Schema error in "' + name + '": duplicate header "' + header + '".');
+    seen[header] = true;
+  });
+}
+
+function ensureSheetCapacity_(sheet, rows, columns) {
+  if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+  if (sheet.getMaxColumns() < columns) sheet.insertColumnsAfter(sheet.getMaxColumns(), columns - sheet.getMaxColumns());
+}
+
+function applyCanonicalFormats_(sheet, schema, headers) {
+  if (!schema || !schema.text) return;
+  schema.text.forEach(function(name) {
+    var index = headers.indexOf(name);
+    if (index !== -1) sheet.getRange(1, index + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+  });
+}
+
+function initialiseCanonicalSheet_(sheet, schema) {
+  ensureSheetCapacity_(sheet, 1, schema.headers.length);
+  sheet.getRange(1, 1, 1, schema.headers.length).setValues([schema.headers]);
+  applyCanonicalFormats_(sheet, schema, schema.headers);
+}
+
+/**
+ * Normal access never relabels populated columns. Missing canonical columns are appended by name;
+ * structural remapping is reserved for the explicit, backed-up migration.
+ */
 function getOrCreateSheet(name) {
-  // Fail fast while a schema upgrade is pending or running (see backend/migrations.js) so the lazy
-  // fix-ups below can't race the migration's structural edits; the migration's own sheet access
-  // bypasses this via MIGRATION_CONTEXT.
   assertMigrationsSettled_();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sh = ss.getSheetByName(name);
-  if (!sh) {
-    sh = ss.insertSheet(name);
-    if (name === 'timesheet_entries') {
-      sh.getRange(1,1,1,10).setValues([['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id','note']]);
-    } else if (name === 'user_settings') {
-      sh.getRange(1,1,1,3).setValues([['key','value','type']]);
-    } else if (name === 'contracts') {
-      sh.getRange(1,1,1,6).setValues([['id','name','start_date','end_date','hourly_rate','created_at']]);
-    } else if (name === 'feature_flags') {
-      sh.getRange(1,1,1,4).setValues([['feature','enabled','name','description']]);
-    } else if (name === 'hour_types') {
-      sh.getRange(1,1,1,11).setValues([[
-        'id',
-        'name',
-        'slug',
-        'color',
-        'contributes_to_income',
-        'requires_contract',
-        'is_default',
-        'auto_populate_public_holidays',
-        'auto_populate_hours',
-        'created_at',
-        'display_order'
-      ]]);
-    } else if (name === 'deductions') {
-      sh.getRange(1,1,1,17).setValues([[
-        'id',
-        'name',
-        'category_id',
-        'company_expense',
-        'deduction_type',
-        'amount_type',
-        'amount_value',
-        'gst_inclusive',
-        'gst_amount',
-        'frequency',
-        'start_date',
-        'end_date',
-        'notes',
-        'active',
-        'created_at',
-        'updated_at',
-        'display_order'
-      ]]);
-    } else if (name === 'deduction_categories') {
-      sh.getRange(1,1,1,5).setValues([[
-        'id',
-        'name',
-        'color',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'deduction_occurrence_exceptions') {
-      sh.getRange(1,1,1,8).setValues([[
-        'id',
-        'deduction_id',
-        'original_date',
-        'exception_type',
-        'new_date',
-        'new_amount',
-        'notes',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'invoices') {
-      sh.getRange(1,1,1,17).setValues([[
-        'id',
-        'year',
-        'month',
-        'sequence',
-        'invoice_number',
-        'invoice_date',
-        'status',
-        'generated_doc_id',
-        'generated_doc_url',
-        'generated_at',
-        'template_doc_id',
-        'template_doc_path',
-        'output_folder_id',
-        'output_folder_path',
-        'notes',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'invoice_line_items') {
-      sh.getRange(1,1,1,20).setValues([[
-        'id',
-        'invoice_id',
-        'is_default',
-        'default_label',
-        'position',
-        'line_date',
-        'description',
-        'hours',
-        'hour_type_id',
-        'hour_type_name_snapshot',
-        'amount',
-        'amount_mode',
-        'contract_id',
-        'contract_name_snapshot',
-        'timesheet_entry_id',
-        'entry_snapshot_json',
-        'last_synced_at',
-        'source_default_id',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'recurring_time_entries') {
-      sh.getRange(1,1,1,19).setValues([[
-        'id',
-        'label',
-        'recurrence_type',
-        'weekly_interval',
-        'weekly_weekdays_json',
-        'monthly_interval',
-        'monthly_mode',
-        'monthly_day',
-        'monthly_week',
-        'monthly_weekday',
-        'duration_minutes',
-        'hour_type_id',
-        'contract_id',
-        'start_date',
-        'end_date',
-        'generated_until',
-        'warning_message',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'bulk_time_entries') {
-      sh.getRange(1,1,1,14).setValues([[
-        'id',
-        'label',
-        'duration_minutes',
-        'hour_type_id',
-        'contract_id',
-        'start_date',
-        'end_date',
-        'include_weekends',
-        'skip_public_holidays',
-        'last_synced_at',
-        'last_synced_count',
-        'warning_message',
-        'created_at',
-        'updated_at'
-      ]]);
-    } else if (name === 'bas_submissions') {
-      sh.getRange(1,1,1,15).setValues([[
-        'id',
-        'financial_year',
-        'period_type',
-        'quarter',
-        'month',
-        'g1_total_sales',
-        'g1_includes_gst',
-        'field_1a_gst_on_sales',
-        'field_1b_gst_on_purchases',
-        't1_payg_income',
-        't2_instalment_rate',
-        'submitted',
-        'submitted_at',
-        'created_at',
-        'updated_at'
-      ]]);
-    }
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName(name);
+  var schema = getCanonicalSheetSchema_(name);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(name);
+    if (schema) initialiseCanonicalSheet_(sheet, schema);
+    return sheet;
   }
-  if (name === 'deduction_categories') {
-    sh.getRange('A:C').setNumberFormat('@');
-    sh.getRange('D:E').setNumberFormat('@');
+  if (!schema) return sheet;
+  if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+    initialiseCanonicalSheet_(sheet, schema);
+    return sheet;
   }
-  if (name === 'deduction_occurrence_exceptions') {
-    sh.getRange('A:B').setNumberFormat('@'); // id, deduction_id
-    sh.getRange('C:C').setNumberFormat('@'); // original_date
-    sh.getRange('D:D').setNumberFormat('@'); // exception_type
-    sh.getRange('E:E').setNumberFormat('@'); // new_date
-    sh.getRange('F:F').setNumberFormat('0.00'); // new_amount
-    sh.getRange('G:G').setNumberFormat('@'); // notes
-    sh.getRange('H:I').setNumberFormat('@'); // created_at, updated_at
+  var values = sheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  validateSheetHeaders_(name, headers, values.slice(1));
+  var missing = schema.headers.filter(function(header) { return headers.indexOf(header) === -1; });
+  if (missing.length) {
+    ensureSheetCapacity_(sheet, Math.max(1, sheet.getLastRow()), headers.length + missing.length);
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+    if (sheet.getLastRow() > 1) {
+      var defaults = missing.map(function(header) { return schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? schema.defaults[header] : ''; });
+      var fill = [];
+      for (var row = 1; row < sheet.getLastRow(); row++) fill.push(defaults.slice());
+      sheet.getRange(2, headers.length + 1, fill.length, missing.length).setValues(fill);
+    }
+    headers = headers.concat(missing);
   }
-  if (name === 'timesheet_entries') {
-    const expectedHeaders = ['id','date','duration_minutes','contract_id','created_at','punches_json','entry_type','hour_type_id','recurrence_id','note'];
-    // Upstream sheets have 'assessment_id' where this schema puts 'note'. Insert 'note' in front of
-    // it, pushing assessment_id out of the managed first 10 columns (data intact, dormant) — otherwise
-    // the header rewrite below would relabel that column and surface assessment ids as note text.
-    const preColumnCount = sh.getLastColumn();
-    if (preColumnCount > 0) {
-      const preHeaders = sh.getRange(1, 1, 1, preColumnCount).getValues()[0];
-      const legacyAssessmentIndex = preHeaders.indexOf('assessment_id');
-      if (legacyAssessmentIndex !== -1 && legacyAssessmentIndex < expectedHeaders.length && preHeaders.indexOf('note') === -1) {
-        sh.insertColumnBefore(legacyAssessmentIndex + 1);
-        sh.getRange(1, legacyAssessmentIndex + 1).setValue('note');
-        const legacyRowCount = sh.getLastRow();
-        if (legacyRowCount > 1) {
-          sh.getRange(2, legacyAssessmentIndex + 1, legacyRowCount - 1, 1).setValue('');
-        }
-      }
-    }
-    const lastColumn = Math.max(sh.getLastColumn(), expectedHeaders.length);
-    const headerRange = sh.getRange(1, 1, 1, lastColumn);
-    const headers = headerRange.getValues()[0];
-    const projectIndex = headers.indexOf('project');
-    const hasContract = headers.indexOf('contract_id') !== -1;
-    if (!hasContract) {
-      if (projectIndex !== -1) {
-        sh.getRange(1, projectIndex + 1).setValue('contract_id');
-      } else {
-        const durationIndex = headers.indexOf('duration_minutes');
-        const insertBefore = durationIndex === -1 ? expectedHeaders.length : durationIndex + 2;
-        sh.insertColumnBefore(insertBefore);
-        sh.getRange(1, insertBefore).setValue('contract_id');
-      }
-    }
-    const punchesIndex = headers.indexOf('punches_json');
-    if (punchesIndex === -1) {
-      const lastCol = sh.getLastColumn();
-      sh.insertColumnAfter(lastCol);
-      sh.getRange(1, lastCol + 1).setValue('punches_json');
-      const rowCount = sh.getLastRow();
-      if (rowCount > 1) {
-        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('[]');
-      }
-    }
-    const entryTypeIndex = headers.indexOf('entry_type');
-    if (entryTypeIndex === -1) {
-      const lastCol = sh.getLastColumn();
-      sh.insertColumnAfter(lastCol);
-      sh.getRange(1, lastCol + 1).setValue('entry_type');
-      const rowCount = sh.getLastRow();
-      if (rowCount > 1) {
-        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('basic');
-      }
-    }
-    const hourTypeIndex = headers.indexOf('hour_type_id');
-    if (hourTypeIndex === -1) {
-      const lastCol = sh.getLastColumn();
-      sh.insertColumnAfter(lastCol);
-      sh.getRange(1, lastCol + 1).setValue('hour_type_id');
-      const rowCount = sh.getLastRow();
-      if (rowCount > 1) {
-        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
-      }
-    }
-    const recurrenceIndex = headers.indexOf('recurrence_id');
-    if (recurrenceIndex === -1) {
-      const lastCol = sh.getLastColumn();
-      sh.insertColumnAfter(lastCol);
-      sh.getRange(1, lastCol + 1).setValue('recurrence_id');
-      const rowCount = sh.getLastRow();
-      if (rowCount > 1) {
-        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
-      }
-    }
-    // Free-text per-day note (entry_type='comment' records store their text here; work/break rows leave it
-    // blank). Appended at the end so the fixed row[0..8] index reads elsewhere stay valid.
-    const noteIndex = headers.indexOf('note');
-    if (noteIndex === -1) {
-      const lastCol = sh.getLastColumn();
-      sh.insertColumnAfter(lastCol);
-      sh.getRange(1, lastCol + 1).setValue('note');
-      const rowCount = sh.getLastRow();
-      if (rowCount > 1) {
-        sh.getRange(2, lastCol + 1, rowCount - 1, 1).setValue('');
-      }
-    }
-    const sanitizedHeaders = sh.getRange(1, 1, 1, expectedHeaders.length).getValues()[0];
-    if (expectedHeaders.some((header, idx) => sanitizedHeaders[idx] !== header)) {
-      sh.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
-    }
-    sh.getRange('B:B').setNumberFormat('@');
-    sh.getRange('E:E').setNumberFormat('@');
-    sh.getRange('F:F').setNumberFormat('@');
-    sh.getRange('G:G').setNumberFormat('@');
-    sh.getRange('H:H').setNumberFormat('@');
-    sh.getRange('I:I').setNumberFormat('@');
-    sh.getRange('J:J').setNumberFormat('@'); // note (free text)
-  }
-  if (name === 'invoices') {
-    sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:C').setNumberFormat('0');
-    sh.getRange('D:D').setNumberFormat('0');
-    sh.getRange('E:E').setNumberFormat('@');
-    sh.getRange('F:F').setNumberFormat('@');
-    sh.getRange('G:G').setNumberFormat('@');
-    sh.getRange('H:H').setNumberFormat('@');
-    sh.getRange('I:I').setNumberFormat('@');
-    sh.getRange('J:J').setNumberFormat('@');
-    sh.getRange('K:M').setNumberFormat('@');
-    sh.getRange('N:N').setNumberFormat('@');
-    sh.getRange('O:Q').setNumberFormat('@');
-  }
-  if (name === 'invoice_line_items') {
-    const expectedInvoiceLineHeaders = [
-      'id',
-      'invoice_id',
-      'is_default',
-      'default_label',
-      'position',
-      'line_date',
-      'description',
-      'hours',
-      'hour_type_id',
-      'hour_type_name_snapshot',
-      'amount',
-      'contract_id',
-      'contract_name_snapshot',
-      'timesheet_entry_id',
-      'entry_snapshot_json',
-      'last_synced_at',
-      'source_default_id',
-      'created_at',
-      'updated_at'
-    ];
-    const existingLastCol = Math.max(sh.getLastColumn(), expectedInvoiceLineHeaders.length);
-    if (existingLastCol > 0) {
-      const existingHeaders = sh.getRange(1, 1, 1, existingLastCol).getValues()[0];
-      const rateIdx = existingHeaders.indexOf('rate');
-      if (rateIdx !== -1) {
-        sh.deleteColumn(rateIdx + 1);
-      }
-    }
-    sh.getRange(1, 1, 1, expectedInvoiceLineHeaders.length).setValues([expectedInvoiceLineHeaders]);
-    sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:B').setNumberFormat('@');
-    sh.getRange('C:C').setNumberFormat('@');
-    sh.getRange('D:D').setNumberFormat('@');
-    sh.getRange('E:E').setNumberFormat('0');
-    sh.getRange('F:F').setNumberFormat('@');
-    sh.getRange('G:G').setNumberFormat('@');
-    sh.getRange('H:H').setNumberFormat('0.00');
-    sh.getRange('I:I').setNumberFormat('@');
-    sh.getRange('J:J').setNumberFormat('@');
-    sh.getRange('K:K').setNumberFormat('0.00');
-    sh.getRange('L:L').setNumberFormat('@');
-    sh.getRange('M:M').setNumberFormat('@');
-    sh.getRange('N:N').setNumberFormat('@');
-    sh.getRange('O:O').setNumberFormat('@');
-    sh.getRange('P:P').setNumberFormat('@');
-    sh.getRange('Q:Q').setNumberFormat('@');
-    sh.getRange('R:R').setNumberFormat('@');
-    sh.getRange('S:S').setNumberFormat('@');
-  }
-  if (name === 'contracts') {
-    sh.getRange('C:D').setNumberFormat('@');
-    sh.getRange('E:E').setNumberFormat('0.00');
-    sh.getRange('F:F').setNumberFormat('@');
-  }
-  if (name === 'feature_flags') {
-    const expectedFlagHeaders = ['feature', 'enabled'];
-    let lastColumn = sh.getLastColumn();
-    if (lastColumn < expectedFlagHeaders.length) {
-      sh.insertColumnsAfter(lastColumn, expectedFlagHeaders.length - lastColumn);
-      lastColumn = sh.getLastColumn();
-    }
-    if (lastColumn > expectedFlagHeaders.length) {
-      sh.deleteColumns(expectedFlagHeaders.length + 1, lastColumn - expectedFlagHeaders.length);
-    }
-    const headerRange = sh.getRange(1, 1, 1, expectedFlagHeaders.length);
-    const headers = headerRange.getValues()[0];
-    const needsUpdate = expectedFlagHeaders.some((header, idx) => headers[idx] !== header);
-    if (needsUpdate) {
-      headerRange.setValues([expectedFlagHeaders]);
-    }
-    sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:B').setNumberFormat('@');
-  }
-  if (name === 'hour_types') {
-    const expectedHourTypeHeaders = [
-      'id',
-      'name',
-      'slug',
-      'color',
-      'contributes_to_income',
-      'requires_contract',
-      'is_default',
-      'use_for_rate_calculation',
-      'auto_populate_public_holidays',
-      'auto_populate_hours',
-      'created_at'
-    ];
-    const headerRange = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedHourTypeHeaders.length));
-    let headers = headerRange.getValues()[0];
-    const rowCount = sh.getLastRow();
+  applyCanonicalFormats_(sheet, schema, headers);
+  return sheet;
+}
 
-    function ensureHourTypeColumn(headerName, defaultValue, insertBeforeHeader) {
-      headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expectedHourTypeHeaders.length)).getValues()[0];
-      if (headers.indexOf(headerName) !== -1) return;
-      let insertPosition = headers.indexOf(insertBeforeHeader);
-      if (insertPosition === -1) {
-        insertPosition = headers.length;
-        sh.insertColumnAfter(insertPosition);
-        sh.getRange(1, insertPosition + 1).setValue(headerName);
-      } else {
-        sh.insertColumnBefore(insertPosition + 1);
-        sh.getRange(1, insertPosition + 1).setValue(headerName);
-      }
-      if (rowCount > 1 && defaultValue !== undefined) {
-        sh.getRange(2, insertPosition + 1, rowCount - 1, 1).setValue(defaultValue);
-      }
-    }
-
-    ensureHourTypeColumn('auto_populate_public_holidays', 'FALSE', 'created_at');
-    ensureHourTypeColumn('auto_populate_hours', 7.5, 'created_at');
-
-    sh.getRange(1, 1, 1, expectedHourTypeHeaders.length).setValues([expectedHourTypeHeaders]);
-
-    const idColumn = expectedHourTypeHeaders.indexOf('id') + 1;
-    sh.getRange(1, idColumn, sh.getMaxRows(), 1).setNumberFormat('@');
-    const textColumns = ['name', 'slug', 'color'];
-    textColumns.forEach(function(header) {
-      const col = expectedHourTypeHeaders.indexOf(header) + 1;
-      sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
+/** Rebuild a sheet by header name while preserving every named legacy column and cell. */
+function canonicalizeSheet_(name) {
+  var schema = getCanonicalSheetSchema_(name);
+  if (!schema) throw new Error('No canonical schema is registered for "' + name + '".');
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName(name);
+  if (!sheet) return { sheet: name, state: 'missing', rows: 0 };
+  if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+    initialiseCanonicalSheet_(sheet, schema);
+    return { sheet: name, state: 'initialised', rows: 0 };
+  }
+  var values = sheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  var rows = values.slice(1);
+  validateSheetHeaders_(name, headers, rows);
+  Object.keys(schema.aliases || {}).forEach(function(alias) {
+    var canonical = schema.aliases[alias];
+    var aliasIndex = headers.indexOf(alias);
+    if (aliasIndex === -1) return;
+    if (headers.indexOf(canonical) !== -1) throw new Error('Schema error in "' + name + '": both legacy "' + alias + '" and canonical "' + canonical + '" exist.');
+    headers[aliasIndex] = canonical;
+  });
+  validateSheetHeaders_(name, headers, rows);
+  var extras = headers.filter(function(header) { return header && schema.headers.indexOf(header) === -1; });
+  var outputHeaders = schema.headers.concat(extras);
+  var indexByHeader = {};
+  headers.forEach(function(header, index) { if (header) indexByHeader[header] = index; });
+  var outputRows = rows.map(function(row) {
+    return outputHeaders.map(function(header) {
+      if (Object.prototype.hasOwnProperty.call(indexByHeader, header)) return row[indexByHeader[header]];
+      return schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? schema.defaults[header] : '';
     });
-    ['contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays'].forEach(function(header) {
-      const col = expectedHourTypeHeaders.indexOf(header) + 1;
-      sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
-    });
-    const autoHoursCol = expectedHourTypeHeaders.indexOf('auto_populate_hours') + 1;
-    sh.getRange(1, autoHoursCol, sh.getMaxRows(), 1).setNumberFormat('0.00');
-    const createdAtCol = expectedHourTypeHeaders.indexOf('created_at') + 1;
-    sh.getRange(1, createdAtCol, sh.getMaxRows(), 1).setNumberFormat('@');
-  }
-  if (name === 'deductions') {
-    sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('B:D').setNumberFormat('@');
-    sh.getRange('E:F').setNumberFormat('@');
-    sh.getRange('G:G').setNumberFormat('0.00');
-    sh.getRange('H:H').setNumberFormat('@');
-    sh.getRange('I:I').setNumberFormat('0.00');
-    sh.getRange('J:J').setNumberFormat('@');
-    sh.getRange('K:L').setNumberFormat('@');
-    sh.getRange('M:M').setNumberFormat('@');
-    sh.getRange('N:N').setNumberFormat('@');
-    sh.getRange('O:P').setNumberFormat('@');
-  }
-  if (name === 'bas_submissions') {
-    sh.getRange('A:A').setNumberFormat('@'); // id
-    sh.getRange('B:B').setNumberFormat('0'); // financial_year
-    sh.getRange('C:C').setNumberFormat('@'); // period_type
-    sh.getRange('D:E').setNumberFormat('0'); // quarter, month
-    sh.getRange('F:F').setNumberFormat('0.00'); // g1_total_sales
-    sh.getRange('G:G').setNumberFormat('@'); // g1_includes_gst
-    sh.getRange('H:J').setNumberFormat('0.00'); // field_1a, field_1b, t1
-    sh.getRange('K:K').setNumberFormat('0.0000'); // t2_instalment_rate
-    sh.getRange('L:L').setNumberFormat('@'); // submitted
-    sh.getRange('M:O').setNumberFormat('@'); // submitted_at, created_at, updated_at
-  }
-  return sh;
+  });
+  ensureSheetCapacity_(sheet, Math.max(1, outputRows.length + 1), outputHeaders.length);
+  sheet.getRange(1, 1, 1, outputHeaders.length).setValues([outputHeaders]);
+  if (outputRows.length) sheet.getRange(2, 1, outputRows.length, outputHeaders.length).setValues(outputRows);
+  applyCanonicalFormats_(sheet, schema, outputHeaders);
+  return { sheet: name, state: 'canonical', rows: outputRows.length, extra_headers: extras };
+}
+
+function rowObjectFromHeaders_(headers, row) {
+  var result = {};
+  headers.forEach(function(header, index) { if (header) result[header] = row[index]; });
+  return result;
+}
+
+function rowValuesFromObject_(headers, value, existingRow) {
+  return headers.map(function(header, index) {
+    return Object.prototype.hasOwnProperty.call(value || {}, header) ? value[header] : (existingRow ? existingRow[index] : '');
+  });
 }
 
 function applyDisplayOrderToSheet(name, orderIds) {
   if (!name) return [];
-  var sh = getOrCreateSheet(name);
-  var values = sh.getDataRange().getValues();
+  var sheet = getOrCreateSheet(name);
+  var values = sheet.getDataRange().getValues();
   if (!values || values.length <= 1) return [];
   var headers = values[0];
   var idIndex = headers.indexOf('id');
@@ -467,22 +192,12 @@ function applyDisplayOrderToSheet(name, orderIds) {
   var normalizedOrder = Array.isArray(orderIds) ? orderIds : [];
   var map = {};
   var next = normalizedOrder.length + 1;
-  normalizedOrder.forEach(function(id, idx) {
-    if (id || id === 0) {
-      map[String(id)] = idx + 1;
-    }
-  });
-  for (var i = 1; i < values.length; i++) {
-    var rowId = String(values[i][idIndex] || '');
-    var desired = map[rowId];
-    if (!desired) {
-      desired = next++;
-      map[rowId] = desired;
-    }
-    var current = Number(values[i][orderIndex]);
-    if (current !== desired) {
-      sh.getRange(i + 1, orderIndex + 1).setValue(desired);
-    }
+  normalizedOrder.forEach(function(id, index) { if (id || id === 0) map[String(id)] = index + 1; });
+  for (var row = 1; row < values.length; row++) {
+    var rowId = String(values[row][idIndex] || '');
+    var desired = map[rowId] || next++;
+    map[rowId] = desired;
+    if (Number(values[row][orderIndex]) !== desired) sheet.getRange(row + 1, orderIndex + 1).setValue(desired);
   }
   return map;
 }

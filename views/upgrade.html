@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <style>
+    :root { color-scheme: dark; --bg:#090d12; --panel:#111820; --line:#283440; --text:#eef2f3; --muted:#9ba9b3; --accent:#53ad91; --danger:#ef827a; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; background:radial-gradient(circle at 18% 8%, #173127 0, transparent 36%), var(--bg); color:var(--text); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(680px,100%); }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:750; letter-spacing:.13em; text-transform:uppercase; }
+    h1 { margin:10px 0 14px; max-width:590px; font-family:Georgia,"Times New Roman",serif; font-size:clamp(34px,7vw,58px); font-weight:400; line-height:1.02; letter-spacing:-.025em; }
+    .lede { max-width:590px; margin:0 0 34px; color:var(--muted); font-size:17px; }
+    section { border-block:1px solid var(--line); padding:22px 0; }
+    ol { margin:0; padding-left:22px; display:grid; gap:10px; }
+    .actions { display:flex; align-items:center; gap:14px; margin-top:28px; flex-wrap:wrap; }
+    button { appearance:none; border:0; border-radius:9px; padding:13px 19px; background:var(--accent); color:#07120f; font:inherit; font-weight:800; cursor:pointer; }
+    button:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 48%,white); outline-offset:3px; }
+    button[disabled] { cursor:wait; opacity:.62; }
+    #status { min-height:24px; color:var(--muted); }
+    #status[data-state="error"] { color:var(--danger); }
+    .backup { margin-top:16px; color:var(--muted); overflow-wrap:anywhere; }
+    .backup a { color:var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">One-time data upgrade</div>
+    <h1>Your records stay intact.</h1>
+    <p class="lede">Tempus needs to reconcile older sheet layouts before financial pages can open. The process is resumable and begins by creating and verifying a complete spreadsheet backup.</p>
+    <section aria-labelledby="upgrade-details">
+      <h2 id="upgrade-details">What happens</h2>
+      <ol>
+        <li>A dated copy is created in the same Drive folder and checked sheet by sheet.</li>
+        <li>Columns are matched by header name; populated columns are never silently relabelled.</li>
+        <li>Legacy company expenses and invoices move into auditable ledgers. Superseded rows are archived.</li>
+        <li>If anything interrupts the run, Tempus resumes at the unfinished migration.</li>
+      </ol>
+    </section>
+    <div class="actions">
+      <button id="run" type="button">Back up and upgrade</button>
+      <div id="status" role="status" aria-live="polite">Ready to begin.</div>
+    </div>
+    <div id="backup" class="backup"></div>
+  </main>
+  <script>
+    (function () {
+      var button = document.getElementById('run');
+      var status = document.getElementById('status');
+      var backup = document.getElementById('backup');
+      function fail(error) {
+        button.disabled = false;
+        status.dataset.state = 'error';
+        status.textContent = error && error.message ? error.message : String(error || 'Upgrade failed.');
+      }
+      button.addEventListener('click', function () {
+        button.disabled = true;
+        status.dataset.state = 'running';
+        status.textContent = 'Creating and verifying backup…';
+        google.script.run.withSuccessHandler(function (result) {
+          if (!result || result.success === false) { fail(result && result.message ? result.message : 'Upgrade failed.'); return; }
+          if (result.backup && result.backup.url) {
+            var link = document.createElement('a');
+            link.href = result.backup.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = result.backup.name || 'Open verified backup';
+            backup.replaceChildren(document.createTextNode('Verified backup: '), link);
+          }
+          status.textContent = 'Upgrade complete. Opening Tempus…';
+          window.setTimeout(function () { window.top.location.reload(); }, 700);
+        }).withFailureHandler(fail).api_runUpgrade();
+      });
+    }());
+  </script>
+</body>
+</html>

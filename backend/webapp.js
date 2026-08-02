@@ -1,13 +1,9 @@
 /** Web entry + HTML includes */
 function doGet(e) {
-  // Upgrade the spreadsheet schema before anything below touches it. 'busy' means another page load
-  // is mid-upgrade and the lock wait timed out — serve a lightweight splash that retries instead of
-  // racing it. Any other status serves the app: 'error' retries on the next load and the
-  // assertMigrationsSettled_ guard keeps the data APIs safe in the meantime.
-  var migrationStatus = runPendingMigrations();
-  if (migrationStatus === 'busy') {
-    return buildUpgradeSplashPage_();
-  }
+  // Financial migrations are explicit: the user sees what will happen and a verified Drive backup
+  // is created before any sheet is changed. The application cannot race a partial upgrade.
+  var migrationStatus = api_getMigrationStatus();
+  if (migrationStatus.required) return buildPreUpgradePage_();
   var view = e && e.parameter && e.parameter.view ? String(e.parameter.view).toLowerCase() : '';
   var templateName = view === 'mobile' ? 'views/mobile' : 'views/index';
   var tpl = HtmlService.createTemplateFromFile(templateName);
@@ -37,6 +33,13 @@ function doGet(e) {
     .setFaviconUrl('https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/images/favicon.ico')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   return html;
+}
+
+function buildPreUpgradePage_() {
+  return HtmlService.createHtmlOutputFromFile('views/upgrade')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
+    .setTitle('Upgrade Tempus')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function include(name) {
