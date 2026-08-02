@@ -2,7 +2,7 @@
 // Generated automatically by scripts/write-version.sh
 var BUILD_META = {
   buildDate: '2026-08-02',
-  buildCommit: '5a2331f18d54'
+  buildCommit: '067910a09186'
 };
 function api_getBuildMeta() {
   return BUILD_META;
