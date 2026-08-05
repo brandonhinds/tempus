@@ -6,6 +6,7 @@ docs/**
 README.md
 MIGRATION_REPORT.md
 ACCEPTANCE_CHECKLIST.md
+UAT_TEST_CASES.md
 package.json
 Claude Design/**
 design-reference/**

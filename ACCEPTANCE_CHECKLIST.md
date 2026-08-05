@@ -2,6 +2,8 @@
 
 Use a copied spreadsheet and a test Apps Script deployment. Do not use production for this checklist.
 
+For the complete staged procedure, expected results, and release exit criteria, see [UAT_TEST_CASES.md](UAT_TEST_CASES.md).
+
 ## Upgrade
 
 - [ ] Open each fixture-equivalent workbook shape and confirm the upgrade screen appears.
