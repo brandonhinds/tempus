@@ -240,11 +240,13 @@ function migrationPublicHolidayCatalogue_() {
   var nameIndex = headers.indexOf('name');
   var regionIndex = headers.indexOf('region');
   var countiesIndex = headers.indexOf('counties');
+  var yearIndex = headers.indexOf('year');
   var sourceIndex = headers.indexOf('source');
   var activeIndex = headers.indexOf('active');
   for (var row = 1; row < values.length; row++) {
     var date = toIsoDate(values[row][dateIndex] || '');
     var name = String(values[row][nameIndex] || 'Public holiday');
+    if (yearIndex !== -1 && !values[row][yearIndex]) values[row][yearIndex] = Number(date.slice(0, 4)) || '';
     if (!values[row][idIndex]) values[row][idIndex] = 'holiday-' + date + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     if (!values[row][regionIndex]) {
       var counties = assessmentJsonSafeMigration_(countiesIndex === -1 ? '' : values[row][countiesIndex], null);

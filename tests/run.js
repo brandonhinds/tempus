@@ -264,4 +264,43 @@ test('upgrade completion provides a top-level continuation link and refresh fall
   assert.doesNotMatch(upgrade, /window\.top\.location\.reload/);
 });
 
+test('public holiday refresh replaces legacy blank-year rows instead of appending duplicates', () => {
+  const headers = ['id', 'date', 'name', 'region', 'source', 'active', 'created_at', 'updated_at', 'local_name', 'counties', 'types', 'year', 'fetched_at'];
+  const { context, spreadsheet } = createAppsScriptContext({
+    public_holidays: [headers, ['legacy', '2026-01-01', "New Year's Day", '["AU"]', 'legacy', 'TRUE', '', '', "New Year's Day", '', '["Public"]', '', '']]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  context.cacheClearPrefix = () => {};
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/publicholidays.js');
+  assert.equal(context.repairPublicHolidayYears_(), 1);
+  context.replaceYearHolidays(2026, [{ date:'2026-01-01', name:"New Year's Day", localName:"New Year's Day", counties:null }]);
+  const rows = spreadsheet.getSheetByName('public_holidays').snapshot();
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1][headers.indexOf('year')], 2026);
+});
+
+test('public holiday time population adopts an existing date and hour type under the server lock', () => {
+  const headers = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'];
+  const { context, spreadsheet } = createAppsScriptContext({
+    timesheet_entries: [headers, ['existing', '2026-01-01', 450, '', '2026-01-01T00:00:00Z', '[]', 'basic', 'leave', '', '', '', 'manual', '', '', '']]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  context.getDefaultHourTypeId = () => 'work';
+  context.api_getSettings = () => ({});
+  context.cacheClearPrefix = () => {};
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+  load(context, 'backend/publicholidays.js');
+  const duplicate = context.api_addPublicHolidayEntry({ date:'2026-01-01', duration_minutes:450, hour_type_id:'leave' });
+  assert.equal(duplicate.error, 'duplicate_entry');
+  assert.equal(spreadsheet.getSheetByName('timesheet_entries').getLastRow(), 2);
+  const added = context.api_addPublicHolidayEntry({ date:'2026-01-02', duration_minutes:450, hour_type_id:'leave' });
+  assert.equal(added.success, true);
+  assert.equal(added.entry.source_type, 'public_holiday');
+  assert.equal(added.entry.source_occurrence_key, '2026-01-02');
+  assert.deepStrictEqual(Array.from(added.entry.punches), []);
+});
+
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');

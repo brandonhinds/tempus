@@ -32630,7 +32630,7 @@ function getCachedIncomeSummary(monthKey) {
     const eligibleHourTypes = state.hourTypes.filter(ht => ht.auto_populate_public_holidays && Number(ht.auto_populate_hours) > 0);
     if (!eligibleHourTypes.length) return;
 
-    const entryKeys = new Set(state.entries.map(entry => `${entry.date}__${entry.hour_type_id || getDefaultHourTypeId()}`));
+    const entryKeys = new Set(state.entries.map(entry => `${normalizeHolidayDate(entry.date)}__${entry.hour_type_id || getDefaultHourTypeId()}`));
 
     const queue = [];
     state.publicHolidays.forEach(holiday => {
@@ -32658,16 +32658,6 @@ function getCachedIncomeSummary(monthKey) {
 
     state.isAutoPopulatingPublicHolidays = true;
     processHolidayAutoPopulateQueue(queue, []);
-  }
-
-  function buildHolidayPunches(minutes) {
-    const total = Math.max(0, Math.round(Number(minutes) || 0));
-    if (!total) return [];
-    const capped = Math.min(total, (24 * 60) - 1); // stay within day
-    const hours = Math.floor(capped / 60);
-    const mins = capped % 60;
-    const pad = (n) => (n < 10 ? `0${n}` : String(n));
-    return [{ in: '00:00', out: `${pad(hours)}:${pad(mins)}` }];
   }
 
   function processHolidayAutoPopulateQueue(queue, createdEntries) {
@@ -32705,13 +32695,11 @@ function getCachedIncomeSummary(monthKey) {
       .withFailureHandler((error) => {
         processHolidayAutoPopulateQueue(queue, createdEntries);
       })
-      .api_addEntry({
+      .api_addPublicHolidayEntry({
         date: next.date,
         duration_minutes: minutes,
-        entry_type: 'basic',
         hour_type_id: next.hourTypeId,
-        contract_id: '',
-        punches: buildHolidayPunches(minutes)
+        contract_id: ''
       });
   }
 

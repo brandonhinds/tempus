@@ -80,6 +80,7 @@ class MockSpreadsheet {
     Object.entries(fixtures || {}).forEach(([name, values]) => { this.sheets[name] = new MockSheet(name, values); });
   }
   getId() { return this.id; }
+  getSpreadsheetTimeZone() { return 'Australia/Sydney'; }
   getSheetByName(name) { return this.sheets[name] || null; }
   insertSheet(name) { const sheet = new MockSheet(name, []); this.sheets[name] = sheet; return sheet; }
   getSheets() { return Object.values(this.sheets); }
@@ -114,10 +115,10 @@ function createAppsScriptContext(fixtures) {
     Infinity,
     isFinite,
     isNaN,
-    SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet },
+    SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet, getActive: () => spreadsheet },
     PropertiesService: { getScriptProperties: () => properties },
     Session: { getScriptTimeZone: () => 'Australia/Sydney' },
-    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
+    LockService: { getScriptLock: () => ({ tryLock: () => true, waitLock: () => true, releaseLock: () => {} }) },
     Utilities: {
       getUuid: (() => { let id = 0; return () => 'uuid-' + (++id); })(),
       formatDate: (date, zone, pattern) => {

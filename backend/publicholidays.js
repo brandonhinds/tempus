@@ -1,5 +1,5 @@
 /** Public Holidays API */
-var PUBLIC_HOLIDAYS_CACHE_KEY = 'public_holidays_v1';
+var PUBLIC_HOLIDAYS_CACHE_KEY = 'public_holidays_v2';
 // Bumped when the storage format changes; triggers a one-time wholesale rebuild
 // of the sheet so old date-only-keyed data heals itself.
 var PH_REBUILD_FLAG = 'ph_rebuild_v2';
@@ -26,6 +26,36 @@ function formatSheetDateKey(value, timezone) {
   var str = String(value).trim();
   if (!str) return '';
   return str.split('T')[0];
+}
+
+function publicHolidayRowYear_(row, yearIndex, dateIndex, timezone) {
+  var stored = yearIndex !== -1 ? Number(row[yearIndex]) : 0;
+  if (isFinite(stored) && stored >= 1900 && stored <= 9999) return stored;
+  var date = dateIndex !== -1 ? formatSheetDateKey(row[dateIndex], timezone) : '';
+  var derived = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Number(date.slice(0, 4)) : 0;
+  return derived >= 1900 && derived <= 9999 ? derived : 0;
+}
+
+/** Fill the canonical year column on upgraded legacy rows without changing holiday identity. */
+function repairPublicHolidayYears_() {
+  var sh = getOrCreateSheet('public_holidays');
+  var values = sh.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  var headers = values[0];
+  var yearIdx = headers.indexOf('year');
+  var dateIdx = headers.indexOf('date');
+  if (yearIdx === -1 || dateIdx === -1) return 0;
+  var timezone = getSpreadsheetTimeZone();
+  var yearValues = [];
+  var changed = 0;
+  for (var row = 1; row < values.length; row++) {
+    var year = publicHolidayRowYear_(values[row], yearIdx, dateIdx, timezone);
+    var current = Number(values[row][yearIdx]) || 0;
+    if (year && current !== year) changed += 1;
+    yearValues.push([year || values[row][yearIdx] || '']);
+  }
+  if (changed) sh.getRange(2, yearIdx + 1, yearValues.length, 1).setValues(yearValues);
+  return changed;
 }
 
 /**
@@ -104,9 +134,7 @@ function replaceYearHolidays(year, holidays) {
 
   // Remove every existing row for this year (bottom-up so row numbers stay valid).
   for (var i = values.length - 1; i >= 1; i--) {
-    var rowYear = yearIdx !== -1
-      ? values[i][yearIdx]
-      : parseInt(String(values[i][dateIdx]).split('-')[0], 10);
+    var rowYear = publicHolidayRowYear_(values[i], yearIdx, dateIdx, timezone);
     if (Number(rowYear) === Number(year)) sh.deleteRow(i + 1);
   }
 
@@ -187,7 +215,7 @@ function getStoredPublicHolidays(years) {
 
   for (var i = 1; i < values.length; i++) {
     var row = values[i];
-    var year = yearIdx !== -1 ? row[yearIdx] : parseInt(String(row[dateIdx]).split('-')[0]);
+    var year = publicHolidayRowYear_(row, yearIdx, dateIdx, effectiveTimeZone);
 
     if (years && years.indexOf(year) === -1) continue;
 
@@ -279,10 +307,11 @@ function hasHolidaysForYear(year) {
   var headers = values[0];
   var yearIdx = headers.indexOf('year');
   var dateIdx = headers.indexOf('date');
+  var timezone = getSpreadsheetTimeZone();
 
   for (var i = 1; i < values.length; i++) {
-    var rowYear = yearIdx !== -1 ? values[i][yearIdx] : parseInt(String(values[i][dateIdx]).split('-')[0]);
-    if (rowYear === year) return true;
+    var rowYear = publicHolidayRowYear_(values[i], yearIdx, dateIdx, timezone);
+    if (Number(rowYear) === Number(year)) return true;
   }
 
   return false;
@@ -303,27 +332,9 @@ function ensurePublicHolidayData(years) {
   // Ensure schema is valid before doing anything else
   ensurePublicHolidaysSchema();
 
-  // Heal any duplicate rows that accumulated in the sheet (cheap when clean).
-  dedupePublicHolidaysSheet();
-
-  // One-time heal: earlier versions stored holidays keyed by date alone, which
-  // lost every date that carries more than one holiday. Force a wholesale rebuild
-  // of the requested years once, so existing instances repair themselves on the
-  // next load without the user having to hit a refresh button.
-  var props = PropertiesService.getScriptProperties();
-  var needsRebuild = props.getProperty(PH_REBUILD_FLAG) !== '1';
-
-  // Which requested years need fetching?
-  var toFetch = [];
-  years.forEach(function(y) {
-    if (needsRebuild || !hasHolidaysForYear(y)) toFetch.push(y);
-  });
-
-  if (toFetch.length === 0) return;
-
   // Serialise the fetch+store so two concurrent loads (e.g. the calendar overlay
-  // and the page, or two tabs) can't both decide a year is missing and write it
-  // twice — the original source of the duplicate rows.
+  // and the page, or two tabs) cannot repair, delete, or append the same rows at
+  // the same time.
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000);
@@ -333,6 +344,20 @@ function ensurePublicHolidayData(years) {
   }
 
   try {
+    repairPublicHolidayYears_();
+    dedupePublicHolidaysSheet();
+
+    // One-time heal: earlier versions stored holidays keyed by date alone, which
+    // lost every date that carries more than one holiday. Force a wholesale rebuild
+    // of the requested years once, so existing instances repair themselves on the
+    // next load without the user having to hit a refresh button.
+    var props = PropertiesService.getScriptProperties();
+    var needsRebuild = props.getProperty(PH_REBUILD_FLAG) !== '1';
+    var toFetch = [];
+    years.forEach(function(y) {
+      if (needsRebuild || !hasHolidaysForYear(y)) toFetch.push(y);
+    });
+
     toFetch.forEach(function(y) {
       // Re-check under the lock — a racing execution may have just populated it.
       if (!needsRebuild && hasHolidaysForYear(y)) return;
@@ -456,4 +481,51 @@ function api_refreshPublicHolidays() {
   }
 
   return { success: true, message: 'Public holidays refreshed successfully' };
+}
+
+function findExistingPublicHolidayTimeEntry_(values, date, hourTypeId, defaultHourTypeId) {
+  if (!values || values.length < 2) return null;
+  var headers = values[0];
+  for (var row = 1; row < values.length; row++) {
+    var entry = normalizeEntryForRead(rowObjectFromHeaders_(headers, values[row]), defaultHourTypeId);
+    if (entry.entry_type === 'break' || entry.entry_type === 'comment') continue;
+    if (entry.date === date && String(entry.hour_type_id || defaultHourTypeId) === String(hourTypeId)) return entry;
+  }
+  return null;
+}
+
+/**
+ * Adds one automatically populated public-holiday time entry. Unlike a normal
+ * manual create, this performs its date+hour-type adoption check against the
+ * authoritative sheet while holding the script lock, so upgraded legacy rows
+ * and two racing browser tabs cannot produce duplicates.
+ */
+function api_addPublicHolidayEntry(payload) {
+  return withScriptLock_('public holiday entry population', function() {
+    var date = normalizeIsoDateStrict_(payload && payload.date, 'Holiday date', false);
+    var hourTypeId = String(payload && payload.hour_type_id || '').trim();
+    var duration = normalizeDurationMinutes(payload && payload.duration_minutes);
+    if (!hourTypeId) return apiRecoverableFailure_('hour_type_required', 'A public-holiday hour type is required.');
+    if (!duration) return apiRecoverableFailure_('duration_required', 'Public-holiday hours must be greater than zero.');
+
+    var defaultHourTypeId = resolveDefaultHourTypeId();
+    var sh = getOrCreateSheet('timesheet_entries');
+    var values = sh.getDataRange().getValues();
+    var existing = findExistingPublicHolidayTimeEntry_(values, date, hourTypeId, defaultHourTypeId);
+    if (existing) {
+      return { success: false, error: 'duplicate_entry', message: 'An entry already exists for this public holiday and hour type.', entry: existing };
+    }
+
+    return api_addEntry({
+      date: date,
+      duration_minutes: duration,
+      entry_type: 'basic',
+      hour_type_id: hourTypeId,
+      contract_id: '',
+      punches: [],
+      source_type: 'public_holiday',
+      source_id: hourTypeId,
+      source_occurrence_key: date
+    });
+  });
 }
