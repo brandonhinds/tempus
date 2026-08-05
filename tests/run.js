@@ -228,6 +228,45 @@ test('assessment catalogues keep stable generic fields, line IDs, and token outp
   assert.equal(resolved[0].gst_amount, 16.5);
 });
 
+test('income summaries wait for complete finance data and invalidate on reference-data changes', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  assert.match(scripts, /if \(!incomeDependenciesReady\(\)\) \{\s*state\.incomeSummary = null;/);
+  assert.match(scripts, /function processMonthCalculationQueue\(\) \{\s*if \(!state\.lazyLoadQueue\) return;\s*if \(!incomeDependenciesReady\(\)\) return;/);
+  assert.match(scripts, /const isDirty = shouldRecalculateMonth\(year, month\);/);
+  assert.match(scripts, /metadata\.dependencyHash !== dependencyHash/);
+  assert.match(scripts, /state\.incomeCacheMetadata\[monthKey\]\.dependencyHash = calculateIncomeDependencyHash\(\);/);
+  ['contributes_to_income', 'hourly_rate', 'amount_value', 'lost_super_recovery_mode', 'percentage'].forEach((dependency) => {
+    assert.ok(scripts.includes(dependency), 'missing income dependency: ' + dependency);
+  });
+  assert.match(scripts, /const entries = entriesForMonth\(year, month\)\.filter\(entryContributesToIncome\);/);
+  assert.match(scripts, /return !getFeatureFlag\('hour_types'\);/);
+});
+
+test('Annual View uses taxable income and the same FY2026 PAYG result as the server', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  assert.match(scripts, /tax = estimateTaxLocal\(taxableIncome, periodStartIso\);/);
+  assert.doesNotMatch(scripts, /tax = estimateTaxLocal\(grossIncome,/);
+  const start = scripts.indexOf('  function estimateTaxLocal(');
+  const end = scripts.indexOf('\n  function renderAnnualViews()', start);
+  assert.ok(start >= 0 && end > start);
+  const clientContext = {
+    Date,
+    parseIsoDate(value) {
+      const parts = String(value).split('-').map(Number);
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+  };
+  vm.createContext(clientContext);
+  vm.runInContext(scripts.slice(start, end), clientContext);
+
+  const { context: serverContext } = createAppsScriptContext({});
+  load(serverContext, 'backend/tax.js');
+  [2372.69, 4735.19, 10000].forEach((income) => {
+    assert.equal(clientContext.estimateTaxLocal(income, '2026-08-01'), serverContext.estimateTax(income, '2026-08-01'));
+  });
+  assert.equal(clientContext.estimateTaxLocal(2372.69, '2026-08-01'), 125);
+});
+
 test('backend globals and modified HTML scripts parse without duplicate functions', () => {
   const files = fs.readdirSync(path.join(root, 'backend')).filter((file) => file.endsWith('.js'));
   const names = new Map();

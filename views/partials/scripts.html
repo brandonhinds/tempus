@@ -563,6 +563,18 @@ let ratePreviewInputSyncing = false;
     incomeSummary: null,
     incomeSummaryCache: {},
     dirtyIncomeMonths: new Set(),
+    // Deliberately transient: cached reference data may paint the shell quickly, but an income
+    // summary is not authoritative until every server-backed input below has completed this load.
+    incomeDependencies: {
+      entries: false,
+      settings: false,
+      contracts: false,
+      featureFlags: false,
+      hourTypes: false,
+      deductions: false,
+      superRates: false,
+      deductionExceptions: false
+    },
     pendingTaxRequest: null,
     // Per-month effective tax rate (tax / taxable) from the last resolved summary. Lets the income
     // allocation bar paint an optimistic split while the exact tax for an edit is being fetched, so it
@@ -4898,20 +4910,17 @@ function hideAnnualLoadingState() {
     // Display month period (used for deductions and label)
     const periodStart = startOfDay(new Date(year, month, 1));
     const periodEnd = startOfDay(new Date(year, month + 1, 0));
-    const periodStartIso = periodStart.toISOString().substring(0, 10);
+    const periodStartIso = isoDate(periodStart);
 
     // Super rate uses source month (that is when the work was earned)
-    const srcPeriodStartIso = startOfDay(new Date(srcYear, srcMonth, 1)).toISOString().substring(0, 10);
+    const srcPeriodStartIso = isoDate(startOfDay(new Date(srcYear, srcMonth, 1)));
     const superRate = getSuperGuaranteeRateForDate(srcPeriodStartIso);
     const contractIncome = {};
     const contractMinutes = {};
     let totalMinutes = 0; // income-contributing minutes only
     filteredEntries.forEach((entry) => {
       const minutes = Number(entry.duration_minutes) || 0;
-      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-      const hourType = state.hourTypeMap[hourTypeId];
-      const contributes = hourType ? hourType.contributes_to_income : true;
-      if (!contributes) return;
+      if (!entryContributesToIncome(entry)) return;
       totalMinutes += minutes;
       const contractId = entry.contract_id || '';
       const contract = state.contractMap[contractId];
@@ -5055,7 +5064,7 @@ function hideAnnualLoadingState() {
     const taxableIncome = Math.max(0, grossIncome - extraSuper - otherDeductions + recoveredToSuperBase);
     let tax = 0;
     if (taxableIncome > 0) {
-      tax = estimateTaxLocal(grossIncome, periodStartIso);
+      tax = estimateTaxLocal(taxableIncome, periodStartIso);
     }
     const netIncome = Math.max(0, taxableIncome - tax);
 
@@ -5238,44 +5247,32 @@ function hideAnnualLoadingState() {
     return breakdown;
   }
 
-  function estimateTaxLocal(grossIncome, currentDate) {
-    let income = Number(grossIncome) || 0;
+  function estimateTaxLocal(taxableIncome, currentDate) {
+    let income = Number(taxableIncome) || 0;
     if (income < 0) income = 0;
     const decimal = Number(((income % 1).toFixed(2)));
     if (decimal === 0.33) {
       income += 0.01;
     }
     const weeklyIncome = Math.floor(income * (3 / 13)) + 0.99;
-    const targetDate = new Date(currentDate);
-    let financialYear = '2024/2025';
-    if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())) {
-      if (targetDate <= new Date('2024-05-30')) {
-        financialYear = '2020/2021';
-      } else if (targetDate <= new Date('2099-05-30')) {
-        financialYear = '2024/2025';
-      }
-    }
-    let a = 0;
-    let b = 0;
-    if (financialYear === '2020/2021') {
-      if (weeklyIncome < 359) { a = 0; b = 0; } else
-      if (weeklyIncome < 438) { a = 0.19; b = 68.3462; } else
-      if (weeklyIncome < 548) { a = 0.29; b = 112.1942; } else
-      if (weeklyIncome < 721) { a = 0.21; b = 68.3465; } else
-      if (weeklyIncome < 865) { a = 0.219; b = 74.8369; } else
-      if (weeklyIncome < 1282) { a = 0.3477; b = 186.2119; } else
-      if (weeklyIncome < 2307) { a = 0.345; b = 182.7504; } else
-      if (weeklyIncome < 3461) { a = 0.39; b = 286.5965; } else { a = 0.47; b = 563.5196; }
-    } else {
-      if (weeklyIncome < 361) { a = 0; b = 0; } else
-      if (weeklyIncome < 500) { a = 0.16; b = 57.8462; } else
-      if (weeklyIncome < 625) { a = 0.26; b = 107.8462; } else
-      if (weeklyIncome < 721) { a = 0.18; b = 57.8462; } else
-      if (weeklyIncome < 865) { a = 0.189; b = 64.3365; } else
-      if (weeklyIncome < 1282) { a = 0.3277; b = 180.0385; } else
-      if (weeklyIncome < 2596) { a = 0.32; b = 176.5769; } else
-      if (weeklyIncome < 3653) { a = 0.39; b = 358.3077; } else { a = 0.47; b = 650.6154; }
-    }
+    const targetDate = currentDate instanceof Date ? currentDate : parseIsoDate(String(currentDate || '').substring(0, 10));
+    const targetYear = targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.getFullYear() : new Date().getFullYear();
+    const targetMonth = targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.getMonth() : new Date().getMonth();
+    const financialYearStart = targetMonth >= 6 ? targetYear : targetYear - 1;
+    const tables = {
+      2020: [[359, 0, 0], [438, 0.1900, 68.3462], [548, 0.2900, 112.1942], [721, 0.2100, 68.3465], [865, 0.2190, 74.8369], [1282, 0.3477, 186.2119], [2307, 0.3450, 182.7504], [3461, 0.3900, 286.5965], [Infinity, 0.4700, 563.5196]],
+      2024: [[361, 0, 0], [500, 0.1600, 57.8462], [625, 0.2600, 107.8462], [721, 0.1800, 57.8462], [865, 0.1890, 64.3365], [1282, 0.3227, 180.0385], [2596, 0.3200, 176.5769], [3653, 0.3900, 358.3077], [Infinity, 0.4700, 650.6154]],
+      2025: [[361, 0, 0], [500, 0.1600, 57.8462], [625, 0.2600, 107.8462], [721, 0.1800, 57.8462], [865, 0.1890, 64.3365], [1282, 0.3227, 180.0385], [2596, 0.3200, 176.5769], [3653, 0.3900, 358.3077], [Infinity, 0.4700, 650.6154]],
+      2026: [[362, 0, 0], [538, 0.1500, 54.3462], [673, 0.2500, 108.2135], [721, 0.1700, 54.3473], [865, 0.1790, 60.8377], [1282, 0.3227, 185.1935], [2596, 0.3200, 181.7319], [3653, 0.3900, 363.4627], [Infinity, 0.4700, 655.7704]]
+    };
+    const supportedYears = Object.keys(tables).map(Number).sort((a, b) => a - b);
+    const appliedYear = tables[financialYearStart]
+      ? financialYearStart
+      : (financialYearStart > supportedYears[supportedYears.length - 1] ? supportedYears[supportedYears.length - 1] : supportedYears[0]);
+    const rows = tables[appliedYear];
+    const row = rows.find((candidate) => weeklyIncome < candidate[0]) || rows[rows.length - 1];
+    const a = row[1];
+    const b = row[2];
     const weeklyTax = (a * weeklyIncome) - b;
     const monthlyTax = Math.round(weeklyTax * (13 / 3));
     return Math.max(0, Math.round(monthlyTax));
@@ -16347,6 +16344,10 @@ function updateDeductionFormVisibility() {
         if (toggleInput) toggleInput.disabled = false;
         if (res && res.success && res.flags) {
           state.featureFlags = normalizeFeatureFlags(res.flags);
+          if (featureKey === 'hour_types') {
+            if (!state.incomeDependencies || typeof state.incomeDependencies !== 'object') state.incomeDependencies = {};
+            state.incomeDependencies.hourTypes = !enabled;
+          }
           saveCache();
           renderFeatureFlags();
           applyFeatureFlagsLazy();
@@ -16778,7 +16779,11 @@ function parseMonthKey(monthKey) {
 function hourTypeContributesToIncome(hourTypeId) {
   const id = hourTypeId || getDefaultHourTypeId();
   const hourType = state.hourTypeMap[id];
-  return hourType ? hourType.contributes_to_income : true;
+  if (hourType) return !!hourType.contributes_to_income;
+  // Without the feature, legacy entries are all ordinary paid time. Once hour types are enabled
+  // an unknown id is not safe to bill: it may be leave or another non-income type whose lookup has
+  // not resolved. The dependency gate below prevents this conservative fallback during startup.
+  return !getFeatureFlag('hour_types');
 }
 
 function entryContributesToIncome(entry) {
@@ -16794,6 +16799,74 @@ function ensureIncomeCacheStructures() {
   if (!state.incomeCacheMetadata || typeof state.incomeCacheMetadata !== 'object') {
     state.incomeCacheMetadata = {};
   }
+}
+
+const INCOME_DEPENDENCY_KEYS = [
+  'entries',
+  'settings',
+  'contracts',
+  'featureFlags',
+  'hourTypes',
+  'deductions',
+  'superRates',
+  'deductionExceptions'
+];
+
+function markIncomeDependencyReady(key) {
+  if (!state.incomeDependencies || typeof state.incomeDependencies !== 'object') {
+    state.incomeDependencies = {};
+  }
+  if (INCOME_DEPENDENCY_KEYS.indexOf(key) !== -1) state.incomeDependencies[key] = true;
+}
+
+function incomeDependenciesReady() {
+  const readiness = state.incomeDependencies || {};
+  return INCOME_DEPENDENCY_KEYS.every((key) => readiness[key] === true);
+}
+
+function incomeFingerprintRecord_(record, keys) {
+  return keys.map((key) => record && record[key] != null ? record[key] : null);
+}
+
+function incomeFingerprintList_(records, keys, identityKey) {
+  return (Array.isArray(records) ? records : [])
+    .slice()
+    .sort((left, right) => String((left && left[identityKey]) || '').localeCompare(String((right && right[identityKey]) || '')))
+    .map((record) => incomeFingerprintRecord_(record, keys));
+}
+
+// An income summary depends on much more than its entries. Persisting this alongside the entry hash
+// makes an old summary self-invalidating when rates, billing flags, deductions, settings, feature
+// flags, exceptions, or SG tables change (including across browser reloads).
+function calculateIncomeDependencyHash() {
+  const superRates = getCachedSuperGuaranteeRates();
+  return JSON.stringify({
+    hourTypes: incomeFingerprintList_(state.hourTypes, [
+      'id', 'contributes_to_income', 'is_default', 'use_for_rate_calculation'
+    ], 'id'),
+    contracts: incomeFingerprintList_(state.contracts, [
+      'id', 'start_date', 'end_date', 'hourly_rate', 'archived'
+    ], 'id'),
+    deductions: incomeFingerprintList_(state.deductions, [
+      'id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive',
+      'frequency', 'start_date', 'end_date', 'active'
+    ], 'id'),
+    deductionExceptions: incomeFingerprintList_(state.deductionExceptions, [
+      'id', 'deduction_id', 'original_date', 'exception_type', 'new_date', 'new_amount'
+    ], 'id'),
+    settings: incomeFingerprintRecord_(state.settings, [
+      'lost_super_recovery_mode', 'superannuation_rate'
+    ]),
+    features: [
+      !!getFeatureFlag('hour_types'),
+      !!getFeatureFlag('no_lost_super_to_deductions'),
+      !!getFeatureFlag('enable_company_tracking_features'),
+      !!state.companyTrackingEnabled
+    ],
+    superRates: incomeFingerprintList_(superRates, [
+      'id', 'start_date', 'end_date', 'percentage'
+    ], 'start_date')
+  });
 }
 
 function markMonthDirty(monthKey) {
@@ -16871,11 +16944,7 @@ function markIncomeSummaryDirtyForEntries(entries) {
 
 function markAllIncomeSummariesDirty() {
   ensureIncomeCacheStructures();
-  const keys = new Set([
-    ...Object.keys(state.incomeSummaryCache || {}),
-    ...Object.keys(state.incomeCacheMetadata || {})
-  ]);
-  keys.forEach((key) => markMonthDirty(key));
+  getTrackedIncomeMonthKeys().forEach((key) => markMonthDirty(key));
 }
 
 function getTrackedIncomeMonthKeys(extraKeys = []) {
@@ -16963,6 +17032,14 @@ function shouldRecalculateMonth(year, month) {
   if (!metadata) return true;
   if (metadata.isDirty) return true;
   if (!state.incomeSummaryCache[monthKey]) return true;
+  const dependencyHash = calculateIncomeDependencyHash();
+  if (metadata.dependencyHash !== dependencyHash) {
+    metadata.dependencyHash = dependencyHash;
+    metadata.isDirty = true;
+    delete state.incomeSummaryCache[monthKey];
+    state.dirtyIncomeMonths.add(monthKey);
+    return true;
+  }
   const currentHash = calculateMonthEntryHash(year, month);
   if (metadata.entryHash !== currentHash) {
     metadata.entryHash = currentHash;
@@ -17019,6 +17096,7 @@ function cacheIncomeSummary(monthKey, summary) {
   const entryHash = coords ? calculateMonthEntryHash(coords.year, coords.month) : '';
   if (!state.incomeCacheMetadata[monthKey]) state.incomeCacheMetadata[monthKey] = {};
   state.incomeCacheMetadata[monthKey].entryHash = entryHash;
+  state.incomeCacheMetadata[monthKey].dependencyHash = calculateIncomeDependencyHash();
   state.incomeCacheMetadata[monthKey].lastCalculated = Date.now();
   state.incomeCacheMetadata[monthKey].isDirty = false;
   saveCache();
@@ -19301,13 +19379,9 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function buildIncomeSummary(year, month) {
-    const entries = entriesForMonth(year, month).filter(entry => {
-      const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-      const hourType = state.hourTypeMap[hourTypeId];
-      return hourType ? hourType.contributes_to_income : true; // Default to true for backwards compatibility
-    });
+    const entries = entriesForMonth(year, month).filter(entryContributesToIncome);
     const periodStart = new Date(year, month, 1);
-    const periodStartStr = periodStart.toISOString().substring(0, 10);
+    const periodStartStr = isoDate(periodStart);
     const superRate = getSuperGuaranteeRateForDate(periodStartStr);
     let totalMinutes = 0;
     let totalHours = 0;
@@ -20012,7 +20086,7 @@ function getCachedIncomeSummary(monthKey) {
       ? summary.deductionSnapshot
       : computeMonthlyDeductionTotals(year, month);
     const periodStart = startOfDay(new Date(year, month, 1));
-    const periodStartStr = periodStart.toISOString().substring(0, 10);
+    const periodStartStr = isoDate(periodStart);
     const superRate = summary && summary.superRate != null
       ? summary.superRate
       : getSuperGuaranteeRateForDate(periodStartStr);
@@ -20320,10 +20394,16 @@ function getCachedIncomeSummary(monthKey) {
   }
   function renderIncomeSummary() {
     if (!incomeNetBadge && !incomeBreakdownEl) return;
+    if (!incomeDependenciesReady()) {
+      state.incomeSummary = null;
+      updateIncomeSummaryUI(null);
+      applyIncomeBreakdownVisibility();
+      return;
+    }
     ensureCalendarState();
     const { year, month } = state.calendar;
     const monthKey = monthKeyFor(year, month);
-    const isDirty = state.dirtyIncomeMonths && state.dirtyIncomeMonths.has(monthKey);
+    const isDirty = shouldRecalculateMonth(year, month);
     let summary = null;
     if (!isDirty) {
       summary = getCachedIncomeSummary(monthKey);
@@ -22038,10 +22118,7 @@ function getCachedIncomeSummary(monthKey) {
         entry.date && entry.date.startsWith(monthKey)
       );
       monthIncomeMinutes = monthEntries.reduce((acc, entry) => {
-        const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-        const hourType = state.hourTypeMap[hourTypeId];
-        const contributesToIncome = hourType ? hourType.contributes_to_income : true;
-        if (contributesToIncome) {
+        if (entryContributesToIncome(entry)) {
           acc += Number(entry.duration_minutes) || 0;
         }
         return acc;
@@ -24326,7 +24403,7 @@ function getCachedIncomeSummary(monthKey) {
       const ht = state.hourTypeMap[primary.hour_type_id || getDefaultHourTypeId()];
       typeLabel = ht ? ht.name : 'Work';
       color = (ht && ht.color) ? ht.color : 'var(--primary)';
-      isIncome = ht ? ht.contributes_to_income : true;
+      isIncome = hourTypeContributesToIncome(primary.hour_type_id);
     }
     return { dayEntries, primary, minutes, hasOpenPunch, hasHoliday, holidayName: hasHoliday ? (holiday.localName || holiday.name || '') : '', typeLabel, color, isIncome, isDefaultType: primary ? ((primary.hour_type_id || getDefaultHourTypeId()) === getDefaultHourTypeId()) : true };
   }
@@ -25459,6 +25536,7 @@ function getCachedIncomeSummary(monthKey) {
           state.entriesSyncEmpty = sanitizedEntries.length === 0;
           mergeEntriesWithServerEntries(sanitizedEntries);
           state.entriesLoaded = true;
+          markIncomeDependencyReady('entries');
           saveCache();
           renderEntries();
           updateTabStates();
@@ -25521,6 +25599,7 @@ function getCachedIncomeSummary(monthKey) {
               ? state.settings.last_non_custom_theme
               : '';
             state.settings = settings;
+            markIncomeDependencyReady('settings');
 
             if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
               try {
@@ -25587,6 +25666,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((contracts) => {
           state.contracts = (contracts || []).map(sanitizeContract);
+          markIncomeDependencyReady('contracts');
           refreshContractBindings();
           populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id : '');
           ensureInvoiceFormOptions();
@@ -25614,6 +25694,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((flags) => {
           state.featureFlags = normalizeFeatureFlags(flags);
+          markIncomeDependencyReady('featureFlags');
           saveCache();
           renderFeatureFlags();
           applyFeatureFlagsLazy();
@@ -25637,6 +25718,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((deductions) => {
           state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+          markIncomeDependencyReady('deductions');
           markAllIncomeSummariesDirty();
           saveCache();
           renderDeductionsList();
@@ -25680,6 +25762,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((rates) => {
           cacheSuperGuaranteeRates(rates);
+          markIncomeDependencyReady('superRates');
           onCalendarMonthChange();
           if (state.annualData) {
             loadAnnualData();
@@ -25736,6 +25819,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((exceptions) => {
           state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
+          markIncomeDependencyReady('deductionExceptions');
           saveCache();
           renderIncomeSummary();
           onCalendarMonthChange();
@@ -25813,6 +25897,7 @@ function getCachedIncomeSummary(monthKey) {
 
   async function loadTier2Supporting() {
     const hourTypesEnabled = getFeatureFlag('hour_types');
+    if (!hourTypesEnabled) markIncomeDependencyReady('hourTypes');
     if (hourTypesEnabled) {
       updateLoadingFeatureState('hourTypes', { loading: true });
     }
@@ -25833,6 +25918,13 @@ function getCachedIncomeSummary(monthKey) {
       fetchDeductionExceptionsFromServer()
     ]);
     state.loadingTiers.tier2Complete = true;
+    if (incomeDependenciesReady()) {
+      markAllIncomeSummariesDirty();
+      renderIncomeSummary();
+      onCalendarMonthChange();
+    } else {
+      setStatus('Income totals are waiting for required data. Refresh to retry the failed sync.', 'warn');
+    }
     saveCache();
     loadTier3BackgroundEager();
   }
@@ -26017,6 +26109,7 @@ function getCachedIncomeSummary(monthKey) {
 
   function processMonthCalculationQueue() {
     if (!state.lazyLoadQueue) return;
+    if (!incomeDependenciesReady()) return;
     if (state.lazyLoadQueue.currentlyCalculating) return;
     const next = state.lazyLoadQueue.monthsToCalculate.shift();
     if (!next) {
@@ -32109,6 +32202,8 @@ function getCachedIncomeSummary(monthKey) {
         .withSuccessHandler((hourTypes) => {
           state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
           updateHourTypeMap();
+          markIncomeDependencyReady('hourTypes');
+          markAllIncomeSummariesDirty();
           populateRecurringHourTypeOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.hour_type_id : '');
           updateRecurringHourTypeVisibility();
           populateBulkHourTypeOptions(state.bulkEntryForm.draft ? state.bulkEntryForm.draft.hour_type_id : '');
@@ -33629,6 +33724,9 @@ function getCachedIncomeSummary(monthKey) {
         btnSaveSuperRates.textContent = 'Save Rates';
         setStatus('Super guarantee rates saved successfully', 'success');
         cacheSuperGuaranteeRates(response.rates);
+        markAllIncomeSummariesDirty();
+        renderIncomeSummary();
+        onCalendarMonthChange();
         hideSuperGuaranteeRatesModal();
       })
       .withFailureHandler(function(error) {
@@ -34140,8 +34238,7 @@ function getCachedIncomeSummary(monthKey) {
     const htEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 0;
     if (!htEnabled) { noteEl.textContent = ''; noteEl.className = 'ts-entry-billable'; return; }
     const id = (hourTypeSelect && hourTypeSelect.value) ? hourTypeSelect.value : getDefaultHourTypeId();
-    const ht = state.hourTypeMap[id];
-    const income = ht ? ht.contributes_to_income !== false : true;
+    const income = hourTypeContributesToIncome(id);
     noteEl.textContent = income ? 'Billable' : 'Non-billable';
     noteEl.className = 'ts-entry-billable ' + (income ? 'is-billable' : 'is-nonbillable');
   }
