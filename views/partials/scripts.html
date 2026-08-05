@@ -16778,7 +16778,16 @@ function parseMonthKey(monthKey) {
 
 function hourTypeContributesToIncome(hourTypeId) {
   const id = hourTypeId || getDefaultHourTypeId();
-  const hourType = state.hourTypeMap[id];
+  let hourType = state.hourTypeMap[id];
+  // Older sheets sometimes stored the stable slug (most commonly "work") in entries while the
+  // hour_types row itself used a generated id. Resolve that legacy reference by slug before treating
+  // it as unknown. Slugs are unique; arbitrary unknown ids remain conservatively non-billable.
+  if (!hourType && id) {
+    const legacySlug = String(id).trim().toLowerCase();
+    hourType = (state.hourTypes || []).find((candidate) =>
+      candidate && String(candidate.slug || '').trim().toLowerCase() === legacySlug
+    ) || null;
+  }
   if (hourType) return !!hourType.contributes_to_income;
   // Without the feature, legacy entries are all ordinary paid time. Once hour types are enabled
   // an unknown id is not safe to bill: it may be leave or another non-income type whose lookup has
@@ -17242,15 +17251,6 @@ function getCachedIncomeSummary(monthKey) {
       totalMinutes,
       hasEntries: eligibleEntries.length > 0
     };
-  }
-  function entryContributesToIncome(entry) {
-    if (!entry) return false;
-    const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-    const hourType = hourTypeId ? state.hourTypeMap[hourTypeId] : null;
-    if (hourType && Object.prototype.hasOwnProperty.call(hourType, 'contributes_to_income')) {
-      return !!hourType.contributes_to_income;
-    }
-    return true;
   }
   // Build a console script that injects the WHOLE month in one shot — no week paging. The Xero
   // timesheet page keeps every week client-side in per-week ExtJS pivot stores (pivotStore0..N,

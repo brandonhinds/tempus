@@ -240,6 +240,53 @@ test('income summaries wait for complete finance data and invalidate on referenc
   });
   assert.match(scripts, /const entries = entriesForMonth\(year, month\)\.filter\(entryContributesToIncome\);/);
   assert.match(scripts, /return !getFeatureFlag\('hour_types'\);/);
+  assert.match(scripts, /String\(candidate\.slug \|\| ''\)\.trim\(\)\.toLowerCase\(\) === legacySlug/);
+  assert.equal((scripts.match(/function entryContributesToIncome\(entry\)/g) || []).length, 1);
+  const helperStart = scripts.indexOf('function hourTypeContributesToIncome(');
+  const helperEnd = scripts.indexOf('\nfunction ensureIncomeCacheStructures()', helperStart);
+  const clientContext = {
+    state: {
+      hourTypeMap: {
+        'work-id': { id: 'work-id', slug: 'work', contributes_to_income: true },
+        'leave-id': { id: 'leave-id', slug: 'leave', contributes_to_income: false }
+      },
+      hourTypes: [
+        { id: 'work-id', slug: 'work', contributes_to_income: true },
+        { id: 'leave-id', slug: 'leave', contributes_to_income: false }
+      ]
+    },
+    getDefaultHourTypeId: () => 'work-id',
+    getFeatureFlag: () => true
+  };
+  vm.createContext(clientContext);
+  vm.runInContext(scripts.slice(helperStart, helperEnd), clientContext);
+  assert.equal(clientContext.hourTypeContributesToIncome('work'), true);
+  assert.equal(clientContext.hourTypeContributesToIncome('leave-id'), false);
+  assert.equal(clientContext.hourTypeContributesToIncome('unknown-type'), false);
+});
+
+test('legacy Work hour types are repaired to billable without overriding an explicit default', () => {
+  const headers = ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'];
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      headers,
+      ['work-id', 'Work', 'work', '#3b82f6', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 0, '', 1, 'TRUE', 7.5, 'clock', 'hours'],
+      ['wfh-id', 'WFH', 'wfh', '#10b981', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', 2, 'FALSE', '', '', 'hours']
+    ]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  context.cacheClearPrefix = () => {};
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  const work = context.ensureWorkHourType();
+  assert.equal(work.contributes_to_income, true);
+  assert.equal(work.requires_contract, true);
+  assert.equal(work.is_default, false);
+  const rows = spreadsheet.getSheetByName('hour_types').snapshot();
+  const workRow = rows.find((row) => row[headers.indexOf('id')] === 'work-id');
+  assert.equal(workRow[headers.indexOf('contributes_to_income')], 'TRUE');
+  assert.equal(workRow[headers.indexOf('requires_contract')], 'TRUE');
+  assert.equal(workRow[headers.indexOf('is_default')], 'FALSE');
 });
 
 test('Annual View uses taxable income and the same FY2026 PAYG result as the server', () => {

@@ -121,20 +121,15 @@ function migrateEntryDefaultsToHourTypes(sh) {
 
 function api_getHourTypes() {
   var sh = getHourTypesSheet();
-  var data = sh.getDataRange().getValues();
-  var headers = data[0];
-  var rows = data.slice(1);
-
-  // Ensure work hour type exists if no hour types exist
-  if (rows.length === 0) {
-    ensureWorkHourType();
-  }
+  // Work has always been a protected, income-generating type. Repair legacy/partially-upgraded rows
+  // that pre-date that invariant as well as creating the row when it is absent.
+  ensureWorkHourType();
 
   // Carry legacy entry-defaults over to per-type quick-fill settings (runs once), then read fresh.
   migrateEntryDefaultsToHourTypes(sh);
-  data = sh.getDataRange().getValues();
-  headers = data[0];
-  rows = data.slice(1);
+  var data = sh.getDataRange().getValues();
+  var headers = data[0];
+  var rows = data.slice(1);
 
   var hourTypes = rows.map(function(row) {
     return normalizeHourTypeRow(headers, row);
@@ -501,6 +496,13 @@ function api_reorderHourTypes(payload) {
 }
 
 function ensureWorkHourType() {
+  if (typeof withScriptLock_ === 'function') {
+    return withScriptLock_('work hour type repair', ensureWorkHourTypeUnlocked_);
+  }
+  return ensureWorkHourTypeUnlocked_();
+}
+
+function ensureWorkHourTypeUnlocked_() {
   var sh = getHourTypesSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0];
@@ -568,10 +570,38 @@ function ensureWorkHourType() {
 
   var rows = data.slice(1);
   var slugIndex = headers.indexOf('slug');
+  var incomeIndex = headers.indexOf('contributes_to_income');
+  var requiresContractIndex = headers.indexOf('requires_contract');
+  var isDefaultIndex = headers.indexOf('is_default');
+  var hasExplicitDefault = isDefaultIndex !== -1 && rows.some(function(row) {
+    return row[isDefaultIndex] === true || row[isDefaultIndex] === 'TRUE';
+  });
 
   for (var i = 0; i < rows.length; i++) {
     if (rows[i][slugIndex] === 'work') {
-      return normalizeHourTypeRow(headers, rows[i]);
+      var repaired = rows[i].slice();
+      var changed = false;
+      if (incomeIndex !== -1 && repaired[incomeIndex] !== true && repaired[incomeIndex] !== 'TRUE') {
+        repaired[incomeIndex] = 'TRUE';
+        changed = true;
+      }
+      if (requiresContractIndex !== -1 && repaired[requiresContractIndex] !== true && repaired[requiresContractIndex] !== 'TRUE') {
+        repaired[requiresContractIndex] = 'TRUE';
+        changed = true;
+      }
+      if (!hasExplicitDefault && isDefaultIndex !== -1) {
+        repaired[isDefaultIndex] = 'TRUE';
+        changed = true;
+      }
+      if (!hasRateCalcHourType && rateCalcIndex !== -1) {
+        repaired[rateCalcIndex] = 'TRUE';
+        changed = true;
+      }
+      if (changed) {
+        sh.getRange(i + 2, 1, 1, repaired.length).setValues([repaired]);
+        cacheClearPrefix('hour_types');
+      }
+      return normalizeHourTypeRow(headers, repaired);
     }
   }
 
