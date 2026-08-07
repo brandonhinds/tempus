@@ -8,6 +8,7 @@ var HOUR_TYPE_HEADERS = [
   'is_default',
   'auto_populate_public_holidays',
   'auto_populate_hours',
+  'entry_mode',
   'created_at',
   'display_order',
   // Quick-action fields: each hour type can opt into the calendar right-click quick-fill bar with its
@@ -23,6 +24,7 @@ var HOUR_TYPE_HEADERS = [
 // display_order, these are appended at the end (never repositioned) and seeded with a default for any
 // pre-existing rows, so old sheets gain them without disturbing the existing column order.
 var HOUR_TYPE_APPENDED_COLUMNS = [
+  { name: 'entry_mode', def: '' },
   { name: 'display_order', def: '' },
   { name: 'quick_fill_enabled', def: 'FALSE' },
   { name: 'quick_fill_hours', def: '' },
@@ -154,6 +156,11 @@ function boolFromSheetCell(value) {
   return value === true || value === 'TRUE';
 }
 
+function normalizeHourTypeEntryMode(value) {
+  var mode = String(value == null ? '' : value).trim().toLowerCase();
+  return mode === 'simple' || mode === 'detailed' ? mode : '';
+}
+
 function normalizeHourTypeRow(headers, row) {
   if (!headers || !row) return {};
   function cell(header) {
@@ -183,6 +190,7 @@ function normalizeHourTypeRow(headers, row) {
     use_for_rate_calculation: boolFromSheetCell(cell('use_for_rate_calculation')),
     auto_populate_public_holidays: boolFromSheetCell(cell('auto_populate_public_holidays')),
     auto_populate_hours: autoHours,
+    entry_mode: normalizeHourTypeEntryMode(cell('entry_mode')),
     created_at: cell('created_at'),
     display_order: displayOrder,
     quick_fill_enabled: boolFromSheetCell(cell('quick_fill_enabled')),
@@ -276,6 +284,8 @@ function createHourTypeUnlocked_(data) {
         return autoPopulate;
       case 'auto_populate_hours':
         return autoHours;
+      case 'entry_mode':
+        return normalizeHourTypeEntryMode(data.entry_mode);
       case 'created_at':
         return now;
       case 'display_order':
@@ -392,6 +402,10 @@ function updateHourTypeUnlocked_(id, data) {
       normalizedHours = 0;
     }
     updatedRow[autoHoursIndex] = normalizedHours;
+  }
+  var entryModeIndex = headers.indexOf('entry_mode');
+  if (entryModeIndex !== -1 && data.hasOwnProperty('entry_mode')) {
+    updatedRow[entryModeIndex] = normalizeHourTypeEntryMode(data.entry_mode);
   }
   var orderIndex = headers.indexOf('display_order');
   if (orderIndex !== -1 && data.hasOwnProperty('display_order')) {
@@ -541,6 +555,8 @@ function ensureWorkHourTypeUnlocked_() {
           return 'FALSE';
         case 'auto_populate_hours':
           return 0;
+        case 'entry_mode':
+          return '';
         case 'created_at':
           return now;
         case 'display_order':

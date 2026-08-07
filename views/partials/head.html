@@ -1019,7 +1019,8 @@
   .ts-pace-burndown { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-3) var(--space-5); }
   .ts-pace-burndown .ts-av-hrow-name { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:600; }
   .ts-pace-burndown .ts-av-hrow-val { font-size:var(--font-size-base); font-weight:600; }
-  .ts-pace-card-divider { height:1px; background:var(--border); margin:2px 0; }
+  .ts-pace-month-section { display:flex; flex-direction:column; gap:var(--space-2); }
+  .ts-pace-burndown + .ts-pace-month-section { border-top:1px solid var(--border); padding-top:var(--space-3); }
   .ts-pace-month-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
   .ts-pace-subhead { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:600; }
   .ts-pace-bar { position:relative; height:10px; border-radius:5px; background:var(--surface-subtle); overflow:hidden; }

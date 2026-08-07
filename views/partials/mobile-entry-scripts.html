@@ -253,18 +253,31 @@
     // state.contracts so existing entries keep their name. Mirrors desktop's validContractsForDate.
     const validContractsForDate = (dateIso) => state.contracts.filter((c) => !c.archived && contractIsValid(c, dateIso));
 
-    // Mirrors of desktop's contract-mode helpers (the two bundles don't share code beyond entryCore).
-    // A type "needs" a contract when it requires one outright or contributes to income (billable time
-    // must land on a contract); a contract's effective entry mode is its own override else the global
-    // default. Quick actions use these so mobile resolves contracts by the same rules as desktop.
+    // Mirrors of desktop's entry-mode helpers (the two bundles don't share code beyond entryCore).
+    // Settings chooses whether contracts or hour types own the Simple/Detailed override.
     const hourTypeNeedsContract = (ht) => !!ht && (!!ht.requires_contract || !!ht.contributes_to_income);
+    const globalDefaultEntryMode = () =>
+      (state.settings && state.settings.default_entry_mode === 'detailed') ? 'detailed' : 'simple';
+    const entryModeSource = () =>
+      (state.settings && state.settings.entry_mode_source === 'hour_type') ? 'hour_type' : 'contract';
+    const hourTypeEffectiveEntryMode = (ht) => {
+      const m = ht && ht.entry_mode;
+      return (m === 'simple' || m === 'detailed') ? m : globalDefaultEntryMode();
+    };
     const contractEffectiveEntryMode = (c) => {
       const m = c && c.entry_mode;
       if (m === 'simple' || m === 'detailed') return m;
-      return (state.settings && state.settings.default_entry_mode === 'detailed') ? 'detailed' : 'simple';
+      return globalDefaultEntryMode();
     };
-    const validContractsForDateAndMode = (dateIso, mode) =>
-      validContractsForDate(dateIso).filter((c) => contractEffectiveEntryMode(c) === mode);
+    const validContractsForDateAndMode = (dateIso, mode, hourTypeId) => {
+      const valid = validContractsForDate(dateIso);
+      if (mode !== 'simple' && mode !== 'detailed') return valid;
+      if (entryModeSource() === 'hour_type') {
+        const ht = state.hourTypeMap[hourTypeId || defaultHourTypeId()];
+        return hourTypeEffectiveEntryMode(ht) === mode ? valid : [];
+      }
+      return valid.filter((c) => contractEffectiveEntryMode(c) === mode);
+    };
 
     const renderHourTypeSelect = (select) => {
       if (!select) return;
@@ -302,7 +315,7 @@
       const dateIso = state.currentDate;
       const hourType = state.hourTypeMap[hourTypeId || defaultHourTypeId()] || {};
       const needsContract = hourTypeNeedsContract(hourType);
-      const valid = validContractsForDateAndMode(dateIso, entryMode);
+      const valid = validContractsForDateAndMode(dateIso, entryMode, hourTypeId);
       select.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
@@ -336,20 +349,27 @@
     };
 
     // Which entry surfaces the current day offers (desktop's dayEntryModes, mirrored): the union over the
-    // contracts valid that day (by effective mode), PLUS the kind of any entry already logged (so an
+    // configured source, PLUS the kind of any entry already logged (so an
     // existing entry never becomes unreachable if a contract's mode later changes), falling back to the
     // global default when the day has no signal at all.
     const dayEntryModes = () => {
       let simple = false, detailed = false;
-      validContractsForDate(state.currentDate).forEach((c) => {
-        if (contractEffectiveEntryMode(c) === 'detailed') detailed = true; else simple = true;
-      });
+      if (entryModeSource() === 'hour_type') {
+        const types = hourTypesEnabled() ? state.hourTypes : [state.hourTypeMap[defaultHourTypeId()]];
+        types.filter(Boolean).forEach((ht) => {
+          if (hourTypeEffectiveEntryMode(ht) === 'detailed') detailed = true; else simple = true;
+        });
+      } else {
+        validContractsForDate(state.currentDate).forEach((c) => {
+          if (contractEffectiveEntryMode(c) === 'detailed') detailed = true; else simple = true;
+        });
+      }
       (state.entries || []).forEach((e) => {
         if (!e || e.date !== state.currentDate) return;
         if ((e.entry_type || 'basic') === 'advanced') detailed = true; else simple = true;
       });
       if (!simple && !detailed) {
-        if (state.settings && state.settings.default_entry_mode === 'detailed') detailed = true; else simple = true;
+        if (globalDefaultEntryMode() === 'detailed') detailed = true; else simple = true;
       }
       return { simple, detailed, both: simple && detailed };
     };
@@ -1363,17 +1383,25 @@
           .filter((s) => s.in && s.out)
       })).filter((t) => t.sessions.length);
     };
-    // Detailed contracts valid on `dateIso` that actually have at least one day template.
-    const standardDayContractsForDate = (dateIso) =>
-      validContractsForDateAndMode(dateIso, 'detailed').filter((c) => contractStandardDayTemplates(c).length > 0);
+    const applicableStandardDayTemplates = (contract) => contractStandardDayTemplates(contract)
+      .map((template, index) => ({ template, index }))
+      .filter((item) => entryModeSource() !== 'hour_type' || item.template.sessions.every((session) => {
+        const ht = state.hourTypeMap[session.htId || defaultHourTypeId()];
+        return hourTypeEffectiveEntryMode(ht) === 'detailed';
+      }));
+    const standardDayContractsForDate = (dateIso) => {
+      const contracts = entryModeSource() === 'hour_type'
+        ? validContractsForDate(dateIso)
+        : validContractsForDateAndMode(dateIso, 'detailed');
+      return contracts.filter((contract) => applicableStandardDayTemplates(contract).length > 0);
+    };
 
-    // Contracts a quick action may land on, by the same rules as desktop's quick menu: a fill action
-    // writes a Basic entry so only Simple-mode contracts qualify; a punch action takes any valid contract.
+    // Contracts a quick action may land on, by the same rules as desktop's quick menu.
     const quickContractCandidates = (hourType) => {
       if (!hourTypeNeedsContract(hourType)) return [];
       return hourType.quick_fill_mode === 'punch'
-        ? validContractsForDate(state.currentDate)
-        : validContractsForDateAndMode(state.currentDate, 'simple');
+        ? validContractsForDateAndMode(state.currentDate, 'detailed', hourType.id)
+        : validContractsForDateAndMode(state.currentDate, 'simple', hourType.id);
     };
 
     // Quick-fill types actually usable on the current day: punch types only on today (a punch is always
@@ -1465,7 +1493,7 @@
       });
       if (bothKinds) addSection('Day templates');
       sdContracts.forEach((contract) => {
-        contractStandardDayTemplates(contract).forEach((tpl, ti) => {
+        applicableStandardDayTemplates(contract).forEach(({ template: tpl, index: ti }) => {
           const totalMins = tpl.sessions.reduce((acc, s) => {
             const a = timeToMinutes(s.in); const b = timeToMinutes(s.out);
             return acc + ((a !== null && b !== null && b > a) ? (b - a) : 0);

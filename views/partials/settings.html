@@ -64,12 +64,26 @@
     Default entry mode
    </label>
    <div class="ts-note">
-    How you log time by default. <strong>Simple</strong> shows a single total-hours field; <strong>Detailed</strong> shows a session timeline (start/end times and breaks). Any contract can override this on the Contracts page. The Basic/Sessions toggle only appears on days that offer both.
+    How you log time by default. <strong>Simple</strong> shows a single total-hours field; <strong>Detailed</strong> shows a session timeline (start/end times and breaks). The contract or hour type selected above can override this default. The Basic/Sessions toggle only appears on days that offer both.
    </div>
    <div class="ts-settings-field ts-settings-control">
     <select id="set-default-entry-mode">
      <option value="simple">Simple — total hours</option>
      <option value="detailed">Detailed — sessions</option>
+    </select>
+   </div>
+  </div>
+  <div class="ts-settings-item" data-setting-key="entry_mode_source">
+   <label class="ts-settings-label" for="set-entry-mode-source">
+    Entry mode is configured by
+   </label>
+   <div class="ts-note">
+    Choose whether each <strong>contract</strong> or each <strong>hour type</strong> decides between total hours and session tracking. Existing entries are never changed.
+   </div>
+   <div class="ts-settings-field ts-settings-control">
+    <select id="set-entry-mode-source">
+     <option value="contract">Contracts</option>
+     <option value="hour_type">Hour types</option>
     </select>
    </div>
   </div>

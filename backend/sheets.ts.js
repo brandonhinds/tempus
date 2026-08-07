@@ -17,9 +17,9 @@ var TEMPUS_SHEET_SCHEMAS = {
     text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at']
   },
   hour_types: {
-    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'created_at', 'display_order'],
-    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5 },
-    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'created_at']
+    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order'],
+    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5, entry_mode: '' },
+    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at']
   },
   deductions: {
     headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order'],

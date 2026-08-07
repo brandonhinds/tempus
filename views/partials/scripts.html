@@ -3189,6 +3189,7 @@ let ratePreviewInputSyncing = false;
     clone.requires_contract = Boolean(clone.requires_contract === 'TRUE' || clone.requires_contract === true);
     clone.is_default = Boolean(clone.is_default === 'TRUE' || clone.is_default === true);
     clone.use_for_rate_calculation = Boolean(clone.use_for_rate_calculation === 'TRUE' || clone.use_for_rate_calculation === true);
+    clone.entry_mode = (clone.entry_mode === 'simple' || clone.entry_mode === 'detailed') ? clone.entry_mode : '';
     clone.auto_populate_public_holidays = Boolean(
       clone.auto_populate_public_holidays === 'TRUE' || clone.auto_populate_public_holidays === true
     );
@@ -3316,8 +3317,12 @@ let ratePreviewInputSyncing = false;
       return (s != null && e != null && e > s) ? t + (e - s) : t;
     }, 0);
   }
-  // The selected contract's effective entry mode ('' when no contract is chosen yet).
-  function scheduleContractEntryMode(contractId) {
+  // A schedule follows whichever dimension Settings has made authoritative. Contract-based mode still
+  // waits for a contract; hour-type mode can resolve as soon as the type is selected.
+  function scheduleEntryMode(contractId, hourTypeId) {
+    if (getEntryModeSource() === 'hour_type') {
+      return hourTypeEffectiveEntryMode(state.hourTypeMap[hourTypeId || getDefaultHourTypeId()]);
+    }
     if (!contractId) return '';
     const c = state.contractMap[contractId];
     return c ? contractEffectiveEntryMode(c) : '';
@@ -3438,7 +3443,7 @@ let ratePreviewInputSyncing = false;
     el.textContent = total > 0 ? '= ' + formatDecimalHours(total / 60) + 'h each day' : '';
   }
   function updateRecurringTimeMode() {
-    const mode = scheduleContractEntryMode(recurringContractSelect ? recurringContractSelect.value : '');
+    const mode = scheduleEntryMode(recurringContractSelect ? recurringContractSelect.value : '', recurringHourTypeSelect ? recurringHourTypeSelect.value : '');
     const hoursWrap = document.getElementById('recurring-hours-wrap');
     const sessionsWrap = document.getElementById('recurring-sessions-wrap');
     const hint = document.getElementById('recurring-time-hint');
@@ -3451,7 +3456,7 @@ let ratePreviewInputSyncing = false;
     }
   }
   function updateBulkTimeMode() {
-    const mode = scheduleContractEntryMode(bulkContractSelect ? bulkContractSelect.value : '');
+    const mode = scheduleEntryMode(bulkContractSelect ? bulkContractSelect.value : '', bulkHourTypeSelect ? bulkHourTypeSelect.value : '');
     const timeRow = document.getElementById('bulk-time-row');
     const sessionsWrap = document.getElementById('bulk-sessions-wrap');
     const hint = document.getElementById('bulk-time-hint');
@@ -10366,9 +10371,13 @@ function updateDeductionFormVisibility() {
   // Valid contracts on a date whose effective entry mode matches `mode` ('simple' | 'detailed') — Phase 3.
   // Keeps the Basic tab's contract picker to Simple contracts and the Sessions picker to Detailed ones, so a
   // contract only appears on the surface it's set up for. Unknown/omitted mode → all valid contracts.
-  function validContractsForDateAndMode(dateIso, mode) {
+  function validContractsForDateAndMode(dateIso, mode, hourTypeId) {
     const valid = validContractsForDate(dateIso);
     if (mode !== 'simple' && mode !== 'detailed') return valid;
+    if (getEntryModeSource() === 'hour_type') {
+      const hourType = state.hourTypeMap[hourTypeId || getDefaultHourTypeId()];
+      return hourTypeEffectiveEntryMode(hourType) === mode ? valid : [];
+    }
     return valid.filter((c) => contractEffectiveEntryMode(c) === mode);
   }
 
@@ -10796,7 +10805,7 @@ function updateDeductionFormVisibility() {
   function updatePunchContractOptions(preferredContractId) {
     if (!punchContract) return '';
     const dateIso = currentPunchDate();
-    const valid = validContractsForDate(dateIso);
+    const valid = validContractsForDateAndMode(dateIso, 'detailed', punchHourType ? punchHourType.value : getDefaultHourTypeId());
     const currentValue = preferredContractId != null ? preferredContractId : punchContract.value;
     const options = [...valid];
     if (currentValue && !options.some((contract) => contract.id === currentValue)) {
@@ -12392,7 +12401,7 @@ function updateDeductionFormVisibility() {
     const dateIso = manualDate && manualDate.value ? manualDate.value : todayIso();
     // Basic tab is the Simple surface — only offer Simple-mode contracts (an editing entry's own contract is
     // still preserved below even if it's not in this list).
-    const valid = validContractsForDateAndMode(dateIso, 'simple');
+    const valid = validContractsForDateAndMode(dateIso, 'simple', manualHourType ? manualHourType.value : getDefaultHourTypeId());
     const editing = !!state.editingEntryId;
     const explicit = (preferredContractId != null && preferredContractId !== '') ? preferredContractId : '';
     const options = [...valid];
@@ -12416,7 +12425,9 @@ function updateDeductionFormVisibility() {
         // Say WHY the list is empty: contracts may well be active on the date — just none that take
         // Basic entries. The generic "no contract is active" copy was wrong (and confusing) then.
         manualContractWarning.textContent = validContractsForDate(dateIso).length
-          ? 'Your contracts on this date use Sessions — log this time on the Sessions tab, or set a contract’s entry mode to Simple.'
+          ? (getEntryModeSource() === 'hour_type'
+              ? 'This hour type uses Sessions — switch to the Sessions tab or change its entry mode on the Hour Types page.'
+              : 'Your contracts on this date use Sessions — log this time on the Sessions tab, or set a contract’s entry mode to Simple.')
           : 'No contract is active on this date. Add one on the Contracts page before you can log time against it.';
         manualContractWarning.style.display = 'block';
       }
@@ -12910,6 +12921,7 @@ function updateDeductionFormVisibility() {
   if (recurringContractSelect) {
     recurringContractSelect.addEventListener('change', updateRecurringTimeMode);
   }
+  if (recurringHourTypeSelect) recurringHourTypeSelect.addEventListener('change', updateRecurringTimeMode);
   // Sessions editors on both schedule forms (one-time delegated wiring; drafts mutate in place).
   wireScheduleSessions('recurring-sessions-list', 'recurring-sessions-add', recurringDraftSessions, updateRecurringSessionsTotal);
   wireScheduleSessions('bulk-sessions-list', 'bulk-sessions-add', bulkDraftSessions, updateBulkSessionsTotal);
@@ -12999,6 +13011,7 @@ function updateDeductionFormVisibility() {
       updateBulkTimeMode();
     });
   }
+  if (bulkHourTypeSelect) bulkHourTypeSelect.addEventListener('change', updateBulkTimeMode);
 
   if (manualHourType) {
     manualHourType.addEventListener('change', updateBasicSaveEnabled);
@@ -13218,6 +13231,7 @@ function updateDeductionFormVisibility() {
   }
   const roundInput = document.getElementById('set-round');
   const targetHoursInput = document.getElementById('set-target-hours');
+  const entryModeSourceSelect = document.getElementById('set-entry-mode-source');
   const themeSelect = document.getElementById('set-theme');
   const statusNotificationSelect = document.getElementById('set-status-notifications');
   const brandShortcutSelect = document.getElementById('set-brand-shortcut');
@@ -13417,6 +13431,7 @@ function updateDeductionFormVisibility() {
     // New contracts start on "Use default" (inherit the global entry mode).
     const contractEntryModeSelect = document.getElementById('contract-entry-mode');
     if (contractEntryModeSelect) { syncContractEntryModeDefaultLabel(); contractEntryModeSelect.value = ''; }
+    syncContractEntryModeAvailability();
     // Fresh standard-day editor.
     state.contractStandardDayDraft = [];
     if (typeof renderContractStandardDay === 'function') renderContractStandardDay();
@@ -13549,6 +13564,17 @@ function updateDeductionFormVisibility() {
     sel.options[0].textContent = 'Use default (' + dflt + ')';
   }
 
+  function syncContractEntryModeAvailability() {
+    const column = document.getElementById('contract-entry-mode-column');
+    const standardHoursColumn = document.getElementById('contract-standard-hours-column');
+    const contractControlsMode = getEntryModeSource() === 'contract';
+    if (column) column.style.display = contractControlsMode ? '' : 'none';
+    if (standardHoursColumn) {
+      standardHoursColumn.classList.toggle('ts-col-span-6', contractControlsMode);
+      standardHoursColumn.classList.toggle('ts-col-span-12', !contractControlsMode);
+    }
+  }
+
   // --- Contract day templates (Phase 4; multi-template + naming 2026-07-06) -------------------------
   // Stored shape v2: [{ name, sessions: [{ in, out, htId }] }]. v1 (a bare session array — the original
   // single "Standard day") is normalised on read by wrapping it as one template named "Standard day";
@@ -13611,10 +13637,15 @@ function updateDeductionFormVisibility() {
       // and doubles as the empty state on a template-less contract.
       + '<button type="button" class="ts-sd-add-tile">+ Add template</button>';
   }
-  // The section only makes sense for a Detailed contract — show it based on the entry-mode select's effective mode.
+  // Contract-owned mode follows the contract select. With hour-type-owned mode, templates remain available
+  // whenever at least one hour type uses Sessions because each template row chooses its own hour type.
   function updateContractStandardDayVisibility() {
     const sec = document.getElementById('contract-standard-day-section');
     if (!sec) return;
+    if (getEntryModeSource() === 'hour_type') {
+      sec.style.display = (state.hourTypes || []).some((hourType) => hourTypeEffectiveEntryMode(hourType) === 'detailed') ? '' : 'none';
+      return;
+    }
     const sel = document.getElementById('contract-entry-mode');
     const mode = sel ? sel.value : '';
     const effective = (mode === 'simple' || mode === 'detailed') ? mode : getGlobalDefaultEntryMode();
@@ -13776,6 +13807,7 @@ function updateDeductionFormVisibility() {
       // Setting .value auto-refreshes the enhanceSelect() UI via its overridden value setter.
       contractEntryModeSelect.value = (contract.entry_mode === 'simple' || contract.entry_mode === 'detailed') ? contract.entry_mode : '';
     }
+    syncContractEntryModeAvailability();
     loadContractStandardDayDraft(contract);
     const contractColorInput = document.getElementById('contract-color');
     if (contractColorInput) {
@@ -14176,9 +14208,10 @@ function updateDeductionFormVisibility() {
     addDetail('Date range', rangeNode);
     addDetail('Hourly rate', `${Number(contract.hourly_rate || 0).toFixed(2)} / hr`);
     addDetail('Total hours', totalHoursValue > 0 ? `${formatDecimalHours(totalHoursValue)} hrs` : 'Unlimited');
-    // Entry mode (Phase 3): explicit override, or the resolved global default when inheriting.
+    // When hour types own the choice, do not present the dormant contract override as authoritative.
     const emOverride = contract.entry_mode;
-    const emLabel = emOverride === 'simple' ? 'Simple'
+    const emLabel = getEntryModeSource() === 'hour_type' ? 'Set by hour type'
+      : emOverride === 'simple' ? 'Simple'
       : emOverride === 'detailed' ? 'Detailed (sessions)'
       : ('Default (' + (getGlobalDefaultEntryMode() === 'detailed' ? 'Detailed' : 'Simple') + ')');
     addDetail('Entry mode', emLabel);
@@ -21299,10 +21332,12 @@ function getCachedIncomeSummary(monthKey) {
       const contractObj = (typeof getContractById === 'function') ? getContractById(contract.contractId) : null;
       if (contractObj) {
         card.appendChild(buildContractBurndown(contractObj));
-        const sep = document.createElement('div');
-        sep.className = 'ts-pace-card-divider';
-        card.appendChild(sep);
       }
+
+      // Keep the complete monthly story together. The section itself owns the single boundary below the
+      // contract burndown, so a loose divider can never drift between the progress bar and its figures.
+      const monthSection = document.createElement('div');
+      monthSection.className = 'ts-pace-month-section';
 
       // "This month" pacing section.
       const monthHead = document.createElement('div');
@@ -21314,7 +21349,7 @@ function getCachedIncomeSummary(monthKey) {
       loggedEl.className = 'ts-pace-logged';
       loggedEl.textContent = `${formatDecimalHours(logged)} hrs logged`;
       monthHead.append(monthLabel, loggedEl);
-      card.appendChild(monthHead);
+      monthSection.appendChild(monthHead);
 
       const bar = document.createElement('div');
       bar.className = 'ts-pace-bar';
@@ -21336,7 +21371,7 @@ function getCachedIncomeSummary(monthKey) {
         marker.title = `Target ${formatDecimalHours(target)} hrs`;
         bar.appendChild(marker);
       }
-      card.appendChild(bar);
+      monthSection.appendChild(bar);
 
       const stats = document.createElement('div');
       stats.className = 'ts-pace-stats';
@@ -21414,8 +21449,9 @@ function getCachedIncomeSummary(monthKey) {
       const foot = document.createElement('div');
       foot.className = 'ts-pace-foot';
       foot.append(stats, toggle);
-      card.appendChild(foot);
-      card.appendChild(details);
+      monthSection.appendChild(foot);
+      monthSection.appendChild(details);
+      card.appendChild(monthSection);
 
       expectedHoursContentEl.appendChild(card);
     });
@@ -22644,19 +22680,38 @@ function getCachedIncomeSummary(monthKey) {
     const m = state.settings && state.settings.default_entry_mode;
     return m === 'detailed' ? 'detailed' : 'simple';
   }
+  function getEntryModeSource() {
+    return state.settings && state.settings.entry_mode_source === 'hour_type' ? 'hour_type' : 'contract';
+  }
+  function hourTypeEffectiveEntryMode(hourType) {
+    const mode = hourType && hourType.entry_mode;
+    return (mode === 'simple' || mode === 'detailed') ? mode : getGlobalDefaultEntryMode();
+  }
   // A contract's effective mode: its own override ('simple'/'detailed') else the global default.
   function contractEffectiveEntryMode(contract) {
     const m = contract && contract.entry_mode;
     return (m === 'simple' || m === 'detailed') ? m : getGlobalDefaultEntryMode();
+  }
+  function effectiveEntryMode(contract, hourType) {
+    return getEntryModeSource() === 'hour_type'
+      ? hourTypeEffectiveEntryMode(hourType)
+      : contractEffectiveEntryMode(contract);
   }
   // Which entry surfaces a day offers: the union over the contracts valid that day (by effective mode), PLUS
   // the kind of any entry already logged that day (so an existing entry never becomes unreachable if a
   // contract's mode later changes), falling back to the global default when the day has no signal at all.
   function dayEntryModes(dateIso) {
     let simple = false, detailed = false;
-    (validContractsForDate(dateIso) || []).forEach((c) => {
-      if (contractEffectiveEntryMode(c) === 'detailed') detailed = true; else simple = true;
-    });
+    if (getEntryModeSource() === 'hour_type') {
+      const types = getFeatureFlag('hour_types') && state.hourTypes.length ? state.hourTypes : [getDefaultHourType()];
+      types.filter(Boolean).forEach((hourType) => {
+        if (hourTypeEffectiveEntryMode(hourType) === 'detailed') detailed = true; else simple = true;
+      });
+    } else {
+      (validContractsForDate(dateIso) || []).forEach((c) => {
+        if (contractEffectiveEntryMode(c) === 'detailed') detailed = true; else simple = true;
+      });
+    }
     (state.entries || []).forEach((e) => {
       if (!e || e.date !== dateIso) return;
       if (resolveEntryType(e) === 'advanced') detailed = true; else simple = true;
@@ -22705,7 +22760,13 @@ function getCachedIncomeSummary(monthKey) {
           });
           return;
         }
-        if (ev.target.closest('.ts-day-sessions-clock')) { ev.preventDefault(); startTimelineClock(); return; }
+        const clockBtn = ev.target.closest('.ts-day-sessions-clock');
+        if (clockBtn) {
+          ev.preventDefault();
+          if (clockBtn.dataset.clockAction === 'out') quickPunchOutForDate(state.selectedCalendarDate);
+          else startTimelineClock();
+          return;
+        }
         // --- Day comment editor ---
         if (ev.target.closest('.ts-day-sessions-comment-del')) {
           ev.preventDefault(); ev.stopPropagation();
@@ -22892,7 +22953,7 @@ function getCachedIncomeSummary(monthKey) {
         : '';
       // Sessions is the Detailed surface — only offer Detailed-mode contracts (the current contract is still
       // preserved via `extra` below even if it isn't one of them, so an existing session keeps its contract).
-      const valid = validContractsForDateAndMode(dateIso, 'detailed');
+      const valid = validContractsForDateAndMode(dateIso, 'detailed', htId);
       // Single available contract already selected → lock it (auto-selected + greyed, no dropdown, no
       // "No contract"), mirroring the Basic tab. A new session pre-seeds this sole contract so it lands here;
       // an existing session pinned to a different (or no) contract still gets the full picker below.
@@ -23031,13 +23092,14 @@ function getCachedIncomeSummary(monthKey) {
         }
       }
     }
-    // Start clock: only on the interactive (Sessions) surface, only on today, only when nothing's already
-    // open, and not mid-add. Punches in NOW. (Hidden on the Basic tab's read-only day-at-a-glance.)
+    // One contextual clock action on the interactive Sessions surface: an open session becomes Clock out;
+    // otherwise today offers Clock in. Both use the same save paths as the right-click menu.
     // A "draft" is open whenever a row is being edited OR there are buffered-but-unsaved time edits — the
     // Save/Cancel bar and the "held" state persist across row switches until one Save commits them all.
     const editing = !!daySessionsEdit || daySessionsPending.size > 0;
-    const clockBtnHtml = (interactive && dateIso === todayIso() && !data.hasOpen && !editing)
-      ? `<button type="button" class="ts-day-sessions-clock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg><span>Start clock</span></button>`
+    const clockAction = data.hasOpen ? 'out' : (dateIso === todayIso() && canStartTimelineClock(dateIso) ? 'in' : '');
+    const clockBtnHtml = (interactive && clockAction && !editing)
+      ? `<button type="button" class="ts-day-sessions-clock" data-clock-action="${clockAction}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg><span>${clockAction === 'out' ? 'Clock out' : 'Clock in'}</span></button>`
       : '';
     // Save/Cancel live at the bottom of the sessions area (out of the editor card) while adding/editing — this
     // frees the card's times row to show the live duration prominently. Same button classes, so the delegated
@@ -23235,7 +23297,8 @@ function getCachedIncomeSummary(monthKey) {
   function enterDaySessionAdd() {
     stashDaySessionEdit(); // keep any open edit buffered while adding a new session
     const dateIso = state.selectedCalendarDate;
-    const valid = validContractsForDateAndMode(dateIso, 'detailed');
+    const seedHourTypeId = getDefaultHourTypeId();
+    const valid = validContractsForDateAndMode(dateIso, 'detailed', seedHourTypeId);
     let latestOut = '';
     (state.entries || []).forEach((e) => {
       if (!e || e.date !== dateIso) return;
@@ -23252,7 +23315,7 @@ function getCachedIncomeSummary(monthKey) {
       mode: 'add',
       inVal: latestOut || '',
       outVal: '',
-      htId: getDefaultHourTypeId(),
+      htId: seedHourTypeId,
       contractId: seedContract,
       anchorMin: daySessionStartAnchor(dateIso, null, -1, '')
     };
@@ -23873,15 +23936,35 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
-  // Start the live clock from the timeline (Phase 2c-final): punch in NOW as an open session, using the
-  // day's default hour type + first valid contract. Only offered on today, and only when nothing is already
-  // open (an open session is closed by editing its end time). Type/contract can be corrected on the row after.
+  // Resolve the type used by the one-click clock. In hour-type-owned mode the default can legitimately be
+  // Simple, so fall forward to the first Detailed type instead of creating a Sessions record against it.
+  function timelineClockHourType() {
+    const defaultType = state.hourTypeMap[getDefaultHourTypeId()] || getDefaultHourType();
+    if (getEntryModeSource() !== 'hour_type') return defaultType || null;
+    if (defaultType && hourTypeEffectiveEntryMode(defaultType) === 'detailed') return defaultType;
+    return (state.hourTypes || []).find((hourType) => hourTypeEffectiveEntryMode(hourType) === 'detailed') || null;
+  }
+  function canStartTimelineClock(dateIso) {
+    if (dateIso !== todayIso()) return false;
+    const hourType = timelineClockHourType();
+    if (!hourType) return false;
+    return !hourTypeNeedsContract(hourType)
+      || validContractsForDateAndMode(dateIso, 'detailed', hourType.id).length > 0;
+  }
+
+  // Start the live clock from the timeline or context menu: punch in NOW as an open session, using the
+  // resolved Detailed hour type + first valid contract. Type/contract can be corrected on the row after.
   function startTimelineClock() {
     const dateIso = state.selectedCalendarDate;
     if (dateIso !== todayIso()) return;
     const now = new Date().toTimeString().slice(0, 5);
-    const hourTypeId = getDefaultHourTypeId();
-    const valid = validContractsForDateAndMode(dateIso, 'detailed');
+    const clockHourType = timelineClockHourType();
+    if (!clockHourType) {
+      setStatus('Set an hour type to Detailed before starting the clock.', 'warn');
+      return;
+    }
+    const hourTypeId = clockHourType.id;
+    const valid = validContractsForDateAndMode(dateIso, 'detailed', hourTypeId);
     const contractId = valid.length ? valid[0].id : '';
     // A billable / requires-contract default hour type can't clock in contract-less.
     if (!contractId && hourTypeNeedsContract(state.hourTypeMap[hourTypeId])) {
@@ -24145,9 +24228,24 @@ function getCachedIncomeSummary(monthKey) {
       .map((t) => ({ name: (t.name || '').trim() || 'Standard day', comment: t.comment || '', sessions: t.sessions.filter((s) => s.in && s.out) }))
       .filter((t) => t.sessions.length);
   }
-  // Detailed contracts valid on `dateIso` that actually have at least one day template.
+  // Preserve each template's stored index while filtering what can be applied under the active source.
+  // In hour-type mode every session in a template must belong to a Detailed type; otherwise applying the
+  // template would create a Sessions entry for a type explicitly configured for total hours.
+  function applicableStandardDayTemplates(contract) {
+    return contractStandardDayTemplates(contract)
+      .map((template, index) => ({ template, index }))
+      .filter((item) => getEntryModeSource() !== 'hour_type' || item.template.sessions.every((session) => {
+        const hourType = state.hourTypeMap[session.htId || session.hour_type_id || getDefaultHourTypeId()];
+        return hourTypeEffectiveEntryMode(hourType) === 'detailed';
+      }));
+  }
+  // Valid contracts that actually have at least one applicable day template.
   function standardDayContractsForDate(dateIso) {
-    return (dateIso ? validContractsForDateAndMode(dateIso, 'detailed') : []).filter((c) => contractStandardDayTemplates(c).length > 0);
+    if (!dateIso) return [];
+    const contracts = getEntryModeSource() === 'hour_type'
+      ? validContractsForDate(dateIso)
+      : validContractsForDateAndMode(dateIso, 'detailed');
+    return contracts.filter((contract) => applicableStandardDayTemplates(contract).length > 0);
   }
   function dayHasStandardDayTemplate(dateIso) {
     return standardDayContractsForDate(dateIso).length > 0;
@@ -25224,6 +25322,15 @@ function getCachedIncomeSummary(monthKey) {
       defaultValue: 'simple',
       event: 'change'
     },
+    entry_mode_source: {
+      section: 'core',
+      order: 16,
+      element: () => entryModeSourceSelect,
+      getValue: (el) => (el && el.value === 'hour_type') ? 'hour_type' : 'contract',
+      setValue: (el, val) => { if (el) el.value = (val === 'hour_type' ? 'hour_type' : 'contract'); },
+      defaultValue: 'contract',
+      event: 'change'
+    },
     theme: {
       section: 'core',
       order: 20,
@@ -25476,6 +25583,12 @@ function getCachedIncomeSummary(monthKey) {
       state.settings = { ...state.settings, ...next };
       saveCache();
       applyStatusDisplay();
+      syncContractEntryModeDefaultLabel();
+      syncContractEntryModeAvailability();
+      updateContractStandardDayVisibility();
+      updateRecurringTimeMode();
+      updateBulkTimeMode();
+      renderHourTypes();
       // Clear annual data cache when lost super recovery mode changes to force recalculation
       if (state.annualData && next.lost_super_recovery_mode && next.lost_super_recovery_mode !== settingsInitialState.lost_super_recovery_mode) {
         state.annualData = null;
@@ -29942,7 +30055,7 @@ function getCachedIncomeSummary(monthKey) {
     types.forEach((hourType) => {
       const isPunch = hourType.quick_fill_mode === 'punch';
       const candidates = hourTypeNeedsContract(hourType)
-        ? (isPunch ? validContractsForDate(calendarContextMenuDate) : validContractsForDateAndMode(calendarContextMenuDate, 'simple'))
+        ? (isPunch ? validContractsForDateAndMode(calendarContextMenuDate, 'detailed', hourType.id) : validContractsForDateAndMode(calendarContextMenuDate, 'simple', hourType.id))
         : [];
       if (candidates.length > 1) candidates.forEach((c) => items.push({ hourType, contract: c }));
       // A fill-mode type that needs a contract but has NO valid Simple contract on this day can never
@@ -30105,7 +30218,7 @@ function getCachedIncomeSummary(monthKey) {
       const clockIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>';
       let sdItemCount = 0;
       sdContracts.forEach((c) => {
-        contractStandardDayTemplates(c).forEach((tpl, ti) => {
+        applicableStandardDayTemplates(c).forEach(({ template: tpl, index: ti }) => {
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'ts-calendar-context-item';
@@ -30123,16 +30236,19 @@ function getCachedIncomeSummary(monthKey) {
     const actionsSection = calendarContextMenu.querySelector('[data-section="actions"]');
     const dayHasClearableEntries = !!dateIso && state.entries.some((e) => e && e.date === dateIso);
     if (actionsSection) actionsSection.style.display = dayHasClearableEntries ? 'block' : 'none';
-    // "Punch out" — a standalone action at the very bottom that clocks out the open punch in place (no modal).
-    // Shown ONLY when the right-clicked day IS the one with the open punch, and only when there's exactly one
-    // open punch in total: with several out it can't know which to close, so it stays hidden and you use the
-    // status-bar clock to find them. (Stored on the section so the click handler knows which day to close.)
+    // Contextual clock action: today's idle state offers Clock in; the day containing the single open punch
+    // offers Clock out. A running punch on another day suppresses Clock in so we never create two live clocks.
     const punchSection = calendarContextMenu.querySelector('[data-section="punch"]');
     if (punchSection) {
       const openEntries = (state.entries || []).filter((e) => e && (Number(e.open_punch_count) || 0) > 0);
       const totalOpen = openEntries.reduce((sum, e) => sum + (Number(e.open_punch_count) || 0), 0);
       const showPunchOut = totalOpen === 1 && openEntries.length === 1 && openEntries[0].date === dateIso;
-      punchSection.style.display = showPunchOut ? 'block' : 'none';
+      const showPunchIn = totalOpen === 0 && canStartTimelineClock(dateIso);
+      const clockBtn = document.getElementById('calendar-clock-toggle');
+      const clockLabel = document.getElementById('calendar-clock-toggle-label');
+      if (clockBtn) clockBtn.dataset.clockAction = showPunchOut ? 'out' : 'in';
+      if (clockLabel) clockLabel.textContent = showPunchOut ? 'Clock out' : 'Clock in';
+      punchSection.style.display = (showPunchOut || showPunchIn) ? 'block' : 'none';
     }
     updateCalendarContextActions(dateIso);
   }
@@ -30268,8 +30384,10 @@ function getCachedIncomeSummary(monthKey) {
     const cell = event.target.closest('.ts-calendar-cell');
     if (!cell || !cell.dataset.date) return;
     const featureEnabled = state.featureFlags.default_inputs && state.featureFlags.default_inputs.enabled;
-    // Open for quick-fill users (default_inputs) OR whenever there's a copy / standard-day action to offer.
-    if (!featureEnabled && !dayCopyAvailableForDate(cell.dataset.date) && !dayHasStandardDayTemplate(cell.dataset.date)) return;
+    const hasOpenOnDay = (state.entries || []).some((entry) => entry && entry.date === cell.dataset.date && (Number(entry.open_punch_count) || 0) > 0);
+    const hasClockAction = hasOpenOnDay || (!hasOpenPunch() && canStartTimelineClock(cell.dataset.date));
+    // Open for quick-fill/copy/template users, and always when a contextual clock action is available.
+    if (!featureEnabled && !dayCopyAvailableForDate(cell.dataset.date) && !dayHasStandardDayTemplate(cell.dataset.date) && !hasClockAction) return;
     ensureCalendarState();
     event.preventDefault();
     calendarContextMenuDate = cell.dataset.date;
@@ -30442,12 +30560,17 @@ function getCachedIncomeSummary(monthKey) {
       copyLastWeekForDate(dateIso);
     });
   }
-  const calendarPunchOutBtn = document.getElementById('calendar-punch-out');
-  if (calendarPunchOutBtn) {
-    calendarPunchOutBtn.addEventListener('click', () => {
+  const calendarClockToggleBtn = document.getElementById('calendar-clock-toggle');
+  if (calendarClockToggleBtn) {
+    calendarClockToggleBtn.addEventListener('click', () => {
       const dateIso = calendarContextMenuDate;
+      const action = calendarClockToggleBtn.dataset.clockAction;
       hideCalendarContextMenu();
-      quickPunchOutForDate(dateIso);
+      if (action === 'out') quickPunchOutForDate(dateIso);
+      else {
+        state.selectedCalendarDate = dateIso;
+        startTimelineClock();
+      }
     });
   }
   document.addEventListener('click', (event) => {
@@ -31193,9 +31316,10 @@ function getCachedIncomeSummary(monthKey) {
     const rawMinutes = Number.isFinite(hoursValue) && hoursValue > 0 ? Math.round(hoursValue * 60) : 0;
     const roundedMinutes = rawMinutes > 0 ? roundDuration(rawMinutes) : 0;
     const contractId = bulkContractSelect ? bulkContractSelect.value : '';
-    // Sessions ride along only when the chosen contract is Detailed; they define the daily duration and
-    // force the daily distribution (a monthly-total spread can't be expressed as sessions).
-    const sessionsMode = scheduleContractEntryMode(contractId) === 'detailed';
+    // Sessions ride along only when the active entry-mode source resolves to Detailed; they define the
+    // daily duration and force daily distribution (a monthly-total spread can't be sessions).
+    const bulkHourTypeId = bulkHourTypeSelect ? bulkHourTypeSelect.value : '';
+    const sessionsMode = scheduleEntryMode(contractId, bulkHourTypeId) === 'detailed';
     const sessions = sessionsMode && state.bulkEntryForm.draft && Array.isArray(state.bulkEntryForm.draft.sessions)
       ? state.bulkEntryForm.draft.sessions.slice()
       : [];
@@ -31229,7 +31353,7 @@ function getCachedIncomeSummary(monthKey) {
       distribution_mode: mode,
       sessions: sessions,
       contract_id: contractId,
-      hour_type_id: bulkHourTypeSelect ? bulkHourTypeSelect.value : '',
+      hour_type_id: bulkHourTypeId,
       start_date: startDate,
       end_date: endDate,
       include_weekends: bulkSkipWeekendsToggle ? !bulkSkipWeekendsToggle.checked : false,
@@ -31393,7 +31517,7 @@ function getCachedIncomeSummary(monthKey) {
     // Flag every empty mandatory field at once (red outline, focus the first) instead of one-at-a-time
     // inline text errors. Hours is the same input in both daily/monthly modes; in sessions mode the
     // hours input is hidden, so an empty session list reports as inline text instead of a ring.
-    const sessionsMode = scheduleContractEntryMode(draft.contract_id) === 'detailed';
+    const sessionsMode = scheduleEntryMode(draft.contract_id, draft.hour_type_id) === 'detailed';
     const hoursValid = sessionsMode
       ? draft.duration_minutes > 0
       : (draft.distribution_mode === 'monthly' ? draft.monthly_total_minutes > 0 : draft.duration_minutes > 0);
@@ -31659,9 +31783,9 @@ function getCachedIncomeSummary(monthKey) {
       generated_until: state.recurringEntryForm.draft ? state.recurringEntryForm.draft.generated_until : '',
       warning_message: state.recurringEntryForm.draft ? state.recurringEntryForm.draft.warning_message : ''
     };
-    // Sessions ride along only when the chosen contract is Detailed (the sanitizer then derives the
-    // duration from them); on a Simple contract they're stripped so the schedule stays whole-hours.
-    values.sessions = scheduleContractEntryMode(values.contract_id) === 'detailed'
+    // Sessions ride along only when the active entry-mode source resolves to Detailed (the sanitizer then
+    // derives duration from them); in Simple mode they're stripped so the schedule stays whole-hours.
+    values.sessions = scheduleEntryMode(values.contract_id, values.hour_type_id) === 'detailed'
       ? (state.recurringEntryForm.draft && Array.isArray(state.recurringEntryForm.draft.sessions)
           ? state.recurringEntryForm.draft.sessions.slice() : [])
       : [];
@@ -31881,7 +32005,7 @@ function getCachedIncomeSummary(monthKey) {
   function validateRecurringForm(draft) {
     if (!draft.label) return 'Name is required.';
     if (!draft.duration_minutes || draft.duration_minutes <= 0) {
-      return scheduleContractEntryMode(draft.contract_id) === 'detailed'
+      return scheduleEntryMode(draft.contract_id, draft.hour_type_id) === 'detailed'
         ? 'Add at least one session with an end time.'
         : 'Hours must be greater than zero.';
     }
@@ -31989,7 +32113,7 @@ function getCachedIncomeSummary(monthKey) {
     // Hours only rings on a Simple-mode contract — in sessions mode the input is hidden and the
     // "add a session" case is reported by validateRecurringForm's inline text instead.
     if ((!draft.duration_minutes || draft.duration_minutes <= 0) && recurringHoursInput
-        && scheduleContractEntryMode(draft.contract_id) !== 'detailed') {
+        && scheduleEntryMode(draft.contract_id, draft.hour_type_id) !== 'detailed') {
       recurringHoursInput.classList.add('ts-field-invalid');
       failures.push(recurringHoursInput);
     }
@@ -32268,6 +32392,9 @@ function getCachedIncomeSummary(monthKey) {
       const detailParts = [];
       detailParts.push(hourType.contributes_to_income ? 'Counts toward your income' : 'Leave — doesn’t count toward income');
       detailParts.push(hourTypeNeedsContract(hourType) ? 'needs a contract' : 'no contract needed');
+      if (getEntryModeSource() === 'hour_type') {
+        detailParts.push(hourTypeEffectiveEntryMode(hourType) === 'detailed' ? 'sessions' : 'total hours');
+      }
       // Show the effective quick-fill duration (own value, else the fallback chain) for any type that
       // appears in the quick-fill bar — including the default, which is always included.
       if (hourType.quick_fill_enabled || hourType.id === getDefaultHourTypeId()) detailParts.push('quick-fill ' + fmtHours(quickFillHoursForType(hourType)) + 'h');
@@ -32841,6 +32968,7 @@ function getCachedIncomeSummary(monthKey) {
     const contributesInput = document.getElementById('hour-type-contributes-income');
     const defaultInput = document.getElementById('hour-type-is-default');
     const rateCalcInput = document.getElementById('hour-type-use-for-rate-calc');
+    const entryModeInput = document.getElementById('hour-type-entry-mode');
 
     if (!modal) return;
 
@@ -32857,6 +32985,13 @@ function getCachedIncomeSummary(monthKey) {
     contributesInput.checked = hourType ? hourType.contributes_to_income : false;
     defaultInput.checked = hourType ? hourType.is_default : false;
     if (rateCalcInput) rateCalcInput.checked = hourType ? hourType.use_for_rate_calculation : false;
+    if (entryModeInput) entryModeInput.value = hourType && (hourType.entry_mode === 'simple' || hourType.entry_mode === 'detailed') ? hourType.entry_mode : '';
+    const entryModeNote = document.getElementById('hour-type-entry-mode-note');
+    if (entryModeNote) {
+      entryModeNote.textContent = getEntryModeSource() === 'hour_type'
+        ? 'This hour type currently controls whether its entries use total hours or sessions.'
+        : 'Saved for use when Settings → Entry mode is configured by is set to Hour types.';
+    }
 
     // Quick-fill settings.
     const quickFillEnabledInput = document.getElementById('hour-type-quick-fill-enabled');
@@ -32935,6 +33070,7 @@ function getCachedIncomeSummary(monthKey) {
     const contributesInput = document.getElementById('hour-type-contributes-income');
     const defaultInput = document.getElementById('hour-type-is-default');
     const rateCalcInput = document.getElementById('hour-type-use-for-rate-calc');
+    const entryModeInput = document.getElementById('hour-type-entry-mode');
     const saveBtn = document.getElementById('btn-save-hour-type');
 
     const quickFillEnabledInput = document.getElementById('hour-type-quick-fill-enabled');
@@ -32947,6 +33083,7 @@ function getCachedIncomeSummary(monthKey) {
     const contributesToIncome = contributesInput.checked;
     const isDefault = defaultInput.checked;
     const useForRateCalc = rateCalcInput ? rateCalcInput.checked : false;
+    const entryMode = entryModeInput && (entryModeInput.value === 'simple' || entryModeInput.value === 'detailed') ? entryModeInput.value : '';
     const quickFillEnabled = quickFillEnabledInput ? quickFillEnabledInput.checked : false;
     const quickFillMode = getHourTypeQuickMode();
     const icon = iconInput && iconInput.value ? iconInput.value : 'clock';
@@ -32987,6 +33124,7 @@ function getCachedIncomeSummary(monthKey) {
       contributes_to_income: contributesToIncome,
       is_default: isDefault,
       use_for_rate_calculation: useForRateCalc,
+      entry_mode: entryMode,
       auto_populate_public_holidays: autoPopulateHolidays,
       auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0,
       quick_fill_enabled: quickFillEnabled,
@@ -33015,6 +33153,7 @@ function getCachedIncomeSummary(monthKey) {
             contributes_to_income: contributesToIncome,
             is_default: isDefault,
             use_for_rate_calculation: useForRateCalc,
+            entry_mode: entryMode,
             auto_populate_public_holidays: autoPopulateHolidays,
             auto_populate_hours: autoPopulateHolidays ? autoHolidayHours : 0,
             quick_fill_enabled: quickFillEnabled,

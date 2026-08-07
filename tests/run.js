@@ -289,6 +289,25 @@ test('legacy Work hour types are repaired to billable without overriding an expl
   assert.equal(workRow[headers.indexOf('is_default')], 'FALSE');
 });
 
+test('hour type entry modes persist and invalid values fall back to the global default', () => {
+  const headers = ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'];
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      headers,
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '', 1, 'TRUE', 7.5, 'clock', 'hours']
+    ]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  context.cacheClearPrefix = () => {};
+  context.withScriptLock_ = (label, callback) => callback();
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  assert.equal(context.api_updateHourType('work-id', { entry_mode: 'detailed' }).entry_mode, 'detailed');
+  assert.equal(context.api_updateHourType('work-id', { entry_mode: 'unexpected' }).entry_mode, '');
+  const rows = spreadsheet.getSheetByName('hour_types').snapshot();
+  assert.equal(rows[1][rows[0].indexOf('entry_mode')], '');
+});
+
 test('Annual View uses taxable income and the same FY2026 PAYG result as the server', () => {
   const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
   assert.match(scripts, /tax = estimateTaxLocal\(taxableIncome, periodStartIso\);/);
@@ -328,9 +347,33 @@ test('backend globals and modified HTML scripts parse without duplicate function
   const duplicates = [...names.entries()].filter(([, locations]) => locations.length > 1);
   assert.deepStrictEqual(duplicates, []);
   const main = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
+  const mobile = fs.readFileSync(path.join(root, 'views/partials/mobile-entry-scripts.html'), 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
   const operations = fs.readFileSync(path.join(root, 'views/partials/operations-scripts.html'), 'utf8').replace(/^<script>\s*/, '').replace(/<\/script>\s*$/, '');
   new vm.Script(main);
+  new vm.Script(mobile);
   new vm.Script(operations);
+});
+
+test('time entry controls expose contextual clocks and hour-type-owned entry modes', () => {
+  const html = fs.readFileSync(path.join(root, 'views/index.html'), 'utf8');
+  const settings = fs.readFileSync(path.join(root, 'views/partials/settings.html'), 'utf8');
+  const hourTypes = fs.readFileSync(path.join(root, 'views/partials/hourtypes.html'), 'utf8');
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const mobile = fs.readFileSync(path.join(root, 'views/partials/mobile-entry-scripts.html'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'views/partials/head.html'), 'utf8');
+  assert.match(html, /id="calendar-clock-toggle"/);
+  assert.match(scripts, /data-clock-action="\$\{clockAction\}"/);
+  assert.match(scripts, /clockBtn\.dataset\.clockAction === 'out'\) quickPunchOutForDate/);
+  assert.match(scripts, /clockLabel\.textContent = showPunchOut \? 'Clock out' : 'Clock in'/);
+  assert.match(settings, /id="set-entry-mode-source"/);
+  assert.match(hourTypes, /id="hour-type-entry-mode"/);
+  assert.match(scripts, /state\.settings\.entry_mode_source === 'hour_type'/);
+  assert.match(mobile, /state\.settings\.entry_mode_source === 'hour_type'/);
+  assert.match(scripts, /scheduleEntryMode\(draft\.contract_id, draft\.hour_type_id\)/);
+  assert.doesNotMatch(scripts, /scheduleContractEntryMode/);
+  assert.match(styles, /\.ts-pace-burndown \+ \.ts-pace-month-section/);
+  assert.doesNotMatch(styles, /\.ts-pace-card-divider/);
+  assert.doesNotMatch(scripts, /className = 'ts-pace-card-divider'/);
 });
 
 test('quick actions expose menu semantics and keyboard controls', () => {
