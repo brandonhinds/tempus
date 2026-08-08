@@ -21379,12 +21379,11 @@ function getCachedIncomeSummary(monthKey) {
 
       const stats = document.createElement('div');
       stats.className = 'ts-pace-stats';
-      // Show the projection against BOTH rulers (capacity + quota) so the badge's number always appears here —
-      // otherwise someone who never opens the ⓘ sees one figure on the card and a different one in the dropdown.
-      const sel = (typeof getProjectionsVarianceValue === 'function') ? getProjectionsVarianceValue() : 'monthly_capacity';
-      const badgeIsCapacity = sel === 'monthly_capacity' || sel === 'projected_vs_standard';
-      const badgeIsQuota = sel === 'projected_vs_contract';
-      const buildStatLine = (label, targetVal, isBadge) => {
+      // Show the projection against both rulers (capacity + quota). The headline
+      // card already identifies the selected comparison; these rows should stay
+      // focused on the figures rather than exposing an internal "your badge"
+      // implementation label beside one of them.
+      const buildStatLine = (label, targetVal) => {
         const line = document.createElement('div');
         line.className = 'ts-pace-stat-line';
         line.append(document.createTextNode(`Projected ${formatDecimalHours(projected)} hrs · Target ${formatDecimalHours(targetVal)} hrs (${label})`));
@@ -21400,17 +21399,11 @@ function getCachedIncomeSummary(monthKey) {
         } else {
           line.append(document.createTextNode(' · on pace'));
         }
-        if (isBadge) {
-          const tag = document.createElement('span');
-          tag.className = 'ts-pace-stat-badge';
-          tag.textContent = 'your badge';
-          line.appendChild(tag);
-        }
         return line;
       };
       const capacityVal = Number(contract.standardHoursBasedOnBusinessDays) || 0;
-      if (capacityVal > 0.01) stats.appendChild(buildStatLine('monthly capacity', capacityVal, badgeIsCapacity));
-      if (hasContractTarget) stats.appendChild(buildStatLine('contract quota', Number(contract.averageContractHoursThisMonth) || 0, badgeIsQuota));
+      if (capacityVal > 0.01) stats.appendChild(buildStatLine('monthly capacity', capacityVal));
+      if (hasContractTarget) stats.appendChild(buildStatLine('contract quota', Number(contract.averageContractHoursThisMonth) || 0));
       if (!stats.children.length) stats.append(document.createTextNode(`Projected ${formatDecimalHours(projected)} hrs · Target —`));
 
       const detailsKey = contract.contractId;
@@ -25683,14 +25676,36 @@ function getCachedIncomeSummary(monthKey) {
   // fail fast with an "upgrading this spreadsheet" error. Those failures are transient — retry them
   // quietly with backoff instead of surfacing a sync failure.
   const UPGRADE_RETRY_DELAYS_MS = [2500, 5000, 10000];
+  const ENTRY_SYNC_RETRY_DELAYS_MS = [1500, 4000];
+  function entriesSyncErrorText(error) {
+    const raw = error && error.message ? error.message : error;
+    return String(raw || 'Unknown server error')
+      .replace(/^ScriptError:\s*/i, '')
+      .replace(/^Exception:\s*/i, '')
+      .trim();
+  }
   function isUpgradeInProgressError(error) {
-    const message = error && error.message ? error.message : error;
-    return String(message || '').indexOf('upgrading this spreadsheet') !== -1;
+    return entriesSyncErrorText(error).indexOf('upgrading this spreadsheet') !== -1;
+  }
+  function isTransientEntriesSyncError(error) {
+    const message = entriesSyncErrorText(error).toLowerCase();
+    return [
+      'server error',
+      'internal error',
+      'service unavailable',
+      'service spreadsheets failed',
+      'timed out',
+      'timeout',
+      'temporarily',
+      'network error',
+      'connection error',
+      'please wait a bit and try again'
+    ].some((fragment) => message.indexOf(fragment) !== -1);
   }
 
   function fetchEntriesFromServer() {
     return new Promise((resolve) => {
-      const attempt = (upgradeRetryCount) => {
+      const attempt = (upgradeRetryCount, transientRetryCount) => {
       setStatus('Syncing...', 'warn');
       const reqSeq = beginEntriesSync();
       google.script.run
@@ -25721,19 +25736,28 @@ function getCachedIncomeSummary(monthKey) {
         resolve(true);
       })
         .withFailureHandler((error) => {
-          endEntriesSync(reqSeq);
+          // A superseded request is no longer authoritative. In particular, an
+          // older failure must not overwrite the result of a newer successful
+          // refresh with a false "Entries sync failed" warning.
+          if (!endEntriesSync(reqSeq)) { resolve(true); return; }
           if (isUpgradeInProgressError(error) && upgradeRetryCount < UPGRADE_RETRY_DELAYS_MS.length) {
-            setTimeout(() => attempt(upgradeRetryCount + 1), UPGRADE_RETRY_DELAYS_MS[upgradeRetryCount]);
+            setTimeout(() => attempt(upgradeRetryCount + 1, transientRetryCount), UPGRADE_RETRY_DELAYS_MS[upgradeRetryCount]);
             return;
           }
+          if (isTransientEntriesSyncError(error) && transientRetryCount < ENTRY_SYNC_RETRY_DELAYS_MS.length) {
+            setTimeout(() => attempt(upgradeRetryCount, transientRetryCount + 1), ENTRY_SYNC_RETRY_DELAYS_MS[transientRetryCount]);
+            return;
+          }
+          console.error('[Entries] Initial sync failed:', error);
           state.entriesSyncSucceeded = false;
           state.entriesSyncEmpty = false;
-          setStatus('Entries sync failed', 'error');
+          const message = entriesSyncErrorText(error);
+          setStatus('Entries sync failed — ' + (message.length > 140 ? message.slice(0, 137) + '…' : message), 'error');
           resolve(false);
         })
         .api_getEntries({});
       };
-      attempt(0);
+      attempt(0, 0);
     });
   }
 
@@ -32177,10 +32201,12 @@ function getCachedIncomeSummary(monthKey) {
         }
         if (typeof onComplete === 'function') onComplete();
       })
-      .withFailureHandler(() => {
-        endEntriesSync(reqSeq);
+      .withFailureHandler((error) => {
+        if (!endEntriesSync(reqSeq)) { if (typeof onComplete === 'function') onComplete(); return; }
+        console.error('[Entries] Refresh failed:', error);
         if (typeof onComplete === 'function') onComplete();
-        setStatus('Entries sync failed', 'error');
+        const message = entriesSyncErrorText(error);
+        setStatus('Entries sync failed — ' + (message.length > 140 ? message.slice(0, 137) + '…' : message), 'error');
       })
       .api_getEntries({});
   }

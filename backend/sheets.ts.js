@@ -188,8 +188,14 @@ function getOrCreateSheet(name) {
       sheet.getRange(2, headers.length + 1, fill.length, missing.length).setValues(fill);
     }
     headers = headers.concat(missing);
+    // Formatting is a schema-write concern, not a read concern. Reapplying it
+    // here unconditionally made every data API write across whole columns on
+    // every request; on a production-sized timesheet that could make the
+    // otherwise read-only entries sync time out during page load. Existing
+    // canonical sheets were formatted by their migration, so only format when
+    // this call has actually appended schema columns.
+    applyCanonicalFormats_(sheet, schema, headers);
   }
-  applyCanonicalFormats_(sheet, schema, headers);
   return sheet;
 }
 

@@ -70,6 +70,28 @@ test('canonical migration rejects conflicting duplicate legacy values', () => {
   assert.throws(() => context.canonicalizeSheet_('hour_types'), /duplicate header "icon" has conflicting values in row 2/);
 });
 
+test('canonical sheet reads do not rewrite whole-column number formats', () => {
+  const { context, spreadsheet } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  load(context, 'backend/sheets.ts.js');
+  const sheet = spreadsheet.insertSheet('timesheet_entries');
+  sheet.getRange(1, 1, 1, context.TEMPUS_SHEET_SCHEMAS.timesheet_entries.headers.length)
+    .setValues([context.TEMPUS_SHEET_SCHEMAS.timesheet_entries.headers]);
+  const originalGetRange = sheet.getRange.bind(sheet);
+  let formatWrites = 0;
+  sheet.getRange = function() {
+    const range = originalGetRange.apply(sheet, arguments);
+    const originalSetNumberFormat = range.setNumberFormat.bind(range);
+    range.setNumberFormat = function() {
+      formatWrites++;
+      return originalSetNumberFormat.apply(range, arguments);
+    };
+    return range;
+  };
+  context.getOrCreateSheet('timesheet_entries');
+  assert.equal(formatWrites, 0);
+});
+
 test('upgrade verifies a backup, records failure, and resumes without rerunning completed work', () => {
   const { context, spreadsheet, properties } = createAppsScriptContext({});
   const backup = new MockSpreadsheet({});
@@ -392,6 +414,16 @@ test('quick actions expose menu semantics and keyboard controls', () => {
     if (token === 'Shift+F10') assert.match(scripts, /event\.shiftKey && event\.key === 'F10'/);
     else assert.ok(scripts.includes(token));
   });
+});
+
+test('variance details omit internal badge labels and entry sync suppresses stale failures', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'views/partials/head.html'), 'utf8');
+  assert.doesNotMatch(scripts, /tag\.textContent\s*=\s*['"]your badge['"]/i);
+  assert.doesNotMatch(styles, /\.ts-pace-stat-badge\b/);
+  assert.match(scripts, /const ENTRY_SYNC_RETRY_DELAYS_MS\s*=\s*\[1500, 4000\]/);
+  assert.match(scripts, /if \(!endEntriesSync\(reqSeq\)\) \{ resolve\(true\); return; \}/);
+  assert.match(scripts, /console\.error\('\[Entries\] Initial sync failed:', error\)/);
 });
 
 test('upgrade completion provides a top-level continuation link and refresh fallback', () => {
