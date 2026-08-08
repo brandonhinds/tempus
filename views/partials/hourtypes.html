@@ -127,7 +127,7 @@
       <div class="ts-flag-row" style="margin-top:16px;">
         <div class="ts-flag-meta">
           <div class="ts-flag-title">Show in quick actions</div>
-          <div class="ts-flag-desc">Adds a one-click action to the calendar right-click menu that fills a day with this hour type.</div>
+          <div class="ts-flag-desc">Adds this hour type to the calendar right-click menu for either fixed hours or clock in/out.</div>
           <div class="ts-flag-desc" id="hour-type-quick-fill-lock-note" style="display:none;">Always on for the default hour type, so there's always at least one quick action.</div>
         </div>
         <label class="ts-toggle">
@@ -143,10 +143,10 @@
           <div class="ts-col">
             <label>Quick action</label>
             <div class="ts-av-seg" id="hour-type-quick-mode" role="radiogroup" aria-label="Quick action">
-              <button type="button" data-mode="hours" aria-selected="true">Fill hours</button>
-              <button type="button" data-mode="punch" aria-selected="false">Start punch</button>
+              <button type="button" data-mode="hours" aria-selected="true">Log fixed hours</button>
+              <button type="button" data-mode="punch" aria-selected="false">Clock in/out</button>
             </div>
-            <div class="ts-note"><strong>Fill hours</strong> logs a set number of hours on one click. <strong>Start punch</strong> starts the clock instead — for people who time their day. Because a punch is always "now", its quick action only appears on <strong>today</strong>.</div>
+            <div class="ts-note"><strong>Log fixed hours</strong> records a set duration. <strong>Clock in/out</strong> shows a contextual shortcut for this hour type on today; while its clock is running, the same shortcut clocks it out. Clock shortcuts use Detailed entry mode.</div>
           </div>
         </div>
         <div class="ts-row" style="margin-top:16px;" id="hour-type-quick-fill-hours-row">

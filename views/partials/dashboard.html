@@ -217,15 +217,22 @@
           <p class="ts-entry-editing-date" id="entry-editing-date">—</p>
         </div>
 
+        <!-- Left-click day action: always stays outside the Basic/Sessions panes so changing the selected
+             entry surface cannot make the live clock disappear. Its label is contextual. -->
+        <button type="button" class="ts-day-sessions-clock" id="day-clock-toggle" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
+          <span id="day-clock-toggle-label">Clock in</span>
+        </button>
+
         <!-- Copy-yesterday accelerator now lives as a quiet secondary link inside the Sessions timeline's
              Add-session row (renderDaySessionsTimeline), grouped with the other "fill this day" action. -->
 
         <!-- Punch→Sessions overhaul: the day timeline. Composes EVERY work session on this day across all
              hour types + contracts into one list. It is now the CONTENT of the "Sessions" tab (Phase 2c-final
              retired the old bottom #tab-punch editor below): add/edit/delete sessions, breaks (gaps), and the
-             Start-clock action all live here. On the Basic tab it doubles as a read-only "day at a glance".
+             session editing lives here. On the Basic tab it doubles as a read-only "day at a glance".
              Populated by renderDaySessionsTimeline(); hidden on the Basic tab when the day has no sessions,
-             force-open on the Sessions tab so an empty day still offers "+ Add session" / Start clock. -->
+             force-open on the Sessions tab so an empty day still offers "+ Add session". -->
         <div id="day-sessions-timeline" class="ts-day-sessions" style="display:none;"></div>
 
         <div id="tab-manual">

@@ -11601,9 +11601,11 @@ function updateDeductionFormVisibility() {
   // no modal. Reuses persistPunchDraft (the real save path) rather than handlePunchToggle, whose punch-IN
   // contract guard would block no-contract hour types. Mirrors handlePunchToggle's punch-out branch: set the
   // open punch's out-time to now, splitting across midnight if the out has rolled past it.
-  async function quickPunchOutForDate(dateIso) {
+  async function quickPunchOutForDate(dateIso, targetEntryId) {
     if (!dateIso) return;
-    const entry = (state.entries || []).find((e) => e && e.date === dateIso && (Number(e.open_punch_count) || 0) > 0);
+    const entry = (state.entries || []).find((e) => e && e.date === dateIso
+      && (!targetEntryId || String(e.id) === String(targetEntryId))
+      && ((Number(e.open_punch_count) || 0) > 0 || summarizePunches(entryPunches(e)).openCount > 0));
     if (!entry) return;
     const punches = clonePunches(entryPunches(entry));
     const openIndex = punches.findIndex((p) => p && p.in && !p.out);
@@ -22749,6 +22751,7 @@ function getCachedIncomeSummary(monthKey) {
   function renderDaySessionsTimeline(dateIso) {
     const host = document.getElementById('day-sessions-timeline');
     if (!host) return;
+    updateDayClockToggle(dateIso);
     // Delegated delete: bound ONCE on the host (survives innerHTML re-renders). The ✕ sits in a reserved
     // gutter (see CSS) so revealing it on hover shifts nothing. Delete is immediate + no-confirm by design.
     if (!host.__sessionsWired) {
@@ -23105,15 +23108,9 @@ function getCachedIncomeSummary(monthKey) {
         }
       }
     }
-    // One contextual clock action on the interactive Sessions surface: an open session becomes Clock out;
-    // otherwise today offers Clock in. Both use the same save paths as the right-click menu.
     // A "draft" is open whenever a row is being edited OR there are buffered-but-unsaved time edits — the
     // Save/Cancel bar and the "held" state persist across row switches until one Save commits them all.
     const editing = !!daySessionsEdit || daySessionsPending.size > 0;
-    const clockAction = data.hasOpen ? 'out' : (dateIso === todayIso() && canStartTimelineClock(dateIso) ? 'in' : '');
-    const clockBtnHtml = (interactive && clockAction && !editing)
-      ? `<button type="button" class="ts-day-sessions-clock" data-clock-action="${clockAction}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg><span>${clockAction === 'out' ? 'Clock out' : 'Clock in'}</span></button>`
-      : '';
     // Save/Cancel live at the bottom of the sessions area (out of the editor card) while adding/editing — this
     // frees the card's times row to show the live duration prominently. Same button classes, so the delegated
     // click handler still routes them to saveDaySession / cancelDaySessionEdit.
@@ -23124,7 +23121,6 @@ function getCachedIncomeSummary(monthKey) {
     host.innerHTML = `<div class="ts-day-sessions-head">`
       + `<span class="ts-day-sessions-total">${daySessionsFmtHm(data.workMinutes)}${data.hasOpen ? '+' : ''}<span class="ts-day-sessions-total-sub">worked${gapNote}</span></span></div>`
       + `<div class="ts-day-sessions-list">${rowsHtml}${addBlockHtml}${commentHtml}</div>`
-      + clockBtnHtml
       + actionsHtml
       + (editing ? '' : `<p class="ts-day-sessions-foot">Every session logged this day, across all hour types.</p>`);
     host.style.display = 'block';
@@ -23240,6 +23236,39 @@ function getCachedIncomeSummary(monthKey) {
   // changes are NOT buffered — those still commit on switch via saveDaySessionEdit's move path, because
   // batching cross-entry moves is fragile.)
   let daySessionsPending = new Map(); // `${entryId}#${punchIndex}` -> { inVal, outVal }
+
+  // The left-click day modal owns one clock action outside both entry panes. It remains available whether
+  // Basic or Sessions is selected, and targets the exact open entry when clocking out.
+  function updateDayClockToggle(dateIso) {
+    const btn = document.getElementById('day-clock-toggle');
+    const label = document.getElementById('day-clock-toggle-label');
+    if (!btn) return;
+    const openEntries = (state.entries || []).filter((entry) => entry && entry.date === dateIso
+      && ((Number(entry.open_punch_count) || 0) > 0 || summarizePunches(entryPunches(entry)).openCount > 0));
+    const totalOpen = openEntries.reduce((sum, entry) => sum + Math.max(
+      Number(entry.open_punch_count) || 0,
+      summarizePunches(entryPunches(entry)).openCount
+    ), 0);
+    const showOut = openEntries.length === 1 && totalOpen === 1;
+    const showIn = !hasOpenPunch() && canStartTimelineClock(dateIso);
+    const editing = !!daySessionsEdit || daySessionsPending.size > 0;
+    btn.hidden = editing || (!showOut && !showIn);
+    btn.dataset.clockAction = showOut ? 'out' : 'in';
+    btn.dataset.entryId = showOut ? String(openEntries[0].id) : '';
+    if (label) label.textContent = showOut ? 'Clock out' : 'Clock in';
+  }
+
+  const dayClockToggleBtn = document.getElementById('day-clock-toggle');
+  if (dayClockToggleBtn) {
+    dayClockToggleBtn.addEventListener('click', () => {
+      const dateIso = state.selectedCalendarDate;
+      if (dayClockToggleBtn.dataset.clockAction === 'out') {
+        quickPunchOutForDate(dateIso, dayClockToggleBtn.dataset.entryId);
+      } else {
+        startTimelineClock();
+      }
+    });
+  }
   // The day-comment editor's open state: null when closed, else { text } holding the working note text
   // (survives the timeline's innerHTML re-renders, like daySessionsEdit). Committed via Save → saveDayComment.
   let daySessionsCommentEdit = null;
@@ -30031,17 +30060,19 @@ function getCachedIncomeSummary(monthKey) {
     return getTargetHoursPerDay();
   }
 
-  // Hour types that opted into the quick-fill bar, default type first (its action anchors the top of the
-  // menu as "Quick Fill Hours"), then the rest in their configured display order.
+  // Hour types explicitly opted into the quick-action menu, with the default type first when enabled.
   function quickFillHourTypes() {
     const defaultId = getDefaultHourTypeId();
-    // The default type always offers a quick action (its toggle is locked on in the editor); include it
-    // even if stored data has the flag off, so the quick-fill bar is never empty.
-    const enabled = (state.hourTypes || []).filter((ht) => ht && (ht.quick_fill_enabled || ht.id === defaultId));
+    const enabled = (state.hourTypes || []).filter((ht) => ht && ht.quick_fill_enabled);
     if (!enabled.length) return [];
     const primary = enabled.filter((ht) => ht.id === defaultId);
     const rest = enabled.filter((ht) => ht.id !== defaultId);
     return primary.concat(rest);
+  }
+
+  function quickClockHourTypes() {
+    return quickFillHourTypes().filter((hourType) => hourType.quick_fill_mode === 'punch'
+      && (getEntryModeSource() !== 'hour_type' || hourTypeEffectiveEntryMode(hourType) === 'detailed'));
   }
 
   // A quick-fill action always logs a Basic entry, but a day can only hold one Punch *or* Basic entry
@@ -30066,6 +30097,10 @@ function getCachedIncomeSummary(monthKey) {
     if (!listEl) return 0;
     listEl.innerHTML = '';
     let types = quickFillHourTypes();
+    if (getEntryModeSource() === 'hour_type') {
+      types = types.filter((hourType) => hourType.quick_fill_mode !== 'punch'
+        || hourTypeEffectiveEntryMode(hourType) === 'detailed');
+    }
     // "Start punch" types only make sense for today (a punch is always "now"), so they're omitted from the
     // quick menu on any other day — starting a clock in the past/future is meaningless. Fill types show always.
     if (calendarContextMenuDate !== todayIso()) types = types.filter((ht) => ht.quick_fill_mode !== 'punch');
@@ -30104,31 +30139,30 @@ function getCachedIncomeSummary(monthKey) {
       const iconEl = document.createElement('span');
       iconEl.className = 'ts-calendar-context-icon';
       iconEl.innerHTML = hourTypeIconSvg(hourType.icon);
+      const existingPunch = punchEntryForHourTypeOnDay(calendarContextMenuDate, hourType.id, contract ? contract.id : null);
+      const isPunchMode = hourType.quick_fill_mode === 'punch';
+      const existingPunchOpen = !!(existingPunch && ((Number(existingPunch.open_punch_count) || 0) > 0
+        || summarizePunches(entryPunches(existingPunch)).openCount > 0));
       const labelEl = document.createElement('span');
       labelEl.className = 'ts-calendar-context-label';
-      labelEl.textContent = (hourType.name || '(untitled)') + (contract ? ' — ' + contract.name : '');
+      const typeLabel = (hourType.name || '(untitled)') + (contract ? ' — ' + contract.name : '');
+      labelEl.textContent = isPunchMode
+        ? ((existingPunchOpen ? 'Clock out — ' : 'Clock in — ') + typeLabel)
+        : typeLabel;
       item.appendChild(iconEl);
       item.appendChild(labelEl);
 
-      // Blocked when a Punch entry of this type already exists on the day. EXCEPTION: a "Start punch" type
-      // over a COMPLETED punch is allowed — clicking starts a NEW session. An OPEN punch always blocks (close
-      // it via the bottom "Punch out"); and fill-mode types stay blocked by any existing punch (can't add
-      // Basic time on top of a punch entry). Contract-specific items only check their own contract.
-      const existingPunch = punchEntryForHourTypeOnDay(calendarContextMenuDate, hourType.id, contract ? contract.id : null);
-      const isPunchMode = hourType.quick_fill_mode === 'punch';
+      // Clock shortcuts are contextual: the configured type clocks out its own open entry, or clocks in
+      // when idle. A different running clock blocks a second clock-in. Fixed-hours actions remain blocked
+      // by any existing Sessions entry of the same type/contract.
       let blocked = false;
-      if (existingPunch) {
-        const punches = existingPunch.punches || [];
-        const isOpen = (Number(existingPunch.open_punch_count) || 0) > 0 || summarizePunches(punches).openCount > 0;
-        blocked = isOpen || !isPunchMode;
+      if (existingPunch && !isPunchMode) {
+        blocked = true;
         if (blocked) {
           item.classList.add('is-blocked');
           item.setAttribute('aria-disabled', 'true');
           const typeName = hourType.name || 'this hour type';
-          // No badge — the greyed-out row + the hover tooltip already say it's blocked.
-          item.title = isOpen
-            ? typeName + ' has a punch in progress on this day — clock out first, or edit the punch entry.'
-            : typeName + ' already has a punch entry on this day — edit that entry instead.';
+          item.title = typeName + ' already has a Sessions entry on this day — edit that entry instead.';
           // Still clickable so the reason is explained (rather than nothing happening), but no quick-fill.
           item.addEventListener('click', () => {
             setStatus(item.title, 'warn');
@@ -30136,8 +30170,23 @@ function getCachedIncomeSummary(monthKey) {
           });
         }
       }
+      if (isPunchMode && !existingPunchOpen && hasOpenPunch()) {
+        blocked = true;
+        item.classList.add('is-blocked');
+        item.setAttribute('aria-disabled', 'true');
+        item.title = 'Another clock is already running — clock it out before starting this one.';
+        item.addEventListener('click', () => { setStatus(item.title, 'warn'); hideCalendarContextMenu(); });
+      }
       if (!blocked) {
-        item.addEventListener('click', () => handleHourTypeQuickFill(calendarContextMenuDate, hourType, contract ? contract.id : null));
+        if (isPunchMode && existingPunchOpen) {
+          item.addEventListener('click', () => {
+            const dateIso = calendarContextMenuDate;
+            hideCalendarContextMenu();
+            quickPunchOutForDate(dateIso, existingPunch.id);
+          });
+        } else {
+          item.addEventListener('click', () => handleHourTypeQuickFill(calendarContextMenuDate, hourType, contract ? contract.id : null));
+        }
       }
       listEl.appendChild(item);
     });
@@ -30262,19 +30311,28 @@ function getCachedIncomeSummary(monthKey) {
     const actionsSection = calendarContextMenu.querySelector('[data-section="actions"]');
     const dayHasClearableEntries = !!dateIso && state.entries.some((e) => e && e.date === dateIso);
     if (actionsSection) actionsSection.style.display = dayHasClearableEntries ? 'block' : 'none';
-    // Contextual clock action: today's idle state offers Clock in; the day containing the single open punch
-    // offers Clock out. A running punch on another day suppresses Clock in so we never create two live clocks.
+    // Generic safety fallback for clocking out an entry whose configured shortcut was later disabled.
+    // Configured hour-type clock in/out actions live in the quick-action list above.
     const punchSection = calendarContextMenu.querySelector('[data-section="punch"]');
     if (punchSection) {
-      const openEntries = (state.entries || []).filter((e) => e && (Number(e.open_punch_count) || 0) > 0);
-      const totalOpen = openEntries.reduce((sum, e) => sum + (Number(e.open_punch_count) || 0), 0);
+      const openEntries = (state.entries || []).filter((entry) => entry
+        && ((Number(entry.open_punch_count) || 0) > 0 || summarizePunches(entryPunches(entry)).openCount > 0));
+      const totalOpen = openEntries.reduce((sum, entry) => sum + Math.max(
+        Number(entry.open_punch_count) || 0,
+        summarizePunches(entryPunches(entry)).openCount
+      ), 0);
       const showPunchOut = totalOpen === 1 && openEntries.length === 1 && openEntries[0].date === dateIso;
-      const showPunchIn = totalOpen === 0 && canStartTimelineClock(dateIso);
+      const configuredClockTypes = quickClockHourTypes();
+      const openTypeHasShortcut = showPunchOut && configuredClockTypes.some((hourType) =>
+        String(hourType.id) === String(openEntries[0].hour_type_id || getDefaultHourTypeId()));
+      // Clock-in is deliberately hour-type configured. Keep only a generic clock-out fallback so a running
+      // legacy or now-disabled shortcut can never become stranded.
+      const genericActionNeeded = showPunchOut && !openTypeHasShortcut;
       const clockBtn = document.getElementById('calendar-clock-toggle');
       const clockLabel = document.getElementById('calendar-clock-toggle-label');
-      if (clockBtn) clockBtn.dataset.clockAction = showPunchOut ? 'out' : 'in';
-      if (clockLabel) clockLabel.textContent = showPunchOut ? 'Clock out' : 'Clock in';
-      punchSection.style.display = (showPunchOut || showPunchIn) ? 'block' : 'none';
+      if (clockBtn) clockBtn.dataset.clockAction = 'out';
+      if (clockLabel) clockLabel.textContent = 'Clock out';
+      punchSection.style.display = genericActionNeeded ? 'block' : 'none';
     }
     updateCalendarContextActions(dateIso);
   }
@@ -32421,9 +32479,12 @@ function getCachedIncomeSummary(monthKey) {
       if (getEntryModeSource() === 'hour_type') {
         detailParts.push(hourTypeEffectiveEntryMode(hourType) === 'detailed' ? 'sessions' : 'total hours');
       }
-      // Show the effective quick-fill duration (own value, else the fallback chain) for any type that
-      // appears in the quick-fill bar — including the default, which is always included.
-      if (hourType.quick_fill_enabled || hourType.id === getDefaultHourTypeId()) detailParts.push('quick-fill ' + fmtHours(quickFillHoursForType(hourType)) + 'h');
+      // Show the configured right-click shortcut in the list summary.
+      if (hourType.quick_fill_enabled) {
+        detailParts.push(hourType.quick_fill_mode === 'punch'
+          ? 'clock shortcut'
+          : 'quick-fill ' + fmtHours(quickFillHoursForType(hourType)) + 'h');
+      }
 
       const isWork = hourType.slug === 'work';
       const isSelected = state.editingHourTypeId === hourType.id;
@@ -33109,9 +33170,10 @@ function getCachedIncomeSummary(monthKey) {
     const contributesToIncome = contributesInput.checked;
     const isDefault = defaultInput.checked;
     const useForRateCalc = rateCalcInput ? rateCalcInput.checked : false;
-    const entryMode = entryModeInput && (entryModeInput.value === 'simple' || entryModeInput.value === 'detailed') ? entryModeInput.value : '';
+    let entryMode = entryModeInput && (entryModeInput.value === 'simple' || entryModeInput.value === 'detailed') ? entryModeInput.value : '';
     const quickFillEnabled = quickFillEnabledInput ? quickFillEnabledInput.checked : false;
     const quickFillMode = getHourTypeQuickMode();
+    if (quickFillMode === 'punch' && getEntryModeSource() === 'hour_type') entryMode = 'detailed';
     const icon = iconInput && iconInput.value ? iconInput.value : 'clock';
     let quickFillHours = quickFillHoursInput ? parseFloat(quickFillHoursInput.value) : NaN;
     if (Number.isNaN(quickFillHours) || quickFillHours <= 0) quickFillHours = null;
@@ -33958,20 +34020,15 @@ function getCachedIncomeSummary(monthKey) {
     hourTypeAutoHolidayHoursRow.style.display = shouldShow ? 'flex' : 'none';
   }
 
-  // The quick-fill duration + icon rows only matter when the type opts into the quick-fill bar. The
-  // default hour type must always offer a quick action (so the quick-fill bar is never empty), so for it
-  // the toggle is forced on and locked.
+  // The duration/mode/icon rows only matter when this type opts into the right-click menu.
   function syncHourTypeQuickFillVisibility() {
     const rows = document.getElementById('hour-type-quick-fill-rows');
     const toggle = document.getElementById('hour-type-quick-fill-enabled');
     const defaultInput = document.getElementById('hour-type-is-default');
     const isDefault = !!(defaultInput && defaultInput.checked);
-    if (toggle) {
-      if (isDefault) toggle.checked = true;
-      toggle.disabled = isDefault;
-    }
+    if (toggle) toggle.disabled = false;
     const lockNote = document.getElementById('hour-type-quick-fill-lock-note');
-    if (lockNote) lockNote.style.display = isDefault ? 'block' : 'none';
+    if (lockNote) lockNote.style.display = 'none';
 
     // Show what a blank field actually resolves to for THIS type, rather than a generic example: the
     // default type's quick-fill hours (when editing a non-default type that has one), else the standard
@@ -34005,6 +34062,10 @@ function getCachedIncomeSummary(monthKey) {
     if (seg) seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', b.dataset.mode === resolved ? 'true' : 'false'));
     const hoursRow = document.getElementById('hour-type-quick-fill-hours-row');
     if (hoursRow) hoursRow.style.display = resolved === 'punch' ? 'none' : '';
+    if (resolved === 'punch' && getEntryModeSource() === 'hour_type') {
+      const entryModeInput = document.getElementById('hour-type-entry-mode');
+      if (entryModeInput) entryModeInput.value = 'detailed';
+    }
   }
   (function bindHourTypeQuickModeSegments() {
     const seg = document.getElementById('hour-type-quick-mode');

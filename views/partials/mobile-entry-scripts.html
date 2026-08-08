@@ -1353,9 +1353,7 @@
     // "Show in quick actions") as one-tap presets, so phone logging matches what they know on desktop.
     const quickFillHourTypes = () => {
       const defId = defaultHourTypeId();
-      // The default type always offers a quick action (its toggle is locked on in the editor); include it
-      // even if stored data has the flag off, so the quick-fill bar is never empty. Mirrors desktop.
-      const enabled = (state.hourTypes || []).filter((ht) => ht && (ht.quick_fill_enabled || ht.id === defId));
+      const enabled = (state.hourTypes || []).filter((ht) => ht && ht.quick_fill_enabled);
       if (!enabled.length) return [];
       const primary = enabled.filter((ht) => ht.id === defId);
       const rest = enabled.filter((ht) => ht.id !== defId);

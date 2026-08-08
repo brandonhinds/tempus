@@ -1877,6 +1877,7 @@
   .ts-day-sessions-comment-save:hover { filter:brightness(1.05); }
   /* Start clock — the live punch-in, a quiet full-width action under the list (reset global button chrome). */
   .ts-day-sessions-clock { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; margin:9px 0 0; padding:10px 12px; background:var(--surface-subtle); background-image:none; border:1px solid var(--border); border-radius:10px; box-shadow:none; color:var(--text); font-size:13px; font-weight:600; cursor:pointer; }
+  .ts-day-sessions-clock[hidden] { display:none; }
   .ts-day-sessions-clock:hover, .ts-day-sessions-clock:active { background:color-mix(in srgb, var(--primary) 12%, var(--surface-subtle)); background-image:none; box-shadow:none; transform:none; border-color:var(--primary); color:var(--text); }
   .ts-day-sessions-clock svg { width:16px; height:16px; color:var(--primary); }
   /* Add-session editor: hour type + contract selects share one line, side by side, above the times. */

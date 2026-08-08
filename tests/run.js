@@ -356,17 +356,22 @@ test('backend globals and modified HTML scripts parse without duplicate function
 
 test('time entry controls expose contextual clocks and hour-type-owned entry modes', () => {
   const html = fs.readFileSync(path.join(root, 'views/index.html'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(root, 'views/partials/dashboard.html'), 'utf8');
   const settings = fs.readFileSync(path.join(root, 'views/partials/settings.html'), 'utf8');
   const hourTypes = fs.readFileSync(path.join(root, 'views/partials/hourtypes.html'), 'utf8');
   const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
   const mobile = fs.readFileSync(path.join(root, 'views/partials/mobile-entry-scripts.html'), 'utf8');
   const styles = fs.readFileSync(path.join(root, 'views/partials/head.html'), 'utf8');
   assert.match(html, /id="calendar-clock-toggle"/);
-  assert.match(scripts, /data-clock-action="\$\{clockAction\}"/);
+  assert.match(dashboard, /id="day-clock-toggle"/);
+  assert.match(scripts, /function updateDayClockToggle\(dateIso\)/);
+  assert.match(scripts, /btn\.dataset\.clockAction = showOut \? 'out' : 'in'/);
   assert.match(scripts, /clockBtn\.dataset\.clockAction === 'out'\) quickPunchOutForDate/);
-  assert.match(scripts, /clockLabel\.textContent = showPunchOut \? 'Clock out' : 'Clock in'/);
+  assert.match(scripts, /clockLabel\.textContent = 'Clock out'/);
   assert.match(settings, /id="set-entry-mode-source"/);
   assert.match(hourTypes, /id="hour-type-entry-mode"/);
+  assert.match(hourTypes, />Clock in\/out</);
+  assert.match(scripts, /'Clock out — ' : 'Clock in — '/);
   assert.match(scripts, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(mobile, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(scripts, /activateTab\(hourTypeEffectiveEntryMode\(chosenHourType\) === 'detailed' \? 'punch' : 'manual'\)/);
