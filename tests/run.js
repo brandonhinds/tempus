@@ -394,6 +394,10 @@ test('time entry controls expose contextual clocks and hour-type-owned entry mod
   assert.match(hourTypes, /id="hour-type-entry-mode"/);
   assert.match(hourTypes, />Clock in\/out</);
   assert.match(scripts, /'Clock out — ' : 'Clock in — '/);
+  assert.match(scripts, /commitEntryPunches\(entry\.id, punches, \{ successMsg: 'Clocked out', failMsg: 'Couldn’t clock out' \}\)/);
+  assert.doesNotMatch(scripts, /await goToOpenPunch\(\);\s*handlePunchToggle\(\);/);
+  assert.match(scripts, /Clock out is available one minute after clock in\./);
+  assert.match(scripts, /punchToggleBtn\.disabled = !contractOptional && !hasContract/);
   assert.match(scripts, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(mobile, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(scripts, /activateTab\(hourTypeEffectiveEntryMode\(chosenHourType\) === 'detailed' \? 'punch' : 'manual'\)/);

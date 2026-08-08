@@ -11162,15 +11162,15 @@ function updateDeductionFormVisibility() {
     const openCount = summarizePunches(punches).openCount;
     if (punchToggleBtn) {
       punchToggleBtn.textContent = openCount > 0 ? 'Punch Out' : 'Punch In';
-      punchToggleBtn.disabled = !hasContract;
+      punchToggleBtn.disabled = !contractOptional && !hasContract;
     }
     if (punchSaveBtn) {
       // Hidden commit target (Enter key / quick-fill) — only enabled when there's a real session.
-      punchSaveBtn.disabled = !hasContract || !hasSession;
+      punchSaveBtn.disabled = (!contractOptional && !hasContract) || !hasSession;
       punchSaveBtn.textContent = draft.entryId ? 'Update entry' : 'Add entry';
     }
     if (punchCancelBtn) {
-      punchCancelBtn.disabled = !hasContract || !draft.dirty;
+      punchCancelBtn.disabled = (!contractOptional && !hasContract) || !draft.dirty;
       punchCancelBtn.style.display = draft.dirty ? 'inline-flex' : 'none';
     }
     if (punchDeleteBtn) {
@@ -11597,11 +11597,12 @@ function updateDeductionFormVisibility() {
       .api_addEntry(payload);
   }
 
-  // Quick "Punch out" from the calendar right-click menu — clocks out the day's single open punch in place,
-  // no modal. Reuses persistPunchDraft (the real save path) rather than handlePunchToggle, whose punch-IN
-  // contract guard would block no-contract hour types. Mirrors handlePunchToggle's punch-out branch: set the
-  // open punch's out-time to now, splitting across midnight if the out has rolled past it.
-  async function quickPunchOutForDate(dateIso, targetEntryId) {
+  // Clock out the exact open entry selected by the timeline or right-click shortcut. This deliberately uses
+  // the Sessions timeline's shared exact-entry update path instead of persistPunchDraft: the old Punch editor
+  // is retained only as hidden value-holders, and routing a visible clock through it made short punches open
+  // the modal with their warning hidden inside the retired panel. Positive elapsed time always saves; the
+  // normal rounding floor keeps a short worked session visible rather than silently discarding it.
+  function quickPunchOutForDate(dateIso, targetEntryId) {
     if (!dateIso) return;
     const entry = (state.entries || []).find((e) => e && e.date === dateIso
       && (!targetEntryId || String(e.id) === String(targetEntryId))
@@ -11613,44 +11614,36 @@ function updateDeductionFormVisibility() {
     const now = new Date();
     const currentTime = now.toTimeString().slice(0, 5);
     const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-    // persistPunchDraft reads the hour type from the (hidden) modal select; point it at this entry's type.
-    if (punchHourType) punchHourType.value = hourTypeId;
     const inMin = timeToMinutes(punches[openIndex].in);
     const outMin = timeToMinutes(currentTime);
-    // Same too-short guard as the modal: a session that rounds to zero at the user's interval shouldn't be
-    // logged. The quick action must NOT bypass it — hand off to the punch modal (where the normal flow rejects
-    // the clock-out and keeps you on the clock) rather than silently saving a stray sub-interval punch.
     const sessionMinutes = (inMin != null && outMin != null) ? (outMin - inMin) : null;
-    const roundInterval = getRoundInterval();
-    if (roundInterval > 0 && sessionMinutes != null && sessionMinutes >= 0
-        && Math.round(sessionMinutes / roundInterval) === 0) {
-      // Too short to log — open the punch modal AND re-run the toggle there so the standard in-modal "too
-      // short to log" warning actually appears (just opening it showed nothing). The punch stays open.
-      await goToOpenPunch();
-      handlePunchToggle();
+    const crossesMidnight = inMin != null && outMin != null && outMin < inMin;
+    // Punches are stored at minute precision. An in/out within the exact same minute has no representable
+    // duration, so leave it open and explain why without unexpectedly opening the day modal.
+    if (!crossesMidnight && sessionMinutes != null && sessionMinutes <= 0) {
+      setStatus('Clock out is available one minute after clock in.', 'warn');
       return;
     }
-    const crossesMidnight = inMin != null && outMin != null && outMin < inMin;
     if (crossesMidnight) {
       // Close at end-of-day on the start day, then spill the post-midnight remainder onto the next day.
       punches[openIndex].out = '23:59';
-      state.punchDraft = { entryId: entry.id, contractId: entry.contract_id || '', date: entry.date, punches, dirty: true };
-      const saved = persistPunchDraft({ requireClosed: false });
-      if (saved) {
-        const nextDateIso = isoDate(addDays(parseIsoDate(entry.date), 1));
-        createPunchEntryForDate(nextDateIso, entry.contract_id || '', hourTypeId, [{ in: '00:00', out: currentTime }]);
-        setStatus('Overnight punch split across two days', 'success');
-      }
+      commitEntryPunches(entry.id, punches, { failMsg: 'Couldn’t clock out' });
+      const nextDateIso = isoDate(addDays(parseIsoDate(entry.date), 1));
+      createPunchEntryForDate(nextDateIso, entry.contract_id || '', hourTypeId, [{ in: '00:00', out: currentTime }]);
+      setStatus('Overnight punch split across two days', 'success');
     } else {
       punches[openIndex].out = currentTime;
-      state.punchDraft = { entryId: entry.id, contractId: entry.contract_id || '', date: entry.date, punches, dirty: true };
-      persistPunchDraft({ requireClosed: false }); // success → "Punch saved" (the punch is now closed)
+      commitEntryPunches(entry.id, punches, { successMsg: 'Clocked out', failMsg: 'Couldn’t clock out' });
     }
+    const modal = document.getElementById('modal-day-entry');
+    if (modal && modal.style.display === 'flex') closeDayModal();
   }
 
   async function handlePunchToggle() {
     const draft = state.punchDraft;
-    if (!draft || !draft.contractId) {
+    const selectedHourType = punchHourType ? state.hourTypeMap[punchHourType.value] : null;
+    const contractRequired = selectedHourType ? hourTypeNeedsContract(selectedHourType) : true;
+    if (!draft || (contractRequired && !draft.contractId)) {
       customAlert('Select a contract before punching in.');
       return;
     }
@@ -11696,27 +11689,19 @@ function updateDeductionFormVisibility() {
       // Punch out - close the open punch
       draft.punches[openIndex].out = currentTime;
 
-      // Guard against an accidental too-fast clock-out (a stray double-tap on the punch button). We do NOT
-      // discard the whole session — that would silently throw away a deliberate clock-in and drop you off
-      // the clock. Instead we ABANDON just the clock-out and leave the punch open: you stay on the clock and
-      // can clock out for real a moment later. The open punch was already persisted on clock-in, so reverting
-      // the draft's out time is enough — no save, no delete, and the resting pill keeps showing "On the clock".
+      // A same-minute clock-out has no representable duration at minute precision. Leave the punch open;
+      // any positive duration is valid and the shared rounding floor preserves it as one interval.
       const closed = draft.punches[openIndex];
       const startMin = timeToMinutes(closed.in);
       const endMin = timeToMinutes(closed.out);
       const sessionMinutes = (startMin != null && endMin != null) ? (endMin - startMin) : null;
-      // "Too short" is defined by the user's own rounding: if the session would round to zero (before the
-      // ≥1-interval floor that roundDuration applies), it isn't worth logging. No hardcoded threshold — it
-      // tracks the rounding setting; with rounding off, nothing is too short.
-      const roundInterval = getRoundInterval();
-      const roundsToZero = roundInterval > 0 && Math.round(sessionMinutes / roundInterval) === 0;
-      if (sessionMinutes != null && sessionMinutes >= 0 && roundsToZero) {
+      if (sessionMinutes != null && sessionMinutes <= 0) {
         draft.punches[openIndex].out = '';
         renderPunchDraft();
         // Surface the rejection IN the modal via #punch-open-warning (this element's only use now) rather
         // than a top-left status message, which gets obstructed. Any re-render hides it again, so it's transient.
         if (punchOpenWarning) {
-          punchOpenWarning.textContent = 'Too short to log at your ' + roundInterval + '-minute rounding.';
+          punchOpenWarning.textContent = 'Clock out is available one minute after clock in.';
           punchOpenWarning.style.display = 'block';
         }
         return;
