@@ -10756,7 +10756,9 @@ function updateDeductionFormVisibility() {
   }
   $$('.ts-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
-      activateTab(tab.getAttribute('data-tab'));
+      const targetTab = tab.getAttribute('data-tab');
+      if (typeof selectCompatibleHourTypeForTab === 'function') selectCompatibleHourTypeForTab(targetTab);
+      activateTab(targetTab);
       focusDefaultEntryField();
     });
   });
@@ -22558,7 +22560,18 @@ function getCachedIncomeSummary(monthKey) {
       }
       }
     } else {
-      // No existing entry, keep current tab but clear editing state
+      // On an empty day, hour-type-owned mode should land on the selected type's configured surface—not
+      // leave a Detailed type sitting in Basic with a warning telling the user to switch manually.
+      const chosenHourTypeId = targetHourTypeId
+        || (manualHourType && manualHourType.value)
+        || getDefaultHourTypeId();
+      if (getEntryModeSource() === 'hour_type') {
+        const chosenHourType = state.hourTypeMap[chosenHourTypeId];
+        if (manualHourType) manualHourType.value = chosenHourTypeId;
+        if (punchHourType) punchHourType.value = chosenHourTypeId;
+        activateTab(hourTypeEffectiveEntryMode(chosenHourType) === 'detailed' ? 'punch' : 'manual');
+      }
+      // No existing entry: clear the editor on the surface selected above.
       if (state.currentTab === 'manual') {
         clearManualEditing();
       } else {
@@ -23297,7 +23310,18 @@ function getCachedIncomeSummary(monthKey) {
   function enterDaySessionAdd() {
     stashDaySessionEdit(); // keep any open edit buffered while adding a new session
     const dateIso = state.selectedCalendarDate;
-    const seedHourTypeId = getDefaultHourTypeId();
+    const selectedPunchTypeId = punchHourType && punchHourType.value ? punchHourType.value : '';
+    const selectedPunchType = state.hourTypeMap[selectedPunchTypeId];
+    const detailedType = getEntryModeSource() === 'hour_type'
+      ? ((selectedPunchType && hourTypeEffectiveEntryMode(selectedPunchType) === 'detailed')
+          ? selectedPunchType
+          : (state.hourTypes || []).find((hourType) => hourTypeEffectiveEntryMode(hourType) === 'detailed'))
+      : null;
+    const seedHourTypeId = detailedType ? detailedType.id : getDefaultHourTypeId();
+    if (getEntryModeSource() === 'hour_type' && !detailedType) {
+      setStatus('Set an hour type to Detailed before adding a session.', 'warn');
+      return;
+    }
     const valid = validContractsForDateAndMode(dateIso, 'detailed', seedHourTypeId);
     let latestOut = '';
     (state.entries || []).forEach((e) => {
@@ -23941,6 +23965,8 @@ function getCachedIncomeSummary(monthKey) {
   function timelineClockHourType() {
     const defaultType = state.hourTypeMap[getDefaultHourTypeId()] || getDefaultHourType();
     if (getEntryModeSource() !== 'hour_type') return defaultType || null;
+    const selectedType = punchHourType && state.hourTypeMap[punchHourType.value];
+    if (selectedType && hourTypeEffectiveEntryMode(selectedType) === 'detailed') return selectedType;
     if (defaultType && hourTypeEffectiveEntryMode(defaultType) === 'detailed') return defaultType;
     return (state.hourTypes || []).find((hourType) => hourTypeEffectiveEntryMode(hourType) === 'detailed') || null;
   }
@@ -34494,16 +34520,30 @@ function getCachedIncomeSummary(monthKey) {
   // Event listeners for hour type changes
   if (manualHourType) {
     manualHourType.addEventListener('change', () => {
-      updateManualContractVisibility();
       handleManualHourTypeChange();
     });
   }
 
   if (punchHourType) {
     punchHourType.addEventListener('change', () => {
-      updatePunchContractVisibility();
       handlePunchHourTypeChange();
     });
+  }
+
+  // A manual tab click still needs a compatible initial type. Remembering the last selection is preferred;
+  // if it belongs to the other surface, choose the first type configured for the requested surface.
+  function selectCompatibleHourTypeForTab(tabId) {
+    if (getEntryModeSource() !== 'hour_type') return;
+    const mode = tabId === 'punch' ? 'detailed' : 'simple';
+    const select = tabId === 'punch' ? punchHourType : manualHourType;
+    const current = select && state.hourTypeMap[select.value];
+    const compatible = current && hourTypeEffectiveEntryMode(current) === mode
+      ? current
+      : (state.hourTypes || []).find((hourType) => hourTypeEffectiveEntryMode(hourType) === mode);
+    if (!compatible || !select) return;
+    select.value = compatible.id;
+    if (tabId === 'punch') updatePunchContractVisibility();
+    else updateManualContractVisibility();
   }
 
   function handleManualHourTypeChange() {
@@ -34513,6 +34553,18 @@ function getCachedIncomeSummary(monthKey) {
     const currentDate = manualDate.value;
 
     if (!currentDate) return;
+
+    const selectedHourType = state.hourTypeMap[selectedHourTypeId];
+    if (getEntryModeSource() === 'hour_type' && hourTypeEffectiveEntryMode(selectedHourType) === 'detailed') {
+      if (punchHourType) punchHourType.value = selectedHourTypeId;
+      setPunchDateValue(currentDate);
+      state.selectedCalendarDate = currentDate;
+      activateTab('punch');
+      handlePunchHourTypeChange();
+      return;
+    }
+
+    updateManualContractVisibility();
 
     const existingEntry = findEntryForDateAndHourType(currentDate, selectedHourTypeId);
 
@@ -34543,6 +34595,19 @@ function getCachedIncomeSummary(monthKey) {
     const currentDate = punchDate.value;
 
     if (!currentDate) return;
+
+    const selectedHourType = state.hourTypeMap[selectedHourTypeId];
+    if (getEntryModeSource() === 'hour_type' && hourTypeEffectiveEntryMode(selectedHourType) === 'simple') {
+      if (manualHourType) manualHourType.value = selectedHourTypeId;
+      if (manualDate) manualDate.value = currentDate;
+      if (manualDatePicker) manualDatePicker.setDate(currentDate, false);
+      state.selectedCalendarDate = currentDate;
+      activateTab('manual');
+      handleManualHourTypeChange();
+      return;
+    }
+
+    updatePunchContractVisibility();
 
     const existingEntry = findEntryForDateAndHourType(currentDate, selectedHourTypeId);
 

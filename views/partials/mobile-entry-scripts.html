@@ -381,7 +381,11 @@
     const applyDayModeChrome = () => {
       const modes = dayEntryModes();
       if (dom.seg) dom.seg.style.display = modes.both ? 'flex' : 'none';
-      const target = modes.both ? state.mode : (modes.detailed ? 'punch' : 'manual');
+      let target = modes.both ? state.mode : (modes.detailed ? 'punch' : 'manual');
+      if (modes.both && entryModeSource() === 'hour_type' && !(state.entries || []).length) {
+        const selected = state.hourTypeMap[state.selectedHourTypeId || defaultHourTypeId()];
+        target = hourTypeEffectiveEntryMode(selected) === 'detailed' ? 'punch' : 'manual';
+      }
       setMode(target);
     };
 
@@ -1123,6 +1127,10 @@
     const selectHourType = (hourTypeId) => {
       state.selectedHourTypeId = hourTypeId || defaultHourTypeId();
       syncHourTypeSelects(state.selectedHourTypeId);
+      if (entryModeSource() === 'hour_type') {
+        const selected = state.hourTypeMap[state.selectedHourTypeId];
+        state.mode = hourTypeEffectiveEntryMode(selected) === 'detailed' ? 'punch' : 'manual';
+      }
       // Add-mode form: changing the hour type just re-targets the new entry (and auto-selects a valid
       // contract). It never loads an existing entry for editing — that's done by tapping the entry's row.
       renderContracts();
@@ -1893,8 +1901,23 @@
     const closeThemeSheet = () => { if (dom.themeSheet) dom.themeSheet.style.display = 'none'; };
 
     const bindEvents = () => {
-      if (dom.tabManual) dom.tabManual.onclick = () => setMode('manual');
-      if (dom.tabPunch) dom.tabPunch.onclick = () => setMode('punch');
+      const selectMode = (mode) => {
+        if (entryModeSource() === 'hour_type') {
+          const desired = mode === 'punch' ? 'detailed' : 'simple';
+          const current = state.hourTypeMap[state.selectedHourTypeId || defaultHourTypeId()];
+          const compatible = current && hourTypeEffectiveEntryMode(current) === desired
+            ? current
+            : state.hourTypes.find((hourType) => hourTypeEffectiveEntryMode(hourType) === desired);
+          if (compatible) {
+            state.selectedHourTypeId = compatible.id;
+            syncHourTypeSelects(compatible.id);
+            renderContracts();
+          }
+        }
+        setMode(mode);
+      };
+      if (dom.tabManual) dom.tabManual.onclick = () => selectMode('manual');
+      if (dom.tabPunch) dom.tabPunch.onclick = () => selectMode('punch');
       if (dom.punchToggle) dom.punchToggle.onclick = togglePunch;
       if (dom.punchEditorDone) dom.punchEditorDone.onclick = () => {
         if (dom.punchEditorDone.dataset.mode === 'punchout') punchOutFromEditor();

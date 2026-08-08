@@ -369,6 +369,9 @@ test('time entry controls expose contextual clocks and hour-type-owned entry mod
   assert.match(hourTypes, /id="hour-type-entry-mode"/);
   assert.match(scripts, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(mobile, /state\.settings\.entry_mode_source === 'hour_type'/);
+  assert.match(scripts, /activateTab\(hourTypeEffectiveEntryMode\(chosenHourType\) === 'detailed' \? 'punch' : 'manual'\)/);
+  assert.match(scripts, /hourTypeEffectiveEntryMode\(selectedHourType\) === 'detailed'/);
+  assert.match(mobile, /state\.mode = hourTypeEffectiveEntryMode\(selected\) === 'detailed' \? 'punch' : 'manual'/);
   assert.match(scripts, /scheduleEntryMode\(draft\.contract_id, draft\.hour_type_id\)/);
   assert.doesNotMatch(scripts, /scheduleContractEntryMode/);
   assert.match(styles, /\.ts-pace-burndown \+ \.ts-pace-month-section/);
