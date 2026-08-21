@@ -26018,8 +26018,20 @@ function getCachedIncomeSummary(monthKey) {
       .replace(/^Exception:\s*/i, '')
       .trim();
   }
+  // The upgrade guard raises 'upgrade_required: Tempus must finish its verified spreadsheet upgrade…'
+  // from getOrCreateSheet (assertMigrationsSettled_), so match that wording. The older phrasing is
+  // kept because a browser holding a cached client from a previous release still sees it.
   function isUpgradeInProgressError(error) {
-    return entriesSyncErrorText(error).indexOf('upgrading this spreadsheet') !== -1;
+    const message = entriesSyncErrorText(error).toLowerCase();
+    return message.indexOf('upgrade_required') !== -1
+      || message.indexOf('spreadsheet upgrade') !== -1
+      || message.indexOf('upgrading this spreadsheet') !== -1;
+  }
+  // withScriptLock_ throws this when another execution holds the script lock — the one-time schema
+  // and quick-fill migrations that run inside first-load reads can hold it long enough to collide.
+  function isConcurrentUpdateError(error) {
+    const message = entriesSyncErrorText(error).toLowerCase();
+    return message.indexOf('concurrent_update') !== -1 || message.indexOf('still being saved') !== -1;
   }
   function isTransientEntriesSyncError(error) {
     const message = entriesSyncErrorText(error).toLowerCase();
@@ -32777,11 +32789,21 @@ function getCachedIncomeSummary(monthKey) {
     return colors[Math.floor(Math.random() * colors.length)];
   }
 
+  // Two boot paths ask for hour types within milliseconds of each other: applyFeatureFlagsLazy() runs
+  // again once fetchFeatureFlagsFromServer() reports the flag enabled, and loadTier2Supporting() starts
+  // from the same promise settling. api_getHourTypes is not a pure read on a freshly migrated sheet —
+  // it repairs the Work row and carries entry defaults over to quick fill, both under the script lock —
+  // so two executions raced the lock and the loser surfaced "Error loading hour types" over data the
+  // winner had already rendered. Share one in-flight request instead.
+  let hourTypesLoadPromise = null;
+
   function loadHourTypes() {
     if (!state.featureFlags.hour_types) return Promise.resolve(false);
+    if (hourTypesLoadPromise) return hourTypesLoadPromise;
 
     // No "Loading hour types…" message — it's a passive background load, not a user action worth announcing.
-    return new Promise((resolve) => {
+    hourTypesLoadPromise = new Promise((resolve) => {
+      const attempt = (upgradeRetryCount, transientRetryCount) => {
       google.script.run
         .withSuccessHandler((hourTypes) => {
           state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
@@ -32813,12 +32835,30 @@ function getCachedIncomeSummary(monthKey) {
           resolve(true);
         })
         .withFailureHandler((error) => {
+          if (isUpgradeInProgressError(error) && upgradeRetryCount < UPGRADE_RETRY_DELAYS_MS.length) {
+            setTimeout(() => attempt(upgradeRetryCount + 1, transientRetryCount), UPGRADE_RETRY_DELAYS_MS[upgradeRetryCount]);
+            return;
+          }
+          // A lock collision or a transient Spreadsheets failure during the one-time first-load
+          // migrations is not worth showing the user — back off and ask again.
+          if ((isConcurrentUpdateError(error) || isTransientEntriesSyncError(error))
+              && transientRetryCount < ENTRY_SYNC_RETRY_DELAYS_MS.length) {
+            setTimeout(() => attempt(upgradeRetryCount, transientRetryCount + 1), ENTRY_SYNC_RETRY_DELAYS_MS[transientRetryCount]);
+            return;
+          }
           console.error('Failed to load hour types:', error);
           setStatus('Error loading hour types', 'error');
           resolve(false);
         })
         .api_getHourTypes();
+      };
+      attempt(0, 0);
+    }).then((loaded) => {
+      // Cleared on settle, not on success, so a later reload (e.g. reverting a failed save) refetches.
+      hourTypesLoadPromise = null;
+      return loaded;
     });
+    return hourTypesLoadPromise;
   }
 
   function renderHourTypes() {

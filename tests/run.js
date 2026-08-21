@@ -780,6 +780,31 @@ test('variance details omit internal badge labels and entry sync suppresses stal
   assert.match(scripts, /console\.error\('\[Entries\] Initial sync failed:', error\)/);
 });
 
+test('hour types load once per boot and retry the upgrade guard instead of alarming the user', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const migrations = fs.readFileSync(path.join(root, 'backend/migrations.js'), 'utf8');
+  // The retry guard has to match the message the upgrade guard actually throws.
+  const guardMessage = (migrations.match(/throw new Error\('(upgrade_required:[^']+)'\)/) || [])[1];
+  assert.ok(guardMessage, 'backend/migrations.js should throw an upgrade_required error');
+  const matcher = scripts.match(/function isUpgradeInProgressError\(error\) \{([\s\S]*?)\n  \}/);
+  assert.ok(matcher, 'isUpgradeInProgressError should exist');
+  const needles = [...matcher[1].matchAll(/indexOf\('([^']+)'\)/g)].map((m) => m[1]);
+  assert.ok(needles.length > 0, 'isUpgradeInProgressError should test for substrings');
+  assert.ok(
+    needles.some((needle) => guardMessage.toLowerCase().includes(needle)),
+    'isUpgradeInProgressError matches none of: ' + guardMessage
+  );
+  // Concurrent boot paths must share one api_getHourTypes call — the first-load migrations inside it
+  // take the script lock, so a second execution loses the race and reports a failure over good data.
+  assert.match(scripts, /let hourTypesLoadPromise = null;/);
+  assert.match(scripts, /if \(hourTypesLoadPromise\) return hourTypesLoadPromise;/);
+  assert.match(scripts, /hourTypesLoadPromise = null;\n      return loaded;/);
+  const loader = scripts.slice(scripts.indexOf('function loadHourTypes()'), scripts.indexOf('function renderHourTypes()'));
+  assert.match(loader, /isUpgradeInProgressError\(error\) && upgradeRetryCount < UPGRADE_RETRY_DELAYS_MS\.length/);
+  assert.match(loader, /isConcurrentUpdateError\(error\) \|\| isTransientEntriesSyncError\(error\)/);
+  assert.match(scripts, /function isConcurrentUpdateError\(error\)[\s\S]*?concurrent_update/);
+});
+
 test('upgrade completion provides a top-level continuation link and refresh fallback', () => {
   const upgrade = fs.readFileSync(path.join(root, 'views/upgrade.html'), 'utf8');
   assert.match(upgrade, /id="continue"[^>]+target="_top"/);
