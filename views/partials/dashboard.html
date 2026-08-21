@@ -198,44 +198,40 @@
     </div>
     </div>
 
-    <!-- Day-entry modal: the Basic / Advanced editor opens when you click a day in the grid.
-         (Relocated from the old sticky right-rail so the calendar can run full-width. All field ids
-         are preserved, so the existing entry logic binds unchanged.) -->
-    <div class="ts-modal" id="modal-day-entry" style="display:none;">
-      <div class="ts-modal-content">
+    <!-- Desktop day editor: one complete, stacked view of every record on the selected day. -->
+    <div class="ts-modal" id="modal-day-entry" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="entry-editing-date">
+      <div class="ts-modal-content ts-day-editor">
         <div class="ts-modal-body">
       <div class="ts-entry-card">
-        <div class="ts-entry-tabs-row">
-          <div class="ts-tabs">
-            <div class="ts-tab active" data-tab="manual">Basic</div>
-            <div class="ts-tab" data-tab="punch">Sessions</div>
+        <div class="ts-entry-editing" id="entry-editing">
+          <div>
+            <p class="ts-entry-editing-wd" id="entry-editing-wd"></p>
+            <p class="ts-entry-editing-date" id="entry-editing-date">—</p>
+          </div>
+          <div class="ts-day-overall" aria-live="polite">
+            <span id="day-overall-total">0m</span>
+            <small>overall logged</small>
           </div>
         </div>
 
-        <div class="ts-entry-editing" id="entry-editing">
-          <p class="ts-entry-editing-wd" id="entry-editing-wd"></p>
-          <p class="ts-entry-editing-date" id="entry-editing-date">—</p>
-        </div>
+        <section class="ts-day-editor-section" aria-labelledby="day-sessions-title">
+          <div id="day-sessions-timeline" class="ts-day-sessions"></div>
+          <button type="button" class="ts-day-sessions-clock" id="day-clock-toggle" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
+            <span id="day-clock-toggle-label">Clock in</span>
+          </button>
+        </section>
 
-        <!-- Left-click day action: always stays outside the Basic/Sessions panes so changing the selected
-             entry surface cannot make the live clock disappear. Its label is contextual. -->
-        <button type="button" class="ts-day-sessions-clock" id="day-clock-toggle" hidden>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
-          <span id="day-clock-toggle-label">Clock in</span>
-        </button>
+        <section class="ts-day-editor-section" aria-labelledby="day-duration-title">
+          <div class="ts-day-section-head">
+            <h3 id="day-duration-title">Duration Entries</h3>
+            <span class="ts-day-section-total"><strong id="day-duration-total">0m</strong><small>fixed duration</small></span>
+          </div>
+          <div id="day-duration-list" class="ts-day-duration-list"></div>
+          <div id="day-duration-editor-parking" hidden></div>
+        </section>
 
-        <!-- Copy-yesterday accelerator now lives as a quiet secondary link inside the Sessions timeline's
-             Add-session row (renderDaySessionsTimeline), grouped with the other "fill this day" action. -->
-
-        <!-- Punch→Sessions overhaul: the day timeline. Composes EVERY work session on this day across all
-             hour types + contracts into one list. It is now the CONTENT of the "Sessions" tab (Phase 2c-final
-             retired the old bottom #tab-punch editor below): add/edit/delete sessions, breaks (gaps), and the
-             session editing lives here. On the Basic tab it doubles as a read-only "day at a glance".
-             Populated by renderDaySessionsTimeline(); hidden on the Basic tab when the day has no sessions,
-             force-open on the Sessions tab so an empty day still offers "+ Add session". -->
-        <div id="day-sessions-timeline" class="ts-day-sessions" style="display:none;"></div>
-
-        <div id="tab-manual">
+        <div id="tab-manual" class="ts-day-duration-editor" hidden>
           <!-- Date is driven by the day you click in the calendar; the input stays as a hidden value-holder. -->
           <div style="display:none;"><label>Date</label><input type="text" id="manual-date" placeholder="Select date" /></div>
           <!-- Row 1: the two most-used fields — Total hours and Hour Type. Hour Type always shows, greyed
@@ -265,13 +261,10 @@
           <!-- Full-width advisory (sits below the row, not squashed under the Contract column). Only shown
                when the date has no active contract at all; "pick one" cases are handled by save-time validation. -->
           <div class="ts-warning" id="manual-contract-warning" style="display:none; margin-top:var(--space-2);">No contract is active on this date. Add one on the Contracts page before you can log time against it.</div>
-          <!-- Full-width advisory when the chosen hour type is already logged as sessions on this day. A day
-               can only hold one Basic OR Sessions entry per hour type, so instead of trapping the user on a
-               tab we flag it here and disable Save (reflectManualSessionsConflict) — they can open Sessions to
-               edit it, or pick a different hour type to log basic hours. -->
+          <!-- Advisory when the chosen hour type is already represented by timed sessions on this day. -->
           <div class="ts-warning" id="manual-sessions-warning" style="display:none; margin-top:var(--space-2);"></div>
           <div class="ts-entry-actions">
-            <button id="btn-add-manual" class="ts-entry-submit">Add entry</button>
+            <button id="btn-add-manual" class="ts-entry-submit">Save duration</button>
             <div class="ts-entry-actions-row">
               <button class="ghost danger" id="btn-delete-manual" style="display:none;">Delete</button>
               <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel</button>
@@ -279,10 +272,12 @@
           </div>
         </div>
 
-        <!-- RETIRED (Phase 2c-final): the old bottom Punch editor. The Sessions timeline above is now the
-             single surface for punch/session editing, so this panel is never shown (applyEntryTabPanes keeps
-             it display:none). It is kept in the DOM only because a lot of live logic still reads its punch*
-             fields as value-holders; do not "re-enable" it — the timeline supersedes it. -->
+        <section class="ts-day-editor-section ts-day-editor-section--day" aria-labelledby="day-details-title">
+          <div class="ts-day-section-head"><h3 id="day-details-title">Day details</h3></div>
+          <div id="day-level-actions" class="ts-day-level-actions"></div>
+        </section>
+
+        <!-- Retained only as hidden value-holders for the mobile/shared punch persistence code. -->
         <div id="tab-punch" style="display:none;">
           <!-- Date is driven by the calendar selection; input kept as a hidden value-holder. -->
           <div style="display:none;"><label>Date</label><input type="text" id="punch-date" placeholder="Select date" /></div>

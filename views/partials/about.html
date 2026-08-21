@@ -119,7 +119,7 @@
             <strong>Terminal Requirements:</strong> All commands must be run in a Unix-like terminal (Git Bash for Windows, or regular Terminal for macOS/Linux).
           </div>
           <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
-            <li>Download the latest release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-main.zip</a>.</li>
+            <li>Download the tested stable release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/release.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-release.zip</a>.</li>
             <li>Extract the archive and open the extracted folder in your file browser.</li>
             <li>Open the local Apps Script project folder you use for deployments (create one with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">clasp clone <span id="script-id-clone" style="color:var(--muted);">[Your Script ID]</span></code> if you haven't already).</li>
             <li>Delete all files inside the directory other than the <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">.clasp.json</code> file. If you don't see that file it is because it is hidden, in which case you can safely delete all files.</li>
@@ -144,7 +144,7 @@
             Run the command below from any folder. It logs into Apps Script (if needed), downloads the updater, makes it executable, and pushes the latest Tempus files using the project ID linked to clasp. The script creates a temporary working directory next to where you run it and removes it afterwards by default.
           </p>
           <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:calc(var(--font-size-xs) + 1px); overflow-x:auto;">
-            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span> &amp;&amp; \<br>rm -f ./update-tempus.sh</code>
+            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/release/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span> &amp;&amp; \<br>rm -f ./update-tempus.sh</code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
           <div class="ts-note" style="margin:var(--space-3) 0; opacity:1;">

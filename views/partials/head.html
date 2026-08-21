@@ -1601,9 +1601,6 @@
      (8% text) so the fill stays a quiet month-shape hint on dark themes, which already define cells by border;
      light themes set --agenda-row-bg explicitly and keep their fuller warmth. */
   .ts-calendar-cell.has-entries { background: var(--agenda-row-bg, color-mix(in srgb, var(--panel) 92%, var(--text))); }
-  /* Empty weekends recede via a fainter *warm* hairline (mix of the theme border, not text) so they sit back
-     without going grey — the working week still pops because logged days carry the warm cream fill above. */
-  .ts-calendar-cell--weekend:not(.has-entries):not(.ts-calendar-holiday) { background: transparent; border-color: color-mix(in srgb, var(--text) 9%, transparent); }
   /* Hour-type cells carry NO fill or edge bar — the dot + type label is the only signal (keeps it calm). */
   .ts-calendar-typed-row { margin-top:auto; display:flex; align-items:baseline; gap:6px; min-width:0; }
   .ts-calendar-type-label { font-size:var(--font-size-sm); font-weight:600; color: var(--text); line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
@@ -1627,7 +1624,9 @@
   .ts-agenda-comment { display:inline-flex; align-items:center; margin-left:6px; color:var(--muted); opacity:.8; vertical-align:middle; }
   .ts-agenda-comment svg { width:13px; height:13px; display:block; }
   .ts-calendar-datenum { font-size:calc(var(--font-size-lg) + 2px); font-weight:600; line-height:1; letter-spacing:-0.02em; color: var(--text); }
-  .ts-calendar-cell--weekend .ts-calendar-datenum { color: var(--muted); }
+  /* Optional quiet-weekend treatment changes only the number. A filled cell made the weekend columns more
+     prominent—the opposite of the preference's purpose—so surfaces and borders remain identical to weekdays. */
+  .ts-subdue-weekends .ts-calendar-cell--weekend:not(.has-entries):not(.ts-calendar-holiday):not(.today):not(.selected) .ts-calendar-datenum { color:color-mix(in srgb, var(--muted) 72%, var(--bg)); }
   .ts-calendar-cell.today .ts-calendar-datenum { color: var(--primary-soft-text); }
   .ts-calendar-todaypill { font-size:calc(var(--font-size-xs) - 1px); font-weight:600; color: var(--primary-soft-text); background: var(--primary-soft-bg); border:1px solid var(--primary-soft-border); padding:1px 7px; border-radius:999px; line-height:1.5; white-space:nowrap; }
   /* Holiday/leave label uses all remaining cell width and fades out where it runs short, no ellipsis */
@@ -1714,14 +1713,24 @@
   .ts-entry-card .ts-tab { height:28px; padding:0 14px; display:inline-flex; align-items:center; border:none; border-radius:7px; background:transparent; color:var(--muted); font-weight:600; font-size:13px; }
   .ts-entry-card .ts-tab:hover { color:var(--text); }
   .ts-entry-card .ts-tab.active { background:var(--surface-subtle); color:var(--text); box-shadow:var(--shadow-md); border:none; }
-  .ts-entry-editing { margin-bottom:var(--space-3); }
+  .ts-entry-editing { display:flex; align-items:flex-end; justify-content:space-between; gap:var(--space-4); margin-bottom:var(--space-4); }
   .ts-entry-editing-label { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
   .ts-entry-editing-wd { font-size:13px; font-weight:600; color:var(--primary); margin:0; }
   .ts-entry-editing-date { font-size:22px; font-weight:700; color:var(--text); margin:2px 0 0; letter-spacing:-0.01em; }
+  .ts-day-overall { display:flex; flex-direction:column; align-items:flex-end; line-height:1.1; }
+  .ts-day-overall span { color:var(--text); font-size:18px; font-weight:750; font-variant-numeric:tabular-nums; }
+  .ts-day-overall small, .ts-day-section-total small { color:var(--muted); font-size:11px; font-weight:500; }
+  .ts-day-editor-section { padding:var(--space-4) 0; border-top:1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+  .ts-day-editor-section:first-of-type { border-top:none; padding-top:0; }
+  .ts-day-editor-section--day { padding-bottom:0; }
+  .ts-day-section-head { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-3); margin-bottom:8px; }
+  .ts-day-section-head h3 { margin:0; color:var(--text); font-size:14px; font-weight:700; letter-spacing:-0.005em; }
+  .ts-day-section-total { display:flex; align-items:baseline; gap:6px; }
+  .ts-day-section-total strong { color:var(--text); font-size:14px; font-variant-numeric:tabular-nums; }
 
   /* Phase 1 Sessions timeline — read-only "day at a glance" inside the day modal. Calm by design:
      hairline list, muted gaps, colour only from each hour type's own dot. */
-  .ts-day-sessions { margin:0 0 var(--space-3); }
+  .ts-day-sessions { margin:0; }
   /* On the Sessions tab the timeline is the last thing in the modal (Basic form hidden), so its bottom margin
      is dead space that made the gap under Save/Cancel larger than the gap above the tabs. Drop it there. */
   .ts-day-sessions[data-interactive="1"] { margin-bottom:0; }
@@ -1760,6 +1769,7 @@
   .ts-sd-remove { flex:0 0 auto; background:none; background-image:none; border:none; box-shadow:none; color:var(--muted); cursor:pointer; padding:4px; display:inline-flex; align-items:center; border-radius:6px; }
   .ts-sd-remove:hover { color:var(--danger); background:none; box-shadow:none; transform:none; }
   .ts-day-sessions-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px; }
+  .ts-day-sessions-head h3 { margin:0; color:var(--text); font-size:14px; font-weight:700; letter-spacing:-0.005em; }
   .ts-day-sessions-eyebrow { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
   .ts-day-sessions-total { display:flex; align-items:baseline; gap:6px; font-size:15px; font-weight:700; color:var(--text); }
   .ts-day-sessions-total-sub { font-size:12px; font-weight:500; color:var(--muted); }
@@ -1889,6 +1899,36 @@
   .ts-day-sessions-select:disabled { -webkit-appearance:none; appearance:none; opacity:1; color:var(--text); background:var(--surface-subtle); cursor:default; }
   .ts-day-sessions-row.is-gap .ts-day-sessions-dur { font-weight:500; color:var(--muted); }
   .ts-day-sessions-foot { font-size:11.5px; color:var(--muted); margin:7px 2px 0; display:flex; align-items:center; gap:5px; }
+  /* Clock-out suggestion: advice, so it reads warmer than the muted footer note but stays a note, not a
+     banner — same success green the punch panel used for this line before the Sessions rebuild. */
+  .ts-day-sessions-suggest { font-size:12px; font-weight:600; color:var(--success); margin:8px 2px 0; }
+  /* The window you've just walked past — context for the line above, so it recedes: muted, lighter, tight
+     under it. Deliberately NOT a warning colour; missing one is a normal part of the day, not an error. */
+  .ts-day-sessions-suggest-past { font-size:11.5px; font-weight:500; color:var(--muted); margin:2px 2px 0; }
+
+  /* Fixed-duration rows use the same restrained list language as sessions, with inline expansion. */
+  .ts-day-duration-list { border:1px solid color-mix(in srgb, var(--text) 17%, transparent); border-radius:10px; overflow:hidden; }
+  .ts-day-duration-row { width:100%; min-height:50px; display:flex; align-items:center; gap:10px; padding:9px 11px; margin:0; border:0; border-radius:0; background:transparent; background-image:none; box-shadow:none; color:var(--text); text-align:left; cursor:pointer; }
+  .ts-day-duration-row + .ts-day-duration-row, .ts-day-duration-row + .ts-day-duration-editor, .ts-day-duration-editor + .ts-day-duration-row, .ts-day-duration-list > .ts-day-duration-add { border-top:1px solid color-mix(in srgb, var(--text) 13%, transparent); }
+  .ts-day-duration-row:hover, .ts-day-duration-row:active { background:color-mix(in srgb, var(--text) 4%, transparent); background-image:none; box-shadow:none; transform:none; }
+  .ts-day-duration-row[aria-expanded="true"] { background:color-mix(in srgb, var(--text) 4%, transparent); box-shadow:inset 3px 0 0 var(--primary); }
+  .ts-day-duration-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; background:var(--muted); }
+  .ts-day-duration-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .ts-day-duration-label { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ts-day-duration-meta { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ts-day-duration-value { flex:0 0 auto; font-size:13px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .ts-day-duration-add { width:100%; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:9px 12px; margin:0; border:0; border-radius:0; background:transparent; background-image:none; box-shadow:none; color:var(--muted); font-size:13px; font-weight:500; cursor:pointer; }
+  .ts-day-duration-add:hover, .ts-day-duration-add:active { color:var(--text); background:color-mix(in srgb, var(--text) 5%, transparent); background-image:none; box-shadow:none; transform:none; }
+  .ts-day-duration-add svg { width:15px; height:15px; }
+  .ts-day-duration-empty { padding:12px; color:var(--muted); font-size:12.5px; }
+  .ts-day-duration-editor { padding:2px 12px 13px 15px; background:color-mix(in srgb, var(--text) 4%, transparent); box-shadow:inset 3px 0 0 var(--primary); }
+  .ts-day-duration-editor[hidden] { display:none; }
+  .ts-day-duration-editor .ts-entry-actions { flex-direction:row-reverse; justify-content:flex-start; align-items:center; }
+  .ts-day-duration-editor .ts-entry-submit { width:auto; min-width:92px; box-shadow:none; }
+  .ts-day-duration-editor .ts-entry-actions-row { margin-right:auto; }
+  .ts-day-level-actions { border:1px solid color-mix(in srgb, var(--text) 17%, transparent); border-radius:10px; overflow:hidden; }
+  .ts-day-level-actions .ts-day-sessions-comment-row, .ts-day-level-actions .ts-day-sessions-comment-edit, .ts-day-level-actions .ts-day-sessions-addrow { border-top:0; }
+  .ts-day-level-actions .ts-day-copy-action { border-top:1px solid color-mix(in srgb, var(--text) 13%, transparent); }
 
   /* Billable status: a read-only field matching the (disabled) dropdowns — never selectable, tracks the
      hour type. A status dot + muted text (no input chrome) so it reads as informational, not interactive
@@ -1983,7 +2023,7 @@
   .ts-agenda-mini-cell { aspect-ratio:1; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--text); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:var(--font-size-xs); font-weight:600; cursor:pointer; transition:background .12s ease, border-color .12s ease; }
   .ts-agenda-mini-cell:hover:not(.is-other):not(.is-selected) { background:var(--surface-subtle); }
   .ts-agenda-mini-cell.is-other { color:color-mix(in srgb, var(--muted) 55%, var(--bg)); cursor:default; }
-  .ts-agenda-mini-cell.is-weekend:not(.is-selected):not(.is-other) { color:var(--muted); }
+  .ts-subdue-weekends .ts-agenda-mini-cell.is-weekend:not(.is-selected):not(.is-other):not(.is-today):not(.is-inweek) { color:color-mix(in srgb, var(--muted) 72%, var(--bg)); }
   .ts-agenda-mini-cell.is-today:not(.is-selected) { border-color:var(--primary-soft-border); }
   /* Active week band: ties the calendars to the week list on the right. The selected day still wins. */
   .ts-agenda-mini-cell.is-inweek:not(.is-selected) { background:var(--primary-soft-bg); }
@@ -2573,7 +2613,7 @@
   .ts-gear-toggle:hover svg { transform: rotate(35deg); }
   .ts-gear-toggle.is-active { border-color: var(--primary-soft-border); color: var(--primary); }
   /* Day-entry modal: the modal panel is the surface, so flatten the nested entry card. */
-  #modal-day-entry .ts-modal-content { max-width:470px; }
+  #modal-day-entry .ts-modal-content { max-width:640px; }
   #modal-day-entry .ts-entry-card { margin:0; background:transparent; border:none; box-shadow:none; padding:0; display:flex; flex-direction:column; }
   #modal-day-entry .ts-grid { grid-template-columns:1fr; }
   #modal-day-entry .ts-grid > [class*="ts-col-span"] { grid-column:1 / -1; }
@@ -2582,19 +2622,14 @@
   #modal-day-entry .ts-entry-pair > * { flex:1 1 0; min-width:0; }
   /* Billable status is a Basic-tab field; the Advanced (punch) tab doesn't carry it as a lone box. */
   #punch-billable-note { display:none; }
-  /* No header bar now — the Basic/Advanced tabs and the close ✕ share one row. */
-  #modal-day-entry .ts-entry-tabs-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:var(--space-3); }
-  /* Optically align the active Basic/Advanced pill with the field labels below: shift the track left by
-     its border (1px) + padding (3px) so the pill's left edge sits flush with "Total hours" etc. */
-  #modal-day-entry .ts-entry-tabs-row .ts-tabs { margin-bottom:0; margin-left:-4px; }
   #modal-day-entry .ts-modal-close { font-size:24px; line-height:1; }
   /* Entrance: the panel lifts in (a touch slower/smoother than the generic modal), then the contents
      settle up into place in a gentle stagger — echoes the annual-view bars rising. */
   #modal-day-entry .ts-modal-content { animation: tsModalIn .3s cubic-bezier(.22,.9,.25,1); }
   /* Exit mirrors the day modal's springier open; ID+class out-specifies the open rule above so the panel sinks out too. */
   #modal-day-entry.ts-modal--closing .ts-modal-content { animation: tsModalOut .2s cubic-bezier(.4,0,1,1) forwards; }
-  #modal-day-entry .ts-entry-tabs-row,
   #modal-day-entry .ts-entry-editing,
+  #modal-day-entry .ts-day-editor-section,
   #modal-day-entry #tab-manual > *,
   #modal-day-entry #tab-punch > * { animation: tsRise .44s cubic-bezier(.22,.9,.25,1) both; }
   #modal-day-entry .ts-entry-editing { animation-delay:.06s; }
@@ -2607,6 +2642,14 @@
   #modal-day-entry #tab-manual > *:nth-child(n+4),
   #modal-day-entry #tab-punch > *:nth-child(n+4) { animation-delay:.27s; }
   @keyframes tsRise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  @media (max-width:680px) {
+    #modal-day-entry .ts-modal-body { padding:18px; }
+    .ts-day-sessions-time { width:auto; flex:0 0 auto; }
+    .ts-day-sessions-end { width:48px; flex-basis:48px; }
+    .ts-day-sessions-editrow2, .ts-day-sessions-editselects { padding-left:0; }
+    #modal-day-entry .ts-entry-pair { flex-direction:column; }
+    #modal-day-entry .ts-entry-pair > * { width:100%; }
+  }
   .ts-warning { color: var(--danger); font-size:12px; margin-top:6px; }
   .ts-error { color:var(--danger); font-size:12px; margin-top:6px; }
   /* Colour controls (hour-type swatch grid + theme chip/hex fields) replace the native colour bar; the native input is kept hidden as the value holder + OS picker trigger. */

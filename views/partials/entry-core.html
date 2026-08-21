@@ -148,13 +148,150 @@
       return [dateIso || '', hourTypeId || '', contractId || ''].join('|');
     };
 
+    // Minutes-since-midnight from a time-of-day value. Tolerates a plain "HH:MM" as well as a Google Sheets
+    // time serial that arrives as a datetime ("1899-12-30T17:00:00", "1899-12-30 17:00:00"). Null if no
+    // sensible time of day can be read.
+    const parseTimeOfDay = (value) => {
+      if (value === null || value === undefined) return null;
+      let s = String(value).trim();
+      if (s.indexOf('T') !== -1) s = s.split('T')[1] || '';
+      else if (/^\d{4}-\d{2}-\d{2}\s/.test(s)) s = s.split(/\s+/)[1] || '';
+      const match = s.match(/(\d{1,2}):(\d{2})/);
+      if (!match) return null;
+      const h = Number(match[1]);
+      const m = Number(match[2]);
+      if (!Number.isFinite(h) || !Number.isFinite(m) || h > 23 || m > 59) return null;
+      return h * 60 + m;
+    };
+
+    // Settings › Suggested minimum end time, when unset or unreadable. Mirrors the settings control's default.
+    const DEFAULT_MINIMUM_END_TIME = '17:00';
+
+    const defaultFormatTime = (hhmm) => {
+      const mins = timeToMinutes(hhmm);
+      if (mins === null) return hhmm || '';
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return (h % 12 === 0 ? 12 : h % 12) + ':' + String(m).padStart(2, '0') + (h >= 12 ? 'pm' : 'am');
+    };
+
+    const defaultFormatHours = (minutes) => {
+      const out = (Math.round(((Number(minutes) || 0) / 60) * 10000) / 10000).toFixed(4).replace(/\.?0+$/, '');
+      return out === '' ? '0' : out;
+    };
+
+    // A countdown is only worth showing when the window is close enough to act on. Further out than this and
+    // the suggestion drops the "— 12 min away" tail: at 9am, "clock out at 5:07pm" is the useful part and
+    // "7h 12m away" is noise.
+    const SUGGESTION_COUNTDOWN_HORIZON = 60;
+
+    const formatGap = (minutes) => {
+      const total = Math.max(0, Math.round(Number(minutes) || 0));
+      if (total < 60) return total + ' min';
+      const h = Math.floor(total / 60);
+      const m = total % 60;
+      return m ? h + 'h ' + m + 'm' : h + 'h';
+    };
+
+    // The "Suggest exact end time" feature, shared by desktop and mobile so both say the same thing: the
+    // clock-out times that make this entry's total land EXACTLY on the rounding interval, so nothing is
+    // rounded away or gifted. Anchored to the user's suggested minimum end time — with 5pm and 15-minute
+    // rounding, the one minute between 5:00 and 5:15 that squares the total.
+    //
+    // Exact clock-outs repeat every `interval` minutes, so once one goes by there are always two nearby: the
+    // one just missed and the one coming up. Reporting only the next left you stranded — a minute past 5:07pm
+    // you'd be told to sit tight for another 14, with no hint that you'd just walked past a clean exit. So
+    // both are returned whenever a valid one has passed, each with its distance from now, and the caller can
+    // judge which window to aim for.
+    //
+    // `punches` must be the open session's own ENTRY, not the whole day: rounding is applied per entry
+    // (that's the unit the server's applyRoundInterval acts on).
+    //
+    // opts: { roundInterval, minimumEndTime, nowMinutes?, formatTime?, formatHours? }. The formatters let
+    // each surface render the sentences in its own house style. Returns null when there's nothing sensible
+    // to say, else:
+    //   { message, previousMessage, timeIso, totalMinutes, minutesAway,
+    //     previousTimeIso, previousTotalMinutes, previousMinutesAgo }
+    // where every `previous*` field is null unless a valid exact clock-out has already gone by.
+    const endTimeSuggestion = (punches, openPunch, opts) => {
+      const options = opts || {};
+      const interval = clampRoundInterval(options.roundInterval);
+      // Rounding off (or 1 minute) → every minute already gives an exact total, so there's nothing to suggest.
+      if (interval < 2) return null;
+      if (!openPunch || !openPunch.in) return null;
+      const inMinutes = timeToMinutes(openPunch.in);
+      if (inMinutes === null) return null;
+
+      let closedMinutes = 0;
+      (punches || []).forEach((punch) => {
+        if (!punch || !punch.in || !punch.out) return;
+        const start = timeToMinutes(punch.in);
+        const end = timeToMinutes(punch.out);
+        if (start === null || end === null || end <= start) return;
+        closedMinutes += end - start;
+      });
+
+      let nowMinutes = options.nowMinutes;
+      if (nowMinutes === null || nowMinutes === undefined) {
+        const now = new Date();
+        nowMinutes = now.getHours() * 60 + now.getMinutes();
+      }
+      const configuredEnd = parseTimeOfDay(options.minimumEndTime);
+      const minimumEnd = configuredEnd === null ? parseTimeOfDay(DEFAULT_MINIMUM_END_TIME) : configuredEnd;
+      const floor = Math.max(minimumEnd === null ? 0 : minimumEnd, inMinutes + 1);
+      // The CURRENT minute still counts: punches record to the minute, so if this very minute is an exact
+      // one, "clock out now" is the most useful thing we can say — not something to skip past.
+      const earliest = Math.max(floor, nowMinutes);
+      // Clocking out at T gives closedMinutes + (T - inMinutes). That is a whole number of intervals exactly
+      // when T ≡ inMinutes - closedMinutes (mod interval); take the first such T at or after `earliest`.
+      const congruent = (((inMinutes - closedMinutes) % interval) + interval) % interval;
+      const suggested = earliest + ((((congruent - earliest) % interval) + interval) % interval);
+      // The day's clock can't record past 23:59 — an overnight session splits at midnight instead.
+      if (suggested > 24 * 60 - 1) return null;
+
+      const totalFor = (endMinutes) => closedMinutes + (endMinutes - inMinutes);
+      const fmtTime = typeof options.formatTime === 'function' ? options.formatTime : defaultFormatTime;
+      const fmtHours = typeof options.formatHours === 'function' ? options.formatHours : defaultFormatHours;
+      const label = (endMinutes) => fmtTime(minutesToTime(endMinutes));
+
+      const minutesAway = suggested - nowMinutes;
+      let message;
+      if (minutesAway <= 0) {
+        message = 'Clock out now — ' + label(suggested) + ' gives exactly ' + fmtHours(totalFor(suggested)) + 'h.';
+      } else {
+        message = 'Clock out at ' + label(suggested) + ' for exactly ' + fmtHours(totalFor(suggested)) + 'h'
+          + (minutesAway <= SUGGESTION_COUNTDOWN_HORIZON ? ' — ' + formatGap(minutesAway) + ' away' : '') + '.';
+      }
+
+      // The window just gone. Only when it was genuinely offerable (at or after the minimum end time, after
+      // the clock-in) and is now behind us — and not while we're sitting on an exact minute, where pointing
+      // at the last one is just noise.
+      const previous = suggested - interval;
+      const hasPrevious = minutesAway > 0 && previous >= floor && previous < nowMinutes;
+      return {
+        message: message,
+        previousMessage: hasPrevious
+          ? ('You passed ' + label(previous) + ' (' + fmtHours(totalFor(previous)) + 'h) '
+            + formatGap(nowMinutes - previous) + ' ago.')
+          : null,
+        timeIso: minutesToTime(suggested),
+        totalMinutes: totalFor(suggested),
+        minutesAway: Math.max(0, minutesAway),
+        previousTimeIso: hasPrevious ? minutesToTime(previous) : null,
+        previousTotalMinutes: hasPrevious ? totalFor(previous) : null,
+        previousMinutesAgo: hasPrevious ? (nowMinutes - previous) : null
+      };
+    };
+
     return {
       clampRoundInterval,
       contractIsValid,
+      endTimeSuggestion,
       entryCompositeKey,
       isoDateTime,
       minutesToTime,
       normalizePunchList,
+      parseTimeOfDay,
       roundDuration,
       sanitizeEntry,
       summarizePunches,

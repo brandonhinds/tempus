@@ -1092,6 +1092,10 @@ let ratePreviewInputSyncing = false;
     merged.sort(entrySort);
     setEntriesAndBreaks(merged);
     reconcileIncomeMetadataWithEntries(previousEntries, merged);
+    // Stored breaks may come from an older client or from a create/delete race. Re-validate every loaded
+    // break date against the authoritative session set so an orphan cannot survive a refresh indefinitely.
+    Array.from(new Set((state.breaks || []).map((record) => record && record.date).filter(Boolean)))
+      .forEach((dateIso) => scheduleBreakReconcile(dateIso));
 
     // If the self-heal above resurrected a server entry we'd wrongly hidden, tell the user once — quietly,
     // so a demo isn't interrupted, but visibly enough that "it fixed itself" isn't a mystery.
@@ -1145,8 +1149,7 @@ let ratePreviewInputSyncing = false;
     // the modal is open — e.g. switching the hour type to one that has an existing entry for that day.
     const _dayModal = document.getElementById('modal-day-entry');
     if (normalized !== 'time' && _dayModal && _dayModal.style.display === 'flex') {
-      hideModal(_dayModal);
-      calendarDaySelected = false;
+      if (!(await closeDayModal())) return;
     }
 
     // Check if leaving settings page with unsaved changes
@@ -1302,13 +1305,19 @@ let ratePreviewInputSyncing = false;
           return;
         }
 
-        const buildDate = String(meta.buildDate || '').trim();
-        if (!buildDate) {
+        const buildTimestamp = String(meta.buildTimestamp || meta.buildDate || '').trim();
+        const buildCommit = String(meta.buildCommit || '').trim();
+        if (!buildTimestamp && !buildCommit) {
           aboutVersionDisplay.textContent = 'Unavailable';
           return;
         }
-
-        aboutVersionDisplay.textContent = 'Build date ' + buildDate;
+        const parts = [];
+        if (buildCommit) parts.push('Deployed ' + buildCommit.slice(0, 12));
+        if (buildTimestamp) {
+          const parsed = new Date(buildTimestamp);
+          parts.push(Number.isNaN(parsed.getTime()) ? buildTimestamp : parsed.toLocaleString());
+        }
+        aboutVersionDisplay.textContent = parts.join(' · ');
       })
       .withFailureHandler(() => {
         aboutVersionDisplay.textContent = 'Unavailable';
@@ -1342,20 +1351,36 @@ let ratePreviewInputSyncing = false;
       return;
     }
     const result = state.updateStatus;
-    if (result.error) {
+    if (result.recoverableError || result.error) {
       aboutVersionStatus.textContent = 'Status unavailable';
-      aboutVersionStatus.style.color = 'var(--danger)';
+      aboutVersionStatus.style.color = 'var(--muted)';
       return;
     }
+    const releasedSha = String(result.releasedCommitSha || '').slice(0, 12);
+    const releasedAt = String(result.releasedTimestamp || '').trim();
+    const parsedReleasedAt = releasedAt ? new Date(releasedAt) : null;
+    const publication = parsedReleasedAt && !Number.isNaN(parsedReleasedAt.getTime())
+      ? parsedReleasedAt.toLocaleString()
+      : releasedAt;
+    const releaseLabel = [releasedSha ? 'Stable ' + releasedSha : '', publication ? 'published ' + publication : ''].filter(Boolean).join(' · ');
     if (result.hasUpdate) {
-      const upstream = String(result.upstreamDate || result.upstreamTimestamp || '').trim();
-      aboutVersionStatus.textContent = upstream ? 'Update available (since ' + upstream + ')' : 'Update available';
+      aboutVersionStatus.textContent = (releaseLabel ? releaseLabel + ' · ' : '') + 'Update available';
       aboutVersionStatus.style.color = 'var(--warning)';
       return;
     }
-    if (result.upstreamDate) {
-      const dateLabel = String(result.localBuildDate || result.upstreamDate || '').trim();
-      aboutVersionStatus.textContent = dateLabel ? 'Up to date (as of ' + dateLabel + ')' : 'Up to date';
+    if (result.relation === 'local_newer') {
+      aboutVersionStatus.textContent = (releaseLabel ? releaseLabel + ' · ' : '') + 'This build is newer';
+      aboutVersionStatus.style.color = 'var(--muted)';
+      return;
+    }
+    if (result.relation === 'divergent') {
+      aboutVersionStatus.textContent = (releaseLabel ? releaseLabel + ' · ' : '') + 'Different build';
+      aboutVersionStatus.style.color = 'var(--muted)';
+      return;
+    }
+    if (result.releasedTimestamp || result.upstreamDate) {
+      aboutVersionStatus.textContent = (releaseLabel ? releaseLabel + ' · ' : '') + 'Up to date'
+        + (result.legacyComparison ? ' (legacy date comparison)' : '');
       aboutVersionStatus.style.color = 'var(--success)';
       return;
     }
@@ -1364,9 +1389,9 @@ let ratePreviewInputSyncing = false;
   }
 
   function applyUpdateIndicators() {
-    // Update notifications suppressed — this instance is intentionally on a custom fork and no longer
-    // tracks upstream. Always keep the nav banner and the "Update" badge hidden.
-    if (navAboutUpdateBadge) navAboutUpdateBadge.style.display = 'none';
+    const updateAvailable = !!(state.updateStatus && state.updateStatus.hasUpdate
+      && !state.updateStatus.error && !state.updateStatus.recoverableError);
+    if (navAboutUpdateBadge) navAboutUpdateBadge.style.display = updateAvailable ? 'inline-flex' : 'none';
     if (navUpdateWarning) navUpdateWarning.style.display = 'none';
     if (state.currentPage === 'about') {
       applyUpdateStatusToAbout();
@@ -2873,9 +2898,10 @@ let ratePreviewInputSyncing = false;
 
   const getRoundInterval = () => clampRoundIntervalValue(state.settings ? state.settings.round_to_nearest : 0);
 
-  // The standard working day, in hours. One source of truth for the punch end-time suggestion (as the
-  // fallback when the hour type has no quick-fill), the agenda weekly progress bar, and the mobile daily
-  // ring. Falls back to 7.5h when unset or invalid.
+  // The standard working day, in hours. One source of truth for the agenda weekly progress bar, the mobile
+  // daily ring, and the quick-fill hours fallback when neither the hour type nor the default type sets its
+  // own. (No longer feeds the clock-out suggestion — that anchors on Settings › Suggested minimum end time
+  // plus the rounding interval, per calculateEndTimeSuggestion.) Falls back to 7.5h when unset or invalid.
   const DEFAULT_TARGET_HOURS_PER_DAY = 7.5;
   const getTargetHoursPerDay = () => {
     const v = Number(state.settings ? state.settings.target_hours_per_day : NaN);
@@ -10378,6 +10404,27 @@ function updateDeductionFormVisibility() {
       const hourType = state.hourTypeMap[hourTypeId || getDefaultHourTypeId()];
       return hourTypeEffectiveEntryMode(hourType) === mode ? valid : [];
     }
+    // A contract configured Simple can still be HOLDING sessions: the clock in/out shortcuts write
+    // Detailed entries whatever the contract's mode says (see the hour-type editor's "Clock shortcuts use
+    // Detailed entry mode"). Filtering the Detailed surface purely on configured mode stranded those
+    // entries — the Sessions contract picker came up empty on the very day a clock-in had just resolved
+    // that same contract, so "Add session" could never be saved. Widen it two ways, both narrow:
+    //   (a) the contract already has a Detailed entry that day — the same "never make a logged entry
+    //       unreachable" rule dayEntryModes applies to the Basic/Sessions tabs, and
+    //   (b) the hour type in play is clock-configured, so anything logged under it will be Detailed —
+    //       which is what makes a day with nothing on it yet work too.
+    if (mode === 'detailed') {
+      const hourType = state.hourTypeMap[hourTypeId || getDefaultHourTypeId()];
+      if (hourType && hourType.quick_fill_mode === 'punch') return valid;
+      const holdingSessions = new Set();
+      (state.entries || []).forEach((entry) => {
+        if (!entry || entry.date !== dateIso) return;
+        if (resolveEntryType(entry) !== 'advanced') return;
+        holdingSessions.add(String(entry.contract_id || ''));
+      });
+      return valid.filter((c) => contractEffectiveEntryMode(c) === 'detailed'
+        || holdingSessions.has(String(c.id)));
+    }
     return valid.filter((c) => contractEffectiveEntryMode(c) === mode);
   }
 
@@ -10669,28 +10716,11 @@ function updateDeductionFormVisibility() {
       + `or ${attemptedKind} entry per hour type — edit the existing entry, or pick a different hour type to log ${attemptedKind.toLowerCase()} time.`;
   }
 
-  // Show the correct entry-editor pane for the active tab. Phase 2c-final: the Sessions tab's content is the
-  // whole-day timeline (rendered above the panes by renderDaySessionsTimeline), so the legacy bottom
-  // #tab-punch editor is never shown. Basic still shows its #tab-manual form. Selecting Sessions also
-  // force-opens the timeline so an empty day still offers "+ Add session" / Start clock.
+  // Legacy tab entry points remain because quick actions and the mobile/shared punch code call them. The
+  // desktop modal is now a single stacked editor, so these functions only keep hidden value-holders in sync.
   function applyEntryTabPanes(activeId) {
-    const manualPane = document.getElementById('tab-manual');
-    if (manualPane) manualPane.style.display = activeId === 'manual' ? 'block' : 'none';
     const punchPane = document.getElementById('tab-punch');
     if (punchPane) punchPane.style.display = 'none';
-    // Re-render the timeline on EVERY tab flip: on the Sessions tab it's the interactive editor (Add session,
-    // Start clock, click-to-edit, delete); on the Basic tab it's a read-only day-at-a-glance with none of
-    // those. Re-rendering here is what strips the Sessions-only controls when you move to Basic — otherwise
-    // the last (Sessions) render lingers and its Start-clock button shows on Basic.
-    // GUARDED on a selected day: the bootstrap activateTab('manual') runs at startup before daySessionsEdit
-    // (a `let`) is initialised, and renderDaySessionsTimeline reads it — calling it then throws a TDZ error
-    // that aborts the rest of init (the app then looks empty/new). No day open ⇒ nothing to render anyway.
-    if (state.selectedCalendarDate && typeof renderDaySessionsTimeline === 'function') {
-      renderDaySessionsTimeline(state.selectedCalendarDate);
-    }
-    // Copy-yesterday is a Sessions-only accelerator — re-evaluate its visibility on each tab flip so it hides
-    // when moving to Basic and reappears on Sessions. (Hoisted fn; at bootstrap no day is selected so it no-ops.)
-    if (typeof updateCopyYesterdayButton === 'function') updateCopyYesterdayButton();
   }
 
   function activateTab(id) {
@@ -10708,18 +10738,6 @@ function updateDeductionFormVisibility() {
       }
     }
 
-    // Update tab visual states
-    $$('.ts-tab').forEach((tab) => {
-      const target = tab.getAttribute('data-tab');
-      tab.classList.toggle('active', target === id);
-    });
-    // Changing tab drops any in-progress timeline add/edit card — the timeline renders above BOTH panes, so
-    // an unsaved "Add session" / edit row would otherwise bleed onto the other tab. Done after the active-tab
-    // class flip so the re-render inside cancelDaySessionEdit reflects the tab we're moving to. Guarded on a
-    // real prior tab so it never touches the daySessionsEdit `let` during the bootstrap activateTab('manual').
-    if (state.currentTab && state.currentTab !== id && typeof cancelDaySessionEdit === 'function') {
-      cancelDaySessionEdit();
-    }
     updateTabStates();
     applyEntryTabPanes(id);
 
@@ -10739,8 +10757,7 @@ function updateDeductionFormVisibility() {
 
     state.currentTab = id;
 
-    // Landing on the Basic tab (guarded on a selected day so it never runs during the bootstrap
-    // activateTab('manual'), before the manual fields are wired):
+    // Keep the hidden Basic value-holders coherent for legacy quick-fill paths.
     if (id === 'manual' && state.selectedCalendarDate) {
       // Coming from Sessions, the Basic form may never have been initialised for this day (opening an
       // advanced day lands on Sessions and skips the manual form). If we're not mid-edit of a basic entry,
@@ -10750,7 +10767,6 @@ function updateDeductionFormVisibility() {
         setManualDate(state.selectedCalendarDate, manualContract ? manualContract.value : '');
         updateManualContractVisibility();
       }
-      // …then flag any hour-type-vs-sessions conflict inline + disable Save.
       reflectManualSessionsConflict();
     }
   }
@@ -10763,16 +10779,9 @@ function updateDeductionFormVisibility() {
     });
   });
 
-  // Both tabs are always reachable now (Phase 2c-final): the Sessions tab is a whole-day surface (the
-  // timeline), and the Basic tab flags an hour-type-vs-sessions conflict inline (reflectManualSessionsConflict)
-  // + disables Save rather than locking the tab. The old opposite-format tab-disabling trapped users on the
-  // wrong tab with no way to pick a different hour type. Kept as a function so its many call sites still work.
+  // Kept as a compatibility hook for existing entry mutations.
   function updateTabStates() {
-    $$('.ts-tab').forEach((tab) => {
-      tab.style.opacity = '1';
-      tab.style.cursor = 'pointer';
-      tab.title = '';
-    });
+    return;
   }
 
   // Default to manual tab initially (will be updated after cache loads)
@@ -10937,15 +10946,16 @@ function updateDeductionFormVisibility() {
   // with no start to lean on) instead leans on opts.anchorMin — the previous session's boundary that day —
   // taking am only if it doesn't fall before the anchor, else pm (so "1" after an 8–12 morning = 1pm).
   // Both readings below the anchor is NOT an error — the user may be inserting an earlier session — pm,
-  // the closer reading, just wins. The result snaps to the app's rounding interval (nearest) so what's
-  // shown reconciles with the rounded total. Output always carries am/pm (no 24h input). Returns {min}
-  // (minutes-since-midnight), {empty}, or {err}.
+  // the closer reading, just wins. The typed minute is kept EXACTLY as given: round_to_nearest quantises
+  // durations (roundDuration here, applyRoundInterval on the server), never the clock times themselves —
+  // the same rule the clock in/out shortcuts and the mobile client already follow. This parser used to
+  // snap its result to the interval, which silently rewrote a typed 9:07 to 9:00 and put the manual
+  // editor at odds with a clock-in on the very same day. Output always carries am/pm (no 24h input).
+  // Returns {min} (minutes-since-midnight), {empty}, or {err}.
   function parseSmartTime(raw, opts) {
     opts = opts || {};
     var isEnd = !!opts.isEnd;
     var startMin = (opts.startMin == null ? null : opts.startMin);
-    var iv = getRoundInterval() || 1;
-    var snap = function (m) { return iv <= 1 ? m : Math.round(m / iv) * iv; };
     var to24 = function (hh, per) { return per === 'am' ? (hh === 12 ? 0 : hh) : (hh === 12 ? 12 : hh + 12); };
     var s = String(raw == null ? '' : raw).trim().toLowerCase().replace(/\s+/g, '');
     if (!s) return { empty: true };
@@ -10953,7 +10963,7 @@ function updateDeductionFormVisibility() {
       var num = parseFloat(s.replace(/^\+/, '').replace(/h$/, ''));
       if (isNaN(num) || num <= 0) return { err: 'Enter hours like 8h' };
       if (startMin == null) return { err: 'Set a start time first' };
-      return { min: snap(startMin + Math.round(num * 60)) };
+      return { min: startMin + Math.round(num * 60) };
     }
     var ap = null, apm = s.match(/([ap])m?$/);
     if (apm) { ap = apm[1] === 'p' ? 'pm' : 'am'; s = s.slice(0, apm.index); }
@@ -10980,7 +10990,6 @@ function updateDeductionFormVisibility() {
       if (!cands.length) return { err: 'End is before start' };
       chosen = Math.min.apply(null, cands);
     }
-    chosen = snap(chosen);
     if (chosen >= 1440) chosen = 1439;
     if (isEnd && startMin != null && chosen <= startMin) return { err: 'End is before start' };
     return { min: chosen };
@@ -11183,68 +11192,22 @@ function updateDeductionFormVisibility() {
     }
   }
 
-  // Extract minutes-since-midnight from a time value. Tolerates a plain "HH:MM" as well as a Google
-  // Sheets time serial that arrives as a datetime (e.g. "1899-12-30T17:00:00" or "... 17:00:00").
-  // Returns null if no valid time of day can be read.
-  function parseTimeOfDay(value) {
-    if (value === null || value === undefined) return null;
-    var s = String(value).trim();
-    if (s.indexOf('T') !== -1) s = s.split('T')[1] || '';
-    else if (/^\d{4}-\d{2}-\d{2}\s/.test(s)) s = s.split(/\s+/)[1] || '';
-    var m = s.match(/(\d{1,2}):(\d{2})/);
-    if (!m) return null;
-    var h = parseInt(m[1], 10), min = parseInt(m[2], 10);
-    if (isNaN(h) || isNaN(min) || h > 23 || min > 59) return null;
-    return h * 60 + min;
-  }
-
-  // Suggest the clock-out time that hits the target for the day. Target = the punched hour type's quick-fill
-  // hours (e.g. Work = 8.5), else the configured standard-day target. No suggestion once you're at/over the
-  // target (closed sessions already meet it, or the open session has run past it). A target that lands after
-  // midnight (late-start shift) is shown as a next-day clock-out time, mirroring the overnight-split behaviour.
-  function calculateEndTimeSuggestion(punches, openPunch, targetHours) {
-    var closedMinutes = 0;
-    for (var i = 0; i < punches.length; i++) {
-      if (punches[i].in && punches[i].out) {
-        var cIn = punches[i].in.split(':');
-        var cOut = punches[i].out.split(':');
-        closedMinutes += (parseInt(cOut[0], 10) * 60 + parseInt(cOut[1], 10)) - (parseInt(cIn[0], 10) * 60 + parseInt(cIn[1], 10));
-      }
-    }
-    var oIn = openPunch.in.split(':');
-    var inMinutes = parseInt(oIn[0], 10) * 60 + parseInt(oIn[1], 10);
-
-    var targetMinutes = Math.round((Number(targetHours) || 0) * 60);
-    if (targetMinutes <= 0) return null;
-
-    // Minutes the open session still needs to reach the target.
-    var remaining = targetMinutes - closedMinutes;
-    if (remaining <= 0) return null; // closed sessions already meet the target
-
-    // Clock out here to land exactly on the target.
-    var suggestedMinutes = inMinutes + remaining;
-
-    if (suggestedMinutes >= 48 * 60) return null; // beyond the next day — too far out to be useful
-
-    var pastMidnight = suggestedMinutes >= 24 * 60;
-    if (!pastMidnight) {
-      var now = new Date();
-      var nowMinutes = now.getHours() * 60 + now.getMinutes();
-      if (suggestedMinutes <= nowMinutes) return null; // already worked past the target today
-    }
-    // A past-midnight target necessarily lands after "now" (today's clock can't exceed 23:59), so no
-    // need to compare against the current time — just render it as tomorrow's clock-out.
-
-    var displayMinutes = suggestedMinutes % (24 * 60);
-    var sh = Math.floor(displayMinutes / 60);
-    var sm = displayMinutes % 60;
-    var period = sh >= 12 ? 'pm' : 'am';
-    var displayHours = sh > 12 ? sh - 12 : (sh === 0 ? 12 : sh);
-    var displayTime = displayHours + ':' + String(sm).padStart(2, '0') + ' ' + period + (pastMidnight ? ' tomorrow' : '');
-
-    return {
-      message: 'Clock out at ' + displayTime + ' for a full ' + formatHours(targetMinutes) + 'h day.'
-    };
+  // "Suggest exact end time": the clock-out time that squares this entry's total against the rounding
+  // interval, at or after Settings › Suggested minimum end time. The maths lives in entryCore so desktop and
+  // mobile can't drift apart; this only supplies the settings and this surface's own formatters.
+  //
+  // It used to ignore both of those settings and instead target quick-fill/standard-day HOURS ("clock out at
+  // 5:30pm for a full 7.5h day"), which is a different feature, and it went quiet the moment that time
+  // passed. See entryCore.endTimeSuggestion for the rule it follows now.
+  function calculateEndTimeSuggestion(punches, openPunch) {
+    const core = window.entryCore || {};
+    if (typeof core.endTimeSuggestion !== 'function') return null;
+    return core.endTimeSuggestion(punches, openPunch, {
+      roundInterval: getRoundInterval(),
+      minimumEndTime: state.settings ? state.settings.minimum_end_time : null,
+      formatTime: formatTime12,
+      formatHours: formatHours
+    });
   }
 
   function updatePunchSummary() {
@@ -11263,16 +11226,14 @@ function updateDeductionFormVisibility() {
     // ONLY for the too-short clock-out error, which handlePunchToggle sets directly.
     punchOpenWarning.style.display = 'none';
 
-    // End-time suggestion: while on the clock and below your target, suggest the clock-out time that hits it.
-    // Target = the punched hour type's quick-fill hours, else the configured standard-day target.
+    // End-time suggestion. This panel is a hidden value-holder now, so the line the user actually sees is
+    // rendered by renderDaySessionsTimeline — kept in step here only so the retired markup never holds a
+    // stale message if it's ever surfaced again.
     const suggestEndTimeEnabled = getFeatureFlag('suggest_end_time');
     if (suggestEndTimeEnabled && summary.openCount > 0) {
       const lastOpen = punches.find((p) => !p.out);
       if (lastOpen && lastOpen.in) {
-        const htId = (punchHourType && punchHourType.value) ? punchHourType.value : getDefaultHourTypeId();
-        const ht = state.hourTypeMap[htId];
-        const targetHours = (ht && Number(ht.quick_fill_hours) > 0) ? Number(ht.quick_fill_hours) : getTargetHoursPerDay();
-        const suggestion = calculateEndTimeSuggestion(punches, lastOpen, targetHours);
+        const suggestion = calculateEndTimeSuggestion(punches, lastOpen);
         if (suggestion) {
           punchSuggestion.textContent = suggestion.message;
           punchSuggestion.style.display = 'block';
@@ -12353,7 +12314,7 @@ function updateDeductionFormVisibility() {
     if (warn) {
       if (manualSessionsConflict) {
         const name = (state.hourTypeMap[htId] && state.hourTypeMap[htId].name) || 'This hour type';
-        warn.textContent = '“' + name + '” is logged as sessions on this day. Open the Sessions tab to edit it, '
+        warn.textContent = '“' + name + '” is logged as timed sessions on this day. Edit it in Timed Sessions, '
           + 'or pick a different hour type to log basic hours.';
         warn.style.display = 'block';
       } else {
@@ -12415,8 +12376,8 @@ function updateDeductionFormVisibility() {
         // Basic entries. The generic "no contract is active" copy was wrong (and confusing) then.
         manualContractWarning.textContent = validContractsForDate(dateIso).length
           ? (getEntryModeSource() === 'hour_type'
-              ? 'This hour type uses Sessions — switch to the Sessions tab or change its entry mode on the Hour Types page.'
-              : 'Your contracts on this date use Sessions — log this time on the Sessions tab, or set a contract’s entry mode to Simple.')
+              ? 'This hour type uses Timed Sessions. Change its entry mode on the Hour Types page to add a duration entry.'
+              : 'Your contracts on this date use Timed Sessions. Set a contract’s entry mode to Simple to add a duration entry.')
           : 'No contract is active on this date. Add one on the Contracts page before you can log time against it.';
         manualContractWarning.style.display = 'block';
       }
@@ -12493,8 +12454,8 @@ function updateDeductionFormVisibility() {
   }
 
   function setManualMode(isEdit) {
-    if (manualSaveBtn) manualSaveBtn.textContent = isEdit ? 'Update entry' : 'Add entry';
-    if (manualCancelBtn) manualCancelBtn.style.display = isEdit ? 'inline-flex' : 'none';
+    if (manualSaveBtn) manualSaveBtn.textContent = isEdit ? 'Save changes' : 'Add duration';
+    if (manualCancelBtn) manualCancelBtn.style.display = 'inline-flex';
     if (manualDeleteBtn) manualDeleteBtn.style.display = isEdit ? 'inline-flex' : 'none';
   }
 
@@ -12502,6 +12463,8 @@ function updateDeductionFormVisibility() {
     showPage('time');
     state.currentTab = 'manual';
     activateTab('manual');
+    state.editingEntryId = isEdit ? entry.id : null;
+    state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     const preferredDate = entry.date || todayIso();
     const preferredContractId = entry.contract_id || '';
     // Set the hour type before wiring up the contract field. Contract handling branches on whether THIS
@@ -12529,8 +12492,6 @@ function updateDeductionFormVisibility() {
       manualHoursInput.value = hoursValue ? hoursValue : '';
     }
 
-    state.editingEntryId = isEdit ? entry.id : null;
-    state.editingEntryType = isEdit ? (entry.entry_type || 'basic') : null;
     setManualMode(!!isEdit);
     // Loading a real basic entry clears any lingering sessions-conflict warning (and re-runs Save-enabled).
     if (typeof reflectManualSessionsConflict === 'function') reflectManualSessionsConflict();
@@ -12613,27 +12574,37 @@ function updateDeductionFormVisibility() {
     if (lockResult.blocked) return;
     const inFlightKey = lockResult.key;
     const inFlightId = state.editingEntryId || payload.id || 'new';
-    if (state.editingEntryId) {
-      const idx = state.entries.findIndex((e) => e.id === state.editingEntryId);
+    const editingId = state.editingEntryId;
+    if (editingId) {
+      const idx = state.entries.findIndex((e) => e.id === editingId);
       if (idx === -1) {
         releaseEntryLock(inFlightKey, inFlightId);
         return;
       }
       const backup = { ...state.entries[idx] };
-      const update = { id: state.editingEntryId, ...payload };
+      const update = { id: editingId, ...payload };
       const optimisticUpdate = sanitizeEntry({ ...backup, ...update });
       state.entries[idx] = optimisticUpdate;
+      // renderEntries() sorts the collection, so asynchronous callbacks must resolve the exact entry by
+      // id instead of reusing this pre-sort array index. Otherwise a response can overwrite a neighbour.
+      const currentEditingIndex = () => state.entries.findIndex((entry) =>
+        entry && String(entry.id) === String(editingId));
+      const restoreEditingBackup = () => {
+        const currentIdx = currentEditingIndex();
+        if (currentIdx > -1) state.entries[currentIdx] = backup;
+        state.entries.sort(entrySort);
+      };
       markIncomeDirtyForEntryChange(backup, optimisticUpdate);
-      recordPendingEntryUpdate(state.editingEntryId, optimisticUpdate);
+      recordPendingEntryUpdate(editingId, optimisticUpdate);
       saveCache();
       renderEntries();
       setStatus('Saving...', 'warn');
       google.script.run
         .withSuccessHandler((res) => {
           if (handleDuplicateConflictResponse(res)) {
-            state.entries[idx] = backup;
+            restoreEditingBackup();
             markIncomeSummaryDirtyForEntry(backup);
-            resolvePendingEntryUpdate(state.editingEntryId);
+            resolvePendingEntryUpdate(editingId);
             saveCache();
             renderEntries();
             releaseEntryLock(inFlightKey, inFlightId);
@@ -12641,21 +12612,23 @@ function updateDeductionFormVisibility() {
           }
           if (res && res.success) {
             const confirmed = sanitizeEntry(res.entry);
-            const prevEntry = state.entries[idx];
-            state.entries[idx] = confirmed;
-            markIncomeDirtyIfChanged(prevEntry, confirmed);
+            const currentIdx = currentEditingIndex();
+            if (currentIdx > -1) {
+              const prevEntry = state.entries[currentIdx];
+              state.entries[currentIdx] = confirmed;
+              markIncomeDirtyIfChanged(prevEntry, confirmed);
+            }
             recordPendingEntryUpdate(confirmed.id, confirmed);
             resolveMarkerAfterSync(() => resolvePendingEntryUpdate(confirmed.id));
             state.entries.sort(entrySort);
-            clearManualEditing();
             saveCache();
             renderEntries();
             ensurePunchDraft(payload.contract_id);
             setStatus('Saved', 'success');
           } else {
-            state.entries[idx] = backup;
+            restoreEditingBackup();
             markIncomeSummaryDirtyForEntry(backup);
-            resolvePendingEntryUpdate(state.editingEntryId);
+            resolvePendingEntryUpdate(editingId);
             saveCache();
             renderEntries();
             setStatus('Save failed', 'error');
@@ -12663,9 +12636,9 @@ function updateDeductionFormVisibility() {
           releaseEntryLock(inFlightKey, inFlightId);
         })
         .withFailureHandler(() => {
-          state.entries[idx] = backup;
+          restoreEditingBackup();
           markIncomeSummaryDirtyForEntry(backup);
-          resolvePendingEntryUpdate(state.editingEntryId);
+          resolvePendingEntryUpdate(editingId);
           saveCache();
           renderEntries();
           setStatus('Save failed', 'error');
@@ -12744,13 +12717,18 @@ function updateDeductionFormVisibility() {
     }
     state.selectedCalendarDate = payload.date;
     setManualDate(state.selectedCalendarDate, payload.contract_id);
+    dayDurationDraft = null;
+    state.editingEntryId = null;
+    state.editingEntryType = null;
+    parkDayDurationEditor();
     renderCalendar();
-    closeDayModal();
+    renderDayEditor(state.selectedCalendarDate);
   };
   manualCancelBtn.onclick = function () {
+    dayDurationDraft = null;
     clearManualEditing();
-    activateTab('manual');
-    closeDayModal();
+    parkDayDurationEditor();
+    renderDayDurationEntries(state.selectedCalendarDate);
   };
 
   if (manualDeleteBtn) {
@@ -12783,7 +12761,9 @@ function updateDeductionFormVisibility() {
       saveCache();
       renderEntries();
       updateTabStates();
-      closeDayModal();
+      dayDurationDraft = null;
+      parkDayDurationEditor();
+      renderDayEditor(currentDate);
       setStatus('Deleting entry...', 'warn');
 
       google.script.run
@@ -21863,7 +21843,7 @@ function getCachedIncomeSummary(monthKey) {
     // Keep the read-only Sessions timeline in step with any entry change while the day modal is open
     // (punch/save/delete/sync). Cheap: only composes one day's entries, and only when the modal is visible.
     const dayModal = document.getElementById('modal-day-entry');
-    if (dayModal && dayModal.style.display === 'flex') renderDaySessionsTimeline(state.selectedCalendarDate);
+    if (dayModal && dayModal.style.display === 'flex') renderDayEditor(state.selectedCalendarDate);
   }
   function deleteEntry(id) {
     const idx = state.entries.findIndex((e) => e.id === id);
@@ -22020,6 +22000,7 @@ function getCachedIncomeSummary(monthKey) {
 
   function renderCalendar() {
     ensureCalendarState();
+    applyWeekendPreference();
     const calendarHelpText = document.getElementById('calendar-help-text');
     if (calendarHelpText) {
       // First-run affordance: show the click/right-click hint only while the viewed month is empty. Once
@@ -22487,83 +22468,36 @@ function getCachedIncomeSummary(monthKey) {
     hourTypesBreakdownListEl.innerHTML = html;
   }
 
-  function handleCalendarClick(dateIso, targetHourTypeId) {
+  function handleCalendarClick(dateIso, targetHourTypeId, targetEntryId) {
+    dayModalOpener = document.activeElement;
     state.selectedCalendarDate = dateIso;
     calendarDaySelected = true;
+    dayDurationDraft = null;
+    daySessionsEdit = null;
+    daySessionsPending = new Map();
+    daySessionsCommentEdit = null;
+    state.editingEntryId = null;
+    state.editingEntryType = null;
+    parkDayDurationEditor();
     setManualDate(dateIso);
     updateTabStates();
     renderCalendar();
-
-    // Check if there's an existing entry for this date
     const existingEntries = state.entries.filter(entry => entry.date === dateIso);
-    const hourTypesEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
-    const defaultHourTypeId = getDefaultHourTypeId();
-
-    if (existingEntries.length > 0) {
-      let existingEntry = null;
-      if (targetHourTypeId && hourTypesEnabled) {
-        existingEntry = existingEntries.find(entry => (entry.hour_type_id || getDefaultHourTypeId()) === targetHourTypeId) || null;
-      }
-      // No explicit target → if any entry on this day is still open, land on it (clicking a day with an open
-      // punch should open that punch, mirroring the "On the clock" shortcut) before falling back to default.
-      if (!existingEntry) {
-        existingEntry = existingEntries.find(entry => (Number(entry.open_punch_count) || 0) > 0) || null;
-      }
-      if (!existingEntry && hourTypesEnabled) {
-        existingEntry = existingEntries.find(entry => (entry.hour_type_id || defaultHourTypeId) === defaultHourTypeId) || null;
-      }
-      if (!existingEntry) existingEntry = existingEntries[0];
-
-      const entryType = resolveEntryType(existingEntry);
-
-      // Prepopulate the form with the existing entry
-      if (entryType === 'basic') {
-        populateManualForm(existingEntry, true);
-      } else {
-        // For advanced entries, switch to advanced tab and populate
-      state.currentTab = 'punch';
-      state.editingEntryType = entryType;
-      activateTab('punch');
-      setPunchDateValue(existingEntry.date);
-      ensurePunchDraft(existingEntry.contract_id, existingEntry);
-      if (state.punchDraft) {
-        state.punchDraft.entryId = existingEntry.id;
-        state.punchDraft.contractId = existingEntry.contract_id;
-        state.punchDraft.date = existingEntry.date;
-        state.punchDraft.punches = clonePunches(existingEntry.punches || []);
-        state.punchDraft.dirty = false;
-        if (punchHourType && existingEntry.hour_type_id) {
-          punchHourType.value = existingEntry.hour_type_id;
-          updatePunchContractVisibility();
-        }
-        renderPunchDraft();
-      }
-      }
-    } else {
-      // On an empty day, hour-type-owned mode should land on the selected type's configured surface—not
-      // leave a Detailed type sitting in Basic with a warning telling the user to switch manually.
-      const chosenHourTypeId = targetHourTypeId
-        || (manualHourType && manualHourType.value)
-        || getDefaultHourTypeId();
-      if (getEntryModeSource() === 'hour_type') {
-        const chosenHourType = state.hourTypeMap[chosenHourTypeId];
-        if (manualHourType) manualHourType.value = chosenHourTypeId;
-        if (punchHourType) punchHourType.value = chosenHourTypeId;
-        activateTab(hourTypeEffectiveEntryMode(chosenHourType) === 'detailed' ? 'punch' : 'manual');
-      }
-      // No existing entry: clear the editor on the surface selected above.
-      if (state.currentTab === 'manual') {
-        clearManualEditing();
-      } else {
-        // For advanced mode, just clear the editing state without changing tabs
-        state.editingEntryId = null;
-        state.editingEntryType = null;
-        setPunchDate(dateIso);
-        ensurePunchDraft();
-      }
-    }
     openDayModal();
-    focusDefaultEntryField();
+    // A targeted calendar marker/context row may expand an exact record, but only when the target resolves
+    // uniquely. Ordinary day clicks deliberately leave every row collapsed in the complete day view.
+    let target = targetEntryId
+      ? existingEntries.find((entry) => String(entry.id) === String(targetEntryId))
+      : null;
+    if (!target && targetHourTypeId) {
+      const matches = existingEntries.filter((entry) =>
+        String(entry.hour_type_id || getDefaultHourTypeId()) === String(targetHourTypeId));
+      if (matches.length === 1) target = matches[0];
+    }
+    if (target) {
+      if (resolveEntryType(target) === 'basic') beginDayDurationDraft(target);
+      else if (entryPunches(target).length) enterDaySessionEdit(target.id, 0);
+    }
   }
 
   // --- Phase 1: Sessions "day at a glance" timeline (read-only) -------------------------------
@@ -22604,7 +22538,6 @@ function getCachedIncomeSummary(monthKey) {
   function composeDaySessions(dateIso) {
     const entries = (state.entries || []).filter((e) => e && e.date === dateIso);
     const work = [];
-    const basic = [];
     entries.forEach((entry) => {
       const htId = entry.hour_type_id || getDefaultHourTypeId();
       const contractId = entry.contract_id || '';
@@ -22624,9 +22557,6 @@ function getCachedIncomeSummary(monthKey) {
             htId, contractId, entryId: entry.id, punchIndex, pendingEdit: !!pend
           });
         });
-      } else {
-        const mins = Math.max(0, Math.round(Number(entry.duration_minutes) || 0));
-        if (mins > 0) basic.push({ minutes: mins, htId, contractId, entryId: entry.id });
       }
     });
     work.sort((a, b) => (a.startMin == null ? 1 : b.startMin == null ? -1 : a.startMin - b.startMin));
@@ -22634,6 +22564,7 @@ function getCachedIncomeSummary(monthKey) {
     // parts of a gap NOT covered by a stored break — they're the transient state before
     // reconcileDayBreaks materializes them into stored breaks.
     const breakRows = [];
+    const validBreakWindows = daySessionBreakWindows(dateIso);
     (state.breaks || []).forEach((rec) => {
       if (!rec || rec.date !== dateIso) return;
       entryPunches(rec).forEach((p, punchIndex) => {
@@ -22641,9 +22572,17 @@ function getCachedIncomeSummary(monthKey) {
         const startMin = timeToMinutes(p.in);
         const endMin = timeToMinutes(p.out);
         if (startMin == null || endMin == null || endMin <= startMin) return;
-        breakRows.push({
-          kind: 'break', in: p.in, out: p.out, startMin, endMin, minutes: endMin - startMin,
-          contractId: rec.contract_id || '', entryId: rec.id, punchIndex
+        // Never render an orphan while its server cleanup is in flight. Only the intersection with a gap
+        // bounded by two live sessions is eligible to appear in the timeline or break total.
+        validBreakWindows.forEach(([windowStart, windowEnd]) => {
+          const clippedStart = Math.max(startMin, windowStart);
+          const clippedEnd = Math.min(endMin, windowEnd);
+          if (clippedEnd <= clippedStart) return;
+          breakRows.push({
+            kind: 'break', in: daySessionsMinToHHMM(clippedStart), out: daySessionsMinToHHMM(clippedEnd),
+            startMin: clippedStart, endMin: clippedEnd, minutes: clippedEnd - clippedStart,
+            contractId: rec.contract_id || '', entryId: rec.id, punchIndex
+          });
         });
       });
     });
@@ -22661,10 +22600,75 @@ function getCachedIncomeSummary(monthKey) {
     });
     breakRows.forEach((b) => rows.push(b));
     rows.sort((a, b) => (a.startMin == null ? 1 : b.startMin == null ? -1 : a.startMin - b.startMin));
-    basic.forEach((b) => rows.push(Object.assign({ kind: 'basic' }, b)));
-    const workMinutes = work.reduce((t, w) => t + w.minutes, 0) + basic.reduce((t, b) => t + b.minutes, 0);
+    const workMinutes = work.reduce((t, w) => t + w.minutes, 0);
     const gapMinutes = rows.filter((r) => r.kind === 'gap' || r.kind === 'break').reduce((t, r) => t + r.minutes, 0);
     return { rows, workMinutes, gapMinutes, hasOpen: work.some((w) => w.open) };
+  }
+
+  // The clock-out suggestion for a day (Settings › Suggest exact end time), or null. Per-entry, because
+  // rounding is applied per entry — the open session's own entry is the one whose total we're squaring up.
+  function daySessionsSuggestionFor(dateIso) {
+    if (!dateIso || !getFeatureFlag('suggest_end_time')) return null;
+    const openEntry = (state.entries || []).find((entry) => entry && entry.date === dateIso
+      && summarizePunches(entryPunches(entry)).openCount > 0);
+    if (!openEntry) return null;
+    const punches = entryPunches(openEntry);
+    const openPunch = punches.find((punch) => punch && punch.in && !punch.out);
+    return openPunch ? calculateEndTimeSuggestion(punches, openPunch) : null;
+  }
+
+  // The suggestion counts down to the next exact clock-out, so it has to keep step with the wall clock — a
+  // "13 min away" that has quietly become "1 min away" is the very staleness this feature exists to cure.
+  // Patches the two lines in place rather than re-rendering the timeline, which would fight the inline
+  // editors, and stops itself the moment the day modal closes or the clock is no longer running.
+  let daySessionsSuggestTimer = null;
+  function stopDaySessionsSuggestTicker() {
+    if (daySessionsSuggestTimer) clearInterval(daySessionsSuggestTimer);
+    daySessionsSuggestTimer = null;
+  }
+  function startDaySessionsSuggestTicker(dateIso) {
+    stopDaySessionsSuggestTicker();
+    // 20s keeps the countdown within a third of a minute of the truth without a per-second DOM write.
+    daySessionsSuggestTimer = setInterval(() => {
+      const modal = document.getElementById('modal-day-entry');
+      const host = document.getElementById('day-sessions-timeline');
+      const primary = host && host.querySelector('.ts-day-sessions-suggest');
+      if (!primary || !modal || modal.style.display !== 'flex') { stopDaySessionsSuggestTicker(); return; }
+      const next = daySessionsSuggestionFor(dateIso);
+      // Clocked out (or the suggestion ran out of day) → hand back to a full render so the line goes away.
+      if (!next) { stopDaySessionsSuggestTicker(); renderDaySessionsTimeline(dateIso); return; }
+      primary.textContent = next.message;
+      const pastEl = host.querySelector('.ts-day-sessions-suggest-past');
+      if (!next.previousMessage) {
+        if (pastEl) pastEl.remove();
+      } else if (pastEl) {
+        pastEl.textContent = next.previousMessage;
+      } else {
+        // First window has just gone by — grow the second line without disturbing anything else.
+        const el = document.createElement('p');
+        el.className = 'ts-day-sessions-suggest-past';
+        el.textContent = next.previousMessage;
+        primary.insertAdjacentElement('afterend', el);
+      }
+    }, 20000);
+  }
+
+  // The day's timed total as the CALENDAR counts it. Individual session rows show their exact elapsed
+  // minutes (9:03–5:07 really is 8h 4m — rounding a single session would be a lie about the clock), but
+  // the header total has to reconcile with the figure on the calendar cell, or the same day appears to
+  // hold two different amounts of time. The calendar groups by hour type and rounds each group once, so
+  // this does the same rather than rounding the day's raw sum — with more than one hour type on a day
+  // those two differ. Open sessions contribute 0 (the header's "+" already flags them).
+  function daySessionsRoundedTotal(rows) {
+    const byHourType = new Map();
+    (rows || []).forEach((r) => {
+      if (!r || r.kind !== 'work') return;
+      const key = String(r.htId || '');
+      byHourType.set(key, (byHourType.get(key) || 0) + (Number(r.minutes) || 0));
+    });
+    let total = 0;
+    byHourType.forEach((minutes) => { total += minutes > 0 ? roundDuration(minutes) : 0; });
+    return total;
   }
 
   // --- Phase 3: per-contract entry mode (Simple vs Detailed) ---------------------------------------
@@ -22716,14 +22720,7 @@ function getCachedIncomeSummary(monthKey) {
   // bar when only one mode applies (a Simple-only user never sees the word "Sessions") and force the active
   // tab to that mode. Both modes → the toggle stays and whatever tab was chosen is kept.
   function applyDayEntryModeChrome(dateIso) {
-    const modes = dayEntryModes(dateIso);
-    const tabsRow = document.querySelector('#modal-day-entry .ts-entry-tabs-row');
-    if (tabsRow) tabsRow.style.display = modes.both ? '' : 'none';
-    if (!modes.both) {
-      const only = modes.detailed ? 'punch' : 'manual';
-      if (state.currentTab !== only) activateTab(only);
-      else applyEntryTabPanes(only);
-    }
+    return dayEntryModes(dateIso);
   }
 
   function renderDaySessionsTimeline(dateIso) {
@@ -22736,7 +22733,11 @@ function getCachedIncomeSummary(monthKey) {
       host.addEventListener('click', (ev) => {
         if (ev.target.closest('.ts-day-sessions-editsave')) { ev.preventDefault(); saveDaySession(); return; }
         if (ev.target.closest('.ts-day-sessions-editcancel')) { ev.preventDefault(); cancelDaySessionEdit(); return; }
-        if (ev.target.closest('.ts-day-sessions-add')) { ev.preventDefault(); enterDaySessionAdd(); return; }
+        if (ev.target.closest('.ts-day-sessions-add')) {
+          ev.preventDefault();
+          settleDurationDraftForSwitch().then((ok) => { if (ok) enterDaySessionAdd(); });
+          return;
+        }
         const cyBtn = ev.target.closest('.ts-day-sessions-copy-yesterday');
         if (cyBtn) {
           ev.preventDefault();
@@ -22805,7 +22806,9 @@ function getCachedIncomeSummary(monthKey) {
           ev.preventDefault();
           const id = editRow.getAttribute('data-entry-id');
           const pi = parseInt(editRow.getAttribute('data-punch-index'), 10);
-          if (id) enterDaySessionEdit(id, Number.isNaN(pi) ? 0 : pi);
+          if (id) settleDurationDraftForSwitch().then((ok) => {
+            if (ok) enterDaySessionEdit(id, Number.isNaN(pi) ? 0 : pi);
+          });
         }
       });
       // Live-capture the day comment into daySessionsCommentEdit (survives re-render) + update the counter.
@@ -22870,7 +22873,14 @@ function getCachedIncomeSummary(monthKey) {
         if (!daySessionsEdit) return;
         const sel = ev.target.closest('.ts-day-sessions-select');
         if (!sel) return;
-        if (sel.getAttribute('data-field') === 'htId') daySessionsEdit.htId = sel.value;
+        if (sel.getAttribute('data-field') === 'htId') {
+          daySessionsEdit.htId = sel.value;
+          const valid = validContractsForDateAndMode(state.selectedCalendarDate, 'detailed', sel.value);
+          if (daySessionsEdit.contractId && !valid.some((contract) => String(contract.id) === String(daySessionsEdit.contractId))) {
+            daySessionsEdit.contractId = '';
+          }
+          renderDaySessionsTimeline(state.selectedCalendarDate);
+        }
         else if (sel.getAttribute('data-field') === 'contractId') {
           daySessionsEdit.contractId = sel.value;
           setSelectInvalid(sel, false);
@@ -22878,6 +22888,16 @@ function getCachedIncomeSummary(monthKey) {
       });
       // Enter saves, Escape cancels — and we stop propagation so Escape doesn't also close the day modal.
       host.addEventListener('keydown', (ev) => {
+        const restingRow = ev.target.closest && ev.target.closest('.ts-day-sessions-row.is-clickable');
+        if (!daySessionsEdit && restingRow && (ev.key === 'Enter' || ev.key === ' ')) {
+          ev.preventDefault();
+          const id = restingRow.getAttribute('data-entry-id');
+          const pi = parseInt(restingRow.getAttribute('data-punch-index'), 10);
+          if (id) settleDurationDraftForSwitch().then((ok) => {
+            if (ok) enterDaySessionEdit(id, Number.isNaN(pi) ? 0 : pi);
+          });
+          return;
+        }
         if (!daySessionsEdit) return;
         if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancelDaySessionEdit(); }
         else if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); saveDaySession(); }
@@ -22903,7 +22923,6 @@ function getCachedIncomeSummary(monthKey) {
     // Detailed mode (a Simple-only day shows just the hours field: no session list, no "Sessions" eyebrow,
     // no day-at-a-glance). Existing advanced entries keep Detailed available via dayEntryModes(), so nothing
     // logged is ever hidden.
-    if (dateIso && !dayEntryModes(dateIso).detailed) { host.style.display = 'none'; host.innerHTML = ''; host.dataset.interactive = ''; return; }
     // Drop a stale EDIT if its row is no longer on this day (add mode has no row yet, so it's exempt).
     if (daySessionsEdit && daySessionsEdit.mode === 'edit' && dateIso) {
       const stillHere = (state.entries || []).some((e) => e && String(e.id) === daySessionsEdit.entryId && e.date === dateIso);
@@ -22914,16 +22933,20 @@ function getCachedIncomeSummary(monthKey) {
     // On the Sessions tab the timeline IS the tab's content, so keep it open even on an empty day — its
     // "+ Add session" / Start clock is now the only way to log time (Phase 2c-final). Everywhere else
     // (the Basic tab's read-only day-at-a-glance) an empty day stays hidden.
-    const sessionsTabActive = !!document.querySelector('.ts-tab[data-tab="punch"].active');
     const dayModalEl = document.getElementById('modal-day-entry');
-    const forceOpen = sessionsTabActive && dayModalEl && dayModalEl.style.display === 'flex';
+    const forceOpen = dayModalEl && dayModalEl.style.display === 'flex';
     // interactive = the timeline is the Sessions-tab editor. On the Basic tab it's a read-only day-at-a-glance:
     // no delete, no click-to-edit, no "+ Add session", no Start clock. Recorded on the host so the delegated
     // hover handler can skip the duration↔trash swap when read-only.
-    const interactive = sessionsTabActive;
+    const interactive = !!forceOpen;
     host.dataset.interactive = interactive ? '1' : '';
     // Nothing to show, not mid-add, and not the active Sessions surface → stay hidden.
-    if (!data.rows.length && !adding && !forceOpen) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    if (!data.rows.length && !adding && !forceOpen) {
+      stopDaySessionsSuggestTicker();
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
     const htName = (id) => (state.hourTypeMap[id] && state.hourTypeMap[id].name) || 'Hours';
     const htColor = (id) => daySessionsSafeColor(state.hourTypeMap[id] && state.hourTypeMap[id].color);
     const contractName = (id) => (state.contractMap[id] && state.contractMap[id].name) || '';
@@ -22939,10 +22962,15 @@ function getCachedIncomeSummary(monthKey) {
     // Hour type + contract selects, shared by the add editor and the edit-existing editor. The current
     // contract is always represented even if it's not otherwise valid for this date (so an edit keeps it).
     const buildSessionSelects = (htId, contractId) => {
-      const htEnabled = getFeatureFlag('hour_types') && state.hourTypes.length > 1;
+      const compatibleTypes = getEntryModeSource() === 'hour_type'
+        ? (state.hourTypes || []).filter((hourType) => hourTypeEffectiveEntryMode(hourType) === 'detailed')
+        : (state.hourTypes || []).slice();
+      const currentType = state.hourTypeMap[htId];
+      if (currentType && !compatibleTypes.some((hourType) => String(hourType.id) === String(htId))) compatibleTypes.push(currentType);
+      const htEnabled = getFeatureFlag('hour_types') && compatibleTypes.length > 1;
       const htSel = htEnabled
         ? `<select class="ts-day-sessions-select" data-field="htId" aria-label="Hour type">`
-          + state.hourTypes.map((h) => `<option value="${esc(String(h.id))}"${String(h.id) === String(htId) ? ' selected' : ''}>${esc(h.name)}</option>`).join('')
+          + compatibleTypes.map((h) => `<option value="${esc(String(h.id))}"${String(h.id) === String(htId) ? ' selected' : ''}>${esc(h.name)}</option>`).join('')
           + `</select>`
         : '';
       // Sessions is the Detailed surface — only offer Detailed-mode contracts (the current contract is still
@@ -22986,12 +23014,6 @@ function getCachedIncomeSummary(monthKey) {
           + `<span class="ts-day-sessions-time">${formatTime12(daySessionsMinToHHMM(r.startMin))} – ${formatTime12(daySessionsMinToHHMM(r.endMin))}</span>`
           + endCell(daySessionsFmtHm(r.minutes), '') + `</div>`;
       }
-      if (r.kind === 'basic') {
-        return `<div class="ts-day-sessions-row is-basic"><span class="ts-day-sessions-dot" style="background:${htColor(r.htId)}"></span>`
-          + `<span class="ts-day-sessions-main"><span class="ts-day-sessions-label">${esc(htName(r.htId))}</span>${subHtml(r.contractId)}</span>`
-          + `<span class="ts-day-sessions-time is-muted">no times</span>`
-          + endCell(daySessionsFmtHm(r.minutes), interactive ? delBtn(r.entryId, 0) : '') + `</div>`;
-      }
       // The row currently being edited renders as an expand-in-place editor (top line anchored).
       if (daySessionsEdit && daySessionsEdit.entryId === String(r.entryId) && daySessionsEdit.punchIndex === r.punchIndex) {
         const inV = daySessionsEdit.inVal || '';
@@ -23001,7 +23023,7 @@ function getCachedIncomeSummary(monthKey) {
         const liveDur = (outV && sMin != null && eMin != null && eMin > sMin) ? daySessionsFmtHm(eMin - sMin) : '—';
         // End is always an editable input now — leave it blank to keep the session open, or set it to close
         // the session (works for any of several open punches without relying on the single Punch Out button).
-        return `<div class="ts-day-sessions-row is-editing">`
+        return `<div class="ts-day-sessions-row is-editing" role="group" aria-label="Edit timed session">`
           + `<div class="ts-day-sessions-editrow1"><span class="ts-day-sessions-dot" style="background:${htColor(daySessionsEdit.htId != null ? daySessionsEdit.htId : r.htId)}"></span>`
             + `<span class="ts-day-sessions-main"><span class="ts-day-sessions-label">${esc(htName(daySessionsEdit.htId != null ? daySessionsEdit.htId : r.htId))}</span></span>`
             + `<span class="ts-day-sessions-editdur"><span class="ts-day-sessions-editdur-cap">Duration</span><span class="ts-day-sessions-dur${liveDur !== '—' ? ' has-dur' : ''}">${liveDur}</span></span></div>`
@@ -23018,7 +23040,7 @@ function getCachedIncomeSummary(monthKey) {
       // Whole row is the edit target (click anywhere except the trailing delete zone); data lives on the row.
       // Read-only (Basic tab): no is-clickable, no edit title, no delete — just the session as context.
       const pendTag = (interactive && r.pendingEdit) ? '<span class="ts-day-sessions-pending-tag">Edited</span>' : '';
-      return `<div class="ts-day-sessions-row${interactive ? ' is-clickable' : ''}${r.pendingEdit ? ' is-pending' : ''}" data-entry-id="${esc(String(r.entryId))}" data-punch-index="${r.punchIndex}"${interactive ? ' title="Edit times"' : ''}><span class="ts-day-sessions-dot" style="background:${htColor(r.htId)}"></span>`
+      return `<div class="ts-day-sessions-row${interactive ? ' is-clickable' : ''}${r.pendingEdit ? ' is-pending' : ''}" data-entry-id="${esc(String(r.entryId))}" data-punch-index="${r.punchIndex}"${interactive ? ' role="button" tabindex="0" aria-expanded="false" title="Edit times"' : ''}><span class="ts-day-sessions-dot" style="background:${htColor(r.htId)}"></span>`
         + `<span class="ts-day-sessions-main"><span class="ts-day-sessions-label">${esc(htName(r.htId))}</span>${subHtml(r.contractId)}${pendTag}</span>`
         + `<span class="ts-day-sessions-time">${range}</span>`
         + endCell(r.open ? '' : daySessionsFmtHm(r.minutes), interactive ? delBtn(r.entryId, r.punchIndex) : '') + `</div>`;
@@ -23034,7 +23056,7 @@ function getCachedIncomeSummary(monthKey) {
       const sMin = timeToMinutes(inV);
       const eMin = outV ? timeToMinutes(outV) : null;
       const liveDur = (outV && sMin != null && eMin != null && eMin > sMin) ? daySessionsFmtHm(eMin - sMin) : '—';
-      addBlockHtml = `<div class="ts-day-sessions-row is-editing is-adding">`
+      addBlockHtml = `<div class="ts-day-sessions-row is-editing is-adding" role="group" aria-label="Add timed session">`
         + `<div class="ts-day-sessions-editrow1"><span class="ts-day-sessions-dot" style="background:${htColor(daySessionsEdit.htId)}"></span>`
           + `<span class="ts-day-sessions-main"><span class="ts-day-sessions-label">New session</span></span>`
           + `<span class="ts-day-sessions-editdur"><span class="ts-day-sessions-editdur-cap">Duration</span><span class="ts-day-sessions-dur${liveDur !== '—' ? ' has-dur' : ''}">${liveDur}</span></span></div>`
@@ -23045,46 +23067,11 @@ function getCachedIncomeSummary(monthKey) {
         + buildSessionSelects(daySessionsEdit.htId, daySessionsEdit.contractId)
         + `</div>`;
     } else {
-      // Add-session row. On an EMPTY day, offer a quiet "Copy" link on the right, sourced from the most recent
-      // prior day that has anything (yesterday, or the last day worked when yesterday's blank — e.g. Mon ← Fri).
-      // Only on an empty day, so it disappears the moment the day has entries (right after a copy).
-      const _copySrc = (interactive && entriesForDate(dateIso).length === 0) ? bestDayCopySource(dateIso) : null;
       addBlockHtml = `<div class="ts-day-sessions-addrow">`
         + `<button type="button" class="ts-day-sessions-add">`
           + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`
           + `<span>Add session</span></button>`
-        + (_copySrc ? `<button type="button" class="ts-day-sessions-copy-yesterday" data-copy-source="${esc(_copySrc)}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>${esc(dayCopyLabel(_copySrc, dateIso))}</span></button>` : '')
         + `</div>`;
-    }
-    // Per-day comment (Sessions surface only): a quiet row beneath "+ Add session". Shows the saved note
-    // (click to edit, trash to remove), the "+ Add comment" trigger when there's none, or the inline editor
-    // with a live counter. The textarea caps at COMMENT_MAX_LEN so it stays a short note, not an essay.
-    let commentHtml = '';
-    if (interactive) {
-      if (daySessionsCommentEdit) {
-        const cText = daySessionsCommentEdit.text || '';
-        commentHtml = `<div class="ts-day-sessions-comment-edit">`
-          + `<textarea class="ts-day-sessions-comment-input" maxlength="${COMMENT_MAX_LEN}" rows="2" placeholder="Add a note for this day — e.g. picked the kids up from school">${esc(cText)}</textarea>`
-          + `<div class="ts-day-sessions-comment-editfoot">`
-            + `<span class="ts-day-sessions-comment-count">${cText.length}/${COMMENT_MAX_LEN}</span>`
-            + `<span class="ts-day-sessions-comment-btns"><button type="button" class="ts-day-sessions-comment-cancel">Cancel</button><button type="button" class="ts-day-sessions-comment-save">Save</button></span>`
-          + `</div></div>`;
-      } else {
-        const cText = commentTextForDate(dateIso);
-        if (cText) {
-          commentHtml = `<div class="ts-day-sessions-comment-row is-clickable" title="Edit comment">`
-            + `<span class="ts-day-sessions-comment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/></svg></span>`
-            + `<span class="ts-day-sessions-comment-text">${esc(cText)}</span>`
-            + `<button type="button" class="ts-day-sessions-comment-del" title="Remove comment" aria-label="Remove comment">${delIcon}</button>`
-            + `</div>`;
-        } else {
-          commentHtml = `<div class="ts-day-sessions-addrow ts-day-sessions-comment-addrow">`
-            + `<button type="button" class="ts-day-sessions-addcomment">`
-              + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/></svg>`
-              + `<span>Add comment</span></button>`
-            + `</div>`;
-        }
-      }
     }
     // A "draft" is open whenever a row is being edited OR there are buffered-but-unsaved time edits — the
     // Save/Cancel bar and the "held" state persist across row switches until one Save commits them all.
@@ -23096,12 +23083,38 @@ function getCachedIncomeSummary(monthKey) {
       ? `<div class="ts-day-sessions-actions"><button type="button" class="ts-day-sessions-editcancel">Cancel</button><button type="button" class="ts-day-sessions-editsave">Save</button></div>`
       : '';
     const gapNote = data.gapMinutes > 0 ? ' · ' + daySessionsFmtHm(data.gapMinutes) + ' break' : '';
-    host.innerHTML = `<div class="ts-day-sessions-head">`
-      + `<span class="ts-day-sessions-total">${daySessionsFmtHm(data.workMinutes)}${data.hasOpen ? '+' : ''}<span class="ts-day-sessions-total-sub">worked${gapNote}</span></span></div>`
-      + `<div class="ts-day-sessions-list">${rowsHtml}${addBlockHtml}${commentHtml}</div>`
+    // Clock-out suggestion (Settings › Suggest exact end time). Its old home was the punch panel's
+    // #punch-suggestion line, which the Sessions rebuild left inside a display:none value-holder — computed
+    // every render, visible to nobody. This is its home now: directly under the list you clock out from.
+    // Hidden while editing, like the footer note, so the Save/Cancel bar isn't competing with advice.
+    let suggestHtml = '';
+    const suggestion = (interactive && !editing) ? daySessionsSuggestionFor(dateIso) : null;
+    if (suggestion) {
+      suggestHtml = `<p class="ts-day-sessions-suggest">${esc(suggestion.message)}</p>`;
+      // The window just gone, as a quieter second line — you can weigh "2 min ago" against "13 min away"
+      // instead of only being told to wait.
+      if (suggestion.previousMessage) {
+        suggestHtml += `<p class="ts-day-sessions-suggest-past">${esc(suggestion.previousMessage)}</p>`;
+      }
+    }
+    // Show the rounded total (what the calendar cell says), and explain the difference on hover rather
+    // than leaving the reader to wonder why the rows sum to something else. With rounding off, or when
+    // the exact total already sits on the interval, the two agree and there's nothing to explain.
+    const exactTotal = daySessionsFmtHm(data.workMinutes);
+    const roundedMinutes = daySessionsRoundedTotal(data.rows);
+    const totalLabel = daySessionsFmtHm(roundedMinutes);
+    const totalTitle = (roundedMinutes === data.workMinutes)
+      ? ''
+      : ` title="${esc(exactTotal + ' worked, rounded to ' + totalLabel)}"`;
+    host.innerHTML = `<div class="ts-day-sessions-head"><h3 id="day-sessions-title">Timed Sessions</h3>`
+      + `<span class="ts-day-sessions-total"${totalTitle}>${totalLabel}${data.hasOpen ? '+' : ''}<span class="ts-day-sessions-total-sub">timed${gapNote}</span></span></div>`
+      + `<div class="ts-day-sessions-list">${rowsHtml}${addBlockHtml}</div>`
       + actionsHtml
+      + suggestHtml
       + (editing ? '' : `<p class="ts-day-sessions-foot">Every session logged this day, across all hour types.</p>`);
     host.style.display = 'block';
+    // Keep the countdown honest while the modal sits open; no suggestion on screen means no timer.
+    if (suggestion) startDaySessionsSuggestTicker(dateIso); else stopDaySessionsSuggestTicker();
   }
 
   // Delete from the timeline (Phase 2a). A row maps to one punch of one entry; the ✕ removes just that
@@ -23179,6 +23192,7 @@ function getCachedIncomeSummary(monthKey) {
       resolvePendingEntryUpdate(entryId);
       saveCache();
       renderEntries();
+      scheduleBreakReconcile(backup.date);
       setStatus(opts.failMsg || 'Couldn’t save the change', 'error');
     };
     google.script.run
@@ -23238,7 +23252,8 @@ function getCachedIncomeSummary(monthKey) {
 
   const dayClockToggleBtn = document.getElementById('day-clock-toggle');
   if (dayClockToggleBtn) {
-    dayClockToggleBtn.addEventListener('click', () => {
+    dayClockToggleBtn.addEventListener('click', async () => {
+      if (!(await settleDurationDraftForSwitch())) return;
       const dateIso = state.selectedCalendarDate;
       if (dayClockToggleBtn.dataset.clockAction === 'out') {
         quickPunchOutForDate(dateIso, dayClockToggleBtn.dataset.entryId);
@@ -23250,22 +23265,280 @@ function getCachedIncomeSummary(monthKey) {
   // The day-comment editor's open state: null when closed, else { text } holding the working note text
   // (survives the timeline's innerHTML re-renders, like daySessionsEdit). Committed via Save → saveDayComment.
   let daySessionsCommentEdit = null;
+  let dayModalOpener = null;
+  // The fixed-duration editor reuses the proven Basic form controls, but is mounted immediately beneath the
+  // exact row being edited. Its snapshot lets close/switch guards distinguish a merely expanded row from a
+  // genuinely dirty draft.
+  let dayDurationDraft = null; // { mode:'add'|'edit', entryId:'', initial:{hours,hourTypeId,contractId} }
+
+  function captureDayDurationValues() {
+    return {
+      hours: manualHoursInput ? String(manualHoursInput.value || '') : '',
+      hourTypeId: manualHourType ? String(manualHourType.value || '') : '',
+      contractId: manualContract ? String(manualContract.value || '') : ''
+    };
+  }
+
+  function dayDurationDraftDirty() {
+    if (!dayDurationDraft) return false;
+    return JSON.stringify(captureDayDurationValues()) !== JSON.stringify(dayDurationDraft.initial || {});
+  }
+
+  function daySessionDraftDirty() {
+    if (daySessionsPending.size) return true;
+    if (!daySessionsEdit) return false;
+    if (daySessionsEdit.mode === 'add') return !!(daySessionsEdit.inVal || daySessionsEdit.outVal);
+    const entry = (state.entries || []).find((item) => item && String(item.id) === String(daySessionsEdit.entryId));
+    const punch = entry && entryPunches(entry)[daySessionsEdit.punchIndex];
+    if (!entry || !punch) return false;
+    return String(daySessionsEdit.inVal || '') !== String(punch.in || '')
+      || String(daySessionsEdit.outVal || '') !== String(punch.out || '')
+      || String(daySessionsEdit.htId || '') !== String(entry.hour_type_id || getDefaultHourTypeId() || '')
+      || String(daySessionsEdit.contractId || '') !== String(entry.contract_id || '');
+  }
+
+  function parkDayDurationEditor() {
+    const form = document.getElementById('tab-manual');
+    const parking = document.getElementById('day-duration-editor-parking');
+    if (form && parking && form.parentElement !== parking) parking.appendChild(form);
+    if (form) form.hidden = true;
+  }
+
+  function durationHourTypes(existingEntry) {
+    const types = (state.hourTypes || []).filter((hourType) =>
+      getEntryModeSource() !== 'hour_type' || hourTypeEffectiveEntryMode(hourType) === 'simple');
+    const current = existingEntry && state.hourTypeMap[existingEntry.hour_type_id || getDefaultHourTypeId()];
+    if (current && !types.some((hourType) => String(hourType.id) === String(current.id))) types.push(current);
+    return types;
+  }
+
+  function populateDurationHourTypeOptions(existingEntry) {
+    if (!manualHourType) return;
+    const currentId = existingEntry
+      ? (existingEntry.hour_type_id || getDefaultHourTypeId())
+      : ((manualHourType.value && state.hourTypeMap[manualHourType.value]) ? manualHourType.value : getDefaultHourTypeId());
+    const options = durationHourTypes(existingEntry);
+    manualHourType.innerHTML = '';
+    options.forEach((hourType) => {
+      const option = document.createElement('option');
+      option.value = hourType.id;
+      option.textContent = hourType.name;
+      manualHourType.appendChild(option);
+    });
+    const selected = options.some((hourType) => String(hourType.id) === String(currentId))
+      ? currentId
+      : (options[0] ? options[0].id : '');
+    manualHourType.value = selected || '';
+    manualHourType.disabled = options.length <= 1;
+  }
+
+  async function settleDurationDraftForSwitch() {
+    if (!dayDurationDraft) return true;
+    if (dayDurationDraftDirty()) {
+      const save = await customConfirm('This duration entry has unsaved changes. Save it before switching?', {
+        title: 'Unsaved duration entry', okText: 'Save changes', cancelText: 'Discard changes'
+      });
+      if (save) {
+        if (!manualSaveBtn || manualSaveBtn.disabled) {
+          setStatus('Complete the duration entry before saving.', 'error');
+          return false;
+        }
+        manualSaveBtn.click();
+        // The click handler clears dayDurationDraft synchronously only after validation, duplicate checks,
+        // and the optimistic write have all succeeded. If it is still present, keep this editor open rather
+        // than treating a rejected save as permission to switch sections and lose the user's values.
+        if (dayDurationDraft) return false;
+        return true;
+      }
+    }
+    dayDurationDraft = null;
+    parkDayDurationEditor();
+    state.editingEntryId = null;
+    state.editingEntryType = null;
+    return true;
+  }
+
+  async function settleSessionDraftForSwitch() {
+    if (!daySessionsEdit && !daySessionsPending.size) return true;
+    if (!daySessionDraftDirty()) { cancelDaySessionEdit(); return true; }
+    const save = await customConfirm('The session editor has unsaved changes. Save them before switching?', {
+      title: 'Unsaved session', okText: 'Save changes', cancelText: 'Discard changes'
+    });
+    if (save) return saveDaySession() !== false;
+    cancelDaySessionEdit();
+    return true;
+  }
+
+  async function beginDayDurationDraft(entry) {
+    if (!(await settleSessionDraftForSwitch())) return;
+    const targetId = entry ? String(entry.id) : '';
+    if (dayDurationDraft && dayDurationDraft.entryId === targetId) {
+      const input = document.getElementById('manual-hours');
+      if (input) input.focus();
+      return;
+    }
+    if (!(await settleDurationDraftForSwitch())) return;
+    populateDurationHourTypeOptions(entry || null);
+    if (entry) {
+      populateManualForm(entry, true);
+      populateDurationHourTypeOptions(entry);
+      updateManualContractVisibility(entry.contract_id || '');
+    } else {
+      clearManualEditing();
+      populateDurationHourTypeOptions(null);
+      setManualDate(state.selectedCalendarDate);
+      updateManualContractVisibility();
+    }
+    dayDurationDraft = { mode: entry ? 'edit' : 'add', entryId: targetId, initial: captureDayDurationValues() };
+    setManualMode(!!entry);
+    renderDayDurationEntries(state.selectedCalendarDate);
+    const input = document.getElementById('manual-hours');
+    if (input) input.focus();
+  }
+
+  function renderDayDurationEntries(dateIso) {
+    const list = document.getElementById('day-duration-list');
+    if (!list) return;
+    parkDayDurationEditor();
+    const entries = (state.entries || []).filter((entry) => entry && entry.date === dateIso && resolveEntryType(entry) === 'basic');
+    if (dayDurationDraft && dayDurationDraft.entryId
+      && !entries.some((entry) => String(entry.id) === String(dayDurationDraft.entryId))) dayDurationDraft = null;
+    const total = entries.reduce((sum, entry) => sum + Math.max(0, Number(entry.duration_minutes) || 0), 0);
+    const totalEl = document.getElementById('day-duration-total');
+    if (totalEl) totalEl.textContent = daySessionsFmtHm(total);
+    const overall = (state.entries || []).filter((entry) => entry && entry.date === dateIso)
+      .reduce((sum, entry) => sum + Math.max(0, Number(entry.duration_minutes) || 0), 0);
+    const overallEl = document.getElementById('day-overall-total');
+    if (overallEl) overallEl.textContent = daySessionsFmtHm(overall);
+    const esc = escapeHtmlSafe;
+    const rows = entries.map((entry) => {
+      const htId = entry.hour_type_id || getDefaultHourTypeId();
+      const hourType = state.hourTypeMap[htId] || {};
+      const contract = entry.contract_id ? state.contractMap[entry.contract_id] : null;
+      const billing = hourTypeContributesToIncome(htId) ? 'Billable' : 'Non-billable';
+      const meta = [contract ? contract.name : 'No contract', billing].join(' · ');
+      const expanded = !!(dayDurationDraft && String(dayDurationDraft.entryId) === String(entry.id));
+      return `<button type="button" class="ts-day-duration-row" data-duration-entry-id="${esc(String(entry.id))}" aria-expanded="${expanded}" aria-controls="tab-manual">`
+        + `<span class="ts-day-duration-dot" style="background:${daySessionsSafeColor(hourType.color)}"></span>`
+        + `<span class="ts-day-duration-main"><span class="ts-day-duration-label">${esc(hourType.name || 'Hours')}</span><span class="ts-day-duration-meta">${esc(meta)}</span></span>`
+        + `<span class="ts-day-duration-value">${daySessionsFmtHm(entry.duration_minutes)}</span></button>`;
+    }).join('');
+    list.innerHTML = rows + `<button type="button" class="ts-day-duration-add" aria-expanded="${dayDurationDraft && dayDurationDraft.mode === 'add' ? 'true' : 'false'}">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add duration entry</span></button>`;
+    if (!list.__durationWired) {
+      list.addEventListener('click', (event) => {
+        const row = event.target.closest('.ts-day-duration-row');
+        if (row) {
+          const entry = state.entries.find((item) => item && String(item.id) === row.dataset.durationEntryId);
+          if (entry) beginDayDurationDraft(entry);
+          return;
+        }
+        if (event.target.closest('.ts-day-duration-add')) beginDayDurationDraft(null);
+      });
+      list.__durationWired = true;
+    }
+    if (dayDurationDraft) {
+      const form = document.getElementById('tab-manual');
+      const anchor = dayDurationDraft.mode === 'edit'
+        ? Array.from(list.querySelectorAll('.ts-day-duration-row')).find((row) =>
+            String(row.dataset.durationEntryId) === String(dayDurationDraft.entryId))
+        : list.querySelector('.ts-day-duration-add');
+      if (form && anchor) {
+        anchor.insertAdjacentElement('afterend', form);
+        form.hidden = false;
+      }
+    }
+  }
+
+  function renderDayLevelActions(dateIso) {
+    const host = document.getElementById('day-level-actions');
+    if (!host) return;
+    const esc = escapeHtmlSafe;
+    const deleteIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    let commentHtml = '';
+    if (daySessionsCommentEdit) {
+      const text = daySessionsCommentEdit.text || '';
+      commentHtml = `<div class="ts-day-sessions-comment-edit"><textarea class="ts-day-sessions-comment-input" maxlength="${COMMENT_MAX_LEN}" rows="2" placeholder="Add a note for this day">${esc(text)}</textarea>`
+        + `<div class="ts-day-sessions-comment-editfoot"><span class="ts-day-sessions-comment-count">${text.length}/${COMMENT_MAX_LEN}</span>`
+        + `<span class="ts-day-sessions-comment-btns"><button type="button" class="ts-day-sessions-comment-cancel">Cancel</button><button type="button" class="ts-day-sessions-comment-save">Save</button></span></div></div>`;
+    } else {
+      const text = commentTextForDate(dateIso);
+      commentHtml = text
+        ? `<div class="ts-day-sessions-comment-row is-clickable" title="Edit comment"><span class="ts-day-sessions-comment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/></svg></span><span class="ts-day-sessions-comment-text">${esc(text)}</span><button type="button" class="ts-day-sessions-comment-del" aria-label="Remove comment">${deleteIcon}</button></div>`
+        : `<div class="ts-day-sessions-addrow"><button type="button" class="ts-day-sessions-addcomment"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 1 1 21 11.5z"/></svg><span>Add comment</span></button></div>`;
+    }
+    const copySource = bestDayCopySource(dateIso);
+    const copyHtml = copySource
+      ? `<div class="ts-day-sessions-addrow ts-day-copy-action"><button type="button" class="ts-day-sessions-copy-yesterday" data-copy-source="${esc(copySource)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>${esc(dayCopyLabel(copySource, dateIso))}</span></button></div>`
+      : '';
+    host.innerHTML = commentHtml + copyHtml;
+    if (!host.__dayActionsWired) {
+      host.addEventListener('input', (event) => {
+        const input = event.target.closest('.ts-day-sessions-comment-input');
+        if (!input || !daySessionsCommentEdit) return;
+        daySessionsCommentEdit.text = input.value || '';
+        const count = host.querySelector('.ts-day-sessions-comment-count');
+        if (count) count.textContent = daySessionsCommentEdit.text.length + '/' + COMMENT_MAX_LEN;
+      });
+      host.addEventListener('click', (event) => {
+        if (event.target.closest('.ts-day-sessions-comment-del')) {
+          const record = commentForDate(state.selectedCalendarDate);
+          if (record) removeCommentRecord(record.id, { successMsg: 'Comment removed' });
+          return;
+        }
+        if (event.target.closest('.ts-day-sessions-addcomment') || event.target.closest('.ts-day-sessions-comment-row')) {
+          daySessionsCommentEdit = { text: commentTextForDate(state.selectedCalendarDate) };
+          renderDayLevelActions(state.selectedCalendarDate);
+          const input = host.querySelector('.ts-day-sessions-comment-input');
+          if (input) input.focus();
+          return;
+        }
+        if (event.target.closest('.ts-day-sessions-comment-cancel')) {
+          daySessionsCommentEdit = null;
+          renderDayLevelActions(state.selectedCalendarDate);
+          return;
+        }
+        if (event.target.closest('.ts-day-sessions-comment-save')) {
+          const text = daySessionsCommentEdit ? daySessionsCommentEdit.text : '';
+          daySessionsCommentEdit = null;
+          saveDayComment(state.selectedCalendarDate, text);
+          renderDayLevelActions(state.selectedCalendarDate);
+          return;
+        }
+        const copy = event.target.closest('.ts-day-sessions-copy-yesterday');
+        if (copy) {
+          const from = copy.dataset.copySource;
+          applyDayCopy(dayCopyPayloads(from, state.selectedCalendarDate), { emptyMsg:'Nothing to copy', errMsg:'Couldn’t copy', result:copyResultToast('the previous day') });
+        }
+      });
+      host.__dayActionsWired = true;
+    }
+  }
+
+  function renderDayEditor(dateIso) {
+    renderDaySessionsTimeline(dateIso);
+    renderDayDurationEntries(dateIso);
+    renderDayLevelActions(dateIso);
+    updateDayClockToggle(dateIso);
+  }
+
   function daySessionsPendingKey(entryId, punchIndex) { return String(entryId) + '#' + punchIndex; }
   function daySessionsPendingFor(entryId, punchIndex) { return daySessionsPending.get(daySessionsPendingKey(entryId, punchIndex)) || null; }
   // Fold the row currently open in the editor into the buffer before switching away from it. A pure time
   // change is held; a row whose hour type / contract changed commits immediately through the existing move
   // path (and clears the edit) rather than being buffered.
   function stashDaySessionEdit() {
-    if (!daySessionsEdit || daySessionsEdit.mode !== 'edit') return;
+    if (!daySessionsEdit || daySessionsEdit.mode !== 'edit') return true;
     const e = daySessionsEdit;
     const entry = state.entries.find((x) => x && String(x.id) === e.entryId);
-    if (!entry) return;
+    if (!entry) return true;
     const curHt = entry.hour_type_id || getDefaultHourTypeId();
     const curC = entry.contract_id || '';
     const newHt = e.htId || curHt;
     const newC = e.contractId != null ? e.contractId : curC;
-    if (newHt !== curHt || newC !== curC) { saveDaySessionEdit(); return; } // move → commit now
+    if (newHt !== curHt || newC !== curC) return saveDaySessionEdit() !== false; // move → commit now
     daySessionsPending.set(daySessionsPendingKey(e.entryId, e.punchIndex), { inVal: e.inVal, outVal: e.outVal });
+    return true;
   }
 
   // The previous session's boundary (end, or start while still open) for am/pm inference, in minutes.
@@ -23292,11 +23565,11 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function enterDaySessionEdit(entryId, punchIndex) {
-    const entry = state.entries.find((e) => e && e.id === entryId);
+    const entry = state.entries.find((e) => e && String(e.id) === String(entryId));
     if (!entry) return;
     const p = entryPunches(entry)[punchIndex];
     if (!p) return;
-    stashDaySessionEdit(); // keep the row we're leaving (its edit is buffered, not lost)
+    if (!stashDaySessionEdit()) return; // an invalid move stays open for correction
     // Resume this row's buffered edit if it already has one, else seed from the stored punch.
     const pend = daySessionsPendingFor(entryId, punchIndex);
     const inV = pend ? pend.inVal : (p.in || '');
@@ -23315,7 +23588,7 @@ function getCachedIncomeSummary(monthKey) {
   // Start a brand-new session. Defaults: the day's default hour type, the sole valid contract if there's
   // exactly one, and a start time chained to the latest punch-out so far (fast for reconstructing a day).
   function enterDaySessionAdd() {
-    stashDaySessionEdit(); // keep any open edit buffered while adding a new session
+    if (!stashDaySessionEdit()) return; // an invalid move stays open for correction
     const dateIso = state.selectedCalendarDate;
     const selectedPunchTypeId = punchHourType && punchHourType.value ? punchHourType.value : '';
     const selectedPunchType = state.hourTypeMap[selectedPunchTypeId];
@@ -23338,7 +23611,7 @@ function getCachedIncomeSummary(monthKey) {
     // Sole valid contract auto-selects; with several, a contract-needing hour type pre-fills the
     // last-used one (still changeable) rather than landing on the blocking "Select contract".
     let seedContract = valid.length === 1 ? valid[0].id : '';
-    if (!seedContract && valid.length > 1 && hourTypeNeedsContract(state.hourTypeMap[getDefaultHourTypeId()])) {
+    if (!seedContract && valid.length > 1 && hourTypeNeedsContract(state.hourTypeMap[seedHourTypeId])) {
       const last = getLastManualContractId();
       if (last && valid.some((c) => c.id === last)) seedContract = last;
     }
@@ -23365,7 +23638,7 @@ function getCachedIncomeSummary(monthKey) {
     if (!daySessionsEdit && !daySessionsPending.size) return;
     daySessionsEdit = null;
     daySessionsPending = new Map();
-    renderDaySessionsTimeline(state.selectedCalendarDate);
+    renderDayEditor(state.selectedCalendarDate);
   }
 
   // Commit every buffered time edit at once. Groups edits by entry so each entry is saved a single time,
@@ -23373,7 +23646,7 @@ function getCachedIncomeSummary(monthKey) {
   // can be fixed), and clears the buffer/editor state BEFORE committing (each commit re-renders the
   // timeline). Returns { ok, changed }. Hour-type/contract moves already committed on switch via stash.
   function flushDaySessionsPending() {
-    stashDaySessionEdit(); // fold the currently-open row into the buffer (or commit it if it was a move)
+    if (!stashDaySessionEdit()) return { ok:false }; // invalid move remains open for correction
     if (!daySessionsPending.size) return { ok: true, changed: false };
     const perEntry = new Map(); // entryId -> Map(punchIndex -> {in,out})
     daySessionsPending.forEach((v, key) => {
@@ -23407,11 +23680,12 @@ function getCachedIncomeSummary(monthKey) {
   function saveDaySession() {
     const wasAdd = daySessionsEdit && daySessionsEdit.mode === 'add';
     const res = flushDaySessionsPending();
-    if (!res.ok) return; // a buffered row was invalid — leave the editor open to fix it
-    if (wasAdd) { saveDaySessionAdd(); return; } // add reports its own toast + re-render
+    if (!res.ok) return false; // a buffered row was invalid — leave the editor open to fix it
+    if (wasAdd) return saveDaySessionAdd(); // add reports its own toast + re-render
     if (res.changed) setStatus('Times updated', 'success');
     daySessionsEdit = null;
-    renderDaySessionsTimeline(state.selectedCalendarDate);
+    renderDayEditor(state.selectedCalendarDate);
+    return true;
   }
 
   // Red-ring the timeline editor's contract select (mirrors the form-wide flagRequiredFields look);
@@ -23424,10 +23698,10 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function saveDaySessionEdit() {
-    if (!daySessionsEdit) return;
+    if (!daySessionsEdit) return false;
     const edit = daySessionsEdit;
     const entry = state.entries.find((e) => e && String(e.id) === edit.entryId);
-    if (!entry) { daySessionsEdit = null; return; }
+    if (!entry) { daySessionsEdit = null; return false; }
     const curHt = entry.hour_type_id || getDefaultHourTypeId();
     const curC = entry.contract_id || '';
     const newHt = edit.htId || curHt;
@@ -23438,10 +23712,10 @@ function getCachedIncomeSummary(monthKey) {
     if (newHt === curHt && newC === curC) {
       const newPunches = entryPunches(entry).map((p, i) => (i === edit.punchIndex ? editedPunch : { in: p.in, out: p.out }));
       const err = validatePunches(newPunches, {});
-      if (err) { setStatus(err, 'error'); return; }
+      if (err) { setStatus(err, 'error'); return false; }
       daySessionsEdit = null;
       commitEntryPunches(edit.entryId, newPunches, { successMsg: 'Times updated', failMsg: 'Couldn’t save the times' });
-      return;
+      return true;
     }
 
     // Hour type/contract changed → the destination must satisfy the contract rule: a billable /
@@ -23449,7 +23723,7 @@ function getCachedIncomeSummary(monthKey) {
     if (!newC && hourTypeNeedsContract(state.hourTypeMap[newHt])) {
       flagDaySessionContractInvalid();
       setStatus('Select a contract — this hour type bills against one.', 'error');
-      return;
+      return false;
     }
     // MOVE this punch to the (date, newC, newHt) entry: pull it out of the
     // current entry (which is deleted if that empties it) and append/create at the destination.
@@ -23459,7 +23733,7 @@ function getCachedIncomeSummary(monthKey) {
       && (e.hour_type_id || getDefaultHourTypeId()) === newHt);
     const destPunches = (dest ? entryPunches(dest) : []).concat([editedPunch]);
     const err = validatePunches(destPunches, {});
-    if (err) { setStatus(err, 'error'); return; }
+    if (err) { setStatus(err, 'error'); return false; }
     const remaining = entryPunches(entry).filter((_, i) => i !== edit.punchIndex);
     daySessionsEdit = null;
     // Remove from the source silently (no toast — the destination reports the move).
@@ -23469,21 +23743,22 @@ function getCachedIncomeSummary(monthKey) {
     } else {
       createTimelineEntry(entry.date, newC, newHt, [editedPunch], 'Session moved');
     }
+    return true;
   }
 
   function saveDaySessionAdd() {
-    if (!daySessionsEdit || daySessionsEdit.mode !== 'add') return;
+    if (!daySessionsEdit || daySessionsEdit.mode !== 'add') return false;
     const add = daySessionsEdit;
     const dateIso = state.selectedCalendarDate;
     const hourTypeId = add.htId || getDefaultHourTypeId();
     const contractId = add.contractId || '';
     const newPunch = { in: add.inVal, out: add.outVal };
-    if (!newPunch.in) { setStatus('Enter a start time for the session.', 'error'); return; }
+    if (!newPunch.in) { setStatus('Enter a start time for the session.', 'error'); return false; }
     // A billable / requires-contract hour type must land on a contract — nothing to bill against otherwise.
     if (!contractId && hourTypeNeedsContract(state.hourTypeMap[hourTypeId])) {
       flagDaySessionContractInvalid();
       setStatus('Select a contract — this hour type bills against one.', 'error');
-      return;
+      return false;
     }
     // Same (date, contract, hour type) already has a Sessions entry → append this punch to it; else create one.
     const existing = (state.entries || []).find((e) => e && e.date === dateIso
@@ -23493,15 +23768,16 @@ function getCachedIncomeSummary(monthKey) {
     if (existing) {
       const merged = entryPunches(existing).concat([newPunch]);
       const err = validatePunches(merged, {});
-      if (err) { setStatus(err, 'error'); return; }
+      if (err) { setStatus(err, 'error'); return false; }
       daySessionsEdit = null;
       commitEntryPunches(existing.id, merged, { successMsg: 'Session added', failMsg: 'Couldn’t add the session' });
-      return;
+      return true;
     }
     const err = validatePunches([newPunch], {});
-    if (err) { setStatus(err, 'error'); return; }
+    if (err) { setStatus(err, 'error'); return false; }
     daySessionsEdit = null;
     createTimelineEntry(dateIso, contractId, hourTypeId, [newPunch]);
+    return true;
   }
 
   // Optimistic create of a brand-new Sessions (advanced) entry, mirroring the reconciliation pattern.
@@ -23537,6 +23813,7 @@ function getCachedIncomeSummary(monthKey) {
       if (idx > -1) { state.entries.splice(idx, 1); markIncomeSummaryDirtyForEntry(optimistic); saveCache(); renderEntries(); }
       deferredTempEntryUpdates.delete(String(optimistic.id));
       resolvePendingEntryAdd(optimistic.id);
+      scheduleBreakReconcile(dateIso);
     };
     google.script.run
       .withSuccessHandler((res) => {
@@ -23620,6 +23897,7 @@ function getCachedIncomeSummary(monthKey) {
         resolvePendingEntryDelete(entryId);
         saveCache();
         renderEntries();
+        scheduleBreakReconcile(backup.date);
         setStatus('Delete failed. Please try again.', 'error');
       })
       .api_deleteEntry(entryId);
@@ -23658,19 +23936,34 @@ function getCachedIncomeSummary(monthKey) {
         const j = state.breaks.findIndex((b) => b && b.id === tempId);
         if (res && res.success && res.entry) {
           const confirmed = sanitizeEntry(res.entry);
-          if (j > -1) state.breaks[j] = confirmed; else state.breaks.push(confirmed);
-          recordPendingEntryAdd(confirmed);
-          resolveMarkerAfterSync(() => resolvePendingEntryAdd(confirmed.id));
+          if (j > -1) {
+            state.breaks[j] = confirmed;
+            recordPendingEntryAdd(confirmed);
+            resolveMarkerAfterSync(() => resolvePendingEntryAdd(confirmed.id));
+          } else if (confirmed.id) {
+            // The bounding session disappeared while this create was in flight. The optimistic temp break
+            // has already been removed, so never resurrect the late server result; delete the real row.
+            google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {
+              scheduleBreakReconcile(dateIso);
+            }).api_deleteEntry(confirmed.id);
+          }
         } else if (res && res.error === 'duplicate_entry' && res.entry) {
           // Another record already holds this (date, contract) — adopt the server's instead of ours.
           const confirmed = sanitizeEntry(res.entry);
-          if (j > -1) state.breaks.splice(j, 1);
-          if (!state.breaks.some((b) => b && b.id === confirmed.id)) state.breaks.push(confirmed);
+          if (j > -1) {
+            state.breaks.splice(j, 1);
+            if (!state.breaks.some((b) => b && b.id === confirmed.id)) state.breaks.push(confirmed);
+          } else if (confirmed.id) {
+            google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {
+              scheduleBreakReconcile(dateIso);
+            }).api_deleteEntry(confirmed.id);
+          }
         } else if (j > -1) {
           state.breaks.splice(j, 1);
         }
         saveCache();
         renderEntries();
+        scheduleBreakReconcile(dateIso);
       })
       .withFailureHandler(() => {
         const j = state.breaks.findIndex((b) => b && b.id === tempId);
@@ -23893,47 +24186,59 @@ function getCachedIncomeSummary(monthKey) {
     return merged.map(([s, e]) => ({ in: daySessionsMinToHHMM(s), out: daySessionsMinToHHMM(e) }));
   }
 
-  // After any session mutation on a day: (1) TRIM stored break spans against the day's work spans — a
-  // session saved over a break carves the break away, so the two never overlap; then (2) MATERIALIZE any
-  // remaining uncovered gap between sessions as a STORED unpaid break (the §6 Phase-2 rule: a gap is
-  // never a purely-inferred row that vanishes when a neighbouring session is deleted). Gaps group per
-  // contract — attributed to the PRECEDING work session's contract (a break follows work) — appending to
-  // the existing (date, contract) break record or creating one. Idempotent: everything derives from
-  // current state, so repeat calls no-op. Detailed days only; never called from render paths (reads
-  // must never write).
-  function reconcileDayBreaks(dateIso) {
-    if (!dateIso || !Array.isArray(state.breaks)) return;
-    if (typeof dayEntryModes === 'function' && !dayEntryModes(dateIso).detailed) return;
-    // Work spans + the day's work BOUNDS. A break only exists BETWEEN work (James, 2026-07-06): breaks
-    // outside [first work start, last work boundary] collapse — deleting the day's last session takes its
-    // trailing break with it (the gap simply re-materializes if a session comes back). An open session
-    // contributes its start as a bound (a break can validly end where an open session begins).
-    const workBlocks = [];
-    let boundStart = null;
-    let boundEnd = null;
-    (state.entries || []).forEach((e) => {
-      if (!e || e.date !== dateIso || resolveEntryType(e) !== 'advanced') return;
-      entryPunches(e).forEach((p) => {
-        const s = timeToMinutes(p.in);
-        if (s == null) return;
-        const en = p.out ? timeToMinutes(p.out) : null;
-        if (boundStart == null || s < boundStart) boundStart = s;
-        const hi = en != null && en > s ? en : s;
-        if (boundEnd == null || hi > boundEnd) boundEnd = hi;
-        if (en != null && en > s) workBlocks.push([s, en]);
+  // The only legal locations for breaks: gaps whose left edge is the end of one session and whose right
+  // edge is the start of another. An open session can close a gap on its left, but cannot start a new gap
+  // on its right because it has no known end yet. Overlapping sessions are treated as one work cluster.
+  function daySessionBreakWindows(dateIso) {
+    const sessions = [];
+    (state.entries || []).forEach((entry) => {
+      if (!entry || entry.date !== dateIso || resolveEntryType(entry) !== 'advanced') return;
+      entryPunches(entry).forEach((punch) => {
+        const start = timeToMinutes(punch.in);
+        if (start == null) return;
+        const parsedEnd = punch.out ? timeToMinutes(punch.out) : null;
+        sessions.push({ start: start, end: parsedEnd != null && parsedEnd > start ? parsedEnd : null });
       });
     });
+    sessions.sort((a, b) => a.start - b.start);
+    const windows = [];
+    let clusterEnd = null;
+    sessions.forEach((session) => {
+      if (clusterEnd != null && session.start > clusterEnd) {
+        windows.push([clusterEnd, session.start]);
+      }
+      if (session.end == null) {
+        clusterEnd = null;
+      } else if (clusterEnd == null || session.start > clusterEnd) {
+        clusterEnd = session.end;
+      } else {
+        clusterEnd = Math.max(clusterEnd, session.end);
+      }
+    });
+    return windows.filter((window) => window[1] > window[0]);
+  }
+
+  // After any session mutation on a day: (1) intersect stored breaks with the explicit windows between
+  // live sessions, deleting every leading/trailing orphan; then (2) materialize uncovered windows as stored
+  // unpaid breaks. Gaps group per contract, attributed to the preceding work session. Idempotent: everything
+  // derives from current state, so repeat calls no-op. Loaded break dates also pass through here once after
+  // sync, which repairs orphan records produced by older clients or interrupted optimistic operations.
+  function reconcileDayBreaks(dateIso) {
+    if (!dateIso || !Array.isArray(state.breaks)) return;
+    const validWindows = daySessionBreakWindows(dateIso);
     state.breaks.filter((b) => b && b.date === dateIso).forEach((rec) => {
-      if (boundStart == null) { removeBreakRecord(rec.id); return; } // no sessions left → no breaks
       const kept = [];
       entryPunches(rec).forEach((p) => {
         if (!p.in || !p.out) return;
         const s = timeToMinutes(p.in), en = timeToMinutes(p.out);
         if (s == null || en == null || en <= s) return;
-        // Clamp to the day's work bounds, then carve out the work spans themselves.
-        const cs = Math.max(s, boundStart), ce = Math.min(en, boundEnd);
-        if (ce - cs < 1) return;
-        daySessionsSubtractIntervals(cs, ce, workBlocks).forEach(([a, b]) => kept.push({ in: daySessionsMinToHHMM(a), out: daySessionsMinToHHMM(b) }));
+        // Intersect with explicit between-session windows. Anything before the first session, after the
+        // last, or adjacent to only one surviving session is discarded rather than merely clamped.
+        validWindows.forEach(([windowStart, windowEnd]) => {
+          const clippedStart = Math.max(s, windowStart);
+          const clippedEnd = Math.min(en, windowEnd);
+          if (clippedEnd > clippedStart) kept.push({ in: daySessionsMinToHHMM(clippedStart), out: daySessionsMinToHHMM(clippedEnd) });
+        });
       });
       // Coalesce as well as trim, so an already-fragmented record (a stack of abutting 1h rows) self-heals
       // on the next reconcile even when no work span moved. Commit only if the result actually differs.
@@ -24124,9 +24429,7 @@ function getCachedIncomeSummary(monthKey) {
     const refreshModalIfOpen = () => {
       const dayModal = document.getElementById('modal-day-entry');
       if (dayModal && dayModal.style.display === 'flex') {
-        if (typeof applyDayEntryModeChrome === 'function') applyDayEntryModeChrome(state.selectedCalendarDate);
-        renderDaySessionsTimeline(state.selectedCalendarDate);
-        updateCopyYesterdayButton();
+        renderDayEditor(state.selectedCalendarDate);
       }
     };
 
@@ -24317,24 +24620,41 @@ function getCachedIncomeSummary(monthKey) {
   function openDayModal() {
     const m = document.getElementById('modal-day-entry');
     if (m) showModal(m);
-    // Phase 3: collapse the Basic/Sessions chrome to the modes this day offers (hide the tab bar + force the
-    // sole mode for a Simple-only or Detailed-only day; keep the toggle for mixed days). Runs first so the
-    // timeline/warning below paint against the tab we actually land on.
-    if (typeof applyDayEntryModeChrome === 'function') applyDayEntryModeChrome(state.selectedCalendarDate);
-    updateCopyYesterdayButton();
-    // Paint the day timeline for the day being opened (hidden automatically if no sessions on the Basic tab).
-    renderDaySessionsTimeline(state.selectedCalendarDate);
-    // Recompute the Basic tab's sessions-conflict warning for THIS day — otherwise a warning raised on a
-    // previous day's hour-type pick lingers when a fresh, empty day opens straight onto Basic (which doesn't
-    // go through activateTab). Clears/refreshes it against the day just opened.
-    if (typeof reflectManualSessionsConflict === 'function') reflectManualSessionsConflict();
+    if (m && !m.__focusTrapWired) {
+      m.addEventListener('keydown', (event) => {
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(m.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])'))
+          .filter((element) => element.offsetParent !== null);
+        if (!focusable.length) { event.preventDefault(); return; }
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+      m.__focusTrapWired = true;
+    }
+    renderDayEditor(state.selectedCalendarDate);
+    const panel = m && m.querySelector('.ts-modal-content');
+    if (panel) { panel.tabIndex = -1; panel.focus(); }
   }
-  function closeDayModal() {
+  async function closeDayModal(forceDiscard) {
     const m = document.getElementById('modal-day-entry');
-    if (!m || m.style.display !== 'flex') return;
+    if (!m || m.style.display !== 'flex') return true;
+    const commentDirty = !!(daySessionsCommentEdit
+      && String(daySessionsCommentEdit.text || '') !== String(commentTextForDate(state.selectedCalendarDate) || ''));
+    const dirty = dayDurationDraftDirty() || daySessionDraftDirty() || commentDirty;
+    if (dirty && !forceDiscard) {
+      const discard = await customConfirm('Closing now will discard the unsaved changes in this day.', {
+        title: 'Discard day changes?', okText: 'Discard changes', cancelText: 'Keep editing', danger: true
+      });
+      if (!discard) return false;
+    }
     daySessionsEdit = null; // drop any in-progress inline time edit
     daySessionsPending = new Map(); // …and discard every buffered-but-unsaved session edit
     daySessionsCommentEdit = null; // …and any open (unsaved) comment editor
+    dayDurationDraft = null;
+    state.editingEntryId = null;
+    state.editingEntryType = null;
+    parkDayDurationEditor();
     hideModal(m);
     calendarDaySelected = false;
     if (typeof updateTabStates === 'function') updateTabStates();
@@ -24342,6 +24662,12 @@ function getCachedIncomeSummary(monthKey) {
     // In Agenda view the visible week list isn't touched by renderCalendar — re-render it so the day's
     // selection ring clears now that the modal (its only trigger) is closed.
     if (state.timeView === 'agenda' && typeof renderAgendaView === 'function') renderAgendaView();
+    const restoreFocus = dayModalOpener;
+    dayModalOpener = null;
+    if (restoreFocus && restoreFocus !== document.body) {
+      setTimeout(() => { if (restoreFocus.isConnected && typeof restoreFocus.focus === 'function') restoreFocus.focus(); }, 280);
+    }
+    return true;
   }
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
@@ -25321,6 +25647,19 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   // Settings configuration - add new settings here
+  function settingBoolean(value, fallback) {
+    if (value === true || value === false) return value;
+    if (value == null || value === '') return !!fallback;
+    return ['true', '1', 'yes'].includes(String(value).toLowerCase());
+  }
+
+  function applyWeekendPreference(value) {
+    const stored = arguments.length ? value : (state.settings && state.settings.subdue_weekends);
+    const enabled = settingBoolean(stored, true);
+    if (document.documentElement) document.documentElement.classList.toggle('ts-subdue-weekends', enabled);
+    if (document.body) document.body.classList.toggle('ts-subdue-weekends', enabled);
+  }
+
   const SETTINGS_CONFIG = {
     round_to_nearest: {
       section: 'core',
@@ -25342,6 +25681,15 @@ function getCachedIncomeSummary(monthKey) {
       setValue: (el, val) => { const v = Number(val); el.value = String(Number.isFinite(v) && v > 0 ? v : DEFAULT_TARGET_HOURS_PER_DAY); },
       defaultValue: DEFAULT_TARGET_HOURS_PER_DAY,
       event: 'input'
+    },
+    subdue_weekends: {
+      section: 'core',
+      order: 18,
+      element: () => document.getElementById('set-subdue-weekends'),
+      getValue: (el) => !!el.checked,
+      setValue: (el, val) => { if (el) el.checked = settingBoolean(val, true); },
+      defaultValue: true,
+      event: 'change'
     },
     // Global default for how time is logged, used wherever a contract doesn't override it (Phase 3). Drives
     // which surface a day shows (Basic hours field vs Sessions timeline) and whether the Basic/Sessions toggle
@@ -25614,6 +25962,7 @@ function getCachedIncomeSummary(monthKey) {
       applyTheme(next.theme);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
       state.settings = { ...state.settings, ...next };
+      applyWeekendPreference(next.subdue_weekends);
       saveCache();
       applyStatusDisplay();
       syncContractEntryModeDefaultLabel();
@@ -25683,7 +26032,10 @@ function getCachedIncomeSummary(monthKey) {
       'timeout',
       'temporarily',
       'network error',
+      'networkerror',
       'connection error',
+      'connection failure',
+      'http 0',
       'please wait a bit and try again'
     ].some((fragment) => message.indexOf(fragment) !== -1);
   }
@@ -29549,10 +29901,15 @@ function getCachedIncomeSummary(monthKey) {
       if (canApplyHourType && manualHourType) {
         manualHourType.value = hourTypeId;
         // A disambiguated quick action pins its contract; passed as the explicit preference so the
-        // rebuilt options land on it (it always outranks the last-used fallback).
-        updateManualContractVisibility(defaultData.contract_id != null ? String(defaultData.contract_id) : undefined);
+        // rebuilt options land on it (it always outranks the last-used fallback). An optional-contract
+        // quick fill deliberately passes the empty value so it cannot inherit a contract left in the
+        // parked form by an unrelated entry.
+        updateManualContractVisibility(defaultData.contract_id ? String(defaultData.contract_id) : '');
       }
-      updateBasicSaveEnabled();
+      // Changing the quick-fill hour type also changes which existing Sessions entry can conflict with
+      // it. Recalculate that guard before deciding whether the hidden Basic form is saveable.
+      if (typeof reflectManualSessionsConflict === 'function') reflectManualSessionsConflict();
+      else updateBasicSaveEnabled();
     } else if (type === 'advanced') {
       // Apply punches to advanced form
       ensurePunchDraft();
@@ -30388,7 +30745,7 @@ function getCachedIncomeSummary(monthKey) {
       editBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         hideCalendarContextMenu();
-        handleCalendarClick(dateIso, entry.hour_type_id || getDefaultHourTypeId());
+        handleCalendarClick(dateIso, entry.hour_type_id || getDefaultHourTypeId(), entry.id);
       });
       row.appendChild(editBtn);
 
@@ -30583,7 +30940,15 @@ function getCachedIncomeSummary(monthKey) {
           beginActionWorkToast('Saving…');
           manualSaveBtn.click();
         } else {
-          setStatus('Select a contract before applying this default.', 'warn');
+          const hourTypeId = defaultData.hour_type_id || (manualHourType && manualHourType.value) || getDefaultHourTypeId();
+          const hourType = state.hourTypeMap[hourTypeId];
+          if (manualSessionsConflict) {
+            setStatus((hourType && hourType.name ? hourType.name : 'This hour type') + ' already has timed sessions on this day.', 'warn');
+          } else if (hourTypeNeedsContract(hourType) && !(manualContract && manualContract.value)) {
+            setStatus('Select a contract before applying this duration.', 'warn');
+          } else {
+            setStatus('This duration could not be applied. Check its quick-fill hours and entry mode.', 'warn');
+          }
         }
       } else {
         setPunchDate(dateIso);
@@ -32686,7 +33051,9 @@ function getCachedIncomeSummary(monthKey) {
       const saved = (state.settings && state.settings.public_holiday_state) || 'ACT';
       const validSaved = PH_STATES.some(s => s.code === saved) ? saved : 'ACT';
       phPageState = {
-        year: (state.calendar && state.calendar.year) || new Date().getFullYear(),
+        // This page is a today-based planning view, independent of whichever month the Time Entry
+        // calendar happens to be showing.
+        year: new Date().getFullYear(),
         selectedState: validSaved,
         dataByYear: phLoadCachedData(),
         refreshedYears: {}, // years already background-refreshed this session
@@ -32697,42 +33064,54 @@ function getCachedIncomeSummary(monthKey) {
     return phPageState;
   }
 
+  function phDisplayYears(ps) {
+    return [ps.year, ps.year + 1];
+  }
+
+  function phDisplayData(ps) {
+    return phDisplayYears(ps).reduce((all, year) => all.concat(ps.dataByYear[year] || []), []);
+  }
+
+  // Keep every holiday in the current calendar year, then extend into next year only until the same
+  // calendar date one year from today. This makes next Australia Day appear as soon as this year's has
+  // passed without prematurely duplicating later holidays such as Canberra Day.
+  function phHolidayInDisplayWindow(holiday, todayStr, currentYear) {
+    const iso = normalizeHolidayDate(holiday && holiday.date);
+    if (!iso) return false;
+    const year = Number(iso.slice(0, 4));
+    if (year === currentYear) return true;
+    if (year !== currentYear + 1) return false;
+    const today = parseIsoDate(todayStr);
+    if (!today) return false;
+    const cutoff = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+    return iso < isoDate(cutoff);
+  }
+
   function renderPublicHolidaysPage() {
     const ps = getPhPageState();
     phRenderStateFilter();
 
-    // The page always shows the current year — no year selector. Subtitle mirrors
-    // the reference mockup: "<year> Calendar".
+    // Show the complete current calendar year plus the part of next year that is less than one calendar
+    // year away. Both years are cached and refreshed independently.
     const subtitle = document.getElementById('ph-subtitle');
-    if (subtitle) subtitle.textContent = `${ps.year} Calendar`;
+    if (subtitle) subtitle.textContent = `${ps.year} calendar · rolling 12-month look-ahead`;
 
-    const cached = ps.dataByYear[ps.year];
-    if (cached) {
-      // Optimistic paint from the page's own localStorage cache — instant. Reconcile silently once/session.
-      phRenderList(cached);
-      if (!ps.refreshedYears[ps.year]) {
-        ps.refreshedYears[ps.year] = true;
-        phFetchYear(ps.year, true);
-      }
-    } else {
-      // No page cache (localStorage is unreliable in the Apps Script sandbox — a redeploy or fresh session
-      // wipes it). Rather than waiting on the server round-trip behind a spinner, seed the first paint from
-      // the holidays already in memory for the calendar (state.publicHolidays — filtered to the user's saved
-      // state, which IS the page's default state). Then fill the full multi-state data silently in the
-      // background so the state pills stay accurate. Spinner only if memory has nothing yet.
-      ps.refreshedYears[ps.year] = true;
-      const savedState = (state.settings && state.settings.public_holiday_state) || 'ACT';
-      const seed = (state.publicHolidays || []).filter(h => {
-        const iso = normalizeHolidayDate(h.date);
-        return iso && iso.slice(0, 4) === String(ps.year);
-      });
-      if (seed.length && ps.selectedState === savedState) {
-        phRenderList(seed);          // instant paint for the default state
-        phFetchYear(ps.year, true);  // silent background fetch fills dataByYear (enables pill switching)
-      } else {
-        phFetchYear(ps.year, false); // cold: nothing seedable, show the spinner
-      }
-    }
+    const years = phDisplayYears(ps);
+    const cached = phDisplayData(ps);
+    const savedState = (state.settings && state.settings.public_holiday_state) || 'ACT';
+    const seed = (state.publicHolidays || []).filter(h => {
+      const iso = normalizeHolidayDate(h.date);
+      return iso && years.includes(Number(iso.slice(0, 4)));
+    });
+    const initial = cached.length ? cached : ((seed.length && ps.selectedState === savedState) ? seed : []);
+    if (initial.length) phRenderList(initial);
+    else phSetLoading(true);
+
+    years.forEach((year) => {
+      if (ps.refreshedYears[year]) return;
+      ps.refreshedYears[year] = true;
+      phFetchYear(year, initial.length > 0);
+    });
   }
 
   function phRenderStateFilter() {
@@ -32748,8 +33127,7 @@ function getCachedIncomeSummary(monthKey) {
         btn.addEventListener('click', () => {
           ps.selectedState = btn.getAttribute('data-state');
           phRenderStateFilter();
-          const data = ps.dataByYear[ps.year];
-          if (data) phRenderList(data);
+          phRenderList(phDisplayData(ps));
         });
       });
       ps.filterBuilt = true;
@@ -32775,14 +33153,14 @@ function getCachedIncomeSummary(monthKey) {
         ps.dataByYear[year] = next;
         phSaveCachedData(ps.dataByYear);
         if (!background) phSetLoading(false);
-        if (ps.year === year && (changed || !background)) phRenderList(next);
+        if (phDisplayYears(ps).includes(year) && (changed || !background)) phRenderList(phDisplayData(ps));
       })
       .withFailureHandler((err) => {
         console.error('Failed to load public holidays for page:', err);
         if (background) return; // keep the cached view on a silent-refresh failure
         ps.dataByYear[year] = [];
         phSetLoading(false);
-        if (ps.year === year) phRenderList([]);
+        if (phDisplayYears(ps).includes(year)) phRenderList(phDisplayData(ps));
       })
       .api_getPublicHolidaysForYear({ year });
   }
@@ -32835,12 +33213,14 @@ function getCachedIncomeSummary(monthKey) {
 
     phSetLoading(false);
 
+    const todayStr = todayIso();
     const filtered = (allHolidays || [])
       .filter(h => phHolidayMatchesState(h, ps.selectedState))
+      .filter(h => phHolidayInDisplayWindow(h, todayStr, ps.year))
       .slice()
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-    if (subtitle) subtitle.textContent = `${ps.year} Calendar`;
+    if (subtitle) subtitle.textContent = `${ps.year} calendar · rolling 12-month look-ahead`;
 
     if (!filtered.length) {
       list.innerHTML = '';
@@ -32849,7 +33229,6 @@ function getCachedIncomeSummary(monthKey) {
     }
     if (empty) empty.style.display = 'none';
 
-    const todayStr = todayIso();
     const monthFmt = { month: 'short' };
     const weekdayFmt = { weekday: 'long' };
 
@@ -34403,11 +34782,13 @@ function getCachedIncomeSummary(monthKey) {
     if (event.target.classList.contains('ts-modal-close')) {
       const modal = event.target.closest('.ts-modal');
       if (modal) {
+        if (modal.id === 'modal-day-entry') return;
         hideModal(modal);
         if (modal === modalDeductionCategories) hideDeductionCategoryForm();
       }
     }
     if (event.target.classList.contains('ts-modal')) {
+      if (event.target.id === 'modal-day-entry') return;
       hideModal(event.target);
       if (event.target === modalDeductionCategories) hideDeductionCategoryForm();
     }
@@ -34627,7 +35008,7 @@ function getCachedIncomeSummary(monthKey) {
     if (!currentDate) return;
 
     const selectedHourType = state.hourTypeMap[selectedHourTypeId];
-    if (getEntryModeSource() === 'hour_type' && hourTypeEffectiveEntryMode(selectedHourType) === 'detailed') {
+    if (!dayDurationDraft && getEntryModeSource() === 'hour_type' && hourTypeEffectiveEntryMode(selectedHourType) === 'detailed') {
       if (punchHourType) punchHourType.value = selectedHourTypeId;
       setPunchDateValue(currentDate);
       state.selectedCalendarDate = currentDate;
@@ -34637,6 +35018,13 @@ function getCachedIncomeSummary(monthKey) {
     }
 
     updateManualContractVisibility();
+
+    // In the unified duration list, changing the selector edits the exact expanded row; it must never route
+    // to another entry that happens to share the newly chosen hour type.
+    if (dayDurationDraft) {
+      reflectManualSessionsConflict();
+      return;
+    }
 
     const existingEntry = findEntryForDateAndHourType(currentDate, selectedHourTypeId);
 

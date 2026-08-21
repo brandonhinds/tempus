@@ -3,6 +3,7 @@
     const {
       clampRoundInterval,
       contractIsValid,
+      endTimeSuggestion,
       entryCompositeKey,
       isoDateTime,
       minutesToTime,
@@ -419,19 +420,55 @@
     };
     const openSessionOf = (entry) => (entry && (entry.punches || []).find((p) => p && p.in && !p.out)) || null;
 
+    // "Suggest exact end time" — the clock-out minute that squares the day's hours against your rounding
+    // interval. The markup for this line has always been here (#mobile-punch-suggestion) but nothing ever
+    // wrote to it, so the feature was dead on mobile. Shares desktop's maths via entryCore, formatted in
+    // mobile's own house style ("5:03 pm", trimmed hours). Today only: suggesting when to clock off a past
+    // day is meaningless, and the maths is anchored to the current time.
+    //
+    // Both windows go on one line: the next exact clock-out, plus the one just gone once you're past it, so
+    // a minute-late glance shows "1 min ago" against "14 min away" rather than only the wait.
+    const renderPunchSuggestion = (entry, open) => {
+      const el = dom.punchSuggestion;
+      if (!el) return;
+      const flag = state.featureFlags.suggest_end_time || {};
+      const suggestion = (flag.enabled && open && state.currentDate === todayIso()
+        && typeof endTimeSuggestion === 'function')
+        ? endTimeSuggestion(entry && entry.punches, open, {
+            roundInterval: roundInterval(),
+            minimumEndTime: state.settings ? state.settings.minimum_end_time : null,
+            formatTime: to12h,
+            formatHours: (minutes) => trimHours(formatHours(minutes))
+          })
+        : null;
+      el.textContent = suggestion
+        ? [suggestion.message, suggestion.previousMessage].filter(Boolean).join(' ')
+        : '';
+      el.style.display = suggestion ? 'block' : 'none';
+    };
+
     let clockTimer = null;
     const fmtElapsed = (ms) => {
       const s = Math.max(0, Math.floor(ms / 1000));
       return Math.floor(s / 3600) + 'h ' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm ' + String(s % 60).padStart(2, '0') + 's';
     };
+    // Minute the suggestion was last rendered for, so the per-second timer can refresh its countdown when
+    // the wall clock rolls over — without rewriting that line 60 times a minute.
+    let suggestionMinute = -1;
     const tickClock = () => {
-      const open = openSessionOf(findDayPunchEntry());
+      const entry = findDayPunchEntry();
+      const open = openSessionOf(entry);
       if (!open || !dom.punchTimer) { if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } return; }
       const inMin = timeToMinutes(open.in);
       if (inMin === null) return;
       const now = new Date();
       const start = new Date(now); start.setHours(Math.floor(inMin / 60), inMin % 60, 0, 0);
       dom.punchTimer.textContent = fmtElapsed(now.getTime() - start.getTime());
+      const minuteOfDay = now.getHours() * 60 + now.getMinutes();
+      if (minuteOfDay !== suggestionMinute) {
+        suggestionMinute = minuteOfDay;
+        renderPunchSuggestion(entry, open);
+      }
     };
     // Reflect the saved day's punch state into the clock: on the clock (open session) vs idle, the live
     // timer, and the hero button label/enabled state. The saved entries are the source of truth now.
@@ -448,6 +485,7 @@
       }
       if (dom.punchClockstat) dom.punchClockstat.style.display = open ? 'flex' : 'none';
       if (open && dom.punchSince) dom.punchSince.textContent = to12h(open.in);
+      renderPunchSuggestion(entry, open);
       // Only run the live timer for today; a past day's "open" punch shows just its start time.
       if (open && state.currentDate === todayIso()) { tickClock(); clockTimer = setInterval(tickClock, 1000); }
     };

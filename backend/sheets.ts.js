@@ -16,10 +16,13 @@ var TEMPUS_SHEET_SCHEMAS = {
     defaults: { total_hours: 0, include_weekends: 'FALSE', standard_hours_per_day: 7.5, archived: 'FALSE' },
     text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at']
   },
+  // Quick-action fields: each hour type can opt into the calendar right-click quick-fill bar with its
+  // own one-click duration and icon. quick_fill_mode decides what the one click DOES: 'hours' fills the
+  // quick_fill_hours, 'punch' starts the punch clock instead (no hours needed).
   hour_types: {
-    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order'],
-    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5, entry_mode: '' },
-    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at']
+    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'],
+    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5, entry_mode: '', quick_fill_enabled: 'FALSE', quick_fill_mode: 'hours' },
+    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at', 'quick_fill_enabled', 'icon', 'quick_fill_mode']
   },
   deductions: {
     headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order'],
@@ -56,6 +59,29 @@ function getCanonicalSheetSchema_(name) {
 
 function normalizeSheetHeaders_(values) {
   return (values || []).map(function(value) { return String(value == null ? '' : value).trim(); });
+}
+
+/**
+ * Read the whole header row, not just the sheet's reported data region. An optional column nobody has
+ * filled in yet (quick_fill_hours, icon) holds nothing but its header, which can sit outside
+ * getLastColumn() — and a windowed read makes such a column look absent, so a schema fix-up appends a
+ * second copy of it and every later read dies on "duplicate header". Trailing blanks past the data
+ * region are dropped; blanks inside it are kept so validateSheetHeaders_ can still catch a populated
+ * column that lost its header.
+ */
+function readSheetHeaderRow_(sheet) {
+  var populatedWidth = sheet.getLastColumn();
+  var width = Math.max(sheet.getMaxColumns(), populatedWidth);
+  if (width < 1) return [];
+  var headers = normalizeSheetHeaders_(sheet.getRange(1, 1, 1, width).getValues()[0]);
+  while (headers.length > populatedWidth && !headers[headers.length - 1]) headers.pop();
+  return headers;
+}
+
+function padSheetRowToWidth_(row, width) {
+  var padded = (row || []).slice(0, width);
+  while (padded.length < width) padded.push('');
+  return padded;
 }
 
 function validateSheetHeaders_(name, headers, rows) {
@@ -175,7 +201,7 @@ function getOrCreateSheet(name) {
     return sheet;
   }
   var values = sheet.getDataRange().getValues();
-  var headers = normalizeSheetHeaders_(values[0]);
+  var headers = readSheetHeaderRow_(sheet);
   validateSheetHeaders_(name, headers, values.slice(1));
   var missing = schema.headers.filter(function(header) { return headers.indexOf(header) === -1; });
   if (missing.length) {
@@ -211,8 +237,10 @@ function canonicalizeSheet_(name) {
     return { sheet: name, state: 'initialised', rows: 0 };
   }
   var values = sheet.getDataRange().getValues();
-  var headers = normalizeSheetHeaders_(values[0]);
-  var rows = values.slice(1);
+  var headers = readSheetHeaderRow_(sheet);
+  var priorColumns = Math.max(headers.length, sheet.getLastColumn());
+  var priorRows = Math.max(1, sheet.getLastRow());
+  var rows = values.slice(1).map(function(row) { return padSheetRowToWidth_(row, headers.length); });
   var coalesced = coalesceDuplicateHeaders_(name, headers, rows);
   headers = coalesced.headers;
   rows = coalesced.rows;
@@ -235,11 +263,14 @@ function canonicalizeSheet_(name) {
       return schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? schema.defaults[header] : '';
     });
   });
-  ensureSheetCapacity_(sheet, Math.max(1, outputRows.length + 1), outputHeaders.length);
-  // Clear the previous used rectangle before the name-based rewrite so a
-  // discarded blank legacy column cannot leave hidden values beyond the new
-  // header boundary.
-  sheet.getDataRange().clearContent();
+  var clearRows = Math.max(priorRows, outputRows.length + 1);
+  var clearColumns = Math.max(priorColumns, outputHeaders.length);
+  ensureSheetCapacity_(sheet, clearRows, clearColumns);
+  // Clear the previous used rectangle before the name-based rewrite so a discarded blank legacy column
+  // cannot leave hidden values beyond the new header boundary. The rectangle is measured from the full
+  // header row rather than the data region, because a duplicate column appended by an older release
+  // holds nothing but its header and would otherwise survive the rewrite.
+  sheet.getRange(1, 1, clearRows, clearColumns).clearContent();
   sheet.getRange(1, 1, 1, outputHeaders.length).setValues([outputHeaders]);
   if (outputRows.length) sheet.getRange(2, 1, outputRows.length, outputHeaders.length).setValues(outputRows);
   applyCanonicalFormats_(sheet, schema, outputHeaders);

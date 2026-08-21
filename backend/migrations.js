@@ -13,7 +13,8 @@ function listMigrations() {
     { id: '2026-08-source-aware-timesheet-entries', run: migrationTimesheetSources_ },
     { id: '2026-08-region-aware-holiday-catalogue', run: migrationPublicHolidayCatalogue_ },
     { id: '2026-08-company-expense-ledger', run: migrationCompanyExpenses_ },
-    { id: '2026-08-generic-assessments-unified-invoices', run: migrationAssessmentsAndInvoices_ }
+    { id: '2026-08-generic-assessments-unified-invoices', run: migrationAssessmentsAndInvoices_ },
+    { id: '2026-08-canonical-quick-fill-columns', run: migrationCanonicalQuickFillColumns_ }
   ];
 }
 
@@ -185,6 +186,22 @@ function migration_repairContractColumnSwap() {
 function migrationCanonicalHeaderSchemas_() {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   Object.keys(TEMPUS_SHEET_SCHEMAS).forEach(function(name) {
+    if (spreadsheet.getSheetByName(name)) canonicalizeSheet_(name);
+  });
+}
+
+/**
+ * The hour_types quick-fill columns and the contracts columns used to be appended outside the canonical
+ * schema by per-sheet fix-ups that tested for an existing column inside the getLastColumn() window. A
+ * column holding only a header can fall outside that window, so those fix-ups could append a second
+ * quick_fill_hours or icon column and leave every later read failing header validation. Both sheets are
+ * now fully declared in TEMPUS_SHEET_SCHEMAS; this pass moves the columns into canonical order and
+ * losslessly coalesces any duplicates an earlier release already wrote. It is a distinct migration id so
+ * sheets that finished the previous upgrades still get the repair.
+ */
+function migrationCanonicalQuickFillColumns_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  ['hour_types', 'contracts'].forEach(function(name) {
     if (spreadsheet.getSheetByName(name)) canonicalizeSheet_(name);
   });
 }

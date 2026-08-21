@@ -12,10 +12,14 @@ npm test
 
 The suite runs without Google credentials. It uses an in-memory Apps Script/Sheets harness and fixtures representing fork-only, original-only, hybrid, empty, malformed-header, and partially migrated workbooks.
 
-Build metadata can be refreshed with `scripts/write-version.sh`. Deployment is intentionally manual; the integration work does not run `clasp push` or alter production spreadsheets.
+Every successful `main` build is published to the rolling `release` branch with exact commit metadata and a `release-manifest.json`. Local metadata can still be refreshed with `scripts/write-version.sh`; CI passes the source SHA and UTC timestamp explicitly. Apps Script deployment remains manual: the release workflow never runs `clasp push` or stores Google credentials.
+
+Stable downloads and the updater script are served from the `release` branch. `scripts/update-tempus.sh` preserves the target project's `.clasp.json` before replacing source files and running `clasp push`.
 
 ## Guides
 
+- [Time Entry](docs/time-entry.md)
+- [Updates](docs/updates.md)
 - [Upgrade and schema migration](docs/upgrade.md)
 - [Expense ledger](docs/expenses.md)
 - [Invoices and payments](docs/invoices.md)

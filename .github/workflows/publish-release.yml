@@ -1,0 +1,57 @@
+name: Publish stable release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tempus-stable-release
+  cancel-in-progress: true
+
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run complete test suite
+        run: npm test
+
+      - name: Build release tree
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_dir="$(mktemp -d)"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git worktree add --detach "$build_dir" "$GITHUB_SHA"
+          "$build_dir/scripts/write-version.sh" --commit "$GITHUB_SHA" --timestamp "$published_at"
+          "$build_dir/scripts/write-release-manifest.sh" --commit "$GITHUB_SHA" --timestamp "$published_at"
+          echo "build_dir=$build_dir" >> "$GITHUB_OUTPUT"
+          echo "published_at=$published_at" >> "$GITHUB_OUTPUT"
+
+      - name: Force-publish rolling release branch
+        shell: bash
+        env:
+          BUILD_DIR: ${{ steps.build.outputs.build_dir }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git -C "$BUILD_DIR" config user.name github-actions[bot]
+          git -C "$BUILD_DIR" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C "$BUILD_DIR" add --all
+          git -C "$BUILD_DIR" commit -m "Build stable release for $SOURCE_SHA"
+          git -C "$BUILD_DIR" push --force origin HEAD:release

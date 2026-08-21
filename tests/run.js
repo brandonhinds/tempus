@@ -14,6 +14,11 @@ function test(name, callback) {
 }
 function load(context, file) { vm.runInNewContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file }); }
 function fixture(name) { return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name + '.json'), 'utf8')); }
+function extractClientFunction(source, name) {
+  const match = source.match(new RegExp('  function ' + name + '\\([\\s\\S]*?\\n  \\}'));
+  assert.ok(match, 'Expected client function ' + name);
+  return match[0].trimStart();
+}
 
 test('all six migration fixture families are present', () => {
   ['fork-only', 'original-only', 'hybrid', 'empty', 'malformed-header', 'partially-migrated'].forEach((name) => assert.ok(fixture(name).sheets));
@@ -68,6 +73,195 @@ test('canonical migration rejects conflicting duplicate legacy values', () => {
   context.assertMigrationsSettled_ = () => true;
   load(context, 'backend/sheets.ts.js');
   assert.throws(() => context.canonicalizeSheet_('hour_types'), /duplicate header "icon" has conflicting values in row 2/);
+});
+
+const CANONICAL_HOUR_TYPE_HEADERS = ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'];
+
+// A copy of a production sheet as it stood before the quick-fill release: no use_for_rate_calculation,
+// no entry_mode, no quick-fill columns, and contracts still on its original six columns.
+function legacyProductionSheets() {
+  return {
+    hour_types: [
+      ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'auto_populate_public_holidays', 'auto_populate_hours', 'created_at', 'display_order'],
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '2024-02-01T00:00:00Z', 1],
+      ['leave-id', 'Annual Leave', 'annual-leave', '#22c55e', 'FALSE', 'FALSE', 'FALSE', 'TRUE', 7.5, '2024-02-01T00:00:00Z', 2]
+    ],
+    contracts: [
+      ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'created_at'],
+      ['contract-1', 'Acme', '2024-02-01', '', 150, '2024-02-01T00:00:00Z']
+    ]
+  };
+}
+
+// Row 1 as actually stored, not as snapshot() reports it: snapshot is clipped to the sheet's data
+// region, which is exactly the window a duplicated column can hide beyond.
+function sheetHeaderRow(spreadsheet, name) {
+  const headers = (spreadsheet.getSheetByName(name).values[0] || []).map((value) => String(value == null ? '' : value));
+  while (headers.length && !headers[headers.length - 1]) headers.pop();
+  return headers;
+}
+
+function sheetHeaderDuplicates(spreadsheet, name) {
+  const counts = {};
+  sheetHeaderRow(spreadsheet, name).forEach((header) => {
+    if (header) counts[header] = (counts[header] || 0) + 1;
+  });
+  return Object.keys(counts).filter((header) => counts[header] > 1);
+}
+
+// Stubs for the collaborators the sheet-backed APIs reach for, so a test can exercise the real read path.
+function withSheetApiStubs(context) {
+  context.cacheGet = () => null;
+  context.cacheSet = () => {};
+  context.cacheClearPrefix = () => {};
+  context.withScriptLock_ = (label, callback) => callback();
+  context.toIsoDate = (value) => String(value || '').slice(0, 10);
+  context.toIsoDateTime = (value) => new Date(value || Date.now()).toISOString();
+  context.api_getSettings = () => ({});
+  context.api_updateSettings = () => {};
+  context.api_getEntryDefaults = () => ({ basic: [] });
+  return context;
+}
+
+test('a fresh fork of a production sheet upgrades and then reads back without duplicating columns', () => {
+  const sheets = legacyProductionSheets();
+  const { context, spreadsheet, properties } = createAppsScriptContext(sheets);
+  const backup = new MockSpreadsheet(legacyProductionSheets());
+  properties.setProperty('tempus_migrations_applied', '[]');
+  context.SpreadsheetApp.openById = () => backup;
+  context.DriveApp = {
+    getRootFolder: () => ({ id: 'root' }),
+    getFileById: () => ({
+      getParents: () => ({ hasNext: () => false }),
+      makeCopy: () => ({ getId: () => 'verified-backup', getUrl: () => 'https://drive.google.com/verified-backup', getName: () => 'Tempus pre-upgrade backup' })
+    })
+  };
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/migrations.js');
+  load(context, 'backend/hourtypes.js');
+  load(context, 'backend/contracts.js');
+
+  const upgrade = context.api_runUpgrade();
+  assert.equal(upgrade.required, false, 'every migration should apply on a fresh fork');
+  assert.equal(upgrade.state, 'complete');
+
+  // The upgrade gate is left in its real state: reads below prove it opened rather than being stubbed.
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+
+  // The read path calls getHourTypesSheet repeatedly inside one execution (api_getHourTypes, then
+  // ensureWorkHourType, then again per lookup) — the shape that produced the duplicate columns.
+  context.getHourTypesSheet();
+  context.getHourTypesSheet();
+  const hourTypes = context.api_getHourTypes();
+  context.api_getHourTypes();
+  context.getDefaultHourTypeId();
+  context.api_getContracts();
+
+  assert.deepStrictEqual(sheetHeaderDuplicates(spreadsheet, 'hour_types'), []);
+  assert.deepStrictEqual(sheetHeaderDuplicates(spreadsheet, 'contracts'), []);
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+
+  // Legacy data survives, and the columns the fork added arrive with their declared defaults.
+  const work = hourTypes.find((type) => type.id === 'work-id');
+  const leave = hourTypes.find((type) => type.id === 'leave-id');
+  assert.equal(hourTypes.length, 2, 'no phantom hour type is created on top of the legacy rows');
+  assert.equal(work.name, 'Work');
+  assert.equal(work.contributes_to_income, true);
+  assert.equal(work.display_order, 1);
+  assert.equal(work.quick_fill_mode, 'hours');
+  assert.equal(leave.auto_populate_public_holidays, true);
+  assert.equal(leave.auto_populate_hours, 7.5);
+  assert.equal(leave.quick_fill_enabled, false);
+  const contract = context.api_getContracts()[0];
+  assert.equal(contract.name, 'Acme');
+  assert.equal(contract.hourly_rate, 150);
+  assert.equal(contract.standard_hours_per_day, 7.5);
+  assert.equal(contract.include_weekends, false);
+});
+
+test('a brand new spreadsheet bootstraps hour_types complete and stays stable across reads', () => {
+  const { context, spreadsheet } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  context.getHourTypesSheet();
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+  const created = context.api_getHourTypes();
+  assert.equal(created.length, 1);
+  assert.equal(created[0].slug, 'work');
+  context.api_getHourTypes();
+  context.getHourTypesSheet();
+  assert.deepStrictEqual(sheetHeaderDuplicates(spreadsheet, 'hour_types'), []);
+  assert.equal(context.api_getHourTypes().length, 1, 'repeat reads must not append another Work row');
+});
+
+test('a column holding only a header is never re-appended when the data region under-reports it', () => {
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [CANONICAL_HOUR_TYPE_HEADERS, ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '2024-02-01T00:00:00Z', 1, 'FALSE', '', '', '']]
+  });
+  context.assertMigrationsSettled_ = () => true;
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  // quick_fill_hours and icon are seeded blank, so they carry a header and nothing else. Model a data
+  // region that only reaches columns with body content — the state in which the old fix-up judged those
+  // columns missing and appended a second copy of each.
+  const sheet = spreadsheet.getSheetByName('hour_types');
+  sheet.getLastColumn = function() {
+    let last = 0;
+    this.values.slice(1).forEach((row) => row.forEach((value, index) => { if (value !== '' && value != null) last = Math.max(last, index + 1); }));
+    return last;
+  };
+  assert.ok(sheet.getLastColumn() < CANONICAL_HOUR_TYPE_HEADERS.length, 'the window must fall short for this test to mean anything');
+  context.getHourTypesSheet();
+  context.getHourTypesSheet();
+  context.api_getHourTypes();
+  assert.deepStrictEqual(sheetHeaderDuplicates(spreadsheet, 'hour_types'), []);
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+});
+
+test('a sheet already carrying duplicate quick-fill columns is repaired by the upgrade', () => {
+  const damaged = CANONICAL_HOUR_TYPE_HEADERS.concat(['quick_fill_hours', 'icon']);
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      damaged,
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '2024-02-01T00:00:00Z', 1, 'TRUE', '', '', 'hours', 7.5, 'clock']
+    ]
+  });
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/migrations.js');
+  load(context, 'backend/hourtypes.js');
+  context.assertMigrationsSettled_ = () => true; // the damaged sheet's own upgrade gate is not what is under test
+  assert.throws(() => context.getHourTypesSheet(), /duplicate header "quick_fill_hours"/);
+  context.migrationCanonicalQuickFillColumns_();
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+  const repaired = context.api_getHourTypes();
+  assert.equal(repaired.length, 1);
+  assert.equal(repaired[0].quick_fill_hours, 7.5, 'the populated copy of the duplicated column wins');
+  assert.equal(repaired[0].icon, 'clock');
+});
+
+test('the repair also removes a duplicate column that holds nothing but a header', () => {
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      CANONICAL_HOUR_TYPE_HEADERS.concat(['quick_fill_hours', 'icon']),
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '2024-02-01T00:00:00Z', 1, 'TRUE', 7.5, 'clock', 'hours', '', '']
+    ]
+  });
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/migrations.js');
+  load(context, 'backend/hourtypes.js');
+  context.assertMigrationsSettled_ = () => true;
+  context.migrationCanonicalQuickFillColumns_();
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+  assert.deepStrictEqual(sheetHeaderDuplicates(spreadsheet, 'hour_types'), []);
+  const repaired = context.api_getHourTypes();
+  assert.equal(repaired[0].quick_fill_hours, 7.5, 'the populated copy survives the empty duplicate');
+  assert.equal(repaired[0].icon, 'clock');
 });
 
 test('canonical sheet reads do not rewrite whole-column number formats', () => {
@@ -376,7 +570,7 @@ test('backend globals and modified HTML scripts parse without duplicate function
   new vm.Script(operations);
 });
 
-test('time entry controls expose contextual clocks and hour-type-owned entry modes', () => {
+test('desktop day editor stacks timed sessions, exact duration rows, and day actions', () => {
   const html = fs.readFileSync(path.join(root, 'views/index.html'), 'utf8');
   const dashboard = fs.readFileSync(path.join(root, 'views/partials/dashboard.html'), 'utf8');
   const settings = fs.readFileSync(path.join(root, 'views/partials/settings.html'), 'utf8');
@@ -400,7 +594,20 @@ test('time entry controls expose contextual clocks and hour-type-owned entry mod
   assert.match(scripts, /punchToggleBtn\.disabled = !contractOptional && !hasContract/);
   assert.match(scripts, /state\.settings\.entry_mode_source === 'hour_type'/);
   assert.match(mobile, /state\.settings\.entry_mode_source === 'hour_type'/);
-  assert.match(scripts, /activateTab\(hourTypeEffectiveEntryMode\(chosenHourType\) === 'detailed' \? 'punch' : 'manual'\)/);
+  assert.doesNotMatch(dashboard, /data-tab="manual"|data-tab="punch"/);
+  assert.ok(dashboard.indexOf('id="day-sessions-timeline"') < dashboard.indexOf('id="day-duration-list"'));
+  assert.ok(dashboard.indexOf('id="day-duration-list"') < dashboard.indexOf('id="day-level-actions"'));
+  assert.match(dashboard, /id="day-overall-total"/);
+  assert.match(scripts, /function renderDayDurationEntries\(dateIso\)/);
+  assert.match(scripts, /data-duration-entry-id/);
+  assert.match(scripts, /aria-expanded=/);
+  assert.match(scripts, /function dayDurationDraftDirty\(\)/);
+  assert.match(scripts, /if \(dayDurationDraft\) return false;/);
+  assert.match(scripts, /const currentEditingIndex = \(\) => state\.entries\.findIndex/);
+  assert.match(scripts, /if \(!stashDaySessionEdit\(\)\) return; \/\/ an invalid move stays open for correction/);
+  assert.match(scripts, /Discard day changes\?/);
+  assert.match(scripts, /function handleCalendarClick\(dateIso, targetHourTypeId, targetEntryId\)/);
+  assert.match(scripts, /if \(matches\.length === 1\) target = matches\[0\]/);
   assert.match(scripts, /hourTypeEffectiveEntryMode\(selectedHourType\) === 'detailed'/);
   assert.match(mobile, /state\.mode = hourTypeEffectiveEntryMode\(selected\) === 'detailed' \? 'punch' : 'manual'/);
   assert.match(scripts, /scheduleEntryMode\(draft\.contract_id, draft\.hour_type_id\)/);
@@ -408,6 +615,149 @@ test('time entry controls expose contextual clocks and hour-type-owned entry mod
   assert.match(styles, /\.ts-pace-burndown \+ \.ts-pace-month-section/);
   assert.doesNotMatch(styles, /\.ts-pace-card-divider/);
   assert.doesNotMatch(scripts, /className = 'ts-pace-card-divider'/);
+});
+
+test('calendar preferences, resilient refresh, quick fill, and rolling holiday window are wired', () => {
+  const settings = fs.readFileSync(path.join(root, 'views/partials/settings.html'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'views/partials/head.html'), 'utf8');
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const holidays = fs.readFileSync(path.join(root, 'views/partials/public-holidays.html'), 'utf8');
+  assert.match(settings, /data-setting-key="subdue_weekends"/);
+  assert.match(scripts, /subdue_weekends:[\s\S]*?defaultValue: true/);
+  assert.match(scripts, /classList\.toggle\('ts-subdue-weekends', enabled\)/);
+  assert.match(styles, /\.ts-subdue-weekends \.ts-calendar-cell--weekend/);
+  assert.match(styles, /\.ts-subdue-weekends \.ts-agenda-mini-cell\.is-weekend/);
+  assert.doesNotMatch(styles, /\.ts-subdue-weekends \.ts-calendar-cell--weekend[^{]*\{[^}]*background:/);
+  assert.doesNotMatch(styles, /\.ts-subdue-weekends \.ts-agenda-mini-cell\.is-weekend[^{]*\{[^}]*background:/);
+  ['networkerror', 'connection failure', 'http 0'].forEach((fragment) => assert.ok(scripts.includes(`'${fragment}'`)));
+  assert.match(scripts, /updateManualContractVisibility\(defaultData\.contract_id \? String\(defaultData\.contract_id\) : ''\)/);
+  assert.match(scripts, /reflectManualSessionsConflict\(\);/);
+  assert.match(scripts, /Select a contract before applying this duration\./);
+  assert.match(scripts, /function phHolidayInDisplayWindow\(holiday, todayStr, currentYear\)/);
+  assert.match(scripts, /return \[ps\.year, ps\.year \+ 1\]/);
+  assert.match(scripts, /return iso < isoDate\(cutoff\)/);
+  assert.match(holidays, /rolling look-ahead window/);
+
+  const transientContext = {};
+  vm.createContext(transientContext);
+  vm.runInContext(extractClientFunction(scripts, 'entriesSyncErrorText') + '\n'
+    + extractClientFunction(scripts, 'isTransientEntriesSyncError'), transientContext);
+  assert.equal(transientContext.isTransientEntriesSyncError({ message:'NetworkError: Connection failure due to HTTP 0' }), true);
+
+  const holidayContext = {
+    normalizeHolidayDate: (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : '',
+    parseIsoDate: (value) => {
+      const parts = String(value || '').split('-').map(Number);
+      return parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : null;
+    },
+    isoDate: (date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
+  };
+  vm.createContext(holidayContext);
+  vm.runInContext(extractClientFunction(scripts, 'phHolidayInDisplayWindow'), holidayContext);
+  assert.equal(holidayContext.phHolidayInDisplayWindow({ date:'2026-12-25' }, '2026-01-27', 2026), true);
+  assert.equal(holidayContext.phHolidayInDisplayWindow({ date:'2027-01-26' }, '2026-01-27', 2026), true);
+  assert.equal(holidayContext.phHolidayInDisplayWindow({ date:'2027-03-08' }, '2026-01-27', 2026), false);
+});
+
+test('break windows exist only between live sessions and late creates cannot resurrect an orphan', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const context = {
+    state: { entries: [] },
+    resolveEntryType: (entry) => entry.entry_type,
+    entryPunches: (entry) => entry.punches || [],
+    timeToMinutes: (value) => {
+      const match = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+      return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(extractClientFunction(scripts, 'daySessionBreakWindows'), context);
+  const session = (id, start, end) => ({ id, date:'2026-08-13', entry_type:'advanced', punches:[{ in:start, out:end }] });
+
+  context.state.entries = [session('a', '09:00', '10:00'), session('b', '11:00', '12:00')];
+  assert.deepStrictEqual(Array.from(context.daySessionBreakWindows('2026-08-13'), (pair) => Array.from(pair)), [[600, 660]]);
+  context.state.entries = [session('a', '09:00', '10:00')];
+  assert.deepStrictEqual(Array.from(context.daySessionBreakWindows('2026-08-13'), (pair) => Array.from(pair)), []);
+  context.state.entries = [session('a', '09:00', '10:00'), session('open', '11:00', '')];
+  assert.deepStrictEqual(Array.from(context.daySessionBreakWindows('2026-08-13'), (pair) => Array.from(pair)), [[600, 660]]);
+  context.state.entries = [session('a', '09:00', '10:00'), session('open', '11:00', ''), session('c', '13:00', '14:00')];
+  assert.deepStrictEqual(Array.from(context.daySessionBreakWindows('2026-08-13'), (pair) => Array.from(pair)), [[600, 660]]);
+
+  assert.match(scripts, /The bounding session disappeared while this create was in flight/);
+  assert.match(scripts, /Array\.from\(new Set\(\(state\.breaks \|\| \[\]\)/);
+  assert.match(scripts, /const validBreakWindows = daySessionBreakWindows\(dateIso\)/);
+  assert.doesNotMatch(scripts, /if \(typeof dayEntryModes === 'function' && !dayEntryModes\(dateIso\)\.detailed\) return/);
+});
+
+test('release generators stamp fixed full metadata and a valid stable manifest', () => {
+  const versionGenerator = fs.readFileSync(path.join(root, 'scripts/write-version.sh'), 'utf8');
+  const manifestGenerator = fs.readFileSync(path.join(root, 'scripts/write-release-manifest.sh'), 'utf8');
+  const version = fs.readFileSync(path.join(root, 'backend/version.js'), 'utf8');
+  assert.match(versionGenerator, /TEMPUS_BUILD_COMMIT/);
+  assert.match(versionGenerator, /--timestamp/);
+  assert.match(versionGenerator, /buildTimestamp:/);
+  assert.match(version, /buildTimestamp: '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z'/);
+  assert.match(version, /buildCommit: '[0-9a-f]{40}'/);
+  assert.match(manifestGenerator, /"schema_version": 1/);
+  assert.match(manifestGenerator, /"channel": "stable"/);
+  assert.match(manifestGenerator, /\{40\}/);
+  assert.match(manifestGenerator, /release\.zip/);
+});
+
+test('stable release comparison handles exact, abbreviated, newer, divergent, legacy, cached, and unavailable metadata', () => {
+  const sha = '0123456789abcdef0123456789abcdef01234567';
+  const other = 'fedcba9876543210fedcba9876543210fedcba98';
+  const manifest = { schema_version:1, channel:'stable', commit_sha:sha, published_at:'2026-08-08T10:00:00Z', display_version:'v', archive_url:'https://example.com/release.zip' };
+  const makeContext = (local, responseFactory) => {
+    const { context } = createAppsScriptContext({});
+    let cached = null;
+    context.BUILD_META = local;
+    context.cacheGet = () => cached;
+    context.cacheSet = (key, value) => { cached = value; };
+    context.UrlFetchApp = { fetch: responseFactory };
+    load(context, 'backend/releaseInfo.js');
+    return context;
+  };
+  const response = () => ({ getResponseCode:() => 200, getContentText:() => JSON.stringify(manifest) });
+  let context = makeContext({ buildCommit:sha, buildTimestamp:'2026-08-08T09:00:00Z', buildDate:'2026-08-08' }, response);
+  assert.equal(context.api_checkForUpdate().relation, 'current');
+  assert.equal(context.compareStableRelease_({ buildCommit:sha.slice(0, 12) }, manifest).relation, 'current');
+  assert.equal(context.compareStableRelease_({ buildCommit:other, buildTimestamp:'2026-08-07T09:00:00Z' }, manifest).hasUpdate, true);
+  assert.equal(context.compareStableRelease_({ buildCommit:other, buildTimestamp:'2026-08-09T09:00:00Z' }, manifest).relation, 'local_newer');
+  assert.equal(context.compareStableRelease_({ buildCommit:other, buildTimestamp:'2026-08-08T10:00:00Z' }, manifest).relation, 'divergent');
+  const legacy = context.compareStableRelease_({ buildDate:'2026-08-07' }, manifest);
+  assert.equal(legacy.comparisonMode, 'legacy_date');
+  assert.equal(legacy.hasUpdate, true);
+  let fetches = 0;
+  context = makeContext({ buildCommit:sha }, () => { fetches++; return response(); });
+  context.api_checkForUpdate(); context.api_checkForUpdate();
+  assert.equal(fetches, 1);
+  context = makeContext({}, () => ({ getResponseCode:() => 200, getContentText:() => '{bad' }));
+  assert.equal(context.api_checkForUpdate().recoverableError.code, 'invalid_json');
+  context = makeContext({}, () => { throw new Error('offline'); });
+  assert.equal(context.api_checkForUpdate().comparisonMode, 'unavailable');
+});
+
+test('updater dry run preserves clasp config and accepts only built release packages', () => {
+  const updater = fs.readFileSync(path.join(root, 'scripts/update-tempus.sh'), 'utf8');
+  assert.match(updater, /refs\/heads\/release/);
+  assert.match(updater, /--dry-run/);
+  assert.match(updater, /--archive-file/);
+  assert.match(updater, /cp "\$target_dir\/\.clasp\.json" "\$clasp_backup"/);
+  assert.match(updater, /cp "\$clasp_backup" "\$target_dir\/\.clasp\.json"/);
+  assert.match(updater, /manifest missing/);
+  assert.match(updater, /clasp push -f/);
+  assert.match(fs.readFileSync(path.join(root, '.claspignore'), 'utf8'), /^release-manifest\.json$/m);
+});
+
+test('release workflow gates force-publish on tests and contains no Apps Script deployment', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/publish-release.yml'), 'utf8');
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /contents: write/);
+  assert.ok(workflow.indexOf('npm test') < workflow.indexOf('push --force origin HEAD:release'));
+  assert.match(workflow, /git worktree add --detach/);
+  assert.doesNotMatch(workflow, /clasp push|script\.google\.com|GOOGLE_/i);
 });
 
 test('quick actions expose menu semantics and keyboard controls', () => {

@@ -1,56 +1,9 @@
-var HOUR_TYPE_HEADERS = [
-  'id',
-  'name',
-  'slug',
-  'color',
-  'contributes_to_income',
-  'requires_contract',
-  'is_default',
-  'auto_populate_public_holidays',
-  'auto_populate_hours',
-  'entry_mode',
-  'created_at',
-  'display_order',
-  // Quick-action fields: each hour type can opt into the calendar right-click quick-fill bar with its
-  // own one-click duration and icon. quick_fill_mode decides what the one click DOES: 'hours' fills the
-  // quick_fill_hours, 'punch' starts the punch clock instead (no hours needed).
-  'quick_fill_enabled',
-  'quick_fill_hours',
-  'icon',
-  'quick_fill_mode'
-];
-
-// Columns that live AFTER the canonical block managed by getOrCreateSheet's hour_types rewrite. Like
-// display_order, these are appended at the end (never repositioned) and seeded with a default for any
-// pre-existing rows, so old sheets gain them without disturbing the existing column order.
-var HOUR_TYPE_APPENDED_COLUMNS = [
-  { name: 'entry_mode', def: '' },
-  { name: 'display_order', def: '' },
-  { name: 'quick_fill_enabled', def: 'FALSE' },
-  { name: 'quick_fill_hours', def: '' },
-  { name: 'icon', def: '' },
-  { name: 'quick_fill_mode', def: 'hours' }
-];
-
-function ensureHourTypesSchema(sh) {
-  if (!sh) return;
-  HOUR_TYPE_APPENDED_COLUMNS.forEach(function(col) {
-    var lastColumn = sh.getLastColumn();
-    var headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
-    if (headers.indexOf(col.name) !== -1) return;
-    var insertPos = lastColumn + 1;
-    sh.insertColumnAfter(lastColumn);
-    sh.getRange(1, insertPos).setValue(col.name);
-    if (sh.getLastRow() > 1) {
-      sh.getRange(2, insertPos, sh.getLastRow() - 1, 1).setValue(col.def);
-    }
-  });
-}
-
+// Every hour_types column, quick-fill fields included, is declared in TEMPUS_SHEET_SCHEMAS and added by
+// name by getOrCreateSheet. There is deliberately no second schema fix-up here: the one that used to
+// live in this file decided "does this column exist?" from the getLastColumn() window, which does not
+// always reach a column holding only a header, and so appended duplicate quick_fill_hours/icon columns.
 function getHourTypesSheet() {
-  var sh = getOrCreateSheet('hour_types');
-  ensureHourTypesSchema(sh);
-  return sh;
+  return getOrCreateSheet('hour_types');
 }
 
 // One-time carry-over of the legacy saved "entry defaults" into the new per-hour-type quick-fill

@@ -79,6 +79,10 @@
         </div>
       </div>
     </div>
+    <!-- Shared desktop/mobile entry helpers. Despite its "desktop and mobile" header this was only ever
+         included by mobile.html; desktop now needs it too (scripts.html delegates the clock-out suggestion
+         to entryCore.endTimeSuggestion so the two surfaces can't drift). Must precede scripts. -->
+    <?!= include('views/partials/entry-core'); ?>
     <?!= include('views/partials/scripts'); ?>
     <?!= include('views/partials/operations-scripts'); ?>
   </body>

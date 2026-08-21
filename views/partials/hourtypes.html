@@ -58,6 +58,18 @@
           </div>
         </div>
       </div>
+      <!-- Icon is identity, like Name and Colour: the Hour Types list card renders one for EVERY type,
+           so gating the picker behind "Show in quick actions" left types you could see an icon for but
+           never choose. Lives here with the other identity fields now; the hidden input is the value-
+           holder populateHourTypeForm / saveHourType read, which is why it travels with the row. -->
+      <div class="ts-row" style="margin-top:16px;">
+        <div class="ts-col">
+          <label>Icon</label>
+          <input type="hidden" id="hour-type-icon" value="" />
+          <div class="ts-icon-picker" id="hour-type-icon-picker" role="radiogroup" aria-label="Icon"></div>
+          <div class="ts-note">Shown beside this type in the Hour Types list, and on its quick action in the calendar right-click menu.</div>
+        </div>
+      </div>
       <div class="ts-flag-row" style="margin-top:16px;">
         <div class="ts-flag-meta">
           <div class="ts-flag-title">Contributes to income</div>
@@ -138,7 +150,6 @@
         </label>
       </div>
       <div id="hour-type-quick-fill-rows" style="display:none;">
-        <input type="hidden" id="hour-type-icon" value="" />
         <div class="ts-row" style="margin-top:16px;">
           <div class="ts-col">
             <label>Quick action</label>
@@ -154,13 +165,6 @@
             <label>Quick-fill hours</label>
             <input type="number" id="hour-type-quick-fill-hours" min="0" step="0.25" placeholder="e.g. 7.5" />
             <div class="ts-note">Hours filled on one click. Leave blank to use the default hour type's quick-fill hours, falling back to the <strong>Standard day target</strong> in Settings if that's also unset.</div>
-          </div>
-        </div>
-        <div class="ts-row" style="margin-top:16px;">
-          <div class="ts-col">
-            <label>Icon</label>
-            <div class="ts-icon-picker" id="hour-type-icon-picker" role="radiogroup" aria-label="Icon"></div>
-            <div class="ts-note">Shown on this type's quick action in the calendar menu.</div>
           </div>
         </div>
       </div>

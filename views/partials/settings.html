@@ -53,10 +53,25 @@
     Standard day target (hours)
    </label>
    <div class="ts-note">
-    The length of a full working day. Drives the agenda's weekly progress bar, the mobile daily ring, and the punch clock-out suggestion (an hour type's own quick-fill hours still take precedence). Defaults to 7.5.
+    The length of a full working day. Drives the agenda's weekly progress bar, the mobile daily ring, and the quick-fill hours used when an hour type doesn't set its own. Defaults to 7.5.
    </div>
    <div class="ts-settings-field ts-settings-control">
     <input id="set-target-hours" min="0.25" max="24" step="0.25" type="number"/>
+   </div>
+  </div>
+  <div class="ts-settings-item" data-setting-key="subdue_weekends">
+   <label class="ts-settings-label" for="set-subdue-weekends">
+    De-emphasise weekends
+   </label>
+   <div class="ts-note">
+    Fade empty Saturday and Sunday date numbers in Calendar and Agenda. Weekend entries, public holidays, today, and the selected day remain prominent.
+   </div>
+   <div class="ts-settings-field ts-settings-control">
+    <label class="ts-toggle" for="set-subdue-weekends">
+     <input type="checkbox" id="set-subdue-weekends" />
+     <span class="ts-toggle-track" aria-hidden="true"><span class="ts-toggle-thumb"></span></span>
+     <span class="ts-toggle-row-label">Use quieter weekend styling</span>
+    </label>
    </div>
   </div>
   <div class="ts-settings-item" data-setting-key="default_entry_mode">
