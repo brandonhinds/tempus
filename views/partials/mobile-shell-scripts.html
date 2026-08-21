@@ -7,9 +7,13 @@
       hour_types: { enabled: false }
     };
 
-    const THEME_KEYS = ['dark', 'light', 'og', 'rose', 'sierra117', 'protanopia', 'deuteranopia', 'tritanopia', 'monochrome', 'custom'];
+    const THEME_KEYS = ['dark', 'light', 'og', 'rose', 'sierra117', 'gizmodo', 'blaze', 'velvet-espresso', 'protanopia', 'deuteranopia', 'tritanopia', 'monochrome', 'custom'];
     const BASE_CACHE_KEY = 'ts_mobile_base_cache_v1';
     const BASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+    // Device-local snapshot of the gate-relevant colours for the currently applied mobile theme. The
+    // mobile redirect splash (views/partials/mobile-detect) reads this so it paints in the theme THIS
+    // device actually uses — the desktop-synced theme must never bleed onto the mobile splash, or vice versa.
+    const GATE_SNAPSHOT_KEY = 'ts_mobile_gate_theme';
 
     const CUSTOM_THEME_DEFAULTS = {
       bg: '#0b1220',
@@ -131,6 +135,13 @@
       if (!base.success) base.success = CUSTOM_THEME_DEFAULTS.success;
       if (!base.warning) base.warning = mixColors(base.primary, base.danger, 0.3);
       if (!base.danger) base.danger = CUSTOM_THEME_DEFAULTS.danger;
+      // Preserve the overrides bag (hand-tuned tokens not derivable from the 8 base colours; mirrors desktop).
+      if (raw && raw.overrides && typeof raw.overrides === 'object') {
+        base.overrides = {};
+        Object.keys(raw.overrides).forEach((k) => { if (raw.overrides[k]) base.overrides[k] = raw.overrides[k]; });
+      } else {
+        delete base.overrides;
+      }
       return base;
     };
 
@@ -169,7 +180,7 @@
       const calendarGlow = withAlpha(normalized.primary, 0.36);
       const calendarBg = withAlpha(normalized.primary, 0.22);
 
-      return {
+      const vars = {
         '--bg': normalized.bg,
         '--panel': normalized.panel,
         '--muted': normalized.muted,
@@ -210,11 +221,16 @@
         '--calendar-selected-glow': calendarGlow,
         '--calendar-selected-bg': calendarBg
       };
+      // Hand-tuned overrides win over the derived values (mirrors desktop generateCustomTheme).
+      if (normalized.overrides && typeof normalized.overrides === 'object') {
+        Object.keys(normalized.overrides).forEach((k) => { if (normalized.overrides[k]) vars[k] = normalized.overrides[k]; });
+      }
+      return vars;
     };
 
-    const applyCustomTheme = () => {
-      const customThemeConfig = normalizeCustomThemeConfig(state.settings.custom_theme_config);
-      state.settings.custom_theme_config = customThemeConfig;
+    const applyCustomTheme = (config) => {
+      // Accept a specific named-theme config (custom:<id>); fall back to the legacy single config.
+      const customThemeConfig = normalizeCustomThemeConfig(config || state.settings.custom_theme_config);
       const themeVars = generateCustomTheme(customThemeConfig);
       const styleId = 'custom-theme-style';
       let styleEl = document.getElementById(styleId);
@@ -237,24 +253,74 @@
       return 'dark';
     };
 
+    // The active custom themes, parsed on demand (custom_themes may be a JSON string or an array).
+    const getCustomThemesList = () => {
+      let raw = state.settings ? state.settings.custom_themes : null;
+      if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (e) { raw = []; } }
+      return Array.isArray(raw) ? raw : [];
+    };
+
+    // A device-local theme override (set by the mobile theme picker) wins over the synced desktop setting,
+    // so mobile can run its own look without changing desktop.
+    const mobileThemeOverride = () => { try { return localStorage.getItem('ts_mobile_theme') || ''; } catch (e) { return ''; } };
+    const bootTheme = () => mobileThemeOverride() || state.settings.theme || 'dark';
+
     const applyTheme = (theme) => {
       const body = document.body;
       if (!body) return;
-      const normalizedTheme = (typeof theme === 'string' ? theme.trim().toLowerCase() : '');
-      const fallback = getLastNonCustomTheme();
-      const wantsCustom = normalizedTheme === 'custom';
-      const customEnabled = !!(getCustomThemeFlag() && getCustomThemeFlag().enabled);
-      const normalized = THEME_KEYS.includes(normalizedTheme) ? normalizedTheme : 'dark';
-      const finalTheme = wantsCustom && !customEnabled ? fallback : normalized;
+      const ref = (typeof theme === 'string' ? theme.trim() : '');
+      const lower = ref.toLowerCase();
+
+      // Resolve a custom theme: 'custom:<id>' (named, current system) or bare 'custom' (legacy single).
+      let customConfig = null;
+      let isCustom = false;
+      if (lower.indexOf('custom:') === 0) {
+        const found = getCustomThemesList().find((t) => t && t.id === ref.slice(7));
+        if (found && found.config) { customConfig = found.config; isCustom = true; }
+      } else if (lower === 'custom') {
+        customConfig = state.settings.custom_theme_config;
+        isCustom = true;
+      }
+      // If a custom theme can't be resolved (deleted / not synced yet), fall back to a safe built-in.
+      if (isCustom && !customConfig) isCustom = false;
+
+      let builtin = (THEME_KEYS.includes(lower) && lower !== 'custom') ? lower : null;
+      if (!isCustom && !builtin) builtin = getLastNonCustomTheme();
+      const finalKey = isCustom ? 'custom' : builtin;
+
       THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
-      body.classList.add('ts-theme-' + finalTheme);
-      state.settings = { ...state.settings, theme: finalTheme };
-      if (finalTheme !== 'custom') {
-        state.settings.last_non_custom_theme = finalTheme;
-      }
-      if (finalTheme === 'custom' && customEnabled) {
-        applyCustomTheme();
-      }
+      body.classList.add('ts-theme-' + finalKey);
+
+      // Keep the saved ref intact (don't clobber 'custom:<id>' down to 'custom').
+      state.settings = { ...state.settings, theme: ref || 'dark' };
+      if (!isCustom) state.settings.last_non_custom_theme = builtin;
+
+      if (isCustom) applyCustomTheme(customConfig);
+
+      // Generic light/dark marker for theme-agnostic styling (e.g. the empty-state night scene). Read the
+      // RESOLVED --panel after the theme class (and any custom CSS) is applied; rAF lets the style settle.
+      requestAnimationFrame(() => {
+        const cs = getComputedStyle(body);
+        const panel = cs.getPropertyValue('--panel').trim();
+        const light = panel ? isColorLight(panel) : false;
+        body.classList.toggle('ts-theme--light', light);
+        body.classList.toggle('ts-theme--dark', !light);
+        // Snapshot the gate-relevant colours so the redirect splash can paint in the device's own theme.
+        try {
+          const primary = cs.getPropertyValue('--primary').trim();
+          const snap = {
+            bg: cs.getPropertyValue('--bg').trim(),
+            panel: panel,
+            text: cs.getPropertyValue('--text').trim(),
+            muted: cs.getPropertyValue('--muted').trim(),
+            primary: primary,
+            primaryText: (primary && isColorLight(primary)) ? '#111111' : '#ffffff'
+          };
+          if (snap.bg && snap.text && snap.primary) {
+            localStorage.setItem(GATE_SNAPSHOT_KEY, JSON.stringify(snap));
+          }
+        } catch (e) {}
+      });
     };
 
     const persistBaseCache = () => {
@@ -326,7 +392,7 @@
       }
       state.featureFlags = normalizeFeatureFlags(flags);
       state.entryDefaults = defaults || { basic: [], advanced: [] };
-      applyTheme(state.settings.theme || 'dark');
+      applyTheme(bootTheme());
       persistBaseCache();
       console.log('[mobile-shell] base loaded', {
         theme: state.settings.theme,
@@ -345,7 +411,7 @@
       state.basePromise = (async () => {
         const restored = hydrateBaseCache();
         if (restored) {
-          applyTheme(state.settings.theme || 'dark');
+          applyTheme(bootTheme());
           backgroundRefreshBase();
           return state;
         }
@@ -356,7 +422,7 @@
     };
 
     loadBaseState().catch(() => {
-      applyTheme('dark');
+      applyTheme(mobileThemeOverride() || 'dark');
     });
 
     window.mobileShell = {

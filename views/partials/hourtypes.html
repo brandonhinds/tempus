@@ -1,15 +1,28 @@
 <section class="ts-card" id="page-hour-types" style="display:none;">
-  <div class="ts-page-header">
-    <h2>Hour Types</h2>
-    <p class="ts-page-description">Manage different types of hours you can track. Configure which types contribute to income calculations and require contracts.</p>
-  </div>
-
-  <div class="ts-hour-types-list" id="hour-types-list">
-    <!-- Hour types will be loaded here -->
-  </div>
-
-  <div class="ts-page-actions">
+  <!-- Header matches Contracts/Deductions: title left, primary action top-right. -->
+  <div class="ts-toolbar" style="margin-bottom:12px;">
+    <div class="ts-gap-md" style="display:flex; align-items:center;">
+      <h3 style="margin:0;">Hour Types</h3>
+    </div>
     <button id="btn-add-hour-type">Add Hour Type</button>
+  </div>
+  <div class="ts-note" style="margin-bottom:16px;">Configure which hour types contribute to income calculations and require contracts.</div>
+
+  <!-- Master-detail (mirrors Deductions / Reoccurring Entries): the hour-types list on the left, the
+       selected type's editor inline on the right — no popup. The editor panel is moved in from
+       #modal-hour-type's content node; see showHourTypeModal/hideHourTypeModal. -->
+  <div class="ts-grid ts-grid--gap-lg ts-grid--align-start" id="hour-types-split">
+    <div class="ts-col-span-5">
+      <div class="ts-hour-types-list" id="hour-types-list">
+        <!-- Hour types will be loaded here -->
+      </div>
+    </div>
+    <div class="ts-col-span-7">
+      <div id="hour-type-detail-placeholder" class="ts-empty" style="display:flex; align-items:center; justify-content:center; text-align:center; min-height:240px;">
+        <p style="margin:0; max-width:300px;">Select an hour type on the left, or use <strong>Add Hour Type</strong> to create one.</p>
+      </div>
+      <div id="hour-type-editor-host"></div>
+    </div>
   </div>
 </section>
 
@@ -18,7 +31,6 @@
   <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3 id="hour-type-modal-title">Add Hour Type</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-row">
@@ -26,7 +38,9 @@
           <label>Name</label>
           <input type="text" id="hour-type-name" placeholder="e.g., Annual Leave, Training" />
         </div>
-        <div class="ts-col">
+        <!-- Slug is an internal identifier auto-derived from the name — hidden from users, kept as a
+             value-holder so saveHourType can still read it. -->
+        <div class="ts-col" style="display:none;">
           <label>Slug</label>
           <input type="text" id="hour-type-slug" placeholder="e.g., annual, training" readonly />
           <div class="ts-note">Auto-generated from name. Used internally for identification.</div>
@@ -34,13 +48,26 @@
       </div>
       <div class="ts-row" style="margin-top:16px;">
         <div class="ts-col">
-          <label>Color</label>
-          <input type="color" id="hour-type-color" value="#6b7280" />
-          <div class="ts-note">Used for calendar visualization.</div>
+          <label>Colour</label>
+          <input type="color" id="hour-type-color" value="#6b7280" class="ts-color-native" tabindex="-1" aria-hidden="true" />
+          <div class="ts-color-swatches" id="hour-type-color-swatches" role="radiogroup" aria-label="Colour"></div>
+          <div class="ts-note">Used for calendar visualisation.</div>
           <div class="ts-colorblind-warning" id="hour-type-color-warning" style="display:none;">
             <span class="ts-colorblind-warning-icon">!</span>
-            <span>This color may be difficult to distinguish for colorblind users</span>
+            <span>This colour may be difficult to distinguish for colourblind users</span>
           </div>
+        </div>
+      </div>
+      <!-- Icon is identity, like Name and Colour: the Hour Types list card renders one for EVERY type,
+           so gating the picker behind "Show in quick actions" left types you could see an icon for but
+           never choose. Lives here with the other identity fields now; the hidden input is the value-
+           holder populateHourTypeForm / saveHourType read, which is why it travels with the row. -->
+      <div class="ts-row" style="margin-top:16px;">
+        <div class="ts-col">
+          <label>Icon</label>
+          <input type="hidden" id="hour-type-icon" value="" />
+          <div class="ts-icon-picker" id="hour-type-icon-picker" role="radiogroup" aria-label="Icon"></div>
+          <div class="ts-note">Shown beside this type in the Hour Types list, and on its quick action in the calendar right-click menu.</div>
         </div>
       </div>
       <div class="ts-flag-row" style="margin-top:16px;">
@@ -54,6 +81,17 @@
             <span class="ts-toggle-thumb"></span>
           </span>
         </label>
+      </div>
+      <div class="ts-row" style="margin-top:16px;">
+        <div class="ts-col">
+          <label for="hour-type-entry-mode">Entry mode</label>
+          <select id="hour-type-entry-mode">
+            <option value="">Use default</option>
+            <option value="simple">Simple — total hours</option>
+            <option value="detailed">Detailed — sessions</option>
+          </select>
+          <div class="ts-note" id="hour-type-entry-mode-note">Used when Settings → Entry mode is configured by is set to Hour types.</div>
+        </div>
       </div>
       <div class="ts-flag-row" style="margin-top:16px;">
         <div class="ts-flag-meta">
@@ -98,8 +136,46 @@
           <div class="ts-note">Default hours recorded on each weekday public holiday when auto-populate is enabled.</div>
         </div>
       </div>
+      <div class="ts-flag-row" style="margin-top:16px;">
+        <div class="ts-flag-meta">
+          <div class="ts-flag-title">Show in quick actions</div>
+          <div class="ts-flag-desc">Adds this hour type to the calendar right-click menu for either fixed hours or clock in/out.</div>
+          <div class="ts-flag-desc" id="hour-type-quick-fill-lock-note" style="display:none;">Always on for the default hour type, so there's always at least one quick action.</div>
+        </div>
+        <label class="ts-toggle">
+          <input type="checkbox" id="hour-type-quick-fill-enabled" />
+          <span class="ts-toggle-track">
+            <span class="ts-toggle-thumb"></span>
+          </span>
+        </label>
+      </div>
+      <div id="hour-type-quick-fill-rows" style="display:none;">
+        <div class="ts-row" style="margin-top:16px;">
+          <div class="ts-col">
+            <label>Quick action</label>
+            <div class="ts-av-seg" id="hour-type-quick-mode" role="radiogroup" aria-label="Quick action">
+              <button type="button" data-mode="hours" aria-selected="true">Log fixed hours</button>
+              <button type="button" data-mode="punch" aria-selected="false">Clock in/out</button>
+            </div>
+            <div class="ts-note"><strong>Log fixed hours</strong> records a set duration. <strong>Clock in/out</strong> shows a contextual shortcut for this hour type on today; while its clock is running, the same shortcut clocks it out. Clock shortcuts use Detailed entry mode.</div>
+          </div>
+        </div>
+        <div class="ts-row" style="margin-top:16px;" id="hour-type-quick-fill-hours-row">
+          <div class="ts-col">
+            <label>Quick-fill hours</label>
+            <input type="number" id="hour-type-quick-fill-hours" min="0" step="0.25" placeholder="e.g. 7.5" />
+            <div class="ts-note">Hours filled on one click. Leave blank to use the default hour type's quick-fill hours, falling back to the <strong>Standard day target</strong> in Settings if that's also unset.</div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="ts-modal-footer">
+      <!-- Delete lives here (not on the list card) — subtle trash+underline, shown only when editing an
+           existing, non-built-in type. Triggers the existing delete-confirmation flow. -->
+      <button type="button" class="ts-modal-delete-link" id="btn-delete-hour-type-inline" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        <span>Delete</span>
+      </button>
       <button class="ghost" id="btn-cancel-hour-type">Cancel</button>
       <button id="btn-save-hour-type">Save Hour Type</button>
     </div>
@@ -111,11 +187,10 @@
   <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3>Delete Hour Type</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p>Are you sure you want to delete "<span id="delete-hour-type-name"></span>"?</p>
-      <p class="ts-note">This action cannot be undone. If this hour type is used by existing entries, deletion will be prevented.</p>
+      <p class="ts-note">This action cannot be undone.</p>
     </div>
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-cancel-delete-hour-type">Cancel</button>

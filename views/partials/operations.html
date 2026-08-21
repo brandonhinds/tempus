@@ -1,0 +1,90 @@
+<section class="ts-card ts-card--wide" id="page-expenses" style="display:none;">
+  <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
+    <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Actual purchases and their evidence live here. Recurring rules are forecasts until they create a transaction.</p></div>
+    <div style="display:flex; gap:8px;"><button type="button" class="ghost" id="expense-export">Export FY CSV</button><button type="button" id="expense-add">Record expense</button></div>
+  </div>
+  <div class="ts-view-toggle" role="tablist" aria-label="Expense view" style="margin-bottom:18px;">
+    <button type="button" role="tab" class="ts-view-toggle-btn is-active" aria-selected="true" data-expense-tab="transactions">Transactions</button>
+    <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="rules">Rules</button>
+    <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="report">FY report</button>
+  </div>
+  <form id="expense-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
+    <div class="ts-toolbar"><h4 style="margin:0;">New expense transaction</h4><button type="button" class="ghost" id="expense-form-cancel">Cancel</button></div>
+    <div class="ts-grid ts-grid--gap-md">
+      <div class="ts-col-span-4"><label for="expense-vendor">Vendor</label><input id="expense-vendor" required maxlength="160"></div>
+      <div class="ts-col-span-4"><label for="expense-abn">Vendor ABN (optional)</label><input id="expense-abn" maxlength="20"></div>
+      <div class="ts-col-span-4"><label for="expense-date">Purchase date</label><input id="expense-date" type="date" required></div>
+      <div class="ts-col-span-4" id="expense-supplier-date-wrap"><label for="expense-supplier-date">Supplier invoice date</label><input id="expense-supplier-date" type="date"></div>
+      <div class="ts-col-span-4"><label for="expense-amount">Amount including GST</label><input id="expense-amount" type="number" min="0" step="0.01" required></div>
+      <div class="ts-col-span-4"><label for="expense-category">Category</label><input id="expense-category" maxlength="100"></div>
+      <div class="ts-col-span-4"><label for="expense-gst-code">GST treatment</label><select id="expense-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
+      <div class="ts-col-span-4"><label for="expense-business-use">Business use (%)</label><input id="expense-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
+      <div class="ts-col-span-4" id="expense-frequency-wrap" style="display:none;"><label for="expense-frequency">Frequency</label><select id="expense-frequency"><option value="once">Once</option><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div>
+      <div class="ts-col-span-12"><label for="expense-description">Description</label><input id="expense-description" maxlength="500"></div>
+      <div class="ts-col-span-12"><label for="expense-notes">Notes</label><textarea id="expense-notes" rows="3" maxlength="2000"></textarea></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save transaction</button></div>
+  </form>
+  <div id="expense-transactions-panel"><div class="ts-toolbar" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;"><div><label for="expense-filter-from">From</label><input id="expense-filter-from" type="date"></div><div><label for="expense-filter-to">To</label><input id="expense-filter-to" type="date"></div><div><label for="expense-filter-state">Reconciliation</label><select id="expense-filter-state"><option value="">All</option><option value="unreconciled">Unreconciled</option><option value="legacy_unreconciled">Legacy unreconciled</option><option value="reconciled">Reconciled</option><option value="scheduled">Scheduled</option></select></div><button type="button" class="ghost" id="expense-filter-apply">Apply filters</button></div><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
+  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar"><p class="ts-note">Changing a rule never rewrites recorded transactions.</p><div style="display:flex;gap:8px;"><button type="button" id="expense-rule-generate" class="ghost">Generate next 12 months</button><button type="button" id="expense-rule-add" class="ghost">Add rule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
+  <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year ending</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
+</section>
+
+<section class="ts-card ts-card--wide" id="page-assessments" style="display:none;">
+  <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
+    <div><div class="ts-kicker">Configurable workflow</div><h3 style="margin:2px 0 4px;">Assessments</h3><p class="ts-note" style="margin:0; max-width:620px;">Define your own fields and invoice language. Tempus starts with no profession-specific catalogue.</p></div>
+    <div style="display:flex; gap:8px;"><button class="ghost" id="assessment-type-add">Configure type</button><button id="assessment-add">New assessment</button></div>
+  </div>
+  <form id="assessment-type-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
+    <div class="ts-toolbar"><h4 style="margin:0;">Assessment type</h4><button type="button" class="ghost" data-close-form="assessment-type-form">Cancel</button></div>
+    <label for="assessment-type-name">Name</label><input id="assessment-type-name" required maxlength="140">
+    <label for="assessment-type-fields" style="margin-top:10px;">Field definitions (JSON)</label><textarea id="assessment-type-fields" rows="5" spellcheck="false" placeholder='[{"key":"reference","label":"Reference","input_type":"text","required":true}]'></textarea>
+    <label for="assessment-type-lines" style="margin-top:10px;">Invoice lines (JSON)</label><textarea id="assessment-type-lines" rows="5" spellcheck="false" placeholder='[{"id":"initial","template":"{organisation} – {reference}","multiplier":1,"display_order":1}]'></textarea>
+    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save type</button></div>
+  </form>
+  <form id="assessment-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
+    <div class="ts-toolbar"><h4 style="margin:0;">New assessment</h4><button type="button" class="ghost" data-close-form="assessment-form">Cancel</button></div>
+    <div class="ts-grid ts-grid--gap-md">
+      <div class="ts-col-span-4"><label for="assessment-date">Date</label><input id="assessment-date" type="date" required></div>
+      <div class="ts-col-span-4"><label for="assessment-contract">Contract</label><select id="assessment-contract" required></select></div>
+      <div class="ts-col-span-4"><label for="assessment-type">Type</label><select id="assessment-type" required></select></div>
+      <div class="ts-col-span-6"><label for="assessment-organisation">Organisation</label><input id="assessment-organisation" required maxlength="180"></div>
+      <div class="ts-col-span-6"><label for="assessment-adjustment">Adjustment (%)</label><input id="assessment-adjustment" type="number" step="0.01" value="0"></div>
+      <div class="ts-col-span-12"><label for="assessment-values">Field values (JSON)</label><textarea id="assessment-values" rows="4" spellcheck="false" placeholder='{"reference":"ABC-123"}'></textarea></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save assessment</button></div>
+  </form>
+  <div class="ts-toolbar" style="margin:18px 0 8px;"><p class="ts-note" id="assessment-selection-note" style="margin:0;">Select draft assessments to prepare an invoice.</p><button class="ghost" id="assessment-invoice">Create draft invoice</button></div>
+  <div id="assessment-list" class="ts-ledger-list" aria-live="polite"></div>
+</section>
+
+<section class="ts-card ts-card--wide" id="page-help" style="display:none;">
+  <div class="ts-kicker">Bundled guide</div><h3 style="margin:2px 0 6px;">Help</h3><p class="ts-note" style="max-width:680px;">This guide ships with the same build as the app, so its workflows match the version you are using.</p>
+  <div class="ts-help-grid">
+    <details open><summary>Upgrade and backups</summary><p>Tempus disables financial pages until the one-time upgrade has created and verified a spreadsheet copy. Failed migrations show their error and resume from the unfinished step.</p></details>
+    <details><summary>Expenses and GST</summary><p>Record purchases as transactions and payments. A recurring rule is only a forecast. Taxable GST is included in BAS actuals only after reconciliation, claimable-GST confirmation and receipt attachment.</p></details>
+    <details><summary>Invoice lifecycle</summary><p>Drafts can be edited and recalculated. Issued, sent and paid invoices are immutable. Correct history by voiding the original and creating a revision; payments are tracked separately.</p></details>
+    <details><summary>Assessments</summary><p>Enable assessments, configure stable field keys and invoice line templates, then create records. Issued assessment invoices lock their source records. Voiding releases the sources for revision.</p></details>
+    <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense rules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
+    <details><summary>Tax estimates</summary><p id="help-tax-table-status">Checking the bundled PAYG table…</p><p class="ts-note">Estimates use ATO Scale 2 and are guidance only. Confirm payroll and tax obligations with the ATO or your adviser.</p></details>
+    <details><summary>Keyboard access</summary><p>Use Tab to move through controls. Quick-action menus support the Menu key or Shift+F10, arrow keys, Enter and Escape. Focus remains visible in every theme.</p></details>
+  </div>
+</section>
+
+<style>
+  .ts-kicker { color:var(--primary); font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  .ts-ledger-list { border-top:1px solid var(--border); }
+  .ts-ledger-row { display:grid; grid-template-columns:minmax(160px,1.4fr) minmax(110px,.8fr) minmax(100px,.65fr) auto; gap:16px; align-items:center; padding:15px 4px; border-bottom:1px solid var(--border); }
+  .ts-ledger-row__title { font-weight:700; overflow-wrap:anywhere; }
+  .ts-ledger-row__meta { color:var(--muted); font-size:var(--font-size-xs); }
+  .ts-ledger-row__amount { font-variant-numeric:tabular-nums; font-weight:750; text-align:right; }
+  .ts-ledger-row__actions { display:flex; gap:6px; justify-content:flex-end; }
+  .ts-ledger-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); }
+  .ts-ledger-summary > div { padding:18px; background:var(--panel); }
+  .ts-ledger-summary strong { display:block; margin-top:5px; font-size:22px; font-variant-numeric:tabular-nums; }
+  .ts-help-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; margin-top:24px; border-top:1px solid var(--border); }
+  .ts-help-grid details { padding:18px 0; border-bottom:1px solid var(--border); }
+  .ts-help-grid summary { cursor:pointer; font-weight:750; }
+  .ts-help-grid p { color:var(--muted); margin:10px 0 0; }
+  @media (max-width:760px) { .ts-ledger-row { grid-template-columns:1fr auto; } .ts-ledger-row__meta { grid-column:1; } .ts-ledger-row__actions { grid-column:1 / -1; justify-content:flex-start; } .ts-help-grid { grid-template-columns:1fr; } }
+</style>

@@ -1,32 +1,14 @@
-# Invoices
+# Invoices and payments
 
-*TODO - Need to update when the invoice generation is working correctly.*
+Standard and assessment invoices share `invoices`, `invoice_line_items`, and `invoice_payments`.
 
-Available when `enable_invoices` is enabled; line item templates require `enable_contract_line_item_templates`.
+Document state is independent from payment state:
 
-## Prerequisites
-- Configure template doc ID, output folder ID, and placeholder limit in Settings.
-- Ensure contracts/hour types exist for linking line items to entries.
+- `draft`: editable and explicitly recalculable.
+- `issued`: numbered and immutable.
+- `sent`: immutable with a send timestamp.
+- `void`: retained as audit history.
 
-## Core Flow
-- Invoices page lists headers; select/create to edit.
-- Header fields: invoice number/date, client info, status, etc.
-- Line items: description, amount; optional hours and hour type.
-- Defaults drawer stores reusable line definitions.
+Payment state is derived as unpaid, part-paid, or paid. Server-side numbering occurs only under the script lock. Issuing snapshots line amount, GST, source metadata, and the relevant entry details. Reads do not recalculate or mutate invoices.
 
-## Entry Linkage
-- When hours are present on a line, a basic entry is created/updated immediately.
-- If the calendar entry later changes, a “modified” warning surfaces.
-
-## Generation
-- Uses Google Docs template placeholders: invoice number/date/total, total hours, per-line fields (date, description, hours, hour type, rate, amount, contract) up to configured limit.
-- Template and output folder IDs are cached on the invoice record for re-generation.
-
-## Tips
-- Keep hour types aligned with invoiced work to avoid income mismatch.
-- Ensure line limit in Settings matches template placeholders.
-
-## Summary
-
-Invoices track company income with line items, client details, and Google Docs generation. Create headers, add line items with optional hours linkage, manage default templates, and generate formatted invoices from templates.
-
+Corrections use void-and-revise. A revision copies the historical lines into a new draft and links back to the source invoice. Assessment sources are released only when their invoice is voided. Legacy `generated` invoices become issued with no inferred payment and remain outside cash-basis actuals until reconciled.

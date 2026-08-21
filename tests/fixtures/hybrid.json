@@ -1,0 +1,9 @@
+{
+  "description": "Spreadsheet containing fork and original financial stores",
+  "sheets": {
+    "timesheet_entries": [["id", "date", "duration_minutes", "contract_id", "assessment_id", "recurrence_id", "note"], ["entry-1", "2026-07-01", 90, "contract-1", "assessment-1", "", ""]],
+    "invoices": [["id", "invoice_number", "invoice_date", "status"], ["invoice-1", "2026-07-001", "2026-07-31", "generated"]],
+    "assessment_invoices": [["id", "assessment_id", "invoice_date"], ["legacy-assessment-invoice-1", "assessment-1", "2026-07-31"]],
+    "deductions": [["id", "name", "company_expense", "amount_value", "frequency", "start_date", "active"], ["deduction-1", "Hosting", "TRUE", 55, "monthly", "2026-01-31", "FALSE"]]
+  }
+}

@@ -3,10 +3,12 @@
     <div class="ts-col">
       <!-- Header -->
       <div style="text-align:center; margin-bottom:var(--space-5);">
-        <div style="display:inline-flex; align-items:center; justify-content:center; width:64px; height:64px; background:var(--primary); color:#fff; border-radius:16px; font-size:32px; font-weight:800; margin-bottom:var(--space-3);">
-          T
+        <div style="display:inline-flex; align-items:center; justify-content:center; width:64px; height:64px; background:var(--primary); color:#fff; border-radius:16px; margin-bottom:var(--space-3);">
+          <svg viewBox="0 0 256 256" aria-hidden="true" focusable="false" style="width:34px; height:34px;">
+            <polyline points="220 20 36 20 128 153.44 196 56 92 56 220 240 36 240 96 152 128 204" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </div>
-        <h2 style="margin:0 0 var(--space-1); font-size:28px;">Tempus</h2>
+        <h2 style="margin:0 0 var(--space-1); font-size:calc(var(--font-size-xl) + 4px);">Tempus</h2>
         <p class="ts-note" style="margin:0; opacity:1;">Professional time tracking powered by Google Sheets</p>
       </div>
 
@@ -17,7 +19,7 @@
         <!-- First-Time Setup (Collapsible) -->
         <details style="margin-bottom:var(--space-4); border:1px solid var(--border); border-radius:8px; overflow:hidden;">
           <summary style="padding:var(--space-3); background:var(--surface-subtle); cursor:pointer; font-weight:600; user-select:none; list-style:none; display:flex; align-items:center; gap:var(--space-2);">
-            <span style="transition:transform 0.2s;">▶</span>
+            <span style="transition:transform 0.2s; display:inline-flex; align-items:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:14px; height:14px;"><polyline points="9 18 15 12 9 6"/></svg></span>
             <span>First-Time Setup (one-time only)</span>
           </summary>
           <div style="padding:var(--space-4); background:var(--panel);">
@@ -45,7 +47,7 @@
                 Node.js is required because clasp - Google's official tool that pushes code to Apps Script - runs on Node. npm (bundled with Node) lets you install clasp globally.
               </p>
               <p class="ts-note" style="margin:0; opacity:1;">
-                Download from <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">nodejs.org</a>, then verify with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">node --version && npm --version</code>
+                Download from <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">nodejs.org</a>, then verify with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">node --version && npm --version</code>
               </p>
             </div>
 
@@ -54,7 +56,7 @@
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
                 clasp is Google's command-line tool for Apps Script. Tempus uses it to push the updated files into your project during each deployment.
               </p>
-              <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:13px; overflow-x:auto;">
+              <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:calc(var(--font-size-xs) + 1px); overflow-x:auto;">
                 <code>npm install -g @google/clasp</code>
                 <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
               </div>
@@ -65,7 +67,7 @@
               <p class="ts-note" style="margin:0 0 var(--space-2); opacity:1;">
                 You need to sign in to clasp to allow it (and the updater script) to access your Apps Script project on your behalf. This will be used to push the new code to your Tempus instance.
               </p>
-              <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:13px; overflow-x:auto;">
+              <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-2); font-family:monospace; font-size:calc(var(--font-size-xs) + 1px); overflow-x:auto;">
                 <code>clasp login</code>
                 <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
               </div>
@@ -86,14 +88,14 @@
           </div>
         </details>
 
-        <h4 style="margin:var(--space-4) 0 var(--space-2); font-size:15px;">Step 1: Backup Your Data</h4>
+        <h4 style="margin:var(--space-4) 0 var(--space-2); font-size:var(--font-size-sm);">Step 1: Backup Your Data</h4>
         <p style="margin:0 0 var(--space-3); color:var(--text); line-height:1.6;">
           Before updating, create a backup of your Google Sheet to protect against data corruption or breaking changes.
         </p>
 
         <div style="display:flex; align-items:center; gap:var(--space-3); margin-bottom:var(--space-4); padding:var(--space-3); background:var(--surface-subtle); border:1px solid var(--border); border-radius:8px;">
           <div style="flex:1;">
-            <p style="margin:0; font-size:13px; line-height:1.5;">
+            <p style="margin:0; font-size:calc(var(--font-size-xs) + 1px); line-height:1.5;">
               <strong>Automated Backup:</strong> Click to create a timestamped copy of your sheet in Google Drive.
             </p>
             <p class="ts-note" style="margin:var(--space-1) 0 0; opacity:1;">
@@ -105,7 +107,7 @@
           </button>
         </div>
 
-        <h4 style="margin:var(--space-4) 0 var(--space-2); font-size:15px;">Step 2: Download and Install Latest Version</h4>
+        <h4 style="margin:var(--space-4) 0 var(--space-2); font-size:var(--font-size-sm);">Step 2: Download and Install Latest Version</h4>
 
         <div class="ts-tabs">
           <button class="ts-tab-btn active" data-tab="script-update">Automated</button>
@@ -117,12 +119,12 @@
             <strong>Terminal Requirements:</strong> All commands must be run in a Unix-like terminal (Git Bash for Windows, or regular Terminal for macOS/Linux).
           </div>
           <ol style="margin:0 0 var(--space-3); padding-left:var(--space-4); line-height:1.8;">
-            <li>Download the latest release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-main.zip</a>.</li>
+            <li>Download the tested stable release ZIP: <a href="https://github.com/brandonhinds/tempus/archive/refs/heads/release.zip" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">tempus-release.zip</a>.</li>
             <li>Extract the archive and open the extracted folder in your file browser.</li>
-            <li>Open the local Apps Script project folder you use for deployments (create one with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp clone <span id="script-id-clone" style="color:var(--muted);">[Your Script ID]</span></code> if you haven't already).</li>
-            <li>Delete all files inside the directory other than the <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">.clasp.json</code> file. If you don't see that file it is because it is hidden, in which case you can safely delete all files.</li>
+            <li>Open the local Apps Script project folder you use for deployments (create one with <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">clasp clone <span id="script-id-clone" style="color:var(--muted);">[Your Script ID]</span></code> if you haven't already).</li>
+            <li>Delete all files inside the directory other than the <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">.clasp.json</code> file. If you don't see that file it is because it is hidden, in which case you can safely delete all files.</li>
             <li>Copy the contents of the freshly extracted Tempus release into the Apps Script folder. Allow the file browser to merge folders and replace files so the new sources overwrite the old ones while the hidden clasp files stay put.</li>
-            <li>Open a terminal in that Apps Script folder and run <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px;">clasp push</code> to deploy the update.</li>
+            <li>Open a terminal in that Apps Script folder and run <code style="background:var(--bg); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:var(--font-size-xs);">clasp push</code> to deploy the update.</li>
           </ol>
           <div class="ts-note" style="margin:var(--space-3) 0; opacity:1;">
             Removing the old files before copying prevents <code>.js</code> files generated by <code>clasp pull</code> from mixing with the <code>.gs</code> sources in this repository.
@@ -135,14 +137,14 @@
           <div class="ts-note" style="margin:0 0 var(--space-3); padding:var(--space-3); background:var(--surface-subtle); border:1px solid var(--border); border-radius:8px; opacity:1;">
             <strong>Terminal Requirements:</strong> All commands must be run in a Unix-like terminal (Git Bash for Windows, or regular Terminal for macOS/Linux).
           </div>
-          <p style="margin:0 0 var(--space-2); font-size:13px; color:var(--muted);">
+          <p style="margin:0 0 var(--space-2); font-size:calc(var(--font-size-xs) + 1px); color:var(--muted);">
             We highly recommend using the automated option because it "just works" without any input from you. It runs natively on macOS and Linux, and Windows users can launch it from Git Bash.
           </p>
           <p style="margin:0 0 var(--space-3); color:var(--text); line-height:1.6;">
             Run the command below from any folder. It logs into Apps Script (if needed), downloads the updater, makes it executable, and pushes the latest Tempus files using the project ID linked to clasp. The script creates a temporary working directory next to where you run it and removes it afterwards by default.
           </p>
-          <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:13px; overflow-x:auto;">
-            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/main/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span> &amp;&amp; \<br>rm -f ./update-tempus.sh</code>
+          <div class="ts-code-block" style="position:relative; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:var(--space-3); margin:0 0 var(--space-3); font-family:monospace; font-size:calc(var(--font-size-xs) + 1px); overflow-x:auto;">
+            <code>curl -fsSL https://raw.githubusercontent.com/brandonhinds/tempus/refs/heads/release/scripts/update-tempus.sh -o update-tempus.sh &amp;&amp; \<br>chmod +x update-tempus.sh &amp;&amp; \<br>./update-tempus.sh --script-id <span id="script-id-update" style="color:var(--muted);">[Your Script ID]</span> &amp;&amp; \<br>rm -f ./update-tempus.sh</code>
             <button class="ts-copy-btn" style="position:absolute; top:8px; right:8px;">Copy</button>
           </div>
           <div class="ts-note" style="margin:var(--space-3) 0; opacity:1;">
@@ -197,7 +199,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.9; flex-shrink:0;">
                 <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
               </svg>
-              <strong style="font-size:16px; line-height:1.2;">View on GitHub</strong>
+              <strong style="font-size:var(--font-size-base); line-height:1.2;">View on GitHub</strong>
             </div>
             <p class="ts-note" style="margin:0; opacity:1;">
               Source code, issues, and contributions
@@ -210,7 +212,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.9; flex-shrink:0;">
                 <path d="M7 2.75A2.75 2.75 0 0 1 9.75 0h4.5A2.75 2.75 0 0 1 17 2.75v18.5A2.75 2.75 0 0 1 14.25 24h-4.5A2.75 2.75 0 0 1 7 21.25Zm2.75-.25a.75.75 0 0 0-.75.75v.5h6V3.5a.75.75 0 0 0-.75-.75ZM9 19h6V6H9Zm.75 3.25h4.5a.75.75 0 0 0 .75-.75v-.5H9v.5a.75.75 0 0 0 .75.75Z"/>
               </svg>
-              <strong style="font-size:16px; line-height:1.2;">Open Mobile Entry</strong>
+              <strong style="font-size:var(--font-size-base); line-height:1.2;">Open Mobile Entry</strong>
             </div>
             <p class="ts-note" style="margin:0; opacity:1;">
               Quick add/edit with the responsive view
@@ -223,7 +225,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.9; flex-shrink:0;">
                 <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311zm6.173.478c-.928.116-1.682.028-1.682.028V7.284h1.77s1.971.551 1.971 2.638c0 1.913-.985 2.667-2.059 3.015z"/>
               </svg>
-              <strong style="font-size:16px; line-height:1.2;">Support on Ko-fi</strong>
+              <strong style="font-size:var(--font-size-base); line-height:1.2;">Support on Ko-fi</strong>
             </div>
             <p class="ts-note" style="margin:0; opacity:1;">
               Support continued development

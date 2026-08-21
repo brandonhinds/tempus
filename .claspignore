@@ -1,3 +1,15 @@
 # Ignore local tooling and assets that should not be pushed to Apps Script
 **/.git/**
 scripts/**
+tests/**
+docs/**
+README.md
+MIGRATION_REPORT.md
+ACCEPTANCE_CHECKLIST.md
+UAT_TEST_CASES.md
+package.json
+Claude Design/**
+design-reference/**
+animation-example.html
+index.html
+release-manifest.json

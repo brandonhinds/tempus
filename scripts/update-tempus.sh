@@ -1,148 +1,94 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
-Usage: update-tempus.sh [options]
-
-Clones the configured Google Apps Script project, downloads the latest Tempus
-sources from GitHub, and runs `clasp push`.
-
-Options:
-  -s, --script-id <id>   Apps Script project ID to update (required)
-  -c, --clone-dir <path> Use a specific working directory (must be empty)
-                         (defaults to a temp directory created beside where this script is run)
-  -k, --keep             Do not delete the working directory when finished
-  -h, --help             Show this message and exit
-EOF
+  printf '%s\n' \
+    'Usage: update-tempus.sh --script-id ID [options]' \
+    '' \
+    'Downloads the CI-built stable release, preserves .clasp.json, and runs clasp push.' \
+    '' \
+    'Options:' \
+    '  -s, --script-id ID       Apps Script project ID (required for a new target)' \
+    '  -c, --clone-dir PATH     Existing or empty target directory' \
+    '  -k, --keep               Keep an automatically-created target directory' \
+    '      --archive-file PATH  Use a local release .tar.gz or .zip (testing/offline)' \
+    '      --dry-run            Prepare and validate files without clasp push' \
+    '  -h, --help               Show this help'
 }
 
-CALL_DIR="$(pwd)"
-
-SCRIPT_ID=""
-CLONE_DIR=""
-KEEP_CLONE=0
+script_id=''
+target_dir=''
+archive_file=''
+keep_target=0
+dry_run=0
+auto_target=0
+release_url="${TEMPUS_RELEASE_URL:-https://codeload.github.com/brandonhinds/tempus/tar.gz/refs/heads/release}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -s|--script-id)
-      [[ $# -ge 2 ]] || { echo "Error: --script-id requires a value." >&2; usage; exit 1; }
-      SCRIPT_ID="$2"
-      shift 2
-      ;;
-    -c|--clone-dir)
-      [[ $# -ge 2 ]] || { echo "Error: --clone-dir requires a path." >&2; usage; exit 1; }
-      CLONE_DIR="$2"
-      shift 2
-      ;;
-    -k|--keep)
-      KEEP_CLONE=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Error: Unknown option '$1'." >&2
-      usage
-      exit 1
-      ;;
+    -s|--script-id) script_id="${2:?--script-id requires a value}"; shift 2 ;;
+    -c|--clone-dir) target_dir="${2:?--clone-dir requires a path}"; shift 2 ;;
+    -k|--keep) keep_target=1; shift ;;
+    --archive-file) archive_file="${2:?--archive-file requires a path}"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-AUTO_CLONE_DIR=0
-if [[ -z "$CLONE_DIR" ]]; then
-  AUTO_CLONE_DIR=1
-  base="${CALL_DIR%/}"
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-  candidate="$base/tempus-clone-$timestamp"
-  counter=0
-  while [[ -e "$candidate" ]]; do
-    counter=$((counter + 1))
-    candidate="$base/tempus-clone-$timestamp-$counter"
-  done
-  CLONE_DIR="$candidate"
+if [[ -z "$target_dir" ]]; then
+  target_dir="$(mktemp -d "${TMPDIR:-/tmp}/tempus-update.XXXXXX")"
+  auto_target=1
+else
+  mkdir -p "$target_dir"
+  target_dir="$(cd "$target_dir" && pwd)"
 fi
+[[ "$target_dir" != '/' ]] || { echo 'Refusing to use / as the target.' >&2; exit 2; }
 
-mkdir -p "$CLONE_DIR"
-
-CLONE_DIR="$(cd "$CLONE_DIR" && pwd)"
-
-if find "$CLONE_DIR" -mindepth 1 -print -quit | grep -q .; then
-  echo "Error: Clone directory '$CLONE_DIR' must be empty." >&2
-  exit 1
-fi
-
-if ! command -v clasp >/dev/null 2>&1; then
-  echo "Error: clasp is not installed or not on PATH." >&2
-  exit 1
-fi
-
-if ! command -v curl >/dev/null 2>&1; then
-  echo "Error: curl is required to download the Tempus sources." >&2
-  exit 1
-fi
-
-if ! command -v tar >/dev/null 2>&1; then
-  echo "Error: tar is required to extract the Tempus sources." >&2
-  exit 1
-fi
-
-if [[ -z "$SCRIPT_ID" ]]; then
-  echo "Error: Provide the Apps Script project ID with --script-id." >&2
-  exit 1
-fi
-
-DOWNLOAD_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t tempus-src)"
-
-CLEANUP=0
-if [[ $AUTO_CLONE_DIR -eq 1 && $KEEP_CLONE -eq 0 ]]; then
-  CLEANUP=1
-fi
-
+download_dir="$(mktemp -d "${TMPDIR:-/tmp}/tempus-release.XXXXXX")"
 cleanup() {
-  if [[ ${CLEANUP:-0} -eq 1 && -n "${CLONE_DIR:-}" ]]; then
-    rm -rf "$CLONE_DIR"
-  fi
-  if [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]]; then
-    rm -rf "$DOWNLOAD_DIR"
-  fi
+  rm -rf "$download_dir"
+  if [[ $auto_target -eq 1 && $keep_target -eq 0 ]]; then rm -rf "$target_dir"; fi
 }
 trap cleanup EXIT
 
-echo "Cloning Apps Script project (ID: $SCRIPT_ID)..."
-echo "Working directory: $CLONE_DIR"
-pushd "$CLONE_DIR" >/dev/null
-clasp clone "$SCRIPT_ID"
-popd >/dev/null
-
-echo "Preparing workspace..."
-(
-  shopt -s dotglob nullglob
-  for entry in "$CLONE_DIR"/* "$CLONE_DIR"/.*; do
-    name="$(basename "$entry")"
-    if [[ "$name" == "." || "$name" == ".." || "$name" == ".clasp.json" ]]; then
-      continue
-    fi
-    rm -rf "$entry"
-  done
-)
-
-echo "Downloading latest Tempus sources from GitHub..."
-curl -fsSL "https://codeload.github.com/brandonhinds/tempus/tar.gz/refs/heads/main" | tar -xz -C "$DOWNLOAD_DIR" --strip-components=1
-
-echo "Copying repository code..."
-cp -R "$DOWNLOAD_DIR"/. "$CLONE_DIR"/
-
-echo "Pushing updated files with clasp..."
-pushd "$CLONE_DIR" >/dev/null
-clasp push -f
-popd >/dev/null
-
-if [[ $CLEANUP -eq 1 ]]; then
-  echo "Update complete. Cleaned up temporary directory."
-else
-  echo "Update complete. Working directory kept at: $CLONE_DIR"
+if [[ ! -f "$target_dir/.clasp.json" ]]; then
+  [[ -n "$script_id" ]] || { echo 'Provide --script-id when the target has no .clasp.json.' >&2; exit 2; }
+  if [[ $dry_run -eq 1 ]]; then
+    printf '{"scriptId":"%s"}\n' "$script_id" > "$target_dir/.clasp.json"
+  else
+    command -v clasp >/dev/null 2>&1 || { echo 'clasp is not installed.' >&2; exit 1; }
+    [[ -z "$(find "$target_dir" -mindepth 1 -print -quit)" ]] || { echo 'A target without .clasp.json must be empty.' >&2; exit 2; }
+    (cd "$target_dir" && clasp clone "$script_id")
+  fi
 fi
+
+clasp_backup="$download_dir/.clasp.json"
+cp "$target_dir/.clasp.json" "$clasp_backup"
+find "$target_dir" -mindepth 1 -maxdepth 1 ! -name '.clasp.json' -exec rm -rf -- {} +
+
+if [[ -n "$archive_file" ]]; then
+  [[ -f "$archive_file" ]] || { echo "Archive not found: $archive_file" >&2; exit 2; }
+  case "$archive_file" in
+    *.zip) command -v unzip >/dev/null 2>&1 || { echo 'unzip is required.' >&2; exit 1; }; unzip -q "$archive_file" -d "$download_dir/archive" ;;
+    *) mkdir -p "$download_dir/archive"; tar -xzf "$archive_file" -C "$download_dir/archive" ;;
+  esac
+else
+  command -v curl >/dev/null 2>&1 || { echo 'curl is required.' >&2; exit 1; }
+  mkdir -p "$download_dir/archive"
+  curl -fsSL "$release_url" | tar -xzf - -C "$download_dir/archive"
+fi
+
+release_root="$(find "$download_dir/archive" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[[ -n "$release_root" && -f "$release_root/release-manifest.json" ]] || { echo 'Archive is not a built Tempus release (manifest missing).' >&2; exit 1; }
+cp -R "$release_root"/. "$target_dir"/
+cp "$clasp_backup" "$target_dir/.clasp.json"
+
+if [[ $dry_run -eq 1 ]]; then
+  echo "Dry run complete. Stable release prepared at: $target_dir"
+  exit 0
+fi
+
+command -v clasp >/dev/null 2>&1 || { echo 'clasp is not installed.' >&2; exit 1; }
+(cd "$target_dir" && clasp push -f)
+echo 'Tempus stable release pushed successfully.'

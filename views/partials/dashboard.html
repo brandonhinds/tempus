@@ -1,126 +1,123 @@
-<section class="ts-card" id="page-time" style="margin-bottom:16px;">
-  <div class="ts-tabs">
-    <div class="ts-tab active" data-tab="manual">Basic</div>
-    <div class="ts-tab" data-tab="punch">Advanced</div>
-  </div>
-
-  <div id="tab-manual">
-    <div class="ts-grid ts-grid--gap-md ts-grid--align-start">
-      <div class="ts-col-span-4"><label>Date</label><input type="date" id="manual-date" /></div>
-      <div class="ts-col-span-4" id="manual-hour-type-col" style="display:none;">
-        <label>Hour Type</label>
-        <select id="manual-hour-type"></select>
-      </div>
-      <div class="ts-col-span-4">
-        <label>Contract</label>
-        <select id="manual-contract"></select>
-        <div class="ts-warning" id="manual-contract-warning" style="display:none;">No valid contract for this date. Add one on the Contracts page before logging time.</div>
-      </div>
-    </div>
-    <div class="ts-grid ts-grid--gap-md" style="margin-top:8px;">
-      <div class="ts-col-span-4">
-        <label>Total hours</label>
-        <input type="number" id="manual-hours" min="0" step="0.01" placeholder="" />
-      </div>
-    </div>
-    <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
-      <div class="ts-gap-md" style="display:flex;">
-        <button class="ghost" id="btn-create-manual-default" style="display:none;">Create Default</button>
-        <button class="ghost" id="btn-enter-manual-default" style="display:none;">Enter Default</button>
-        <button class="ghost" id="btn-edit-manual-defaults" style="display:none;">Edit Defaults</button>
-      </div>
-      <div class="ts-gap-md" style="display:flex;">
-        <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel Edit</button>
-        <button class="ghost" id="btn-delete-manual" style="display:none;">Delete Entry</button>
-        <button id="btn-add-manual">Add Entry</button>
+<section id="page-time" style="margin-bottom:16px;">
+  <!-- First-run welcome: shown only when no contracts exist yet (a contract is required before any time
+       can be logged). Replaces the whole calendar/agenda UI until the user creates their first contract. -->
+  <div class="ts-card ts-welcome" id="time-welcome" style="display:none;">
+    <div class="ts-empty-state">
+      <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12"/><path d="M6 22h12"/><path d="M6 2c0 4 3 5 6 10 3-5 6-6 6-10"/><path d="M6 22c0-4 3-5 6-10 3 5 6 6 6 10"/></svg></div>
+      <p class="ts-empty-state__title">Welcome to Tempus</p>
+      <p class="ts-empty-state__text">Before you can log time, set up a <strong>contract</strong> — it defines the engagement you're tracking hours against, with its rate and dates. You only need one to get started.</p>
+      <div class="ts-empty-state__actions">
+        <button id="time-welcome-add" type="button">Add Contract</button>
       </div>
     </div>
   </div>
 
-  <div id="tab-punch" style="display:none;">
-    <div class="ts-grid ts-grid--gap-md ts-grid--align-start">
-      <div class="ts-col-span-4"><label>Date</label><input type="date" id="punch-date" /></div>
-      <div class="ts-col-span-4" id="punch-hour-type-col" style="display:none;">
-        <label>Hour Type</label>
-        <select id="punch-hour-type"></select>
-      </div>
-      <div class="ts-col-span-4">
-        <label>Contract</label>
-        <select id="punch-contract"></select>
-        <div class="ts-warning" id="punch-contract-warning" style="display:none;">No valid contract for this date. Add one on the Contracts page before logging time.</div>
-      </div>
-    </div>
-    <div class="ts-note" id="punch-summary" style="margin-top:8px;"></div>
-    <div class="ts-warning" id="punch-open-warning" style="display:none; margin-top:4px;"></div>
-    <div class="ts-note" id="punch-suggestion" style="display:none; margin-top:4px; color: var(--success);"></div>
-    <div id="punch-range-list" class="ts-punch-list"></div>
-    <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
-      <div class="ts-gap-sm" style="display:flex;">
-        <button class="ghost" id="btn-create-punch-default" style="display:none;">Create Default</button>
-        <button class="ghost" id="btn-enter-punch-default" style="display:none;">Enter Default</button>
-        <button class="ghost" id="btn-edit-punch-defaults" style="display:none;">Edit Defaults</button>
-      </div>
-      <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px;">
-        <button id="btn-punch-toggle">Punch In</button>
-        <button class="ghost" id="btn-punch-cancel" style="display:none;">Discard Changes</button>
-        <button class="ghost" id="btn-delete-punch" style="display:none;">Delete Entry</button>
-        <button id="btn-punch-save">Add Entry</button>
-      </div>
-    </div>
+  <!-- KPI strip: three expandable stat cards, full width above the calendar + entry rail -->
+  <div class="ts-stat-cards" id="calendar-stat-cards">
+    <button class="ts-stat-card ts-hour-types-badge" id="calendar-month-total" type="button" aria-expanded="false">
+      <span class="ts-stat-card-label">Total hours</span>
+      <span class="ts-stat-card-value" id="calendar-month-total-value">0</span>
+      <span class="ts-stat-card-subtext" id="calendar-month-total-sub"></span>
+    </button>
+    <button class="ts-stat-card ts-stat-card--hero ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">
+      <span class="ts-stat-card-label">Net income</span>
+      <span class="ts-stat-card-value" id="calendar-net-income-value">--</span>
+      <span class="ts-stat-card-subtext">this month</span>
+    </button>
+    <button class="ts-stat-card ts-expected-badge" id="calendar-expected-hours" type="button" aria-expanded="false" style="display:none;">
+      <span class="ts-stat-card-label">Projected variance<span class="ts-info-icon" id="btn-projected-variance-help" role="button" tabindex="0" aria-label="How is projected variance worked out?" title="How is this worked out?">i</span></span>
+      <span class="ts-stat-card-value" id="calendar-expected-hours-value">--</span>
+      <span class="ts-stat-card-subtext" id="calendar-expected-hours-sub">vs. projected hours</span>
+    </button>
   </div>
 
-  <div class="ts-calendar" id="calendar-section">
+  <!-- "Where your hours go" breakdown (Total Hours card). Hidden by default; spans above both views.
+       Same visual language as the Net Income breakdown; rows are rendered by renderHoursBreakdown(). -->
+  <div class="ts-card ts-income-breakdown ts-hours-breakdown" id="hours-breakdown" style="display:none;">
+    <div class="ts-income-bd-viz">
+      <div class="ts-income-bd-head">
+        <span class="ts-income-bd-title">Where your hours go</span>
+        <span class="ts-income-bd-gross" id="hours-bd-total"></span>
+      </div>
+      <div class="ts-income-bd-bar" id="hours-bd-bar"></div>
+      <div class="ts-income-bd-legend" id="hours-bd-legend"></div>
+    </div>
+    <div class="ts-income-bd-colhead"><span></span><span></span><span>Hours</span><span>% of total</span></div>
+    <div id="hours-bd-rows" style="display:contents"></div>
+  </div>
+
+  <!-- Calendar view: month grid (left) + contextual entry rail (right) -->
+  <div class="ts-time-layout" id="ts-calendar-view">
+
+    <div class="ts-calendar ts-card" id="calendar-section">
     <div class="ts-calendar-header">
-      <div style="display:flex; align-items:center; gap:16px;">
-        <h3 style="margin:0;">Calendar</h3>
-        <button class="ts-badge ts-hour-types-badge" id="calendar-month-total" type="button" aria-expanded="false">Total hours: 0</button>
-        <button class="ts-badge ts-income-badge" id="calendar-net-income" type="button" aria-expanded="false">Net income: --</button>
-        <button class="ts-badge ts-expected-badge" id="calendar-expected-hours" type="button" aria-expanded="false" style="display:none;">Projected variance: --</button>
-      </div>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <button class="ghost" id="calendar-filter-toggle" style="display:none;" title="Filter hour types">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <div class="ts-calendar-nav">
+        <button class="ghost ts-calendar-month-btn" id="calendar-jump" title="Jump to month" aria-label="Jump to month">
+          <div id="calendar-label"></div>
+          <svg class="ts-calendar-month-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
-        <div class="ts-calendar-nav">
-          <button class="ghost" id="calendar-prev" title="Previous Month">◀</button>
-          <button class="ghost" id="calendar-jump" title="Jump to Month" style="min-width:140px; text-align:center; padding:10px 14px;">
-            <div id="calendar-label"></div>
-          </button>
-          <button class="ghost" id="calendar-next" title="Next Month">▶</button>
-        </div>
+      </div>
+      <div class="ts-calendar-header-side" style="gap:8px;">
+        <button class="ghost" id="calendar-today" type="button" title="Jump to the current month">Today</button>
+        <button class="ghost" id="calendar-prev" title="Previous Month" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <button class="ghost" id="calendar-next" title="Next Month" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+        <button class="ghost" id="calendar-filter-toggle" style="display:none; align-items:center; gap:7px;" title="Show or hide filters" aria-label="Show or hide filters">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>
+          <span>Filter</span>
+          <span class="ts-filter-count" id="calendar-filter-count">0</span>
+        </button>
+        <!-- Tools (bulk/recurring/payroll/print) moved to the global gear menu in navbar.html so both
+             Calendar and Agenda reach them from one consistent place. -->
       </div>
     </div>
     <div class="ts-calendar-filter-panel" id="calendar-filter-panel" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <span style="font-weight:600;">Filter Hour Types</span>
-        <div style="display:flex; gap:8px;">
-          <button class="ghost" id="filter-select-all" style="font-size:12px; padding:4px 8px;">All</button>
-          <button class="ghost" id="filter-select-none" style="font-size:12px; padding:4px 8px;">None</button>
-          <button class="ghost" id="filter-select-income" style="font-size:12px; padding:4px 8px;">Income Only</button>
+      <div class="ts-calendar-filter-row" id="calendar-filter-hourtypes-row">
+        <span class="ts-calendar-filter-group-label" id="calendar-filter-hourtypes-label" style="display:none;">Hour types</span>
+        <div id="calendar-filter-list" class="ts-calendar-filter-list"></div>
+        <div class="ts-calendar-filter-presets">
+          <span class="ts-calendar-filter-presets-divider" aria-hidden="true"></span>
+          <button class="ghost" id="filter-select-all">All</button>
+          <button class="ghost" id="filter-select-none">None</button>
+          <button class="ghost" id="filter-select-income">Billable</button>
         </div>
       </div>
-      <div id="calendar-filter-list" class="ts-calendar-filter-list"></div>
+      <div class="ts-calendar-filter-row" id="calendar-filter-contracts-row" style="display:none;">
+        <span class="ts-calendar-filter-group-label" id="calendar-filter-contracts-label" style="display:none;">Contracts</span>
+        <div id="calendar-contract-filter-list" class="ts-calendar-filter-list"></div>
+      </div>
     </div>
     <div class="ts-hour-types-breakdown" id="hour-types-breakdown" hidden>
       <div id="hour-types-breakdown-list"></div>
     </div>
     <div class="ts-income-breakdown" id="income-breakdown" hidden>
+      <div class="ts-income-bd-viz" id="income-bd-viz">
+        <div class="ts-income-bd-head">
+          <span class="ts-income-bd-title">Where this month's income goes</span>
+          <span class="ts-income-bd-gross" id="income-bd-gross"></span>
+        </div>
+        <div class="ts-income-bd-bar" id="income-bd-bar"></div>
+        <div class="ts-income-bd-legend" id="income-bd-legend"></div>
+      </div>
+      <div class="ts-income-bd-colhead"><span></span><span></span><span>Amount</span><span>% of gross</span></div>
       <div class="ts-income-row" id="income-invoice-total-row" hidden>
         <span class="ts-income-row-label">Invoice total</span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-invoice-total">--</span>
+        <span class="ts-income-row-pct"></span>
       </div>
       <div class="ts-income-row" id="income-company-income-row" hidden>
         <span class="ts-income-row-label">Company income</span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-company-income">--</span>
+        <span class="ts-income-row-pct"></span>
       </div>
       <div class="ts-income-row" id="income-company-expenses-row" hidden>
-        <span class="ts-income-row-label">Company expenses</span>
-        <span class="ts-income-row-actual"><button class="ghost small" id="btn-company-expenses-details" style="font-size:11px; padding:2px 8px;">Click for details</button></span>
+        <span class="ts-income-row-label">Company expenses <span class="ts-info-icon" id="btn-company-expenses-details" role="button" tabindex="0" aria-label="View this month's company expenses and make one-off adjustments" data-tip="Your company expenses for this month. Click to adjust this month's amount only — a one-off that doesn't change the expense's regular schedule. To edit the expense itself, use the Deductions page.">i</span></span>
+        <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-company-expenses">--</span>
+        <span class="ts-income-row-pct"></span>
       </div>
-      <div class="ts-income-row">
+      <div class="ts-income-row ts-income-row--anchor">
         <span class="ts-income-row-label">Gross income</span>
         <span class="ts-income-row-actual" id="income-actual-gross-value"></span>
         <span class="ts-income-row-est" id="income-gross">--</span>
@@ -141,8 +138,8 @@
         <span class="ts-income-row-est" id="income-super-total">--</span>
       </div>
       <div class="ts-income-row">
-        <span class="ts-income-row-label">Pre-tax deductions</span>
-        <span class="ts-income-row-actual"><button class="ghost small" id="btn-deductions-details" style="font-size:11px; padding:2px 8px;">Click for details</button></span>
+        <span class="ts-income-row-label">Pre-tax deductions <span class="ts-info-icon" id="btn-deductions-details" role="button" tabindex="0" aria-label="View this month's pre-tax deductions and make one-off adjustments" data-tip="Your pre-tax deductions for this month. Click to adjust this month's amount only — a one-off that doesn't change the deduction's regular schedule. To edit the deduction itself, use the Deductions page.">i</span></span>
+        <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-other-deductions">--</span>
       </div>
       <div class="ts-income-row" id="income-super-lost-row" hidden>
@@ -160,46 +157,24 @@
         <span class="ts-income-row-actual" id="income-actual-tax-value"></span>
         <span class="ts-income-row-est" id="income-tax">--</span>
       </div>
-      <div class="ts-income-row">
+      <div class="ts-income-divider"></div>
+      <div class="ts-income-row ts-income-row--anchor ts-income-row--net">
         <span class="ts-income-row-label">Net income</span>
         <span class="ts-income-row-actual" id="income-actual-net-value"></span>
         <span class="ts-income-row-est" id="income-net">--</span>
-      </div>
-      <div class="ts-income-row income-potential-row" id="income-projections-header" hidden>
-        <div style="grid-column: 1 / -1; height: 1px; background: var(--border); margin: 16px 0px 8px;"></div>
-        <div class="ts-expected-section-title" style="grid-column: 1 / -1; font-weight: 600; margin: 8px 0px 4px;">Projections</div>
-      </div>
-      <div class="ts-income-row income-potential-row" id="income-potential-net-row" hidden>
-        <span class="ts-income-row-label">Net income if working standard hours every day</span>
-        <span class="ts-income-row-actual"></span>
-        <span class="ts-income-row-est" id="income-potential-net">--</span>
-      </div>
-      <div class="ts-income-row income-potential-row" id="income-estimated-standard-row" hidden>
-        <span class="ts-income-row-label">
-          Estimated net income (standard hours)
-          <span class="ts-info-icon" id="income-estimated-standard-info" title="Hours used: --">i</span>
-        </span>
-        <span class="ts-income-row-actual"></span>
-        <span class="ts-income-row-est" id="income-estimated-standard-net">--</span>
-      </div>
-      <div class="ts-income-row income-potential-row" id="income-estimated-projected-row" hidden>
-        <span class="ts-income-row-label">
-          Estimated net income (projected hours)
-          <span class="ts-info-icon" id="income-estimated-projected-info" title="Hours used: --">i</span>
-        </span>
-        <span class="ts-income-row-actual"></span>
-        <span class="ts-income-row-est" id="income-estimated-projected-net">--</span>
       </div>
       <div id="hourly-rate-divider" class="ts-income-divider" hidden></div>
       <div class="ts-income-row" id="hourly-rate-gross-row" hidden>
         <span class="ts-income-row-label">Gross income hourly rate based on <span id="hourly-rate-gross-label">--</span>:</span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-hourly-rate-gross">--</span>
+        <span class="ts-income-row-pct"></span>
       </div>
       <div class="ts-income-row" id="hourly-rate-net-row" hidden>
         <span class="ts-income-row-label">Net income hourly rate based on <span id="hourly-rate-net-label">--</span>:</span>
         <span class="ts-income-row-actual"></span>
         <span class="ts-income-row-est" id="income-hourly-rate-net">--</span>
+        <span class="ts-income-row-pct"></span>
       </div>
     </div>
     <div class="ts-expected-breakdown" id="expected-hours-breakdown" hidden>
@@ -213,39 +188,187 @@
       <div class="ts-calendar-weekday">Fri</div>
       <div class="ts-calendar-weekday">Sat</div>
       <div class="ts-calendar-weekday">Sun</div>
+      <div class="ts-calendar-weekday ts-calendar-weekday--week">Week</div>
     </div>
     <div class="ts-calendar-grid" id="calendar-grid"></div>
-    <div class="ts-calendar-context-menu" id="calendar-context-menu" style="display:none;">
-      <div class="ts-calendar-context-header">Quick actions</div>
-      <div class="ts-calendar-context-empty" id="calendar-context-empty" style="display:none;">
-        No defaults yet. Create a basic or advanced default to add quick entries.
+    <!-- Footer: legend (hour types + holiday) on the left, terse help text on the right (comp layout). -->
+    <div class="ts-calendar-foot">
+      <div class="ts-calendar-legend" id="calendar-legend"></div>
+      <div id="calendar-help-text" class="ts-note">Click a day to edit · right-click for defaults</div>
+    </div>
+    </div>
+
+    <!-- Desktop day editor: one complete, stacked view of every record on the selected day. -->
+    <div class="ts-modal" id="modal-day-entry" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="entry-editing-date">
+      <div class="ts-modal-content ts-day-editor">
+        <div class="ts-modal-body">
+      <div class="ts-entry-card">
+        <div class="ts-entry-editing" id="entry-editing">
+          <div>
+            <p class="ts-entry-editing-wd" id="entry-editing-wd"></p>
+            <p class="ts-entry-editing-date" id="entry-editing-date">—</p>
+          </div>
+          <div class="ts-day-overall" aria-live="polite">
+            <span id="day-overall-total">0m</span>
+            <small>overall logged</small>
+          </div>
+        </div>
+
+        <section class="ts-day-editor-section" aria-labelledby="day-sessions-title">
+          <div id="day-sessions-timeline" class="ts-day-sessions"></div>
+          <button type="button" class="ts-day-sessions-clock" id="day-clock-toggle" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
+            <span id="day-clock-toggle-label">Clock in</span>
+          </button>
+        </section>
+
+        <section class="ts-day-editor-section" aria-labelledby="day-duration-title">
+          <div class="ts-day-section-head">
+            <h3 id="day-duration-title">Duration Entries</h3>
+            <span class="ts-day-section-total"><strong id="day-duration-total">0m</strong><small>fixed duration</small></span>
+          </div>
+          <div id="day-duration-list" class="ts-day-duration-list"></div>
+          <div id="day-duration-editor-parking" hidden></div>
+        </section>
+
+        <div id="tab-manual" class="ts-day-duration-editor" hidden>
+          <!-- Date is driven by the day you click in the calendar; the input stays as a hidden value-holder. -->
+          <div style="display:none;"><label>Date</label><input type="text" id="manual-date" placeholder="Select date" /></div>
+          <!-- Row 1: the two most-used fields — Total hours and Hour Type. Hour Type always shows, greyed
+               (disabled) when there's only one type, mirroring the Contract field. -->
+          <div class="ts-entry-pair">
+            <div>
+              <label>Total hours</label>
+              <div class="ts-input-suffix"><input type="number" id="manual-hours" min="0" step="0.01" placeholder="" /><span class="ts-input-suffix-text">hrs</span></div>
+            </div>
+            <div id="manual-hour-type-col" style="display:none;">
+              <label>Hour Type</label>
+              <select id="manual-hour-type"></select>
+            </div>
+          </div>
+          <!-- Row 2: Contract (rarely changed) under Total hours, and the read-only billable status under
+               Hour Type — it's a non-selectable field that tracks the hour type. -->
+          <div class="ts-entry-pair">
+            <div>
+              <label>Contract</label>
+              <select id="manual-contract"></select>
+            </div>
+            <div>
+              <label aria-hidden="true" style="visibility:hidden;">Billing</label>
+              <div class="ts-entry-billable" id="manual-billable-note"></div>
+            </div>
+          </div>
+          <!-- Full-width advisory (sits below the row, not squashed under the Contract column). Only shown
+               when the date has no active contract at all; "pick one" cases are handled by save-time validation. -->
+          <div class="ts-warning" id="manual-contract-warning" style="display:none; margin-top:var(--space-2);">No contract is active on this date. Add one on the Contracts page before you can log time against it.</div>
+          <!-- Advisory when the chosen hour type is already represented by timed sessions on this day. -->
+          <div class="ts-warning" id="manual-sessions-warning" style="display:none; margin-top:var(--space-2);"></div>
+          <div class="ts-entry-actions">
+            <button id="btn-add-manual" class="ts-entry-submit">Save duration</button>
+            <div class="ts-entry-actions-row">
+              <button class="ghost danger" id="btn-delete-manual" style="display:none;">Delete</button>
+              <button class="ghost" id="btn-cancel-edit" style="display:none;">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <section class="ts-day-editor-section ts-day-editor-section--day" aria-labelledby="day-details-title">
+          <div class="ts-day-section-head"><h3 id="day-details-title">Day details</h3></div>
+          <div id="day-level-actions" class="ts-day-level-actions"></div>
+        </section>
+
+        <!-- Retained only as hidden value-holders for the mobile/shared punch persistence code. -->
+        <div id="tab-punch" style="display:none;">
+          <!-- Date is driven by the calendar selection; input kept as a hidden value-holder. -->
+          <div style="display:none;"><label>Date</label><input type="text" id="punch-date" placeholder="Select date" /></div>
+          <!-- Hour Type + Contract share one row (mirrors Basic). Hour Type hides when there's only a
+               single type, letting Contract span the full width. -->
+          <div class="ts-entry-pair">
+            <div id="punch-hour-type-col" style="display:none;">
+              <label>Hour Type</label>
+              <select id="punch-hour-type"></select>
+            </div>
+            <div>
+              <label>Contract</label>
+              <select id="punch-contract"></select>
+            </div>
+          </div>
+          <!-- Full-width advisory (see Basic tab note). Only when the date has no active contract at all. -->
+          <div class="ts-warning" id="punch-contract-warning" style="display:none; margin-top:var(--space-2);">No contract is active on this date. Add one on the Contracts page before you can log time against it.</div>
+          <div class="ts-note" id="punch-summary" style="margin-top:8px;"></div>
+          <div class="ts-warning" id="punch-open-warning" style="display:none; margin-top:4px;"></div>
+          <div class="ts-note" id="punch-suggestion" style="display:none; margin-top:4px; color: var(--success);"></div>
+          <div id="punch-range-list" class="ts-punch-list"></div>
+          <div class="ts-entry-billable" id="punch-billable-note"></div>
+          <div class="ts-entry-actions">
+            <!-- The Punch tab is a clock: one hero action. Punch In / Punch Out both save and close.
+                 Manual edits to recorded sessions save automatically on close. -->
+            <button id="btn-punch-toggle" class="ts-entry-punch">Punch In</button>
+            <!-- Hidden commit target: punch in/out and save-on-close handle persistence; kept so the
+                 Enter key and quick-fill defaults still have something to "click". -->
+            <button id="btn-punch-save" class="ts-entry-submit" style="display:none;">Update entry</button>
+            <div class="ts-entry-actions-row">
+              <button class="ghost danger" id="btn-delete-punch" style="display:none;">Delete</button>
+              <button class="ghost" id="btn-punch-cancel" style="display:none;">Cancel</button>
+            </div>
+          </div>
+        </div>
+
       </div>
-      <div class="ts-calendar-context-section" data-section="basic">
-        <div class="ts-calendar-context-title">Basic defaults</div>
-        <div class="ts-calendar-context-list" id="calendar-context-basic"></div>
-      </div>
-      <div class="ts-calendar-context-section" data-section="advanced">
-        <div class="ts-calendar-context-title">Advanced defaults</div>
-        <div class="ts-calendar-context-list" id="calendar-context-advanced"></div>
-      </div>
-      <div class="ts-calendar-context-section" data-section="actions">
-        <div class="ts-calendar-context-title">Actions</div>
-        <div class="ts-calendar-context-list">
-          <button class="ts-calendar-context-item danger" id="calendar-clear-day" type="button">Clear day</button>
         </div>
       </div>
     </div>
-    <div id="calendar-help-text" class="ts-note" style="margin-top:6px;">Click a day to add or edit entries. Right-click to insert a default.</div>
-    <div class="ts-payroll-helper-actions" id="payroll-helper-actions">
-      <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero Payroll Helper</button>
-      <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB Payroll Helper</button>
-      <button class="ghost" id="calendar-actual-income-btn" type="button" style="display:none;">Add Actual Income</button>
-      <button class="ghost" id="btn-manage-recurring" type="button" style="display:none;">Reoccurring Entries</button>
-      <button class="ghost" id="btn-manage-bulk" type="button" style="display:none;">Bulk Entries</button>
-      <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print Monthly Hours</button>
-      <button class="ghost" id="btn-timesheet1-importer" type="button" style="display:none;">Import Timesheet 1.0</button>
-      <button class="ghost" id="btn-mobile-view-shortcut" type="button" style="display:none;">Mobile View</button>
+
+  </div>
+
+  <!-- ============================ AGENDA VIEW ============================ -->
+  <!-- Mini-month navigator + Show filters (left); focused week list + inline Basic editor (right).
+       Hidden until the Calendar/Agenda toggle (navbar) switches to it. Editing reuses the proven
+       manual-entry save path; Advanced/punch entries route to the full Calendar editor. -->
+  <div class="ts-agenda-layout" id="ts-agenda-view" style="display:none;">
+
+    <div class="ts-agenda-side">
+      <div class="ts-card ts-agenda-mini">
+        <div class="ts-agenda-mini-head">
+          <button class="ghost" id="agenda-prev" type="button" title="Previous month" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+          <span class="ts-agenda-mini-label" id="agenda-mini-label"></span>
+          <button class="ghost" id="agenda-next" type="button" title="Next month" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+        </div>
+        <div class="ts-agenda-mini-weekdays" id="agenda-mini-weekdays"></div>
+        <div class="ts-agenda-mini-grid" id="agenda-mini-grid"></div>
+        <!-- Second look-ahead month: shares the prev/next nav above (they move both months as a unit). -->
+        <div class="ts-agenda-mini-month2">
+          <div class="ts-agenda-mini-sublabel" id="agenda-mini-label2"></div>
+          <div class="ts-agenda-mini-weekdays" id="agenda-mini-weekdays2"></div>
+          <div class="ts-agenda-mini-grid" id="agenda-mini-grid2"></div>
+        </div>
+      </div>
     </div>
+
+    <div class="ts-agenda-main">
+      <!-- Slim header strip (not a panel): a paired ‹ › week stepper sits left of the title (so a longer
+           week label grows rightward without nudging the arrows), Today + Filter sit far right. The old
+           time-entry area that balanced this row is gone — entries are added by clicking a day row. -->
+      <div class="ts-agenda-week-bar">
+        <div class="ts-agenda-week-head">
+          <div class="ts-agenda-week-stepper">
+            <button class="ghost ts-agenda-week-nav" id="agenda-week-prev" type="button" title="Previous week" aria-label="Previous week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="ghost ts-agenda-week-nav" id="agenda-week-next" type="button" title="Next week" aria-label="Next week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
+          <div class="ts-agenda-week-headings">
+            <p class="ts-agenda-week-title" id="agenda-week-title"></p>
+            <p class="ts-note ts-agenda-week-sub" id="agenda-week-sub"></p>
+            <div class="ts-agenda-week-progress" id="agenda-week-progress" style="display:none;"><span class="ts-agenda-week-progress-fill" id="agenda-week-progress-fill"></span></div>
+          </div>
+        </div>
+        <div class="ts-agenda-week-actions">
+          <button class="ghost ts-agenda-today" id="agenda-today" type="button" title="Jump to the current week">Today</button>
+        </div>
+      </div>
+      <div class="ts-agenda-list" id="agenda-week-list"></div>
+      <div class="ts-note" id="agenda-help-text" style="display:none; margin-top:12px; text-align:right;"></div>
+    </div>
+
   </div>
 
 </section>
@@ -255,10 +378,9 @@
   <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3 id="actual-income-title">Add Actual Income</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
-      <div style="text-align:center; font-size:18px; font-weight:600; margin-bottom:16px; padding:12px; background:var(--bg); border-radius:8px;" id="actual-income-month-display">
+      <div style="text-align:center; font-size:calc(var(--font-size-base) + 2px); font-weight:600; margin-bottom:16px; padding:12px; background:var(--bg); border-radius:8px;" id="actual-income-month-display">
         October 2025
       </div>
       <input type="hidden" id="actual-income-month" />
@@ -297,7 +419,6 @@
   <div class="ts-modal-content" style="max-width: 720px;">
     <div class="ts-modal-header">
       <h3>Timesheet 1.0 Importer</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p class="ts-note" style="margin-bottom:12px;">
@@ -350,9 +471,10 @@
 <!-- Payroll Helper Modals -->
 <div class="ts-modal" id="modal-xero-helper" style="display:none;">
   <div class="ts-modal-content" style="max-width: 720px;">
-    <div class="ts-modal-header">
+    <div class="ts-modal-header ts-payroll-modal-header">
       <h3>Xero Payroll Helper</h3>
-      <button class="ts-modal-close">&times;</button>
+      <!-- Timesheet-month pills (previous / viewed month) rendered here by renderXeroPayrollHelper. -->
+      <div class="ts-av-seg ts-payroll-monthseg" id="xero-helper-monthseg"></div>
     </div>
     <div class="ts-modal-body">
       <div id="xero-helper-content"></div>
@@ -363,11 +485,51 @@
   </div>
 </div>
 
+<div class="ts-modal ts-modal--stacked" id="modal-xero-guide" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 780px;">
+    <div class="ts-modal-header ts-payroll-modal-header">
+      <h3>Using the Xero helper</h3>
+    </div>
+    <div class="ts-modal-body ts-xero-guide">
+      <section class="ts-xero-guide-reassure">
+        <h4>You're always in control</h4>
+        <ul>
+          <li>This helper runs entirely inside <strong>your own browser</strong>, on the Xero account <strong>you're already signed into</strong>.</li>
+          <li>Tempus has <strong>no connection to Xero</strong> — no password, no login, no API key, and no access to your Xero account or anyone else's.</li>
+          <li>The <strong>daily-totals</strong> script only <strong>types your hours into the timesheet boxes</strong>; nothing is recorded until <strong>you</strong> press <em>Save Draft</em>.</li>
+          <li>The <strong>sessions</strong> script writes each day's start, end and break times into your <strong>draft</strong> timesheet — the same effect as typing them yourself (that timesheet type saves as you go). The draft stays fully editable.</li>
+          <li>Neither script ever <strong>submits</strong> — sending the timesheet to your employer is always your click.</li>
+          <li>If the timesheet you paste into doesn't match the month you copied, the script <strong>stops and says so</strong> — it can't fill the wrong month.</li>
+        </ul>
+      </section>
+      <section class="ts-xero-guide-steps">
+        <h4>Step by step</h4>
+        <ol>
+          <li>Sign in to <strong>Xero</strong> as you normally would.</li>
+          <li>Go to <strong>Payroll → Xero Me → Timesheets</strong>.</li>
+          <li>Open the timesheet for the <strong>month you're copying</strong>. If it doesn't exist yet, click <strong>+ Add Timesheet</strong>, choose the period and the <strong>matching type</strong> (see below), then <strong>Continue</strong>.</li>
+          <li>In Tempus, open this <strong>Xero Payroll Helper</strong>, check the <strong>month pills in the title bar</strong> (early in a new month it pre-selects the month just gone) and the <strong>contract</strong> if you have several, then click <strong>&ldquo;Copy &hellip; for Xero&rdquo;</strong> — the button names exactly what it copies.</li>
+          <li>Back in Xero, open the developer console: press <kbd>F12</kbd> (Windows) or <kbd>&#8984;</kbd>+<kbd>&#8997;</kbd>+<kbd>I</kbd> (Mac), then click the <strong>Console</strong> tab.</li>
+          <li>Click into the console, <strong>paste</strong> (<kbd>Ctrl</kbd>/<kbd>&#8984;</kbd> + <kbd>V</kbd>) and press <kbd>Enter</kbd>.</li>
+          <li>The helper fills your time and shows a summary. <strong>Check every day</strong> against Tempus.</li>
+          <li>Daily totals: press <strong>Save Draft</strong> and confirm the <em>Monthly Total</em>. Sessions: refresh the page to see the times. When you're happy, press <strong>Submit</strong>.</li>
+        </ol>
+      </section>
+      <section class="ts-xero-guide-disclaimer">
+        <h4>Pick the timesheet type that matches the helper view</h4>
+        <p>When you create the month's timesheet, Xero asks how you want to enter time — and it must match what you're copying. If the helper is showing the <strong>daily-totals grid</strong>, choose <strong>Total hours worked</strong> (the script fills the Ordinary Hours line). If it's showing the <strong>sessions view</strong> (a contract with start &amp; end times), choose <strong>Start &amp; end hours</strong> (the script writes each day's sessions and breaks). Paste into the wrong type and the script stops without changing anything.</p>
+      </section>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-close-xero-guide">Got it</button>
+    </div>
+  </div>
+</div>
+
 <div class="ts-modal" id="modal-myob-helper" style="display:none;">
   <div class="ts-modal-content" style="max-width: 720px;">
-    <div class="ts-modal-header">
+    <div class="ts-modal-header ts-payroll-modal-header">
       <h3>MYOB Payroll Helper</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div id="myob-helper-content"></div>
@@ -383,7 +545,6 @@
   <div class="ts-modal-content" style="max-width:720px;">
     <div class="ts-modal-header">
       <h3 id="monthly-deductions-title">Monthly Deductions</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div id="monthly-deductions-content"></div>
@@ -399,35 +560,39 @@
   <div class="ts-modal-content" style="max-width:500px;">
     <div class="ts-modal-header">
       <h3>Adjust Occurrence</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
-      <div class="ts-note" style="margin-bottom:16px;">
-        <strong id="adjust-deduction-name"></strong><br>
-        Original: <span id="adjust-original-date"></span> - <span id="adjust-original-amount"></span>
+      <div style="margin-bottom:4px;"><strong id="adjust-deduction-name"></strong></div>
+      <div class="ts-note" style="margin-bottom:14px;">
+        This occurrence: <span id="adjust-original-date"></span> · <span id="adjust-original-amount"></span>
+      </div>
+      <p class="ts-note" style="margin:0 0 16px;">Change only what's different for this one time — leave a field blank to keep it as it is. Everything here is optional.</p>
+
+      <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px;">
+        <div style="flex:1 1 0; min-width:150px;">
+          <label for="adjust-new-date" style="display:block; margin-bottom:4px;">New date</label>
+          <input type="date" id="adjust-new-date" style="width:100%;">
+        </div>
+        <div style="flex:1 1 0; min-width:150px;">
+          <label for="adjust-new-amount" style="display:block; margin-bottom:4px;">New amount</label>
+          <div class="ts-input-prefix"><span class="ts-input-prefix-symbol" aria-hidden="true">$</span><input type="number" id="adjust-new-amount" step="0.01" min="0"></div>
+        </div>
       </div>
 
       <div style="margin-bottom:16px;">
-        <label for="adjust-new-date" style="display:block; margin-bottom:4px;">Move to different date (optional)</label>
-        <input type="date" id="adjust-new-date" style="width:100%;">
-      </div>
-
-      <div style="margin-bottom:16px;">
-        <label for="adjust-new-amount" style="display:block; margin-bottom:4px;">Adjust amount (optional)</label>
-        <input type="number" id="adjust-new-amount" step="0.01" min="0" style="width:100%;">
-      </div>
-
-      <div style="margin-bottom:16px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="adjust-skip">
-          <span>Skip this occurrence</span>
-        </label>
-        <div class="ts-note" style="margin-top:4px;">When checked, date and amount fields are ignored</div>
+        <span style="display:inline-flex; align-items:center; gap:8px;">
+          <label class="ts-toggle">
+            <input type="checkbox" id="adjust-skip">
+            <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+          </label>
+          <span>Skip this occurrence entirely</span>
+        </span>
+        <div class="ts-note" style="margin-top:4px;">Removes it from this month — the date and amount above are ignored.</div>
       </div>
 
       <div>
-        <label for="adjust-notes" style="display:block; margin-bottom:4px;">Notes (optional)</label>
-        <textarea id="adjust-notes" rows="2" style="width:100%;"></textarea>
+        <label for="adjust-notes" style="display:block; margin-bottom:4px;">Notes</label>
+        <textarea id="adjust-notes" rows="2" style="width:100%;" placeholder="Why this occurrence differs (optional)"></textarea>
       </div>
     </div>
     <div class="ts-modal-footer">
@@ -443,7 +608,6 @@
   <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3>Create Default Entry</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-md">
@@ -465,26 +629,10 @@
   </div>
 </div>
 
-<div class="ts-modal" id="modal-select-default" style="display:none;">
-  <div class="ts-modal-content">
-    <div class="ts-modal-header">
-      <h3>Select Default Entry</h3>
-      <button class="ts-modal-close">&times;</button>
-    </div>
-    <div class="ts-modal-body">
-      <div id="default-selection-list" class="ts-default-list"></div>
-    </div>
-    <div class="ts-modal-footer">
-      <button class="ghost" id="btn-cancel-select-default">Cancel</button>
-    </div>
-  </div>
-</div>
-
 <div class="ts-modal" id="modal-edit-defaults" style="display:none;">
   <div class="ts-modal-content" style="max-width: 600px;">
     <div class="ts-modal-header">
       <h3>Edit Defaults</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div id="edit-defaults-list" class="ts-edit-defaults-list"></div>
@@ -500,7 +648,6 @@
   <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3>Edit Default Details</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-md">
@@ -528,31 +675,45 @@
 <div class="ts-modal" id="modal-recurring-entries" style="display:none;">
   <div class="ts-modal-content" style="max-width:960px;">
     <div class="ts-modal-header">
-      <h3>Manage Reoccurring Entries</h3>
-      <button class="ts-modal-close" aria-label="Close">&times;</button>
+      <div style="display:flex; align-items:center; gap:var(--space-3); min-width:0;">
+        <h3>Manage Reoccurring Entries</h3>
+        <!-- In-modal busy pill, inline by the title (mirrors Manage Bulk Entries) so progress shows here too,
+             not only on the main page after the modal is closed. JS toggles display none/flex. -->
+        <div id="recurring-busy-bar" role="status" aria-live="polite" style="display:none; align-items:center; gap:7px; padding:6px 13px; border-radius:999px; background:var(--surface-subtle); color:var(--muted); font-size:var(--font-size-sm); font-weight:600; line-height:1; white-space:nowrap;">
+          <span class="ts-spinner" aria-hidden="true"></span><span id="recurring-busy-text">Working…</span>
+        </div>
+      </div>
+      <!-- Primary action top-right (no ✕ — click outside or Esc to close), mirroring Manage Bulk Entries. -->
+      <button id="btn-recurring-new">New Schedule</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-lg ts-grid--align-start">
         <div class="ts-col-span-5">
-          <div class="ts-gap-sm" style="display:flex; justify-content:flex-end; align-items:center;">
-            <button id="btn-recurring-new">New Schedule</button>
-          </div>
-          <div id="recurring-entry-list" class="ts-gap-sm" style="margin-top:12px;"></div>
+          <div id="recurring-entry-list" style="display:flex; flex-direction:column; gap:var(--space-4);"></div>
           <div class="ts-empty" id="recurring-entry-empty" style="display:none; margin-top:24px;">
             <p style="margin:0;">No reoccurring schedules yet. Create one to automatically add future entries.</p>
           </div>
         </div>
         <div class="ts-col-span-7">
-          <div id="recurring-entry-form" class="ts-card" style="display:flex; flex-direction:column; gap:12px;">
+          <div id="recurring-entry-placeholder" class="ts-empty" style="display:flex; align-items:center; justify-content:center; text-align:center; min-height:220px;">
+            <p style="margin:0; max-width:280px;">Select a schedule on the left to edit, or create a new one.</p>
+          </div>
+          <div id="recurring-entry-form" class="ts-card" style="display:none; flex-direction:column; gap:12px;">
             <div>
               <h4 id="recurring-form-title" style="margin:0;">New Schedule</h4>
               <p class="ts-note" id="recurring-form-subtitle" style="margin:4px 0 0;">Define cadence and contract limits.</p>
             </div>
             <div class="ts-warning" id="recurring-form-warning" style="display:none;"></div>
             <label>Name<input type="text" id="recurring-name" placeholder="e.g., Parental leave" /></label>
+            <!-- Field flow mirrors the Bulk form (James, 2026-07-07): Name spans the form, then Hour type +
+                 Contract side by side, then the time entry on its own row beneath. The contract's entry
+                 mode decides that time input — whole hours (Simple) or a sessions list (Detailed); until a
+                 contract is chosen it hides behind a hint (Phase 6). -->
             <div class="ts-grid ts-grid--gap-md">
-              <div class="ts-col-span-6">
-                <label>Hours per occurrence<input type="number" id="recurring-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" /></label>
+              <div class="ts-col-span-6" id="recurring-hour-type-row" style="display:none;">
+                <label>Hour type
+                  <select id="recurring-hour-type"></select>
+                </label>
               </div>
               <div class="ts-col-span-6">
                 <label>Contract
@@ -560,10 +721,22 @@
                 </label>
               </div>
             </div>
-            <div id="recurring-hour-type-row" style="display:none;">
-              <label>Hour type
-                <select id="recurring-hour-type"></select>
-              </label>
+            <div class="ts-grid ts-grid--gap-md" id="recurring-time-row">
+              <div class="ts-col-span-6" id="recurring-hours-wrap">
+                <label>Hours per occurrence<input type="number" id="recurring-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" /></label>
+              </div>
+              <div class="ts-col-span-12" id="recurring-time-hint" style="display:none;">
+                <div class="ts-note">Choose a contract first — it decides hours vs sessions.</div>
+              </div>
+            </div>
+            <div id="recurring-sessions-wrap" style="display:none;">
+              <label>Sessions each occurrence</label>
+              <div class="ts-note" style="margin-bottom:8px;">Add the working sessions — no need to add breaks.</div>
+              <div id="recurring-sessions-list" class="ts-schedule-sessions"></div>
+              <div style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+                <button type="button" class="ghost" id="recurring-sessions-add" style="font-size:var(--font-size-xs);">Add session</button>
+                <span class="ts-note" id="recurring-sessions-total" style="margin:0;"></span>
+              </div>
             </div>
             <div class="ts-grid ts-grid--gap-md">
               <div class="ts-col-span-6">
@@ -573,24 +746,26 @@
                 <label>End date (optional)<input type="date" id="recurring-end-date" /></label>
               </div>
             </div>
-            <label>Cadence
-              <select id="recurring-frequency">
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-            <div id="recurring-weekly-fields">
-              <div class="ts-grid ts-grid--gap-md">
-                <div class="ts-col-span-6">
+            <div class="ts-grid ts-grid--gap-md">
+              <div class="ts-col-span-6">
+                <label>Cadence
+                  <select id="recurring-frequency">
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </label>
+              </div>
+              <div class="ts-col-span-6">
+                <div id="recurring-weekly-fields">
                   <label>Repeat every<input type="number" id="recurring-weekly-interval" min="1" step="1" value="1" /></label>
-                  <small class="ts-note">Number of weeks between runs</small>
+                </div>
+                <div id="recurring-monthly-interval-wrap" style="display:none;">
+                  <label>Repeat every<input type="number" id="recurring-monthly-interval" min="1" step="1" value="1" /></label>
                 </div>
               </div>
             </div>
-            <div id="recurring-monthly-fields" class="ts-stack" style="display:none;">
-              <label>Repeat every<input type="number" id="recurring-monthly-interval" min="1" step="1" value="1" /></label>
-              <small class="ts-note">Number of months between runs</small>
-              <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:8px; grid-template-columns: repeat(2, minmax(0, 1fr));">
+            <div id="recurring-monthly-fields" class="ts-stack" style="display:none; margin-top:8px;">
+              <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
                 <div id="recurring-monthly-mode-wrapper" class="ts-stack" style="gap:8px;">
                   <label>Schedule type</label>
                   <select id="recurring-monthly-mode">
@@ -627,22 +802,21 @@
                 </div>
               </div>
             </div>
-            <div class="ts-note" id="recurring-generated-summary" style="display:none;"></div>
             <div class="ts-note" id="recurring-preview-note" style="display:none;">
-              <strong>Next occurrences</strong>
-              <ul id="recurring-preview-list" style="margin:4px 0 0; padding-left:16px;"></ul>
+              <strong>Next:</strong> <span id="recurring-preview-list"></span>
             </div>
             <div class="ts-error" id="recurring-form-error" style="display:none;"></div>
-            <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
-              <button class="ghost" id="btn-cancel-recurring">Close</button>
-              <button class="ghost danger" id="btn-delete-recurring" style="display:none;">Delete Schedule</button>
-              <button id="btn-save-recurring">Add Schedule</button>
-            </div>
-            <div id="recurring-delete-confirm" class="ts-warning" style="display:none;">
-              <p style="margin-top:0;">Delete this schedule? Existing entries remain unless you remove future ones using the button above.</p>
-              <div class="ts-gap-sm" style="display:flex; gap:8px; justify-content:flex-end;">
-                <button class="ghost" id="btn-cancel-delete-recurring">Cancel</button>
-                <button class="danger" id="btn-confirm-delete-recurring">Confirm delete</button>
+            <!-- Actions mirror the Time Entry pattern: full-width primary save on top, then a row with
+                 Delete (subtle trash+underline, left) and Cancel (right). Delete now opens the keep-vs-delete
+                 choice directly — no in-place button swap or inline confirm block. -->
+            <div class="ts-entry-actions">
+              <button id="btn-save-recurring" class="ts-entry-submit">Add Schedule</button>
+              <div class="ts-entry-actions-row">
+                <button type="button" class="ts-modal-delete-link" id="btn-delete-recurring" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  <span>Delete</span>
+                </button>
+                <button class="ghost" id="btn-cancel-recurring">Cancel</button>
               </div>
             </div>
           </div>
@@ -655,31 +829,54 @@
 <div class="ts-modal" id="modal-bulk-entries" style="display:none;">
   <div class="ts-modal-content" style="max-width:960px;">
     <div class="ts-modal-header">
-      <h3>Manage Bulk Entries</h3>
-      <button class="ts-modal-close" aria-label="Close">&times;</button>
+      <div style="display:flex; align-items:center; gap:var(--space-3); min-width:0;">
+        <h3>Manage Bulk Entries</h3>
+        <!-- Sits inline to the right of the title (like the Time Entry status pill) so showing it doesn't
+             push the whole modal down. JS toggles display none/flex. -->
+        <div id="bulk-busy-bar" role="status" aria-live="polite" style="display:none; align-items:center; gap:7px; padding:6px 13px; border-radius:999px; background:var(--surface-subtle); color:var(--muted); font-size:var(--font-size-sm); font-weight:600; line-height:1; white-space:nowrap;">
+          <span class="ts-spinner" aria-hidden="true"></span><span id="bulk-busy-text">Working…</span>
+        </div>
+      </div>
+      <!-- Primary action top-right (no ✕ — click outside or Esc to close, consistent with the other tools). -->
+      <button id="btn-bulk-new">New Bulk Range</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-lg ts-grid--align-start">
         <div class="ts-col-span-5">
-          <div class="ts-gap-sm" style="display:flex; justify-content:flex-end; align-items:center;">
-            <button id="btn-bulk-new">New Bulk Range</button>
-          </div>
-          <div id="bulk-entry-list" class="ts-gap-sm" style="margin-top:12px;"></div>
+          <h4 style="margin:0;">Your bulk ranges</h4>
+          <div id="bulk-entry-list" style="margin-top:12px; display:flex; flex-direction:column; gap:var(--space-4);"></div>
           <div class="ts-empty" id="bulk-entry-empty" style="display:none; margin-top:24px;">
             <p style="margin:0;">No bulk ranges yet. Create one to add consistent entries between two dates.</p>
           </div>
         </div>
         <div class="ts-col-span-7">
-          <div id="bulk-entry-form" class="ts-card" style="display:flex; flex-direction:column; gap:12px;">
+          <div id="bulk-entry-placeholder" class="ts-empty" style="display:flex; align-items:center; justify-content:center; text-align:center; min-height:220px;">
+            <p style="margin:0; max-width:280px;">Select a range on the left to edit, or create a new one.</p>
+          </div>
+          <div id="bulk-entry-form" class="ts-card" style="display:none; flex-direction:column; gap:12px;">
             <div>
               <h4 id="bulk-form-title" style="margin:0;">New Bulk Range</h4>
               <p class="ts-note" id="bulk-form-subtitle" style="margin:4px 0 0;">Fill a date range with matching entries.</p>
             </div>
             <div class="ts-warning" id="bulk-form-warning" style="display:none;"></div>
-            <div class="ts-grid ts-grid--gap-md" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:flex-end;">
-              <div>
-                <label>Name<input type="text" id="bulk-name" placeholder="e.g., Overseas Holiday" /></label>
+            <div>
+              <label>Name<input type="text" id="bulk-name" placeholder="e.g., Overseas Holiday" /></label>
+            </div>
+            <!-- Contract leads (Phase 6): its entry mode decides the time input — Distribution+Hours for a
+                 Simple contract, a per-day sessions list for a Detailed one, a hint until one is chosen. -->
+            <div class="ts-grid ts-grid--gap-md" id="bulk-type-contract-row" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:flex-end;">
+              <div id="bulk-hour-type-row">
+                <label>Hour type
+                  <select id="bulk-hour-type"></select>
+                </label>
               </div>
+              <div>
+                <label>Contract
+                  <select id="bulk-contract"></select>
+                </label>
+              </div>
+            </div>
+            <div class="ts-grid ts-grid--gap-md" id="bulk-time-row" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:flex-end;">
               <div>
                 <label>Distribution
                   <select id="bulk-distribution-mode">
@@ -688,24 +885,24 @@
                   </select>
                 </label>
               </div>
-            </div>
-            <div class="ts-grid ts-grid--gap-md">
-              <div class="ts-col-span-6">
+              <div>
                 <label id="bulk-hours-label">
                   <span id="bulk-hours-label-text">Hours per day</span>
                   <input type="number" id="bulk-hours" min="0.25" step="0.25" placeholder="e.g., 7.5" />
                 </label>
               </div>
-              <div class="ts-col-span-6">
-                <label>Contract
-                  <select id="bulk-contract"></select>
-                </label>
+            </div>
+            <div id="bulk-sessions-wrap" style="display:none;">
+              <label>Sessions each day</label>
+              <div class="ts-note" style="margin-bottom:8px;">Add the working sessions — no need to add breaks.</div>
+              <div id="bulk-sessions-list" class="ts-schedule-sessions"></div>
+              <div style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+                <button type="button" class="ghost" id="bulk-sessions-add" style="font-size:var(--font-size-xs);">Add session</button>
+                <span class="ts-note" id="bulk-sessions-total" style="margin:0;"></span>
               </div>
             </div>
-            <div id="bulk-hour-type-row" style="display:none;">
-              <label>Hour type
-                <select id="bulk-hour-type"></select>
-              </label>
+            <div id="bulk-time-hint" style="display:none;">
+              <div class="ts-note">Choose a contract first — it decides hours vs sessions.</div>
             </div>
             <div id="bulk-month-wrapper" style="display:none;">
               <div class="ts-field-group">
@@ -713,9 +910,9 @@
                 <input type="hidden" id="bulk-month" />
                 <div class="ts-month-picker-card" style="border:1px solid var(--border); border-radius:12px; padding:12px;">
                   <div class="ts-month-picker-header" style="margin-bottom:12px;">
-                    <button type="button" class="ghost small" id="bulk-month-year-prev">◀</button>
-                    <div id="bulk-month-year" class="ts-month-picker-year" style="font-size:16px;">2025</div>
-                    <button type="button" class="ghost small" id="bulk-month-year-next">▶</button>
+                    <button type="button" class="ghost small" id="bulk-month-year-prev" aria-label="Previous year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <div id="bulk-month-year" class="ts-month-picker-year" style="font-size:var(--font-size-base);">2025</div>
+                    <button type="button" class="ghost small" id="bulk-month-year-next" aria-label="Next year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
                   </div>
                   <div class="ts-month-picker-grid" id="bulk-month-grid"></div>
                 </div>
@@ -743,16 +940,16 @@
             </div>
             <div class="ts-note" id="bulk-generated-summary" style="display:none;"></div>
             <div class="ts-error" id="bulk-form-error" style="display:none;"></div>
-            <div class="ts-gap-sm" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
-              <button class="ghost" id="btn-cancel-bulk">Close</button>
-              <button class="ghost danger" id="btn-delete-bulk" style="display:none;">Delete Range</button>
-              <button id="btn-save-bulk">Save Range</button>
-            </div>
-            <div id="bulk-delete-confirm" class="ts-warning" style="display:none;">
-              <p style="margin-top:0;">Delete this bulk range? All generated entries will also be removed.</p>
-              <div class="ts-gap-sm" style="display:flex; gap:8px; justify-content:flex-end;">
-                <button class="ghost" id="btn-cancel-delete-bulk">Cancel</button>
-                <button class="danger" id="btn-confirm-delete-bulk">Confirm delete</button>
+            <!-- Actions mirror the Recurring/Time Entry pattern: full-width primary save on top, then a row
+                 with Delete (subtle trash+underline, left) and Cancel (right). Delete opens #modal-bulk-delete. -->
+            <div id="bulk-form-actions" class="ts-entry-actions">
+              <button id="btn-save-bulk" class="ts-entry-submit">Save Range</button>
+              <div class="ts-entry-actions-row">
+                <button type="button" class="ts-modal-delete-link" id="btn-delete-bulk" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  <span>Delete</span>
+                </button>
+                <button class="ghost" id="btn-cancel-bulk">Cancel</button>
               </div>
             </div>
           </div>
@@ -762,12 +959,31 @@
   </div>
 </div>
 
+<!-- Bulk delete choice popup. Stacks over #modal-bulk-entries (later in DOM, same z-index) so the Manage
+     Bulk Entries action row underneath never reshuffles. -->
+<div class="ts-modal" id="modal-bulk-delete" style="display:none;">
+  <div class="ts-modal-content" style="max-width:440px;">
+    <div class="ts-modal-header">
+      <h3>Delete bulk range</h3>
+    </div>
+    <div class="ts-modal-body">
+      <p style="margin:0;">Keep the entries this range already added, or delete them too?</p>
+    </div>
+    <!-- Buttons answer the question: Keep (detach, safe → primary), Delete (cascade, destructive → quiet
+         red), Cancel (neutral escape). One filled anchor, one quiet-red, no second row. -->
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-bulk-delete-cancel" style="min-width:84px;">Cancel</button>
+      <button class="ghost danger" id="btn-bulk-delete-all" style="min-width:84px;">Delete</button>
+      <button id="btn-bulk-delete-keep" style="min-width:84px;">Keep</button>
+    </div>
+  </div>
+</div>
+
 <!-- Welcome Modal -->
 <div class="ts-modal" id="modal-welcome" style="display:none;">
   <div class="ts-modal-content" style="max-width: 520px;">
     <div class="ts-modal-header">
       <h3>Welcome to Tempus</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p style="margin:0 0 12px 0;">You're all set to start tracking your time and income. Here are some suggestions on what to do to get going:</p>
@@ -787,10 +1003,10 @@
 
 <!-- Reusable Confirm Modal -->
 <div class="ts-modal" id="modal-confirm" style="display:none;">
-  <div class="ts-modal-content" style="max-width: 480px;">
+  <div class="ts-modal-content" style="max-width: 400px;">
     <div class="ts-modal-header">
+      <span class="ts-alert-icon" id="confirm-icon" aria-hidden="true"></span>
       <h3 id="confirm-title">Confirm</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p id="confirm-message" style="margin:0;"></p>
@@ -804,10 +1020,10 @@
 
 <!-- Reusable Alert Modal -->
 <div class="ts-modal" id="modal-alert" style="display:none;">
-  <div class="ts-modal-content" style="max-width: 480px;">
+  <div class="ts-modal-content" style="max-width: 540px;">
     <div class="ts-modal-header">
+      <span class="ts-alert-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
       <h3 id="alert-title">Notice</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p id="alert-message" style="margin:0;"></p>
@@ -823,13 +1039,12 @@
   <div class="ts-modal-content" style="max-width: 680px;">
     <div class="ts-modal-header">
       <h3 id="bas-detail-title">BAS Details</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <p class="ts-note" style="margin:0 0 16px 0;">Click any field to copy its value to the clipboard</p>
 
       <div style="margin-bottom:24px;">
-        <h4 style="margin:0 0 12px 0; font-size:15px; font-weight:600;">Goods and Services Tax (GST)</h4>
+        <h4 style="margin:0 0 12px 0; font-size:var(--font-size-sm); font-weight:600;">Goods and Services Tax (GST)</h4>
         <div style="display:flex; flex-direction:column; gap:12px;">
           <div class="bas-field-row">
             <label class="bas-field-label">G1 - Total Sales</label>
@@ -851,8 +1066,8 @@
       </div>
 
       <div style="margin-bottom:24px;">
-        <h4 style="margin:0 0 12px 0; font-size:15px; font-weight:600;">PAYG Income Tax Instalment</h4>
-        <p class="ts-note" style="margin:0 0 12px 0; font-size:12px;">Calculate PAYG instalment using income times rate</p>
+        <h4 style="margin:0 0 12px 0; font-size:var(--font-size-sm); font-weight:600;">PAYG Income Tax Instalment</h4>
+        <p class="ts-note" style="margin:0 0 12px 0; font-size:var(--font-size-xs);">Calculate PAYG instalment using income times rate</p>
         <div style="display:flex; flex-direction:column; gap:12px;">
           <div class="bas-field-row">
             <label class="bas-field-label">T1 - PAYG Instalment Income</label>
@@ -866,10 +1081,13 @@
       </div>
 
       <div style="display:flex; align-items:center; justify-content:center; padding:16px; background:var(--panel); border-radius:8px; border:1px solid var(--border);">
-        <label style="display:flex; align-items:center; gap:12px; cursor:pointer; user-select:none;">
-          <input type="checkbox" id="bas-submitted-toggle" style="width:18px; height:18px; cursor:pointer;">
+        <span style="display:inline-flex; align-items:center; gap:12px; user-select:none;">
+          <label class="ts-toggle">
+            <input type="checkbox" id="bas-submitted-toggle">
+            <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+          </label>
           <span style="font-weight:600;">BAS Submitted for this period</span>
-        </label>
+        </span>
       </div>
     </div>
     <div class="ts-modal-footer">
@@ -888,12 +1106,12 @@
 }
 
 .bas-field-label {
-  font-size: 13px;
+  font-size: calc(var(--font-size-xs) + 1px);
   color: var(--muted);
 }
 
 .bas-field-value {
-  font-size: 15px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   padding: 8px 12px;
@@ -922,23 +1140,15 @@
 </style>
 
 <!-- Month Picker Modal -->
-<div class="ts-modal" id="modal-month-picker" style="display:none;">
-  <div class="ts-modal-content" style="max-width: 420px;">
-    <div class="ts-modal-header">
-      <h3>Jump to Month</h3>
-      <button class="ts-modal-close">&times;</button>
-    </div>
-    <div class="ts-modal-body">
-      <div class="ts-month-picker-header">
-        <button class="ghost" id="month-picker-year-prev">◀</button>
-        <div id="month-picker-year-display" class="ts-month-picker-year">2025</div>
-        <button class="ghost" id="month-picker-year-next">▶</button>
-      </div>
-
-      <div class="ts-month-picker-grid" id="month-picker-grid">
-        <!-- Months will be generated by JavaScript -->
-      </div>
-    </div>
+<!-- Anchored dropdown (not a dimming modal): positioned under the calendar month label by openMonthPicker(). -->
+<div class="ts-cal-monthpop" id="modal-month-picker" role="dialog" aria-label="Jump to month">
+  <div class="ts-month-picker-header">
+    <button class="ghost" id="month-picker-year-prev" aria-label="Previous year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <div id="month-picker-year-display" class="ts-month-picker-year">2025</div>
+    <button class="ghost" id="month-picker-year-next" aria-label="Next year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+  </div>
+  <div class="ts-month-picker-grid" id="month-picker-grid">
+    <!-- Months will be generated by JavaScript -->
   </div>
 </div>
 
@@ -947,22 +1157,21 @@
   <div class="ts-modal-content" style="max-width: 540px;">
     <div class="ts-modal-header">
       <h3>Select Hour Types for Print View</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-note" style="margin-bottom:16px;">
         Select which hour types to include in the print view. Choose at least one income hour type (they will be summed together) and up to two non-income hour types so the layout fits on a single A4 page.
       </div>
       <div id="print-view-income-types" style="margin-bottom:16px;">
-        <h4 style="margin:0 0 8px 0; font-size:13px; font-weight:600; color:var(--muted);">Income-Generating Hours</h4>
+        <h4 style="margin:0 0 8px 0; font-size:calc(var(--font-size-xs) + 1px); font-weight:600; color:var(--muted);">Income-Generating Hours</h4>
         <div id="print-view-income-list" style="display:flex; flex-direction:column; gap:4px;">
           <!-- Populated by JavaScript -->
         </div>
       </div>
       <div id="print-view-other-types">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <h4 style="margin:0; font-size:13px; font-weight:600; color:var(--muted);">Other Hour Types</h4>
-          <button class="ghost" id="btn-unselect-all-other" style="font-size:12px; padding:4px 8px;">Unselect all</button>
+          <h4 style="margin:0; font-size:calc(var(--font-size-xs) + 1px); font-weight:600; color:var(--muted);">Other Hour Types</h4>
+          <button class="ghost" id="btn-unselect-all-other" style="font-size:var(--font-size-xs); padding:4px 8px;">Unselect all</button>
         </div>
         <div id="print-view-other-list" style="display:flex; flex-direction:column; gap:4px;">
           <!-- Populated by JavaScript -->
@@ -975,6 +1184,25 @@
     <div class="ts-modal-footer">
       <button class="ghost" id="btn-cancel-print-view">Cancel</button>
       <button id="btn-generate-print-view">Generate Print View</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reusable "explain this metric" modal. Any report can open it via openMetricExplainer({title, subtitle, bodyHtml}). -->
+<div class="ts-modal" id="modal-metric-explainer" style="display:none;">
+  <div class="ts-modal-content ts-explainer-modal" style="max-width:620px;">
+    <div class="ts-modal-header ts-explainer-header">
+      <div class="ts-explainer-heading">
+        <span class="ts-explainer-badge"><span class="ts-info-icon" aria-hidden="true">i</span></span>
+        <div>
+          <h3 id="metric-explainer-title">How this is worked out</h3>
+          <p class="ts-explainer-subtitle" id="metric-explainer-subtitle"></p>
+        </div>
+      </div>
+    </div>
+    <div class="ts-modal-body" id="metric-explainer-body"></div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-dismiss-metric-explainer">Got it</button>
     </div>
   </div>
 </div>

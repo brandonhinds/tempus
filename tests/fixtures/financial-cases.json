@@ -1,0 +1,28 @@
+{
+  "invoices": [
+    {"id":"invoice-part","status":"issued","invoice_date":"2026-07-10"},
+    {"id":"invoice-prepaid","status":"issued","invoice_date":"2026-08-10"},
+    {"id":"invoice-void","status":"void","invoice_date":"2026-07-12"}
+  ],
+  "invoice_lines": {
+    "invoice-part":[{"amount":100,"gst_amount":10}],
+    "invoice-prepaid":[{"amount":200,"gst_amount":20}],
+    "invoice-void":[{"amount":100,"gst_amount":10}]
+  },
+  "invoice_payments": [
+    {"id":"payment-1","invoice_id":"invoice-part","payment_date":"2026-07-15","amount":55},
+    {"id":"payment-2","invoice_id":"invoice-part","payment_date":"2026-08-15","amount":55},
+    {"id":"payment-3","invoice_id":"invoice-prepaid","payment_date":"2026-07-20","amount":220}
+  ],
+  "expenses": [
+    {"id":"expense-taxable","status":"recorded","purchase_date":"2026-07-05","supplier_invoice_date":"2026-07-05","amount":110,"gst_code":"taxable","gst_amount":10,"business_use_percentage":1,"claimable_gst_confirmed":"TRUE","reconciliation_state":"reconciled","attachments":[{"id":"receipt-1"}]},
+    {"id":"expense-out-of-scope","status":"recorded","purchase_date":"2026-07-06","supplier_invoice_date":"2026-07-06","amount":50,"gst_code":"out_of_scope","gst_amount":0,"business_use_percentage":1,"claimable_gst_confirmed":"FALSE","reconciliation_state":"reconciled","attachments":[]},
+    {"id":"expense-legacy","status":"legacy_unreconciled","purchase_date":"2026-07-07","supplier_invoice_date":"2026-07-07","amount":55,"gst_code":"taxable","gst_amount":5,"business_use_percentage":1,"claimable_gst_confirmed":"FALSE","reconciliation_state":"legacy_unreconciled","attachments":[]},
+    {"id":"expense-void","status":"void","purchase_date":"2026-07-08","supplier_invoice_date":"2026-07-08","amount":110,"gst_code":"taxable","gst_amount":10,"business_use_percentage":1,"claimable_gst_confirmed":"TRUE","reconciliation_state":"reconciled","attachments":[{"id":"receipt-2"}]}
+  ],
+  "expense_payments": [
+    {"expense_transaction_id":"expense-taxable","payment_date":"2026-07-16","amount":55},
+    {"expense_transaction_id":"expense-taxable","payment_date":"2026-08-16","amount":55},
+    {"expense_transaction_id":"expense-out-of-scope","payment_date":"2026-07-17","amount":50}
+  ]
+}

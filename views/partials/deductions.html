@@ -18,18 +18,37 @@
     </div>
   </div>
   <div id="deductions-empty" class="ts-empty-state" style="display:none;">
-    <div class="ts-empty-state__icon">📭</div>
+    <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></div>
     <p class="ts-empty-state__title">No deductions yet</p>
     <p class="ts-empty-state__text">Use <strong>Add deduction</strong> to configure salary sacrifice, company expenses, or extra super contributions.</p>
   </div>
-  <div class="ts-list" id="deductions-list"></div>
+  <!-- Master-detail (mirrors Manage Bulk / Reoccurring Entries): the deductions list on the left
+       (grouped under category headers when categories are enabled, flat otherwise), and the selected
+       deduction's editor inline on the right — no popup. The editor panel is moved in from
+       #modal-deduction-form's content node; see openDeductionForm/closeDeductionForm. -->
+  <div class="ts-grid ts-grid--gap-lg ts-grid--align-start" id="deductions-split" style="display:none;">
+    <div class="ts-col-span-5">
+      <div class="ts-ded-search" id="deduction-search-wrap" style="display:none;">
+        <svg class="ts-ded-search-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="search" id="deduction-search" placeholder="Search deductions" aria-label="Search deductions" autocomplete="off" />
+      </div>
+      <div id="deduction-master-list" class="ts-ded-master"></div>
+    </div>
+    <div class="ts-col-span-7">
+      <div id="deduction-detail-placeholder" class="ts-empty" style="display:flex; align-items:center; justify-content:center; text-align:center; min-height:240px;">
+        <p style="margin:0; max-width:300px;">Select a deduction on the left, or use <strong>Add deduction</strong> to create one.</p>
+      </div>
+      <div id="deduction-editor-host"></div>
+    </div>
+  </div>
 </section>
 
+<!-- The editor below is moved inline into #deduction-editor-host (right pane); it is not shown as an
+     overlay. The .ts-modal wrapper just parks the panel when idle. See openDeductionForm. -->
 <div class="ts-modal" id="modal-deduction-form" style="display:none;">
-  <div class="ts-modal-content" style="max-width:720px;">
+  <div class="ts-modal-content">
     <div class="ts-modal-header">
       <h3 id="deduction-form-title">Add deduction</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
@@ -54,45 +73,47 @@
       <div class="ts-grid ts-grid--gap-md" style="margin-top:4px;">
         <div class="ts-col-span-12">
           <div class="ts-empty-state ts-empty-state--inline" id="deduction-category-empty-note" style="display:none; margin-top:4px;">
-            <div class="ts-empty-state__icon">🏷️</div>
+            <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></div>
             <p class="ts-empty-state__title">No categories yet</p>
             <p class="ts-empty-state__text">Create categories to organise deductions for reports like BAS and invoices.</p>
           </div>
         </div>
       </div>
-      <div class="ts-grid ts-grid--gap-md" style="margin-top:12px;">
-        <div class="ts-col-span-4" style="max-width:220px;">
+      <!-- Amount, (for extra super) Calculation, and the toggles share one flex row aligned at the bottom, so
+           the toggles sit to the right of Amount and a hidden Calculation collapses without leaving a gap. -->
+      <div class="ts-ded-config-row" style="display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px 28px; margin-top:12px;">
+        <div class="ts-ded-field">
           <div id="deduction-amount-wrapper">
             <label for="deduction-amount">Amount</label>
-            <input type="number" id="deduction-amount" min="0" step="0.01" />
+            <div class="ts-input-prefix"><span class="ts-input-prefix-symbol" aria-hidden="true">$</span><input type="number" id="deduction-amount" min="0" step="0.01" /></div>
           </div>
           <div id="deduction-percent-wrapper" style="display:none;">
             <label for="deduction-percent">Percentage of gross income</label>
             <input type="number" id="deduction-percent" min="0" max="100" step="0.1" placeholder="e.g. 2" />
           </div>
         </div>
-        <div class="ts-col-span-4" style="max-width:220px;">
-          <div id="deduction-amount-mode-wrapper" style="display:none;">
-            <label for="deduction-amount-mode">Calculation</label>
-            <select id="deduction-amount-mode">
-              <option value="flat">Flat amount</option>
-              <option value="percent">Percentage of gross income</option>
-            </select>
+        <div class="ts-ded-field" id="deduction-amount-mode-wrapper" style="display:none;">
+          <label for="deduction-amount-mode">Calculation</label>
+          <select id="deduction-amount-mode">
+            <option value="flat">Flat amount</option>
+            <option value="percent">Percentage of gross income</option>
+          </select>
+        </div>
+        <div class="ts-ded-toggles" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 24px; margin-bottom:8px;">
+          <div class="ts-toggle-row" id="deduction-gst-wrapper">
+            <label class="ts-toggle">
+              <input type="checkbox" id="deduction-gst" />
+              <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+            </label>
+            <label for="deduction-gst" class="ts-toggle-row-label">Amount includes GST</label>
           </div>
-        </div>
-        <div class="ts-col-span-4" id="deduction-gst-wrapper" style="display:flex; flex-direction:column; align-items:center;">
-          <label for="deduction-gst" style="margin-bottom:4px;">Amount includes GST</label>
-          <label class="ts-toggle">
-            <input type="checkbox" id="deduction-gst" />
-            <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
-          </label>
-        </div>
-        <div class="ts-col-span-4" id="deduction-company-wrapper" style="display:none; flex-direction:column; align-items:center;">
-          <label for="deduction-company-expense" style="margin-bottom:4px;">Company expense</label>
-          <label class="ts-toggle">
-            <input type="checkbox" id="deduction-company-expense" />
-            <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
-          </label>
+          <div class="ts-toggle-row" id="deduction-company-wrapper" style="display:none;">
+            <label class="ts-toggle">
+              <input type="checkbox" id="deduction-company-expense" />
+              <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
+            </label>
+            <label for="deduction-company-expense" class="ts-toggle-row-label">Company expense</label>
+          </div>
         </div>
       </div>
       <div id="deduction-company-gst-note" class="ts-note" style="margin-top:4px; display:none;">GST component is tracked automatically when company expenses are enabled.</div>
@@ -126,6 +147,11 @@
       </div>
     </div>
     <div class="ts-modal-footer">
+      <!-- Delete lives in the editor (not on the list card) — subtle trash+underline, shown only when editing. -->
+      <button type="button" class="ts-modal-delete-link" id="btn-delete-deduction-inline" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        <span>Delete</span>
+      </button>
       <button class="ghost" id="btn-cancel-deduction">Cancel</button>
       <button id="btn-save-deduction">Save deduction</button>
     </div>
@@ -138,37 +164,48 @@
       <h3>Manage deduction categories</h3>
       <div class="ts-gap-sm" style="display:flex; align-items:center;">
         <button class="ghost small" id="btn-add-deduction-category">Add category</button>
-        <button class="ts-modal-close">&times;</button>
-      </div>
+        </div>
     </div>
     <div class="ts-modal-body">
       <div id="deduction-category-list-wrapper">
         <div class="ts-note" style="margin-bottom:12px;">Categories appear on the deduction form when the feature flag is enabled. "Uncategorised" is always available.</div>
         <div class="ts-list" id="deduction-category-list"></div>
         <div class="ts-empty-state ts-empty-state--inline" id="deduction-category-empty-state" style="display:none;">
-          <div class="ts-empty-state__icon">🗃️</div>
+          <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg></div>
           <p class="ts-empty-state__title">No custom categories</p>
           <p class="ts-empty-state__text">Add your first category to group similar deductions together.</p>
         </div>
       </div>
       <div id="deduction-category-form-wrapper" style="display:none;">
-        <div class="ts-grid ts-grid--gap-md" style="margin-top:0;">
-          <div class="ts-col-span-8">
+        <div class="ts-row">
+          <div class="ts-col">
             <label for="deduction-category-name">Name</label>
             <input id="deduction-category-name" placeholder="e.g. Tools, Office supplies" />
           </div>
-          <div class="ts-col-span-4" style="max-width:160px;">
-            <label for="deduction-category-color">Color</label>
-            <input type="color" id="deduction-category-color" value="#6b7280" />
+        </div>
+        <div class="ts-row" style="margin-top:16px;">
+          <div class="ts-col">
+            <label for="deduction-category-color">Colour</label>
+            <input type="color" id="deduction-category-color" value="#6b7280" class="ts-color-native" tabindex="-1" aria-hidden="true" />
+            <div class="ts-color-swatches" id="deduction-category-color-swatches" role="radiogroup" aria-label="Colour"></div>
+            <div class="ts-note">Reuses the same palette as hour types to keep visualisations consistent.</div>
+            <div class="ts-colorblind-warning" id="deduction-category-color-warning" style="display:none;">
+              <span class="ts-colorblind-warning-icon">!</span>
+              <span>This colour may be difficult to distinguish for colourblind users</span>
+            </div>
           </div>
         </div>
-        <div class="ts-note" style="margin-top:12px;">Colors reuse the same palette as hour types to keep visualisations consistent.</div>
       </div>
     </div>
     <div class="ts-modal-footer" id="deduction-category-list-footer">
       <button class="ghost" id="btn-close-deduction-categories">Close</button>
     </div>
     <div class="ts-modal-footer" id="deduction-category-form-footer" style="display:none;">
+      <!-- Delete lives in the editor (not on the list row) — subtle trash+underline, shown only when editing. -->
+      <button type="button" class="ts-modal-delete-link" id="btn-delete-deduction-category-inline" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        <span>Delete</span>
+      </button>
       <button class="ghost" id="btn-cancel-deduction-category">Cancel</button>
       <button id="btn-save-deduction-category">Save category</button>
     </div>
@@ -180,7 +217,6 @@
   <div class="ts-modal-content" style="max-width:600px;">
     <div class="ts-modal-header">
       <h3>Edit Recurring Deduction</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-note" style="margin-bottom:16px; padding:12px; background:var(--warning)20; border-left:3px solid var(--warning);">

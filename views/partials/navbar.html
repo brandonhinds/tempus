@@ -1,7 +1,10 @@
-<header class="ts-container" style="padding-top:20px; padding-bottom:8px;">
+<header class="ts-container ts-header" style="padding-top:14px; padding-bottom:8px;">
   <div class="ts-row" style="align-items:center;">
     <div style="display:flex; align-items:center; gap:10px;">
-      <button id="nav-home" class="ts-logo-link" type="button" title="Go to today" aria-label="Go to today">
+      <!-- Logo + wordmark are one button now: a single configurable shortcut (Settings → Tempus name
+           shortcut). The logo lives inside .ts-brand-link, so it inherits the button's colour and follows
+           the per-theme "colour the brand" toggle automatically (the SVG strokes with currentColor). -->
+      <button id="nav-brand" class="ts-brand-link" type="button" aria-label="Tempus shortcut" title="Tempus">
         <svg class="ts-logo-icon" viewBox="0 0 256 256" aria-hidden="true" focusable="false">
           <polyline
             points="220 20 36 20 128 153.44 196 56 92 56 220 240 36 240 96 152 128 204"
@@ -11,31 +14,80 @@
             stroke-linejoin="round"
           />
         </svg>
+        <span class="ts-brand-word">Tempus</span>
       </button>
-      <div style="font-size:20px; font-weight:700;">Tempus</div>
-      <div id="status" class="ts-badge" style="margin-left:10px;">Idle</div>
+      <!-- Standing-state indicator. Hidden at rest; JS reveals it (amber) only while a punch is open
+           ("On the clock"). No permanent "Idle" chip — transient feedback lives in toasts. -->
+      <div id="status" class="ts-badge" style="margin-left:11px; display:none;"></div>
     </div>
+
+    <!-- Primary places: horizontal nav. These are the screens you go to; gated/occasional screens and
+         config live behind the gear menu on the right. Buttons keep their original ids so the existing
+         click handlers (showPage) and gating logic still bind. -->
+    <nav class="ts-topnav" id="primary-nav" aria-label="Primary">
+      <button class="ts-topnav-link" id="nav-time" type="button">Time Entry</button>
+      <button class="ts-topnav-link" id="nav-annual-views" type="button">Annual View</button>
+    </nav>
+
     <div class="ts-nav" style="margin-left:auto; display:flex; align-items:center; gap:10px;">
-      <div id="nav-update-warning" class="ts-warning" style="display:none; font-size:12px; padding:4px 8px;">
-        Your Tempus instance is out of date and needs to be updated. See the About page for details.
+      <!-- Calendar / Agenda switch for the time-entry screen. Shown only on the time page (toggled by
+           showPage); the chosen view is remembered across sessions. -->
+      <div class="ts-view-toggle" id="time-view-toggle" role="tablist" aria-label="Time view" style="display:none;">
+        <button type="button" role="tab" id="view-agenda" class="ts-view-toggle-btn is-active" aria-selected="true">Agenda</button>
+        <button type="button" role="tab" id="view-calendar" class="ts-view-toggle-btn" aria-selected="false">Calendar</button>
       </div>
-      <button class="ghost ts-nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Open navigation">☰</button>
-      <div class="ts-nav-menu" id="nav-menu" hidden>
-        <button class="ghost" id="nav-time">Time Entry</button>
-        <button class="ghost" id="nav-annual-views">Annual Views</button>
+      <!-- "Welcome back" hidden for now (felt like clutter up top). Element kept so the display-name
+           editing logic still has its target; re-show by removing the display:none. -->
+      <div class="ts-welcome" id="welcome-wrap" style="display:none;">Welcome back, <span id="display-name" contenteditable="true" spellcheck="false" role="textbox" aria-label="Your display name" title="Click to edit your name"></span></div>
+      <!-- Gear menu: overflow for occasional/gated screens and configuration. Opens on click; the
+           wrapper + ids (nav-menu-wrap / nav-toggle / nav-menu) are preserved so the existing open/close,
+           outside-click and Escape handlers still work. -->
+      <div class="ts-nav-menu-wrap" id="nav-menu-wrap">
+      <button class="ts-nav-toggle ts-gear-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Settings &amp; more" aria-label="Settings and more">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <div class="ts-nav-menu" id="nav-menu">
+        <div class="ts-nav-section">Manage</div>
         <button class="ghost" id="nav-contracts">Contracts</button>
-        <button class="ghost" id="nav-rate-preview" style="display:none;">Rate Preview</button>
         <button class="ghost" id="nav-deductions">Deductions</button>
         <button class="ghost" id="nav-hour-types" style="display:none;">Hour Types</button>
+        <button class="ghost" id="nav-rate-preview" style="display:none;">Rate Preview</button>
         <button class="ghost" id="nav-bas" style="display:none;">BAS Reporting</button>
-        <button class="ghost" id="nav-assessments" style="display:none;">Assessments</button>
         <button class="ghost" id="nav-invoices" style="display:none;">Invoices</button>
+        <button class="ghost" id="nav-expenses" style="display:none;">Expenses</button>
+        <button class="ghost" id="nav-assessments" style="display:none;">Assessments</button>
+        <button class="ghost" id="nav-public-holidays" style="display:none;">Public Holidays</button>
+        <button class="ghost" id="nav-themes">Themes</button>
+        <!-- Tools: gated bulk/recurring/payroll/print actions. Moved out of the calendar toolbar so both
+             Calendar and Agenda reach them from one place. Each button's visibility is driven by its own
+             feature flag in updatePayrollHelperButtons(); the section label is shown/hidden by
+             updateCalendarToolsVisibility() — only present when ≥1 tool is enabled. -->
+        <div class="ts-nav-section ts-nav-section-toggle" id="nav-tools-section" role="button" tabindex="0" aria-expanded="false" aria-controls="nav-tools-group" style="display:none;">
+          <span>Tools</span>
+          <span class="ts-nav-section-count" id="nav-tools-count"></span>
+          <svg class="ts-nav-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="ts-nav-tools-group" id="nav-tools-group" hidden>
+          <button class="ghost" id="btn-manage-bulk" type="button" style="display:none;">Bulk entries</button>
+          <button class="ghost" id="btn-manage-recurring" type="button" style="display:none;">Recurring</button>
+          <button class="ghost" id="calendar-actual-income-btn" type="button" style="display:none;">Actual income</button>
+          <button class="ghost" id="calendar-print-monthly-btn" type="button" style="display:none;">Print month</button>
+          <button class="ghost" id="calendar-xero-helper" type="button" style="display:none;">Xero helper</button>
+          <button class="ghost" id="calendar-myob-helper" type="button" style="display:none;">MYOB helper</button>
+          <button class="ghost" id="btn-timesheet1-importer" type="button" style="display:none;">Import 1.0</button>
+          <button class="ghost" id="btn-mobile-view-shortcut" type="button" style="display:none;">Mobile view</button>
+        </div>
+        <div class="ts-nav-divider" aria-hidden="true"></div>
         <button class="ghost" id="nav-settings">Settings</button>
-        <button class="ghost" id="nav-docs" type="button" title="Open documentation (new tab)">Docs</button>
+        <button class="ghost" id="nav-docs" type="button">Help</button>
         <button class="ghost" id="nav-about">
           <span>About</span>
-          <span class="ts-badge warn" id="nav-about-update-badge" style="display:none; margin-left:6px; font-size:11px; padding:2px 6px;">Update</span>
+          <span class="ts-badge warn" id="nav-about-update-badge" style="display:none; margin-left:6px; font-size:calc(var(--font-size-xs) - 1px); padding:2px 6px;">Update</span>
         </button>
+      </div>
       </div>
     </div>
   </div>

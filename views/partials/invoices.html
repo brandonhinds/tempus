@@ -5,23 +5,23 @@
         <h3 style="margin:0;">Invoices</h3>
         <div class="ts-note" id="invoice-config-note" style="margin-top:4px; display:none;"></div>
       </div>
-      <button id="btn-invoice-new" class="ts-btn--primary">New invoice</button>
+      <button id="btn-invoice-new">New invoice</button>
     </div>
     <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
       <div style="display:flex; align-items:center; gap:8px;">
-        <label for="invoice-selector" style="font-size:12px; font-weight:600;">Invoice</label>
+        <label for="invoice-selector" style="font-size:var(--font-size-xs); font-weight:600;">Invoice</label>
         <select id="invoice-selector" style="min-width:220px;"></select>
       </div>
       <div class="ts-calendar-nav" style="display:flex; align-items:center; gap:8px;">
-        <button class="ghost" id="invoice-nav-prev" title="Previous Month">◀</button>
+        <button class="ghost" id="invoice-nav-prev" title="Previous Month" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
         <button class="ghost" id="invoice-nav-jump" style="min-width:140px; text-align:center; padding:10px 14px;">--</button>
-        <button class="ghost" id="invoice-nav-next" title="Next Month">▶</button>
+        <button class="ghost" id="invoice-nav-next" title="Next Month" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
       </div>
     </div>
   </div>
 
   <div id="invoice-detail-empty" class="ts-empty-state ts-empty-state--inline">
-    <div class="ts-empty-state__icon">🧾</div>
+    <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
     <p class="ts-empty-state__title">No invoice selected</p>
     <p class="ts-empty-state__text"><span id="invoice-detail-empty-text">Choose an invoice from the list or create a new one to begin.</span></p>
   </div>
@@ -30,7 +30,8 @@
       <div class="ts-row" style="gap:12px; margin-bottom:8px;">
         <div class="ts-col" style="flex:1 1 0;">
           <label for="invoice-detail-number">Invoice number</label>
-          <input id="invoice-detail-number" />
+          <input id="invoice-detail-number" readonly aria-describedby="invoice-number-note" />
+          <span class="ts-note" id="invoice-number-note">Assigned by Tempus</span>
         </div>
         <div class="ts-col" style="flex:1 1 0;">
           <label for="invoice-detail-date">Invoice date</label>
@@ -40,17 +41,27 @@
           <label for="invoice-detail-status">Status</label>
           <select id="invoice-detail-status">
             <option value="draft">Draft</option>
-            <option value="generated">Generated</option>
+            <option value="issued">Issued</option>
+            <option value="sent">Sent</option>
+            <option value="void">Void</option>
           </select>
         </div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-        <button id="btn-invoice-generate" class="ts-btn--primary">Publish invoice</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;"><button id="btn-invoice-recalculate" class="ghost">Recalculate draft</button><button id="btn-invoice-issue">Issue</button><button id="btn-invoice-generate" class="ghost">Issue &amp; create document</button></div>
         <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-invoice-payment" class="ghost">Add payment</button>
+          <button id="btn-invoice-revise" class="ghost">Revise</button>
+          <button id="btn-invoice-void" class="ghost danger">Void</button>
           <button id="btn-invoice-delete" class="ghost">Delete</button>
           <button id="btn-invoice-save">Save changes</button>
         </div>
       </div>
+      <form id="invoice-payment-form" style="display:none; gap:8px; align-items:end; margin-top:12px; flex-wrap:wrap;">
+        <div><label for="invoice-payment-date">Payment date</label><input id="invoice-payment-date" type="date" required></div>
+        <div><label for="invoice-payment-amount">Amount</label><input id="invoice-payment-amount" type="number" min="0.01" step="0.01" required></div>
+        <button type="submit">Record payment</button><button type="button" class="ghost" id="invoice-payment-cancel">Cancel</button>
+      </form>
     </div>
 
     <div class="ts-card ts-card--section">
@@ -117,7 +128,7 @@
       </div>
 
       <div id="invoice-line-empty" class="ts-empty-state ts-empty-state--inline" style="display:none; margin-bottom:8px;">
-        <div class="ts-empty-state__icon">📄</div>
+        <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div>
         <p class="ts-empty-state__title">No line items</p>
         <p class="ts-empty-state__text">Add your first line to build the invoice summary.</p>
       </div>
@@ -142,10 +153,10 @@
   <div class="ts-card ts-card--compact">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
       <div style="font-weight:600;">Default line items</div>
-      <button id="btn-invoice-default-new" class="ghost" style="font-size:12px;">Add default</button>
+      <button id="btn-invoice-default-new" class="ghost" style="font-size:var(--font-size-xs);">Add default</button>
     </div>
     <div id="invoice-default-empty" class="ts-empty-state ts-empty-state--inline" style="display:none;">
-      <div class="ts-empty-state__icon">⭐</div>
+      <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>
       <p class="ts-empty-state__title">No default line items</p>
       <p class="ts-empty-state__text">Save frequently used descriptions here so you can add them with one click.</p>
     </div>
@@ -209,13 +220,12 @@
   <div class="ts-modal-content" style="max-width:360px;">
     <div class="ts-modal-header">
       <h3>Select Month</h3>
-      <button class="ts-modal-close">&times;</button>
     </div>
     <div class="ts-modal-body">
       <div class="ts-month-picker-header">
-        <button class="ghost" id="invoice-month-picker-year-prev" title="Previous Year">◀</button>
+        <button class="ghost" id="invoice-month-picker-year-prev" title="Previous Year" aria-label="Previous year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
         <div class="ts-month-picker-year" id="invoice-month-picker-year-display">2024</div>
-        <button class="ghost" id="invoice-month-picker-year-next" title="Next Year">▶</button>
+        <button class="ghost" id="invoice-month-picker-year-next" title="Next Year" aria-label="Next year"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
       </div>
       <div class="ts-month-picker-grid" id="invoice-month-picker-grid"></div>
     </div>

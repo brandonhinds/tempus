@@ -1,180 +1,156 @@
 <section class="ts-card ts-card--wide" id="page-annual-views" style="display:none;">
   <div class="ts-toolbar">
     <div class="ts-stack ts-stack--sm">
-      <h3 style="margin:0;">Annual Views</h3>
+      <h3 style="margin:0;">Annual View</h3>
       <p class="ts-note" style="margin:0;">Comprehensive financial breakdown across the year with income, hours, and tax insights.</p>
     </div>
-    <div class="ts-toolbar-actions ts-gap-md" style="display:flex; align-items:center;">
+    <!-- Control bar sits on its own full-width row (never beside the title) so it stays put and
+         left-aligns with the title + KPI cards regardless of which controls are visible. -->
+    <div class="ts-toolbar-actions" style="display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; justify-content:flex-start; flex-basis:100%;">
+      <!-- Period: type + which year, unified on one track so they read as a single "period selector" -->
+      <div class="ts-av-period-group">
+        <div class="ts-av-seg" id="av-period-type" role="tablist" aria-label="Period type" title="Choose financial year, calendar year, or all time">
+          <button type="button" role="tab" aria-selected="true" id="av-period-financial">Financial year</button>
+          <button type="button" role="tab" aria-selected="false" id="av-period-calendar">Calendar year</button>
+          <button type="button" role="tab" aria-selected="false" id="av-period-alltime">All time</button>
+        </div>
+        <span id="av-year-control" style="display:inline-flex; align-items:center;"><span class="ts-av-period-div" aria-hidden="true"></span><select id="annual-year-select" aria-label="Year" data-select-inline data-select-width="172px" style="min-width:130px;"></select></span>
+      </div>
 
-      <button class="ghost" id="annual-contract-filter-toggle" style="display:none;" title="Filter by contract">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3h14M3 8h10M5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <!-- Figures basis: recorded-to-date vs projected full-year forecast. The whole group
+           (divider, caption and toggle) hides together when a year has nothing to project. -->
+      <span id="av-figures-control" style="display:inline-flex; align-items:center; gap:8px;">
+        <span class="ts-av-toolbar-div" aria-hidden="true"></span>
+        <span class="ts-av-figures-cap">Figures</span>
+        <div class="ts-av-seg" id="av-data-scope" role="tablist" aria-label="Figures: actual or projected" title="Show figures recorded to date, or the projected full-year forecast">
+          <button type="button" role="tab" aria-selected="false" id="av-scope-actual">Actual</button>
+          <button type="button" role="tab" aria-selected="true" id="av-scope-full">Projected</button>
+        </div>
+        <span class="ts-info-icon" id="av-projected-info" data-tip="Projected fills your unlogged future workdays — each contract's hours × rate, then tax and super. Skips weekends and public holidays. Contracts with an hours cap pace their remaining hours evenly to the end date, so any leave is already reflected.">i</span>
+      </span>
+
+      <!-- Contracts filter toggle: shown only when 2+ contracts overlap the period. Collapsed by
+           default; a count badge surfaces an active filter even while the chips are hidden. -->
+      <button type="button" id="annual-contract-toggle" class="ts-av-contract-toggle" style="display:none;" aria-expanded="false" aria-controls="annual-contract-filter-panel" title="Filter the annual view by contract">
+        <span>Contracts</span>
+        <span class="ts-av-contract-toggle-count" id="annual-contract-toggle-count" style="display:none;"></span>
+        <svg class="ts-av-contract-toggle-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <label class="ts-toggle">
-        <input type="checkbox" id="annual-year-type-toggle" />
-        <span class="ts-toggle-track">
-          <span class="ts-toggle-thumb"></span>
-        </span>
-      </label>
-      <span id="annual-year-type-label" class="ts-muted" style="font-size:13px;">Financial Year</span>
-      <label class="ts-select-label">
-        Year
-        <select id="annual-year-select" style="min-width:160px;"></select>
-      </label>
     </div>
   </div>
 
-  <!-- Contract Filter Panel -->
-  <div class="ts-annual-filter-panel" id="annual-contract-filter-panel" style="display:none;">
-    <div class="ts-flex-between" style="margin-bottom:8px;">
-      <span style="font-size:13px; font-weight:600;">Filter by Contract</span>
-      <button class="ghost" id="annual-filter-select-all" style="padding:4px 8px; font-size:12px;">Select All</button>
-    </div>
+  <!-- Contract chips — shown inline whenever more than one contract overlaps the period -->
+  <div class="ts-annual-contracts-row" id="annual-contract-filter-panel" style="display:none;">
     <div class="ts-annual-filter-list" id="annual-contract-filter-list"></div>
+    <button class="ghost" id="annual-filter-select-all" style="padding:4px 10px; font-size:var(--font-size-xs);">All</button>
   </div>
 
-  <!-- Summary Statistics -->
-  <div class="ts-annual-summary-grid">
-    <!-- Row 1 -->
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Gross Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-gross">--</div>
+  <!-- KPI cards -->
+  <div class="ts-av-kpi-grid" id="av-kpis"></div>
+
+  <!-- Secondary metric chips -->
+  <div class="ts-av-metric-grid" id="av-metrics"></div>
+
+  <!-- Hero income trend -->
+  <div class="ts-av-panel ts-av-section">
+    <div class="ts-av-head">
+      <div class="ts-av-title">
+        <h4>Income Trend</h4>
+        <p class="ts-note" id="av-hero-sub" style="margin-top:3px;">Cumulative gross vs net across the year. Dashed = projected months.</p>
+      </div>
+      <div style="display:flex; align-items:center; gap:var(--space-4); flex-wrap:wrap;">
+        <div class="ts-av-legend" id="av-legend"></div>
+        <div class="ts-av-seg" role="tablist" aria-label="Chart mode">
+          <button type="button" role="tab" aria-selected="false" id="av-mode-cum">Cumulative</button>
+          <button type="button" role="tab" aria-selected="true" id="av-mode-mon">Monthly</button>
+        </div>
+      </div>
     </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Total Superannuation</div>
-      <div class="ts-annual-stat-value" id="annual-stat-super">--</div>
-      <div id="annual-super-cap-warning" style="display:none; font-size:11px; margin-top:4px;"></div>
-    </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Total Tax</div>
-      <div class="ts-annual-stat-value" id="annual-stat-tax">--</div>
-    </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Net Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-net">--</div>
-    </div>
-    <!-- Row 2 -->
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Total Billable Hours</div>
-      <div class="ts-annual-stat-value" id="annual-stat-hours">--</div>
-    </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Avg Monthly Income</div>
-      <div class="ts-annual-stat-value" id="annual-stat-avg-monthly">--</div>
-    </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Effective Tax Rate</div>
-      <div class="ts-annual-stat-value" id="annual-stat-tax-rate">--</div>
-    </div>
-    <div class="ts-annual-stat-card">
-      <div class="ts-annual-stat-label">Effective Hourly Rate</div>
-      <div class="ts-annual-stat-value" id="annual-stat-hourly-rate">--</div>
-    </div>
+    <div class="ts-av-hero-chart"><canvas id="av-hero"></canvas></div>
   </div>
-  <!-- Detailed Income Breakdown Table -->
-  <div style="margin-bottom:24px;">
-    <h4 style="margin:0 0 12px 0; font-size:16px;">Income Breakdown</h4>
-    <div style="overflow-x:auto;">
-      <table class="ts-table" style="width:100%;">
-        <thead>
-          <tr>
-            <th style="text-align:left;">Category</th>
-            <th style="text-align:right;">Amount</th>
-            <th style="text-align:left; width:180px;">Percentage</th>
-          </tr>
-        </thead>
-        <tbody id="annual-income-breakdown-table">
-          <tr>
-            <td>Gross Income</td>
-            <td id="annual-breakdown-gross" style="text-align:right;">--</td>
-            <td id="annual-breakdown-gross-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-gross-bar" style="height:100%; background:linear-gradient(90deg, #3b82f6, #60a5fa); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-gross-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td>Superannuation (Guarantee + Extra)</td>
-            <td id="annual-breakdown-super" style="text-align:right;">--</td>
-            <td id="annual-breakdown-super-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-super-bar" style="height:100%; background:linear-gradient(90deg, #10b981, #34d399); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-super-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-          <tr id="annual-breakdown-super-lost-row" style="display:none;">
-            <td>Superannuation Lost (Deductions)</td>
-            <td id="annual-breakdown-super-lost" style="text-align:right;">--</td>
-            <td id="annual-breakdown-super-lost-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-super-lost-bar" style="height:100%; background:linear-gradient(90deg, #64748b, #94a3b8); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-super-lost-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td>Deductions</td>
-            <td id="annual-breakdown-deductions" style="text-align:right;">--</td>
-            <td id="annual-breakdown-deductions-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-deductions-bar" style="height:100%; background:linear-gradient(90deg, #f59e0b, #fbbf24); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-deductions-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td>Tax</td>
-            <td id="annual-breakdown-tax" style="text-align:right;">--</td>
-            <td id="annual-breakdown-tax-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-tax-bar" style="height:100%; background:linear-gradient(90deg, #ef4444, #f87171); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-tax-pct" style="font-size:13px; font-weight:500; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-          <tr style="font-weight:600; border-top:2px solid var(--border);">
-            <td>Net Income</td>
-            <td id="annual-breakdown-net" style="text-align:right;">--</td>
-            <td id="annual-breakdown-net-pct-cell" style="padding:8px 12px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div style="flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
-                  <div id="annual-breakdown-net-bar" style="height:100%; background:linear-gradient(90deg, #8b5cf6, #a78bfa); width:0%; transition:width 0.6s ease;"></div>
-                </div>
-                <span id="annual-breakdown-net-pct" style="font-size:13px; font-weight:600; min-width:45px; text-align:right;">--</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
+
+  <!-- Income breakdown: allocation bar (visual) over the full gross→net waterfall (detail) -->
+  <div class="ts-av-panel ts-av-section">
+    <div class="ts-av-head"><div class="ts-av-title">
+      <h4>Income Breakdown</h4>
+      <p class="ts-note" id="av-breakdown-sub" style="margin-top:3px;">Where your gross income goes</p>
+    </div></div>
+    <div class="ts-av-alloc-bar" id="av-alloc"></div>
+    <div class="ts-av-alloc-legend" id="av-alloc-legend"></div>
+    <div class="ts-av-alloc-supernote" id="av-alloc-supernote"></div>
+    <div style="overflow-x:auto; margin-top:var(--space-4);">
+      <table class="ts-av-table ts-av-table--static" id="av-breakdown-table">
+        <thead><tr><th>Category</th><th>Amount</th><th>% of gross</th></tr></thead>
+        <tbody id="av-breakdown-body"></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Monthly Income Chart -->
-  <div style="margin-bottom:24px;">
-    <h4 style="margin:0 0 4px 0; font-size:16px; font-weight:600;">Monthly Income Breakdown</h4>
-    <div class="ts-note" style="margin-bottom:8px;">Months with actual income data are shown with a border</div>
-    <div style="background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:24px; height:420px; position:relative; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-      <canvas id="annual-income-chart"></canvas>
+  <!-- Monthly table + insights feed -->
+  <div class="ts-av-two-col ts-av-section">
+    <div class="ts-av-rail" id="av-breakdown-rail">
+      <div class="ts-av-panel">
+        <div class="ts-av-head">
+          <div class="ts-av-title">
+            <h4>Monthly Breakdown</h4>
+            <p class="ts-note" id="av-month-legend" style="margin-top:3px;">
+              <span class="ts-av-state-dot actual"></span>Actual
+              &nbsp;&nbsp;<span class="ts-av-state-dot proj"></span>Projected · click a column to sort
+            </p>
+          </div>
+        </div>
+        <div class="ts-av-table-scroll">
+          <table class="ts-av-table" id="av-month-table">
+            <thead><tr>
+              <th data-key="month" tabindex="0" aria-sort="none">Month <span class="arrow">▼</span></th>
+              <th data-key="grossIncome" tabindex="0" aria-sort="none">Gross <span class="arrow">▼</span></th>
+              <th data-key="super" tabindex="0" aria-sort="none">Super <span class="arrow">▼</span></th>
+              <th data-key="tax" tabindex="0" aria-sort="none">Tax <span class="arrow">▼</span></th>
+              <th data-key="netIncome" tabindex="0" aria-sort="descending">Net <span class="arrow">▼</span></th>
+              <th data-key="totalHours" tabindex="0" aria-sort="none">Hours <span class="arrow">▼</span></th>
+              <th style="width:32px;"></th>
+            </tr></thead>
+            <tbody id="av-month-body"></tbody>
+            <tfoot id="av-month-foot"></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="ts-av-rail" id="av-insights-rail">
+      <div class="ts-av-panel">
+        <div class="ts-av-head"><div class="ts-av-title">
+          <h4>Insights</h4>
+          <p class="ts-note" style="margin-top:3px;">Auto-generated from this year's data</p>
+        </div></div>
+        <div class="ts-av-feed" id="av-feed"></div>
+      </div>
+      <div class="ts-av-panel">
+        <div class="ts-av-head"><div class="ts-av-title">
+          <h4>Hours by Type</h4>
+          <p class="ts-note" style="margin-top:3px;">Across the year</p>
+        </div></div>
+        <div class="ts-av-hours" id="av-hours"></div>
+      </div>
+      <div class="ts-av-panel" id="av-contract-panel" style="display:none;">
+        <div class="ts-av-head"><div class="ts-av-title">
+          <h4>Contract Hours Remaining</h4>
+          <p class="ts-note" id="av-contract-sub" style="margin-top:3px;">Billable hours used against each contract's total</p>
+        </div></div>
+        <div class="ts-av-contracts" id="av-contracts"></div>
+      </div>
     </div>
   </div>
 
-  <div id="annual-category-section" style="margin-bottom:24px; display:none;">
-    <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Expense Categories</h4>
-    <p class="ts-note" style="margin:0 0 12px 0;">Company expenses are shown excluding GST. Use the filters below to focus on specific categories.</p>
-    <div class="ts-annual-filter-panel" id="annual-category-filter-wrapper" style="display:none;">
-      <div class="ts-flex-between ts-flex-wrap" style="margin-bottom:8px;">
-        <span style="font-size:13px; font-weight:600;">Filter categories</span>
+  <!-- Expense Categories (only shown when the user has company expenses) -->
+  <div id="annual-category-section" class="ts-av-panel ts-av-section" style="display:none;">
+    <div class="ts-av-head"><div class="ts-av-title">
+      <h4>Deductions by category</h4>
+      <p class="ts-note" style="margin-top:3px;">Your deductions, grouped by category — company expenses are shown excluding GST. <span id="annual-category-summary"></span></p>
+    </div></div>
+    <div id="annual-category-filter-wrapper" style="display:none; margin-bottom:var(--space-4);">
+      <div class="ts-flex-between ts-flex-wrap" style="margin-bottom:10px;">
+        <span style="font-size:calc(var(--font-size-xs) + 1px); font-weight:600;">Filter categories</span>
         <div style="display:flex; gap:8px;">
           <button class="ghost small" id="annual-category-filter-select-all">Select all</button>
           <button class="ghost small" id="annual-category-filter-clear">Clear</button>
@@ -182,81 +158,48 @@
       </div>
       <div class="ts-annual-filter-list" id="annual-category-filter-list"></div>
     </div>
-    <div style="overflow-x:auto; background:var(--bg); border:1px solid var(--border); border-radius:12px;">
-      <table id="annual-category-table" style="width:100%; border-collapse:collapse; min-width:480px;">
-        <thead id="annual-category-table-head"></thead>
-        <tbody id="annual-category-table-body"></tbody>
-      </table>
+    <div class="ts-av-hours" id="annual-category-bars"></div>
+    <div id="annual-category-chart-wrap" style="margin-top:var(--space-5);">
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:600; margin-bottom:10px;">Monthly</div>
+      <div class="ts-av-cat-legend" id="annual-category-legend"></div>
+      <div style="position:relative; height:200px;"><canvas id="annual-category-chart"></canvas></div>
     </div>
     <div class="ts-empty-state ts-empty-state--inline" id="annual-category-empty" style="display:none; margin-top:12px;">
-      <div class="ts-empty-state__icon">🗂️</div>
+      <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
       <p class="ts-empty-state__title">No categories selected</p>
       <p class="ts-empty-state__text"><span id="annual-category-empty-text">Choose at least one category to see the breakdown.</span></p>
     </div>
   </div>
 
-  <!-- Charts Grid -->
-  <div class="ts-annual-chart-grid">
-    <!-- Income Distribution Pie Chart -->
-    <div>
-      <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Income Distribution</h4>
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:20px; height:380px; position:relative; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <canvas id="annual-income-pie-chart"></canvas>
-      </div>
-    </div>
-
-    <!-- Contract Split Pie Chart (shown when multiple contracts) -->
-    <div id="annual-contract-pie-container" style="display:none;">
-      <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Income by Contract</h4>
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:20px; height:380px; position:relative; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <canvas id="annual-contract-pie-chart"></canvas>
-      </div>
-    </div>
-
-    <!-- Total Hours Donut Chart -->
-    <div id="annual-total-hours-pie-container">
-      <h4 id="annual-total-hours-title" style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Hours by Month</h4>
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:20px; height:380px; position:relative; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <canvas id="annual-total-hours-pie-chart"></canvas>
-      </div>
-    </div>
-
-    <!-- Total Hours by Type Donut Chart -->
-    <div id="annual-total-hours-by-type-pie-container">
-      <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;">Hours by Type</h4>
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:20px; height:380px; position:relative; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <canvas id="annual-total-hours-by-type-pie-chart"></canvas>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tax Analysis Section -->
-  <div id="annual-tax-analysis" style="margin-bottom:24px;">
-    <h4 style="margin:0 0 12px 0; font-size:16px;">Tax Analysis</h4>
-    <div style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:16px;">
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+  <!-- Tax Analysis (preserved) -->
+  <div id="annual-tax-analysis" class="ts-av-panel ts-av-section">
+    <div class="ts-av-head"><div class="ts-av-title">
+      <h4>Tax Analysis</h4>
+      <p class="ts-note" style="margin-top:3px;">Estimated vs expected tax for the period.</p>
+    </div></div>
+      <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px 32px; padding:0 10px;">
         <div>
-          <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Estimated Tax Paid</div>
-          <div id="annual-tax-paid" style="font-size:20px; font-weight:600;">--</div>
+          <div style="font-size:var(--font-size-xs); color:var(--muted); margin-bottom:4px;">Estimated Tax Paid</div>
+          <div id="annual-tax-paid" style="font-size:var(--font-size-lg); font-weight:600; font-variant-numeric:tabular-nums;">--</div>
         </div>
         <div>
-          <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Expected Tax</div>
-          <div id="annual-tax-expected" style="font-size:20px; font-weight:600;">--</div>
+          <div style="font-size:var(--font-size-xs); color:var(--muted); margin-bottom:4px;">Expected Tax</div>
+          <div id="annual-tax-expected" style="font-size:var(--font-size-lg); font-weight:600; font-variant-numeric:tabular-nums;">--</div>
         </div>
-        <div>
-          <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Difference</div>
-          <div id="annual-tax-difference" style="font-size:20px; font-weight:600; cursor:help;" title="This analysis is only useful towards the end of the financial year. The tax you pay each pay period is calculated assuming that is your average for the entire year, while the expected tax field is based on the assumption that your taxable income is finished for the year.">--</div>
+        <div style="text-align:right;">
+          <div style="font-size:var(--font-size-xs); color:var(--muted); margin-bottom:4px;">Difference</div>
+          <div id="annual-tax-difference" style="font-size:var(--font-size-lg); font-weight:600; font-variant-numeric:tabular-nums; cursor:help;" title="This analysis is only useful towards the end of the financial year. The tax you pay each pay period is calculated assuming that is your average for the entire year, while the expected tax field is based on the assumption that your taxable income is finished for the year.">--</div>
+          <div id="annual-tax-difference-note" class="ts-note" style="margin-top:2px;"></div>
         </div>
       </div>
       <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
-        <p class="ts-note" style="margin:0;">Tax estimates based on Australian tax brackets for FY 2025/2026 including Medicare levy. Actual tax may vary based on offsets and other factors.</p>
+        <p class="ts-note" style="margin:0;">Estimates use Australian resident income-tax rates plus the 2% Medicare levy. Your actual tax may differ with offsets, the low-income offset, HELP/HECS and other factors.</p>
       </div>
-    </div>
   </div>
 
   <!-- Empty State -->
   <div class="ts-empty-state" id="annual-empty" style="display:none;">
-    <div class="ts-empty-state__icon">📅</div>
+    <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg></div>
     <p class="ts-empty-state__title">No annual data yet</p>
     <p class="ts-empty-state__text">Try choosing a different year or add entries for this period.</p>
   </div>
