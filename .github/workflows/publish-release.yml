@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out exact source commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -40,6 +40,9 @@ jobs:
           git worktree add --detach "$build_dir" "$GITHUB_SHA"
           "$build_dir/scripts/write-version.sh" --commit "$GITHUB_SHA" --timestamp "$published_at"
           "$build_dir/scripts/write-release-manifest.sh" --commit "$GITHUB_SHA" --timestamp "$published_at"
+          # The release branch is what the updater installs, so it ships without CI config. This also
+          # keeps GITHUB_TOKEN, which may never create or update workflow files, clear of that rule.
+          rm -rf "$build_dir/.github"
           echo "build_dir=$build_dir" >> "$GITHUB_OUTPUT"
           echo "published_at=$published_at" >> "$GITHUB_OUTPUT"
 
@@ -53,5 +56,11 @@ jobs:
           git -C "$BUILD_DIR" config user.name github-actions[bot]
           git -C "$BUILD_DIR" config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git -C "$BUILD_DIR" add --all
+          if git -C "$BUILD_DIR" diff --cached --quiet; then
+            echo "Release tree is identical to the published release; nothing to publish." >&2
+            exit 1
+          fi
           git -C "$BUILD_DIR" commit -m "Build stable release for $SOURCE_SHA"
-          git -C "$BUILD_DIR" push --force origin HEAD:release
+          # HEAD is a detached commit, not a ref, so the destination has to be fully qualified: git
+          # cannot guess "release" for a branch that does not exist on the remote yet.
+          git -C "$BUILD_DIR" push --force origin HEAD:refs/heads/release

@@ -755,8 +755,12 @@ test('release workflow gates force-publish on tests and contains no Apps Script 
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /contents: write/);
-  assert.ok(workflow.indexOf('npm test') < workflow.indexOf('push --force origin HEAD:release'));
+  // A detached HEAD is a commit, not a ref, so git cannot guess an unqualified destination branch.
+  assert.ok(workflow.indexOf('npm test') < workflow.indexOf('push --force origin HEAD:refs/heads/release'));
   assert.match(workflow, /git worktree add --detach/);
+  // GITHUB_TOKEN is never allowed to create or update workflow files, so a release tree that still
+  // carried .github/workflows would have the force-push rejected on every run.
+  assert.ok(workflow.indexOf('rm -rf "$build_dir/.github"') < workflow.indexOf('push --force origin HEAD:refs/heads/release'));
   assert.doesNotMatch(workflow, /clasp push|script\.google\.com|GOOGLE_/i);
 });
 
@@ -1661,6 +1665,59 @@ test('the diagnostic can be written to a sheet while an upgrade is still pending
   const before = built.spreadsheet.getSheetByName('_diagnostic').snapshot().length;
   built.context.writeExpenseLedgerDiagnostic();
   assert.equal(built.spreadsheet.getSheetByName('_diagnostic').snapshot().length, before);
+});
+
+test('the agenda week total honours the billable-only flag without touching the day rows', () => {
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+
+  // The flag exists, is grouped with the other time-entry flags, and is gated on hour types (with no
+  // hour types every hour is billable, so the toggle would do nothing).
+  assert.match(scripts, /weekly_hours_billable_only: \{\s*name: 'Weekly hours: count billable only'/);
+  assert.equal((scripts.match(/if \(key === 'weekly_hours_billable_only' && !getFeatureFlag\('hour_types'\)\) return;/g) || []).length, 2,
+    'both the settings workbench and the legacy flag list must hide the flag');
+
+  // The week total switches source; the day rows keep reading di.minutes either way.
+  assert.match(scripts, /weekMinutes \+= billableOnly \? di\.billableMinutes : di\.minutes;/);
+  assert.match(scripts, /const billableOnly = getFeatureFlag\('weekly_hours_billable_only'\);/);
+  assert.match(scripts, /const hasHours = info\.primary && info\.minutes > 0;/);
+
+  const context = {
+    state: {
+      entries: [
+        { date: '2026-09-01', hour_type_id: 'work-id', duration_minutes: 450 },
+        { date: '2026-09-01', hour_type_id: 'leave-id', duration_minutes: 60 },
+        { date: '2026-09-02', hour_type_id: 'leave-id', duration_minutes: 450 },
+        { date: '2026-09-03', duration_minutes: 120 }
+      ],
+      hourTypeMap: {
+        'work-id': { id: 'work-id', name: 'Work', contributes_to_income: true },
+        'leave-id': { id: 'leave-id', name: 'Annual leave', contributes_to_income: false }
+      },
+      publicHolidayMap: {}
+    },
+    getDefaultHourTypeId: () => 'work-id',
+    getFeatureFlag: () => true,
+    hourTypeContributesToIncome: (id) => {
+      const ht = context.state.hourTypeMap[id || 'work-id'];
+      return !!(ht && ht.contributes_to_income);
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(extractClientFunction(scripts, 'agendaDayInfo'), context);
+
+  // A mixed day reports both figures, so the week can narrow while the row still shows the full day.
+  const mixed = context.agendaDayInfo('2026-09-01');
+  assert.equal(mixed.minutes, 510);
+  assert.equal(mixed.billableMinutes, 450);
+  // A leave-only day drops out of a billable-only week entirely.
+  const leaveOnly = context.agendaDayInfo('2026-09-02');
+  assert.equal(leaveOnly.minutes, 450);
+  assert.equal(leaveOnly.billableMinutes, 0);
+  // An entry with no hour type falls back to the default type, exactly as `minutes` does.
+  const untyped = context.agendaDayInfo('2026-09-03');
+  assert.equal(untyped.billableMinutes, 120);
+  // An empty day is 0, not NaN.
+  assert.equal(context.agendaDayInfo('2026-09-04').billableMinutes, 0);
 });
 
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');

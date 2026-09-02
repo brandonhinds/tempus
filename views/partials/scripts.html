@@ -8858,6 +8858,12 @@ function updateDeductionFormVisibility() {
       order: 230,
       group: 'time_entries'
     },
+    weekly_hours_billable_only: {
+      name: 'Weekly hours: count billable only',
+      description: 'Narrows the weekly total and progress bar on the Agenda view to hour types that contribute to income. Off (the default) counts every hour type logged that week, including leave.',
+      order: 235,
+      group: 'time_entries'
+    },
     enable_public_holidays: {
       name: 'Enable automatic public holiday display',
       description: 'Automatically overlays Australian public holidays on the calendar view and keeps them in sync.',
@@ -10080,6 +10086,8 @@ function updateDeductionFormVisibility() {
     const out = {};
     const add = (key, cfg, meta) => {
       if ((key === 'enable_company_quarterly_bas' || key === 'is_sole_trader') && !state.companyTrackingEnabled) return;
+      // Without hour types every hour is billable, so a billable-only weekly total would be a no-op toggle.
+      if (key === 'weekly_hours_billable_only' && !getFeatureFlag('hour_types')) return;
       out[key] = {
         key: key,
         name: (cfg && cfg.name) || (meta && meta.name) || key,
@@ -16185,6 +16193,8 @@ function updateDeductionFormVisibility() {
       const shouldHideCompanyDependent = (key === 'enable_company_quarterly_bas' || key === 'is_sole_trader')
         && !state.companyTrackingEnabled;
       if (shouldHideCompanyDependent) return;
+      // Without hour types every hour is billable, so a billable-only weekly total would be a no-op toggle.
+      if (key === 'weekly_hours_billable_only' && !getFeatureFlag('hour_types')) return;
 
       const groupId = config.group || 'other';
       const group = ensureGroup(groupId);
@@ -24847,6 +24857,11 @@ function getCachedIncomeSummary(monthKey) {
   function agendaDayInfo(iso) {
     const dayEntries = state.entries.filter(e => e.date === iso);
     const minutes = dayEntries.reduce((a, e) => a + (Number(e.duration_minutes) || 0), 0);
+    // Same "billable" definition the Where-your-hours-go breakdown uses: hour types that contribute to
+    // income. Kept alongside `minutes` (never in place of it) so the day rows still show everything
+    // logged while the week total can be narrowed by the weekly_hours_billable_only flag.
+    const billableMinutes = dayEntries.reduce((a, e) =>
+      a + (hourTypeContributesToIncome(e.hour_type_id) ? (Number(e.duration_minutes) || 0) : 0), 0);
     // A punch that's clocked in but not out yet — mirrors the calendar cell's amber "open" marker.
     const hasOpenPunch = dayEntries.some(e => (Number(e.open_punch_count) || 0) > 0);
     const holiday = state.publicHolidayMap[iso];
@@ -24863,7 +24878,7 @@ function getCachedIncomeSummary(monthKey) {
       color = (ht && ht.color) ? ht.color : 'var(--primary)';
       isIncome = hourTypeContributesToIncome(primary.hour_type_id);
     }
-    return { dayEntries, primary, minutes, hasOpenPunch, hasHoliday, holidayName: hasHoliday ? (holiday.localName || holiday.name || '') : '', typeLabel, color, isIncome, isDefaultType: primary ? ((primary.hour_type_id || getDefaultHourTypeId()) === getDefaultHourTypeId()) : true };
+    return { dayEntries, primary, minutes, billableMinutes, hasOpenPunch, hasHoliday, holidayName: hasHoliday ? (holiday.localName || holiday.name || '') : '', typeLabel, color, isIncome, isDefaultType: primary ? ((primary.hour_type_id || getDefaultHourTypeId()) === getDefaultHourTypeId()) : true };
   }
 
   function refreshAgendaIfActive() {
@@ -25126,15 +25141,19 @@ function getCachedIncomeSummary(monthKey) {
       ? (mon.getDate() + ' – ' + sun.getDate() + ' ' + monthName(sun))
       : (mon.getDate() + ' ' + mon.toLocaleDateString(undefined, { month: 'short' }) + ' – ' + sun.getDate() + ' ' + sun.toLocaleDateString(undefined, { month: 'short' }));
     if (els.weekTitle) els.weekTitle.textContent = 'Week of ' + weekLabel;
+    // "Weekly hours: count billable only" narrows this figure (and the bar below it) to hour types that
+    // contribute to income. Off by default, where every hour type logged in the week counts. The day rows
+    // are deliberately untouched either way — they always show what was actually logged that day.
+    const billableOnly = getFeatureFlag('weekly_hours_billable_only');
     let weekMinutes = 0, weekWorkdays = 0;
     for (let i = 0; i < 7; i++) {
       const d = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + i);
       const di = agendaDayInfo(isoDate(d));
-      weekMinutes += di.minutes;
+      weekMinutes += billableOnly ? di.billableMinutes : di.minutes;
       const dow = d.getDay();
       if (dow !== 0 && dow !== 6 && !di.hasHoliday) weekWorkdays++;
     }
-    if (els.weekSub) els.weekSub.textContent = formatHours(roundDuration(weekMinutes)) + ' hrs logged this week';
+    if (els.weekSub) els.weekSub.textContent = formatHours(roundDuration(weekMinutes)) + (billableOnly ? ' billable hrs this week' : ' hrs logged this week');
     // Weekly progress vs the configured per-workday target (weekends + public holidays excluded).
     const weekTargetMins = weekWorkdays * getTargetHoursPerDay() * 60;
     const progEl = document.getElementById('agenda-week-progress');
@@ -25145,7 +25164,7 @@ function getCachedIncomeSummary(monthKey) {
         progEl.style.display = '';
         progFill.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
         progFill.classList.toggle('is-complete', weekMinutes >= weekTargetMins);
-        progEl.title = formatHours(roundDuration(weekMinutes)) + ' of ' + formatHours(weekTargetMins) + ' hrs target (' + Math.round(ratio * 100) + '%)';
+        progEl.title = formatHours(roundDuration(weekMinutes)) + (billableOnly ? ' billable' : '') + ' of ' + formatHours(weekTargetMins) + ' hrs target (' + Math.round(ratio * 100) + '%)';
       } else {
         progEl.style.display = 'none';
       }
