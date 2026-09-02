@@ -12,9 +12,17 @@ function basPeriodRange_(payload) {
   } else {
     var month = Number(payload.month);
     if (!isFinite(month) || month < 0 || month > 11) throw new Error('Month must be between 0 and 11.');
-    startMonth = month;
+    // `month` is a calendar month index, and a financial year spans two calendar years. Jul-Dec belong to
+    // the FY's first calendar year, Jan-Jun to its second, so Jan-Jun are offset past 12 to reuse the same
+    // convention the quarterly branch above relies on. Without the offset every Jan-Jun month resolved to
+    // the previous calendar year, which made those six months of each FY unreachable and silently returned
+    // figures from 12 months earlier.
+    startMonth = month < 6 ? month + 12 : month;
   }
-  var startYear = startMonth >= 12 ? financialYear : financialYear - 1;
+  // `financial_year` is the financial year's START year: 2026 means FY 2026-27, matching
+  // financialYearLabel() in the client and the financial_year already persisted on bas_submissions.
+  // startMonth 6-11 are Jul-Dec of that year; 12-17 are Jan-Jun of the next.
+  var startYear = startMonth >= 12 ? financialYear + 1 : financialYear;
   var normalizedMonth = startMonth % 12;
   var monthCount = periodType === 'quarterly' ? 3 : 1;
   var start = new Date(Date.UTC(startYear, normalizedMonth, 1, 12));
@@ -91,17 +99,29 @@ function scheduledExpenseForecastForPeriod_(from, to) {
   return roundMoney_(total);
 }
 
-function api_calculateBasPeriod(payload) {
-  var range = basPeriodRange_(payload || {});
-  var basis = payload && payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
+/**
+ * The four BAS actuals for a date range. Extracted so the monthly transfer split reconciles with the BAS
+ * figures by construction rather than by two implementations agreeing — sales are GST-INCLUSIVE here, as
+ * G1 is reported.
+ */
+function basActualsForRange_(basis, from, to) {
   var sales = 0, salesGst = 0;
   listInvoicesInternal().forEach(function(invoice) {
     if (invoice.status === 'void' || invoice.status === 'draft') return;
-    var allocation = basis === 'cash' ? invoiceCashAllocationForPeriod_(invoice, range.from, range.to) : invoiceAccrualAllocationForPeriod_(invoice, range.from, range.to);
+    var allocation = basis === 'cash' ? invoiceCashAllocationForPeriod_(invoice, from, to) : invoiceAccrualAllocationForPeriod_(invoice, from, to);
     sales += allocation.sales;
     salesGst += allocation.gst;
   });
-  var expenses = expenseActualForPeriod_(basis, range.from, range.to);
+  var expenses = expenseActualForPeriod_(basis, from, to);
+  return { g1_total_sales: roundMoney_(sales), gst_on_sales: roundMoney_(salesGst), purchases: expenses.purchases, gst_on_purchases: expenses.gst };
+}
+
+function api_calculateBasPeriod(payload) {
+  var range = basPeriodRange_(payload || {});
+  var basis = payload && payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
+  var actuals = basActualsForRange_(basis, range.from, range.to);
+  var sales = actuals.g1_total_sales, salesGst = actuals.gst_on_sales;
+  var expenses = { purchases: actuals.purchases, gst: actuals.gst_on_purchases };
   var forecastIncome = timesheetForecastForPeriod_(range.from, range.to);
   var forecastExpenses = scheduledExpenseForecastForPeriod_(range.from, range.to);
   var transactions = api_listExpenseTransactions({ from: range.from, to: range.to });

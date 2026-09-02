@@ -130,7 +130,7 @@
     const target = document.getElementById('expense-report');
     const fyInput = document.getElementById('expense-report-fy');
     if (!target || !fyInput) return;
-    if (!fyInput.value) { const now = new Date(); fyInput.value = now.getMonth() >= 6 ? now.getFullYear() + 1 : now.getFullYear(); }
+    if (!fyInput.value) { fyInput.value = financialYearStartYear(new Date()); }
     const report = await operationsApi('api_getExpenseReport', { financial_year:Number(fyInput.value) });
     target.replaceChildren();
     [['Actual', report.totals.actual], ['Scheduled', report.totals.scheduled], ['Unreconciled', report.totals.unreconciled], ['GST creditable', report.totals.gst_creditable], ['Non-creditable GST', report.totals.non_creditable_gst]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
@@ -229,7 +229,7 @@
     const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
     if(basisSelect)basisSelect.value=basis;
     const now=new Date();
-    const fy=Number(state.basCurrentFy)||(now.getMonth()>=6?now.getFullYear()+1:now.getFullYear());
+    const fy=Number(state.basCurrentFy)||financialYearStartYear(now);
     const calendarMonth=now.getMonth();
     const quarter=Math.floor(((calendarMonth+6)%12)/3)+1;
     const payload={financial_year:fy,period_type:state.companyBasQuarterly?'quarterly':'monthly',quarter:quarter,month:calendarMonth,accounting_basis:basis};
@@ -243,5 +243,76 @@
       target.textContent=error.message||'Could not calculate ledger actuals.';
     }
   }
-  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();});
+  function transferSplitEnabled() {
+    const flag=(state.featureFlags&&state.featureFlags.enable_assessments)||(typeof DEFAULT_FEATURE_FLAGS!=='undefined'&&DEFAULT_FEATURE_FLAGS.enable_assessments)||{enabled:false};
+    return !!flag.enabled;
+  }
+
+  function transferSplitCell(row,value,options) {
+    const cell=document.createElement('td');
+    cell.style.textAlign=(options&&options.align)||'right';
+    cell.textContent=(options&&options.text)!==undefined?options.text:operationsMoney(value);
+    // A negative transfer means money comes back out of that account, so it must not read as a payment in.
+    if((options&&options.text)===undefined&&Number(value)<0) cell.classList.add('ts-amount--negative');
+    if(options&&options.strong) cell.style.fontWeight='600';
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function renderTransferSplitRow(target,month,isTotal) {
+    const row=document.createElement('tr');
+    transferSplitCell(row,null,{text:isTotal?'Total':month.label,align:'left',strong:isTotal});
+    transferSplitCell(row,null,{text:isTotal?'':'Q'+month.bas_quarter,align:'left'});
+    [month.received,month.expenses_paid,month.net_gst,month.super,month.tax,month.to_business_account,month.to_offset]
+      .forEach((value,index)=>transferSplitCell(row,value,{strong:isTotal||index>=5}));
+    target.appendChild(row);
+  }
+
+  async function renderTransferSplit() {
+    const section=document.getElementById('bas-transfer-split-section');
+    if(!section) return;
+    if(!transferSplitEnabled()){ section.style.display='none'; return; }
+    const body=document.getElementById('bas-transfer-split-body');
+    const foot=document.getElementById('bas-transfer-split-foot');
+    const basisSelect=document.getElementById('bas-accounting-basis');
+    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    const now=new Date();
+    const fy=Number(state.basCurrentFy)||financialYearStartYear(now);
+    section.style.display='block';
+    try {
+      const report=await operationsApi('api_getMonthlyTransferSplit',{financial_year:fy,accounting_basis:basis});
+      operationsState.transferSplitFy=fy;
+      body.replaceChildren();
+      report.months.forEach((month)=>renderTransferSplitRow(body,month,false));
+      foot.replaceChildren();
+      renderTransferSplitRow(foot,report.totals,true);
+      const method=document.getElementById('bas-transfer-split-method');
+      method.textContent=report.tax_method==='instalment_rate'
+        ? `Tax set aside using your PAYG instalment rate of ${(report.instalment_rate*100).toFixed(2)}% on gross business income. Sole trader: tax applies to profit, and super is deducted before it.`
+        : 'Tax set aside from year-to-date profit at the annual rates, revised each month. A provisioning estimate, not an ATO assessment.';
+      const warnings=document.getElementById('bas-transfer-split-warnings');
+      warnings.replaceChildren();
+      (report.warnings||[]).concat(report.tax_table&&report.tax_table.warning?[report.tax_table.warning]:[])
+        .forEach((text)=>ledgerText(warnings,'ts-note',text));
+    } catch(error) {
+      body.replaceChildren();
+      foot.replaceChildren();
+      operationsStatus('Could not load the monthly transfer split: '+(error&&error.message?error.message:error),'warn');
+    }
+  }
+
+  document.getElementById('bas-transfer-split-export')?.addEventListener('click',async()=>{
+    const fy=operationsState.transferSplitFy;
+    if(!fy) return;
+    const basisSelect=document.getElementById('bas-accounting-basis');
+    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    const result=await operationsApi('api_exportMonthlyTransferSplitCsv',{financial_year:fy,accounting_basis:basis});
+    const link=document.createElement('a');
+    link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'}));
+    link.download=result.filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+
+  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();renderTransferSplit();});
 </script>

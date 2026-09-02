@@ -82,3 +82,13 @@ function sha256Hex_(value) {
   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8);
   return digest.map(function(byte) { var normalized = byte < 0 ? byte + 256 : byte; return ('0' + normalized.toString(16)).slice(-2); }).join('');
 }
+
+/**
+ * 'fy2026' is ambiguous about which half of a financial year it means, so exported filenames spell the
+ * span out. Takes the financial year's START year, as every financial_year in this codebase does.
+ */
+function financialYearLabelSlug_(financialYearStart) {
+  var start = Number(financialYearStart);
+  if (!isFinite(start)) return String(financialYearStart || '');
+  return start + '-' + String((start + 1) % 100).padStart(2, '0');
+}

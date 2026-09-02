@@ -414,8 +414,8 @@ test('BAS fixtures separate cash, accrual, prepayment, void, and unreconciled GS
   context.scheduledExpenseForecastForPeriod_ = () => 0;
   context.sha256Hex_ = () => 'fixture-hash';
   context.stableJsonStringify_ = JSON.stringify;
-  const cash = context.api_calculateBasPeriod({ financial_year:2027, period_type:'monthly', month:6, accounting_basis:'cash' });
-  const accrual = context.api_calculateBasPeriod({ financial_year:2027, period_type:'monthly', month:6, accounting_basis:'accrual' });
+  const cash = context.api_calculateBasPeriod({ financial_year:2026, period_type:'monthly', month:6, accounting_basis:'cash' });
+  const accrual = context.api_calculateBasPeriod({ financial_year:2026, period_type:'monthly', month:6, accounting_basis:'accrual' });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(cash.actual)), { g1_total_sales:275, gst_on_sales:25, purchases:105, gst_on_purchases:5 });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(accrual.actual)), { g1_total_sales:330, gst_on_sales:30, purchases:215, gst_on_purchases:10 });
   assert.ok(accrual.warnings.some((warning) => warning.includes('excluded from GST credits')));
@@ -849,6 +849,818 @@ test('public holiday time population adopts an existing date and hour type under
   assert.equal(added.entry.source_type, 'public_holiday');
   assert.equal(added.entry.source_occurrence_key, '2026-01-02');
   assert.deepStrictEqual(Array.from(added.entry.punches), []);
+});
+
+// Regression: the source-identity migration keyed every derived row on its date and deleted collisions,
+// which destroyed assessment actual-hours tracking rows sharing a date with the assessment's billable
+// row. 13 rows (86.5 tracked hours) were lost on the live sheet this way.
+const ASSESSMENT_LEGACY_HEADERS = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'assessment_id'];
+function assessmentLegacyRow(id, date, minutes, hourTypeId, createdAt) {
+  return [id, date, minutes, 'contract-1', createdAt, '[]', 'basic', hourTypeId, '', 'assess-1'];
+}
+function assessmentMigrationContext(sheets) {
+  const built = createAppsScriptContext(sheets);
+  built.context.assertMigrationsSettled_ = () => true;
+  built.context.getDefaultHourTypeId = () => 'hourtype-work';
+  built.context.api_getSettings = () => ({});
+  built.context.cacheClearPrefix = () => {};
+  load(built.context, 'backend/integrity.js');
+  load(built.context, 'backend/sheets.ts.js');
+  load(built.context, 'backend/entries.js');
+  load(built.context, 'backend/migrations.js');
+  // Migrations run inside api_runUpgrade's context, which is what lets them write to the sheet.
+  built.context.MIGRATION_CONTEXT.active = true;
+  return built;
+}
+function timesheetSnapshot(spreadsheet) {
+  const rows = spreadsheet.getSheetByName('timesheet_entries').snapshot();
+  const headers = rows[0];
+  return rows.slice(1).filter((row) => row[headers.indexOf('id')] !== '').map((row) => ({
+    id: row[headers.indexOf('id')],
+    date: row[headers.indexOf('date')],
+    duration_minutes: row[headers.indexOf('duration_minutes')],
+    hour_type_id: row[headers.indexOf('hour_type_id')],
+    source_type: row[headers.indexOf('source_type')],
+    source_id: row[headers.indexOf('source_id')],
+    occurrence: row[headers.indexOf('source_occurrence_key')]
+  }));
+}
+
+test('source identity migration keeps every assessment tracking row that shares a date with the billable row', () => {
+  const { context, spreadsheet } = assessmentMigrationContext({
+    timesheet_entries: [
+      ASSESSMENT_LEGACY_HEADERS,
+      assessmentLegacyRow('billable', '2026-08-17', 60, 'hourtype-work', '2026-08-17T12:25:42Z'),
+      assessmentLegacyRow('track-same-day', '2026-08-17', 360, 'hourtype-track', '2026-08-17T12:26:06Z'),
+      assessmentLegacyRow('track-second-same-day', '2026-08-17', 90, 'hourtype-track', '2026-08-17T12:27:00Z'),
+      assessmentLegacyRow('track-other-day', '2026-08-18', 180, 'hourtype-track', '2026-08-19T12:48:22Z')
+    ]
+  });
+  context.migrationTimesheetSources_();
+  const rows = timesheetSnapshot(spreadsheet);
+  assert.deepStrictEqual(rows.map((row) => row.id).sort(), ['billable', 'track-other-day', 'track-same-day', 'track-second-same-day']);
+  assert.equal(rows.reduce((sum, row) => sum + Number(row.duration_minutes), 0), 690);
+  rows.forEach((row) => {
+    assert.equal(row.source_type, 'assessment');
+    assert.equal(row.source_id, 'assess-1');
+    assert.equal(row.occurrence, row.id === 'billable' ? 'billable' : '');
+  });
+  // Re-running must not re-key or drop anything.
+  context.migrationTimesheetSources_();
+  assert.deepStrictEqual(timesheetSnapshot(spreadsheet), rows);
+});
+
+test('source identity migration retains rather than deletes a genuine recurring-source collision', () => {
+  const headers = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id'];
+  const { context, spreadsheet } = assessmentMigrationContext({
+    timesheet_entries: [
+      headers,
+      ['rec-a', '2026-08-17', 450, 'contract-1', '2026-08-17T01:00:00Z', '[]', 'basic', 'hourtype-work', 'rule-1'],
+      ['rec-b', '2026-08-17', 120, 'contract-1', '2026-08-17T02:00:00Z', '[]', 'basic', 'hourtype-work', 'rule-1']
+    ]
+  });
+  context.migrationTimesheetSources_();
+  const rows = timesheetSnapshot(spreadsheet);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].occurrence, '2026-08-17');
+  assert.equal(rows[1].occurrence, '', 'the colliding row keeps its data and loses only the wrong derived key');
+  const archive = spreadsheet.getSheetByName('migration_archive').snapshot();
+  assert.equal(archive.length, 2);
+  assert.equal(archive[1][archive[0].indexOf('reason')], 'derived_source_collision_retained');
+});
+
+test('repair migration restores the archived tracking rows and re-keys the survivors', () => {
+  const canonical = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'];
+  const deleted = { id: 'track-same-day', date: '2026-08-17', duration_minutes: 360, contract_id: 'contract-1', created_at: '2026-08-17T12:26:06Z', punches_json: '[]', entry_type: 'basic', hour_type_id: 'hourtype-track', recurrence_id: '', note: '', assessment_id: 'assess-1', source_type: 'assessment', source_id: 'assess-1', source_occurrence_key: '2026-08-17', client_request_id: '' };
+  const { context, spreadsheet } = assessmentMigrationContext({
+    timesheet_entries: [
+      canonical,
+      ['billable', '2026-08-17', 60, 'contract-1', '2026-08-17T12:25:42Z', '[]', 'basic', 'hourtype-work', '', '', 'assess-1', 'assessment', 'assess-1', '2026-08-17', ''],
+      ['track-other-day', '2026-08-18', 180, 'contract-1', '2026-08-19T12:48:22Z', '[]', 'basic', 'hourtype-track', '', '', 'assess-1', 'assessment', 'assess-1', '2026-08-18', '']
+    ],
+    migration_archive: [
+      ['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'],
+      ['archive-1', '2026-08-source-aware-timesheet-entries', 'timesheet_entries', JSON.stringify(deleted), 'duplicate_derived_source', '2026-08-20T00:00:00Z'],
+      ['archive-2', '2026-08-company-expense-ledger', 'deductions', '{"id":"unrelated"}', 'migrated_to_expense_rule', '2026-08-20T00:00:00Z']
+    ]
+  });
+  context.migrationRepairAssessmentEntryIdentity_();
+  const rows = timesheetSnapshot(spreadsheet);
+  assert.deepStrictEqual(rows.map((row) => row.id).sort(), ['billable', 'track-other-day', 'track-same-day']);
+  const restored = rows.filter((row) => row.id === 'track-same-day')[0];
+  assert.equal(restored.duration_minutes, 360, 'the lost tracked hours come back intact');
+  assert.equal(restored.date, '2026-08-17');
+  assert.equal(restored.hour_type_id, 'hourtype-track');
+  assert.equal(restored.occurrence, '');
+  assert.equal(rows.filter((row) => row.id === 'billable')[0].occurrence, 'billable');
+  assert.equal(rows.filter((row) => row.id === 'track-other-day')[0].occurrence, '', 'a survivor keyed on its date is re-keyed as tracking');
+  context.migrationRepairAssessmentEntryIdentity_();
+  assert.deepStrictEqual(timesheetSnapshot(spreadsheet), rows, 'restore is idempotent');
+});
+
+test('assessment time entries accept many rows per day while the billable row stays unique', () => {
+  const canonical = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'];
+  const { context, spreadsheet } = createAppsScriptContext({ timesheet_entries: [canonical] });
+  context.assertMigrationsSettled_ = () => true;
+  context.getDefaultHourTypeId = () => 'hourtype-work';
+  context.api_getSettings = () => ({});
+  context.cacheClearPrefix = () => {};
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+
+  const tracking = { source_type: 'assessment', source_id: 'assess-1', assessment_id: 'assess-1', source_occurrence_key: '', hour_type_id: 'hourtype-track', contract_id: 'contract-1', entry_type: 'basic' };
+  const first = context.api_addEntry(Object.assign({}, tracking, { date: '2026-08-17', duration_minutes: 360 }));
+  const second = context.api_addEntry(Object.assign({}, tracking, { date: '2026-08-17', duration_minutes: 90 }));
+  assert.equal(first.success, true);
+  assert.equal(second.success, true, 'a second tracking row on the same day is not a duplicate');
+
+  const billable = { source_type: 'assessment', source_id: 'assess-1', assessment_id: 'assess-1', source_occurrence_key: 'billable', hour_type_id: 'hourtype-work', contract_id: 'contract-1', entry_type: 'basic', date: '2026-08-17', duration_minutes: 60 };
+  assert.equal(context.api_addEntry(billable).success, true);
+  const repeat = context.api_addEntry(Object.assign({}, billable, { date: '2026-09-01' }));
+  assert.equal(repeat.error, 'duplicate_entry', 'the billable row is unique per assessment regardless of date');
+  assert.equal(repeat.entry.id, spreadsheet.getSheetByName('timesheet_entries').snapshot()[3][0]);
+  assert.equal(spreadsheet.getSheetByName('timesheet_entries').getLastRow(), 4);
+});
+
+test('recovery report counts the archived rows before the repair runs and none after', () => {
+  const canonical = ['id', 'date', 'duration_minutes', 'contract_id', 'created_at', 'punches_json', 'entry_type', 'hour_type_id', 'recurrence_id', 'note', 'assessment_id', 'source_type', 'source_id', 'source_occurrence_key', 'client_request_id'];
+  const deleted = { id: 'track-same-day', date: '2026-08-17', duration_minutes: 360, contract_id: 'contract-1', created_at: '2026-08-17T12:26:06Z', punches_json: '[]', entry_type: 'basic', hour_type_id: 'hourtype-track', recurrence_id: '', note: '', assessment_id: 'assess-1', source_type: 'assessment', source_id: 'assess-1', source_occurrence_key: '2026-08-17', client_request_id: '' };
+  const { context } = assessmentMigrationContext({
+    timesheet_entries: [
+      canonical,
+      ['billable', '2026-08-17', 60, 'contract-1', '2026-08-17T12:25:42Z', '[]', 'basic', 'hourtype-work', '', '', 'assess-1', 'assessment', 'assess-1', '2026-08-17', '']
+    ],
+    migration_archive: [
+      ['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'],
+      ['archive-1', '2026-08-source-aware-timesheet-entries', 'timesheet_entries', JSON.stringify(deleted), 'duplicate_derived_source', '2026-08-20T00:00:00Z']
+    ]
+  });
+  const before = context.api_getTimesheetRecoveryReport();
+  assert.equal(before.entry_rows, 1);
+  assert.equal(before.entry_minutes, 60);
+  assert.equal(before.archived, 1);
+  assert.equal(before.recoverable, 1);
+  assert.equal(before.recoverable_minutes, 360);
+  assert.equal(before.rows[0].id, 'track-same-day');
+
+  context.migrationRepairAssessmentEntryIdentity_();
+  const after = context.api_getTimesheetRecoveryReport();
+  assert.equal(after.entry_rows, 2);
+  assert.equal(after.entry_minutes, 420, 'the recovered minutes land in the sheet');
+  assert.equal(after.recoverable, 0);
+  assert.equal(after.already_present, 1);
+});
+
+// ---- sole trader tax provisioning and the monthly transfer split ----
+
+function taxContext() {
+  const { context } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  context.api_getSettings = () => ({});
+  context.listBasSubmissionsInternal = () => [];
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/tax.js');
+  return context;
+}
+
+test('annual individual tax applies progressive brackets, the medicare shade-in and the 2026-27 rate cut', () => {
+  const context = taxContext();
+  assert.equal(context.annualIncomeTax(18200, 2024), 0, 'tax free threshold');
+  // 2024-25: 16% on 45000-18200 = 4288, plus 2% medicare on 45000 = 900.
+  assert.equal(context.annualIncomeTax(45000, 2024), 4288 + 900);
+  // 2026-27 drops that bracket to 15%: 26800 * 0.15 = 4020.
+  assert.equal(context.annualIncomeTax(45000, 2026), 4020 + 900);
+  // Shade-in: just above the threshold the levy is 10% of the excess, not 2% of income.
+  const shaded = context.annualIncomeTaxDetails(28000, 2024);
+  assert.equal(shaded.medicare_levy, Math.round((28000 - 27222) * 0.10 * 100) / 100);
+  assert.ok(shaded.medicare_levy < 28000 * 0.02);
+  // Well above the shade-in range it is a flat 2%.
+  assert.equal(context.annualIncomeTaxDetails(120000, 2024).medicare_levy, 2400);
+  // Progressive across the third bracket: 4288 + (135000-45000)*0.30 = 31288, medicare 2700.
+  assert.equal(context.annualIncomeTax(135000, 2024), 31288 + 2700);
+});
+
+test('annual tax table reports staleness beyond the bundled years and honours a settings override', () => {
+  const context = taxContext();
+  const stale = context.api_getIndividualTaxTableStatus(2031);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.applied_financial_year, '2026-27');
+  assert.match(stale.warning, /individual_tax_table_override/);
+  assert.equal(context.api_getIndividualTaxTableStatus(2026).stale, false);
+
+  context.api_getSettings = () => ({ individual_tax_table_override: JSON.stringify({ brackets: [[10000, 0], [null, 0.5]], medicare: { rate: 0, lower_threshold: 0, shade_in_rate: 0 } }) });
+  assert.equal(context.annualIncomeTax(20000, 2026), 5000, 'override replaces the bundled brackets');
+  assert.equal(context.api_getIndividualTaxTableStatus(2026).applied_financial_year, 'settings_override');
+});
+
+test('instalment rate method applies to gross income; cumulative method self-corrects on lumpy income', () => {
+  const context = taxContext();
+  const byRate = context.soleTraderTaxProvision_({ instalment_rate: 0.15, period_instalment_income: 20000, financial_year: 2026 });
+  assert.equal(byRate.method, 'instalment_rate');
+  assert.equal(byRate.amount, 3000, 'rate applies to gross business income, not profit');
+
+  // Run a year of monthly profits through the cumulative method and return each month's set-aside.
+  const runYear = (monthlyProfits) => {
+    let provisioned = 0;
+    let ytd = 0;
+    return monthlyProfits.map((profit, index) => {
+      ytd = Math.round((ytd + profit) * 100) / 100;
+      const provision = context.soleTraderTaxProvision_({
+        instalment_rate: null, ytd_taxable_profit: ytd, months_elapsed: index + 1,
+        already_provisioned: provisioned, financial_year: 2026
+      });
+      provisioned = Math.round((provisioned + provision.amount) * 100) / 100;
+      return provision.amount;
+    });
+  };
+  const annualOn60k = context.annualIncomeTax(60000, 2026);
+
+  // One 60k month then eleven empty ones. The whole year's tax is set aside in the month the money
+  // arrived, and nothing further is taken once the profit stops.
+  const frontLoaded = runYear([60000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(frontLoaded[0], annualOn60k, 'month one holds the true tax on income received to date');
+  assert.ok(frontLoaded.slice(1).every((amount) => amount === 0));
+  // The withholding-table approach would have annualised that month to a 720k year.
+  assert.ok(frontLoaded[0] < context.annualIncomeTax(60000 * 12, 2026) / 12);
+
+  // The annual total is independent of how the income arrived — the property that makes it correct.
+  const shapes = [
+    [60000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60000],
+    [20000, 0, 15000, 0, 0, 9000, 0, 16000, 0, 0, 0, 0]
+  ];
+  shapes.forEach((shape, index) => {
+    const total = runYear(shape).reduce((sum, amount) => Math.round((sum + amount) * 100) / 100, 0);
+    assert.equal(total, annualOn60k, 'shape ' + index + ' totals the exact annual tax on 60k profit');
+  });
+
+  // A loss month releases previously set-aside tax rather than stranding it.
+  const withLoss = runYear([40000, 30000, -20000, 10000, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.ok(withLoss[2] < 0, 'the loss month hands money back');
+  assert.equal(
+    withLoss.reduce((sum, amount) => Math.round((sum + amount) * 100) / 100, 0),
+    annualOn60k,
+    'and the year still totals the tax on the 60k of actual profit'
+  );
+});
+
+function splitContext(sheets, settings) {
+  const built = createAppsScriptContext(sheets);
+  const { context } = built;
+  context.assertMigrationsSettled_ = () => true;
+  context.api_getSettings = () => settings || {};
+  context.listBasSubmissionsInternal = () => [];
+  context.cacheGet = () => null;
+  context.cacheSet = () => {};
+  context.cacheClearPrefix = () => {};
+  context.getDefaultHourTypeId = () => 'hourtype-work';
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+  load(context, 'backend/tax.js');
+  load(context, 'backend/settings.js');
+  // The split only needs the four BAS actuals; stub the ledger reads so the arithmetic is what is tested.
+  context.basActualsForRange_ = (basis, from, to) => (built.actuals[from] || { g1_total_sales: 0, gst_on_sales: 0, purchases: 0, gst_on_purchases: 0 });
+  load(context, 'backend/financialReporting.js');
+  context.basActualsForRange_ = (basis, from, to) => (built.actuals[from] || { g1_total_sales: 0, gst_on_sales: 0, purchases: 0, gst_on_purchases: 0 });
+  load(context, 'backend/transferSplit.js');
+  // settings.js and tax.js define their own api_getSettings/lock helpers, so re-stub after every load.
+  context.api_getSettings = () => settings || {};
+  context.listBasSubmissionsInternal = () => [];
+  built.actuals = {};
+  return built;
+}
+
+test('monthly transfer split reaches every month of the financial year', () => {
+  const built = splitContext({});
+  const report = built.context.api_getMonthlyTransferSplit({ financial_year: 2026 });
+  assert.equal(report.months.length, 12);
+  assert.deepStrictEqual(Array.from(report.months.map((month) => month.period.from)), [
+    '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01',
+    '2027-01-01', '2027-02-01', '2027-03-01', '2027-04-01', '2027-05-01', '2027-06-01'
+  ]);
+  assert.deepStrictEqual(Array.from(report.months.map((month) => month.bas_quarter)), [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]);
+});
+
+test('transfer split sets aside net GST, super and tax, and the offset is her after-tax income', () => {
+  const built = splitContext({}, { payg_instalment_rate: 15 });
+  // One month: $11,000 received including $1,000 GST, $2,200 of costs including $200 claimable GST.
+  built.actuals['2026-08-01'] = { g1_total_sales: 11000, gst_on_sales: 1000, purchases: 2200, gst_on_purchases: 200 };
+  const report = built.context.api_getMonthlyTransferSplit({ financial_year: 2026 });
+  const august = report.months.filter((month) => month.calendar_month === 7)[0];
+
+  assert.equal(august.received_ex_gst, 10000);
+  assert.equal(august.expenses_ex_gst, 2000);
+  assert.equal(august.profit_before_super, 8000);
+  assert.equal(august.super_rate, 0.12);
+  assert.equal(august.super, 960);
+  assert.equal(august.taxable_profit, 7040);
+  assert.equal(august.net_gst, 800);
+  assert.equal(august.tax_method, 'instalment_rate');
+  assert.equal(august.tax, 1500, '15% of gross business income of 10000');
+  assert.equal(august.to_business_account, 800 + 1500 + 960);
+  assert.equal(august.to_offset, 7040 - 1500);
+  // The identity: money in is fully accounted for.
+  assert.equal(august.received, august.to_business_account + august.to_offset + august.expenses_paid);
+});
+
+test('the split never leaks money, in any month or for the year, on either tax method', () => {
+  ['instalment', 'cumulative'].forEach((mode) => {
+    const built = splitContext({}, mode === 'instalment' ? { payg_instalment_rate: 0.155 } : {});
+    built.actuals['2026-07-01'] = { g1_total_sales: 4400, gst_on_sales: 400, purchases: 1100, gst_on_purchases: 100 };
+    built.actuals['2026-09-01'] = { g1_total_sales: 22000, gst_on_sales: 2000, purchases: 550, gst_on_purchases: 50 };
+    built.actuals['2027-02-01'] = { g1_total_sales: 8800, gst_on_sales: 800, purchases: 3300, gst_on_purchases: 300 };
+    // A month with costs but no income: net GST is a refund and the offset transfer goes negative.
+    built.actuals['2027-05-01'] = { g1_total_sales: 0, gst_on_sales: 0, purchases: 1100, gst_on_purchases: 100 };
+    const report = built.context.api_getMonthlyTransferSplit({ financial_year: 2026 });
+
+    report.months.forEach((month) => {
+      assert.equal(
+        month.received,
+        Math.round((month.to_business_account + month.to_offset + month.expenses_paid) * 100) / 100,
+        mode + ': ' + month.period.from + ' must account for every dollar received'
+      );
+      assert.equal(month.to_offset, Math.round((month.taxable_profit - month.tax) * 100) / 100, mode + ': ' + month.period.from + ' offset equals after-tax income');
+    });
+    const may = report.months.filter((month) => month.calendar_month === 4)[0];
+    assert.equal(may.net_gst, -100, 'a costs-only month yields a GST refund');
+    assert.ok(may.to_offset < 0, 'and a negative offset transfer, rather than being silently clamped');
+    assert.equal(report.totals.received, Math.round((report.totals.to_business_account + report.totals.to_offset + report.totals.expenses_paid) * 100) / 100);
+    assert.equal(report.totals.to_offset, Math.round((report.totals.taxable_profit - report.totals.tax) * 100) / 100);
+  });
+});
+
+test('transfer split warns when no instalment rate is configured and exports a reconciling csv', () => {
+  const built = splitContext({});
+  built.actuals['2026-08-01'] = { g1_total_sales: 11000, gst_on_sales: 1000, purchases: 0, gst_on_purchases: 0 };
+  const report = built.context.api_getMonthlyTransferSplit({ financial_year: 2026 });
+  assert.equal(report.tax_method, 'cumulative');
+  assert.equal(report.instalment_rate, null);
+  assert.ok(report.warnings.some((warning) => /payg_instalment_rate/.test(warning)));
+
+  const exported = built.context.api_exportMonthlyTransferSplitCsv({ financial_year: 2026 });
+  assert.equal(exported.filename, 'tempus-transfer-split-fy2026-27.csv');
+  const lines = exported.csv.split('\r\n');
+  assert.equal(lines.length, 14, 'header, twelve months, total');
+  assert.match(lines[0], /To business account/);
+  assert.match(lines[13], /^"Total"/);
+});
+
+test('a configured instalment rate is read as either a percentage or a decimal, else from the last BAS', () => {
+  const context = taxContext();
+  context.api_getSettings = () => ({ payg_instalment_rate: 15 });
+  assert.equal(context.resolvePaygInstalmentRate_(), 0.15);
+  context.api_getSettings = () => ({ payg_instalment_rate: 0.15 });
+  assert.equal(context.resolvePaygInstalmentRate_(), 0.15);
+  context.api_getSettings = () => ({});
+  context.listBasSubmissionsInternal = () => [{ t2_instalment_rate: 0 }, { t2_instalment_rate: 12.5 }];
+  assert.equal(context.resolvePaygInstalmentRate_(), 0.125, 'falls back to the most recent lodged T2 rate');
+  context.listBasSubmissionsInternal = () => [];
+  assert.equal(context.resolvePaygInstalmentRate_(), null, 'null puts the provision on the cumulative method');
+});
+
+test('bas monthly periods resolve inside the requested financial year, not the previous calendar year', () => {
+  const { context } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+  load(context, 'backend/financialReporting.js');
+  // Jul-Dec sit in the FY's first calendar year, Jan-Jun in its second. Before the fix Jan-Jun silently
+  // resolved 12 months early, making half of every financial year unreachable through the monthly path.
+  // Values cross the vm realm boundary, so rehome them before comparing structurally.
+  const range = (payload) => ({ ...context.basPeriodRange_(payload) });
+  assert.deepStrictEqual(range({ financial_year: 2026, period_type: 'monthly', month: 6 }), { from: '2026-07-01', to: '2026-07-31' });
+  assert.deepStrictEqual(range({ financial_year: 2026, period_type: 'monthly', month: 0 }), { from: '2027-01-01', to: '2027-01-31' });
+  assert.deepStrictEqual(range({ financial_year: 2026, period_type: 'monthly', month: 5 }), { from: '2027-06-01', to: '2027-06-30' });
+  // Every month of the year lands inside it, and the twelve are contiguous and non-overlapping.
+  const ranges = [6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5].map((month) => range({ financial_year: 2026, period_type: 'monthly', month: month }));
+  assert.equal(ranges[0].from, '2026-07-01');
+  assert.equal(ranges[11].to, '2027-06-30');
+  ranges.forEach((range, index) => {
+    assert.ok(range.from >= '2026-07-01' && range.to <= '2027-06-30', 'month index ' + index + ' is inside FY2027');
+    if (index) assert.ok(range.from > ranges[index - 1].to, 'periods do not overlap');
+  });
+  // Quarterly behaviour is unchanged.
+  assert.deepStrictEqual(range({ financial_year: 2026, period_type: 'quarterly', quarter: 1 }), { from: '2026-07-01', to: '2026-09-30' });
+  assert.deepStrictEqual(range({ financial_year: 2026, period_type: 'quarterly', quarter: 3 }), { from: '2027-01-01', to: '2027-03-31' });
+});
+
+test('transfer split is wired into the bas page, gated on the assessments flag, and parses', () => {
+  const markup = fs.readFileSync(path.join(root, 'views/partials/bas.html'), 'utf8');
+  const client = fs.readFileSync(path.join(root, 'views/partials/operations-scripts.html'), 'utf8');
+  const shell = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'views/partials/operations.html'), 'utf8');
+  const served = fs.readFileSync(path.join(root, 'views/index.html'), 'utf8');
+
+  // Section exists, starts hidden, and carries the table and export control.
+  assert.match(markup, /id="bas-transfer-split-section"[^>]*display:none/);
+  ['bas-transfer-split-body', 'bas-transfer-split-foot', 'bas-transfer-split-export', 'bas-transfer-split-method', 'bas-transfer-split-warnings']
+    .forEach((id) => assert.ok(markup.includes('id="' + id + '"'), 'expected #' + id));
+  assert.match(markup, /To business account[\s\S]*To offset/);
+
+  // Gated on the assessments flag, and hidden rather than left populated when the flag is off.
+  assert.match(client, /function transferSplitEnabled\(\)[\s\S]*enable_assessments/);
+  assert.match(client, /if\(!transferSplitEnabled\(\)\)\{ section\.style\.display='none'; return; \}/);
+
+  // Calls the real endpoints, and the export reuses the basis the table was built with.
+  assert.ok(client.includes("'api_getMonthlyTransferSplit'"));
+  assert.ok(client.includes("'api_exportMonthlyTransferSplitCsv'"));
+  assert.match(client, /bas-transfer-split-export[\s\S]{0,600}operationsState\.transferSplitFy/);
+  // Changing the accounting basis must refresh the split, not just the ledger card above it.
+  assert.match(client, /bas-accounting-basis'\)\?\.addEventListener[\s\S]{0,300}renderTransferSplit\(\)/);
+  // And the page render path invokes it.
+  assert.match(shell, /typeof renderTransferSplit === 'function'\) renderTransferSplit\(\)/);
+
+  // Negative transfers are styled, and the token they use is themed.
+  assert.match(styles, /\.ts-amount--negative \{ color:var\(--danger\); \}/);
+  assert.match(fs.readFileSync(path.join(root, 'views/partials/head.html'), 'utf8'), /--danger:/);
+
+  // Both partials reach the served page, and the client script parses.
+  assert.ok(served.includes("include('views/partials/bas')"));
+  assert.ok(served.includes("include('views/partials/operations-scripts')"));
+  const body = client.slice(client.indexOf('<script>') + 8, client.lastIndexOf('</script>'));
+  new vm.Script(body, { filename: 'operations-scripts.html' });
+});
+
+test('every financial_year in the app means the same thing: the start year', () => {
+  const shell = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+  const client = fs.readFileSync(path.join(root, 'views/partials/operations-scripts.html'), 'utf8');
+  const markup = fs.readFileSync(path.join(root, 'views/partials/operations.html'), 'utf8');
+
+  const { context } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+  load(context, 'backend/tax.js');
+  load(context, 'backend/financialReporting.js');
+
+  // The client labels 2026 as "FY 2026-27" and enumerates its months starting July 2026. The backend
+  // must resolve the same 2026 to the same span; a mismatch here is what blanked the BAS ledger card.
+  assert.match(shell, /function financialYearLabel\(startYear\)[\s\S]*?endYear = startYear \+ 1/);
+  assert.match(shell, /function financialYearStartYear\(date\)[\s\S]*?getFullYear\(\) - 1/);
+  const span = { ...context.basPeriodRange_({ financial_year: 2026, period_type: 'quarterly', quarter: 1 }) };
+  assert.equal(span.from, '2026-07-01', 'backend Q1 of 2026 starts July 2026, matching FY 2026-27');
+  const lastMonth = { ...context.basPeriodRange_({ financial_year: 2026, period_type: 'monthly', month: 5 }) };
+  assert.equal(lastMonth.to, '2027-06-30', 'and the year ends June 2027');
+
+  // Tax tables key off the same number.
+  assert.equal(context.api_getIndividualTaxTableStatus(2026).applied_financial_year, '2026-27');
+
+  // No caller may reintroduce the end-year form. The old bug was a single expression that mixed both:
+  // state.basCurrentFy (a start year) with a getFullYear()+1 fallback (an end year).
+  assert.doesNotMatch(client, /basCurrentFy\)\s*\|\|\s*\(now\.getMonth\(\)>=6\?now\.getFullYear\(\)\+1/);
+  assert.equal((client.match(/financialYearStartYear\(/g) || []).length, 3, 'both bas renders and the expense report derive the year the same way');
+  assert.doesNotMatch(markup, /Financial year ending/);
+
+  // Exported filenames spell the span out, so "fy2026" can never be read as the wrong half.
+  assert.equal(context.financialYearLabelSlug_(2026), '2026-27');
+});
+
+function featureFlagContext(sheets) {
+  const built = createAppsScriptContext(sheets);
+  const { context } = built;
+  context.assertMigrationsSettled_ = () => true;
+  context.cacheGet = () => null;
+  context.cacheSet = () => {};
+  context.cacheClearPrefix = () => {};
+  load(context, 'backend/integrity.js');
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/entries.js');
+  load(context, 'backend/settings.js');
+  load(context, 'backend/migrations.js');
+  context.MIGRATION_CONTEXT.active = true;
+  return built;
+}
+function flagState(spreadsheet, feature) {
+  const rows = spreadsheet.getSheetByName('feature_flags').snapshot();
+  const headers = rows[0];
+  const match = rows.slice(1).filter((row) => String(row[headers.indexOf('feature')]).trim() === feature)[0];
+  return match ? String(match[headers.indexOf('enabled')]) : null;
+}
+
+test('migrated expenses are revealed by enabling the ledger flag, so relocated data is never hidden', () => {
+  const FLAG_HEADERS = ['feature', 'enabled', 'name', 'description'];
+  const TX_HEADERS = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
+  const transaction = ['legacy-expense-1', 'Insurer', '', 'Insurance', 'insurance', '2026-07-01', '', 355.52, 'taxable', 32.32, 1, 'FALSE', '', 'legacy_unreconciled', 'legacy_unreconciled', 'legacy-rule-1', '2026-07-01', '[]', '', '', ''];
+
+  // The exact state the earlier migration left behind: ledger rows present, flag off, page unreachable.
+  const stranded = featureFlagContext({
+    feature_flags: [FLAG_HEADERS, ['enable_company_tracking_features', 'TRUE', '', ''], ['enable_expenses', 'FALSE', '', '']],
+    expense_transactions: [TX_HEADERS, transaction]
+  });
+  assert.equal(flagState(stranded.spreadsheet, 'enable_expenses'), 'FALSE');
+  stranded.context.migrationRevealExpenseLedger_();
+  assert.equal(flagState(stranded.spreadsheet, 'enable_expenses'), 'TRUE', 'the page that shows the rows is switched on');
+  // Company tracking feeds the income calculation, so the migration must not touch it.
+  assert.equal(flagState(stranded.spreadsheet, 'enable_company_tracking_features'), 'TRUE');
+  stranded.context.migrationRevealExpenseLedger_();
+  assert.equal(flagState(stranded.spreadsheet, 'enable_expenses'), 'TRUE', 'idempotent');
+
+  // A flag row that does not exist yet is appended.
+  const missingRow = featureFlagContext({
+    feature_flags: [FLAG_HEADERS],
+    expense_rules: [['id', 'vendor', 'amount', 'frequency', 'start_date', 'active'], ['rule-1', 'Insurer', 355.52, 'monthly', '2026-07-01', 'TRUE']]
+  });
+  missingRow.context.migrationRevealExpenseLedger_();
+  assert.equal(flagState(missingRow.spreadsheet, 'enable_expenses'), 'TRUE');
+
+  // No ledger data means nothing to reveal; a spreadsheet that never had company expenses is untouched.
+  const empty = featureFlagContext({
+    feature_flags: [FLAG_HEADERS, ['enable_expenses', 'FALSE', '', '']],
+    expense_transactions: [TX_HEADERS]
+  });
+  empty.context.migrationRevealExpenseLedger_();
+  assert.equal(flagState(empty.spreadsheet, 'enable_expenses'), 'FALSE');
+});
+
+test('enabling a flag from a migration never overwrites a deliberate off switch for another feature', () => {
+  const FLAG_HEADERS = ['feature', 'enabled', 'name', 'description'];
+  const built = featureFlagContext({
+    feature_flags: [FLAG_HEADERS, ['enable_expenses', 'TRUE', '', ''], ['enable_invoices', 'FALSE', '', '']]
+  });
+  // Already on: reports no change rather than rewriting.
+  assert.equal(built.context.migrationEnableFeatureFlag_('enable_expenses'), false);
+  assert.equal(flagState(built.spreadsheet, 'enable_expenses'), 'TRUE');
+  // And an unrelated feature the user switched off stays off.
+  assert.equal(flagState(built.spreadsheet, 'enable_invoices'), 'FALSE');
+  assert.equal(built.context.migrationEnableFeatureFlag_('enable_invoices'), true, 'only when explicitly asked');
+  assert.equal(flagState(built.spreadsheet, 'enable_invoices'), 'TRUE');
+});
+
+const DEDUCTION_HEADERS = ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order'];
+function deductionRow(id, startDate, overrides) {
+  const base = { id: id, name: 'Insurance ' + id, category_id: 'cat-1', company_expense: 'TRUE', deduction_type: 'standard', amount_type: 'flat', amount_value: 110, gst_inclusive: 'TRUE', gst_amount: 10, frequency: 'monthly', start_date: startDate, end_date: '', notes: '', active: 'TRUE', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', display_order: 1 };
+  Object.assign(base, overrides || {});
+  return DEDUCTION_HEADERS.map((header) => base[header]);
+}
+function expenseMigrationContext(sheets) {
+  const built = featureFlagContext(sheets);
+  built.context.migrationToday_ = () => '2026-03-31';
+  return built;
+}
+function sheetRows(spreadsheet, name) {
+  const sheet = spreadsheet.getSheetByName(name);
+  if (!sheet) return { headers: [], rows: [] };
+  const all = sheet.snapshot();
+  const headers = all[0] || [];
+  return { headers: headers, rows: all.slice(1).filter((row) => String(row[0] || '') !== '') };
+}
+
+test('migrated company expenses arrive paid and recorded, so they are usable on a cash basis', () => {
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description'], ['enable_expenses', 'FALSE', '', '']],
+    deductions: [DEDUCTION_HEADERS, deductionRow('d-1', '2026-01-15')]
+  });
+  built.context.migrationCompanyExpenses_();
+
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  const payments = sheetRows(built.spreadsheet, 'expense_payments');
+  assert.equal(transactions.rows.length, 3, 'Jan, Feb and Mar occurrences up to the migration date');
+  transactions.rows.forEach((row) => {
+    // 'recorded' is the lifecycle status; the review signal lives on reconciliation_state.
+    assert.equal(row[transactions.headers.indexOf('status')], 'recorded');
+    assert.equal(row[transactions.headers.indexOf('reconciliation_state')], 'legacy_unreconciled');
+    // GST stays unconfirmed: a migration must not claim a credit against an unchecked tax invoice.
+    assert.equal(String(row[transactions.headers.indexOf('claimable_gst_confirmed')]), 'FALSE');
+  });
+  assert.equal(payments.rows.length, 3, 'each occurrence carries the payment the legacy deduction asserted');
+  const paidTotal = payments.rows.reduce((sum, row) => sum + Number(row[payments.headers.indexOf('amount')]), 0);
+  assert.equal(paidTotal, 330);
+  assert.deepStrictEqual(
+    Array.from(payments.rows.map((row) => String(row[payments.headers.indexOf('payment_date')]))).sort(),
+    ['2026-01-15', '2026-02-15', '2026-03-15']
+  );
+  // The source row is gone, its replacement exists, and the ledger page is switched on.
+  assert.equal(sheetRows(built.spreadsheet, 'deductions').rows.length, 0);
+  assert.equal(sheetRows(built.spreadsheet, 'expense_rules').rows.length, 1);
+  assert.equal(flagState(built.spreadsheet, 'enable_expenses'), 'TRUE');
+
+  // Re-running must not double-pay.
+  built.context.migrationCompanyExpenses_();
+  assert.equal(sheetRows(built.spreadsheet, 'expense_payments').rows.length, 3);
+});
+
+test('a company expense with no parseable start date is kept, not deleted for an inert rule', () => {
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description']],
+    deductions: [DEDUCTION_HEADERS, deductionRow('d-keep', '', { created_at: '', updated_at: '' }), deductionRow('d-move', '2026-02-10')]
+  });
+  built.context.migrationCompanyExpenses_();
+  const deductions = sheetRows(built.spreadsheet, 'deductions');
+  assert.equal(deductions.rows.length, 1, 'the row with nothing usable to replace it survives');
+  assert.equal(deductions.rows[0][deductions.headers.indexOf('id')], 'd-keep');
+  assert.match(String(deductions.rows[0][deductions.headers.indexOf('notes')]), /no parseable start date/);
+  // The one that migrated cleanly did leave.
+  assert.ok(!deductions.rows.some((row) => row[deductions.headers.indexOf('id')] === 'd-move'));
+});
+
+test('repair migration makes already-migrated expenses usable without double-paying', () => {
+  const TX_HEADERS = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
+  const legacy = (id, date) => ['legacy-expense-' + id, 'Insurer', '', 'Insurance', 'cat-1', date, date, 110, 'taxable', 10, 1, 'FALSE', '', 'legacy_unreconciled', 'legacy_unreconciled', 'legacy-rule-1', date, '[]', '', '', ''];
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description']],
+    expense_transactions: [TX_HEADERS, legacy('a', '2026-01-15'), legacy('b', '2026-02-15')]
+  });
+  built.context.migrationUsableLegacyExpenses_();
+
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  transactions.rows.forEach((row) => assert.equal(row[transactions.headers.indexOf('status')], 'recorded'));
+  transactions.rows.forEach((row) => assert.equal(row[transactions.headers.indexOf('reconciliation_state')], 'legacy_unreconciled', 'still needs review'));
+  const payments = sheetRows(built.spreadsheet, 'expense_payments');
+  assert.equal(payments.rows.length, 2);
+  assert.equal(payments.rows.reduce((sum, row) => sum + Number(row[payments.headers.indexOf('amount')]), 0), 220);
+
+  built.context.migrationUsableLegacyExpenses_();
+  assert.equal(sheetRows(built.spreadsheet, 'expense_payments').rows.length, 2, 'idempotent');
+});
+
+test('missing expense rules are rebuilt from the transactions that reference them', () => {
+  const TX = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
+  const tx = (id, name, date, amount, gstCode, ruleId) => [id, name, '', name, 'cat-1', date, date, amount, gstCode, gstCode === 'taxable' ? Math.round((amount / 11) * 100) / 100 : 0, 1, 'FALSE', '', 'recorded', 'legacy_unreconciled', ruleId, date, '[]', '', '', ''];
+  const archivedDeduction = { id: 'd3', name: 'Psychology Insurance', category_id: 'cat-2', company_expense: 'TRUE', deduction_type: 'standard', amount_type: 'flat', amount_value: 308, gst_inclusive: 'TRUE', gst_amount: 28, frequency: 'monthly', start_date: '2026-08-08', end_date: '', notes: '', active: 'TRUE', created_at: '2026-08-08T00:00:00Z', updated_at: '2026-08-08T00:00:00Z' };
+
+  // Exactly the reported state: transactions naming rules that were never written.
+  const built = expenseMigrationContext({
+    expense_transactions: [TX,
+      tx('legacy-expense-d1-2026-08-08', 'Backpack Bed Donation', '2026-08-08', 10.56, 'out_of_scope', 'legacy-rule-d1'),
+      tx('legacy-expense-d3-2026-08-08', 'Psychology Insurance', '2026-08-08', 308, 'taxable', 'legacy-rule-d3'),
+      tx('legacy-expense-d3-2026-09-08', 'Psychology Insurance', '2026-09-08', 308, 'taxable', 'legacy-rule-d3')
+    ],
+    migration_archive: [['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'],
+      ['arch-1', '2026-08-company-expense-ledger', 'deductions', JSON.stringify(archivedDeduction), 'moved_to_expense_ledger', '2026-08-08T00:00:00Z']
+    ]
+  });
+  assert.equal(sheetRows(built.spreadsheet, 'expense_rules').rows.length, 0);
+  built.context.migrationRebuildMissingExpenseRules_();
+
+  const rules = sheetRows(built.spreadsheet, 'expense_rules');
+  assert.equal(rules.rows.length, 2, 'one rule per distinct source_rule_id');
+  const byId = {};
+  rules.rows.forEach((row) => { byId[row[rules.headers.indexOf('id')]] = row; });
+  const field = (row, name) => row[rules.headers.indexOf(name)];
+
+  // Archived deduction present: the schedule is restored faithfully and the rule is live.
+  const restored = byId['legacy-rule-d3'];
+  assert.equal(field(restored, 'frequency'), 'monthly');
+  assert.equal(field(restored, 'start_date'), '2026-08-08');
+  assert.equal(field(restored, 'amount'), 308);
+  assert.equal(field(restored, 'gst_code'), 'taxable');
+  assert.equal(String(field(restored, 'active')), 'TRUE');
+  assert.match(String(field(restored, 'notes')), /Restored from the archived deduction/);
+
+  // No archive: reconstructed from its transaction, and left archived so an inferred
+  // schedule cannot start generating expenses on its own.
+  const inferred = byId['legacy-rule-d1'];
+  assert.equal(field(inferred, 'vendor'), 'Backpack Bed Donation');
+  assert.equal(field(inferred, 'amount'), 10.56);
+  assert.equal(field(inferred, 'gst_code'), 'out_of_scope');
+  assert.equal(field(inferred, 'frequency'), 'once', 'a single occurrence is not assumed to recur');
+  assert.equal(String(field(inferred, 'active')), 'FALSE');
+  assert.match(String(field(inferred, 'notes')), /schedule is inferred/);
+
+  built.context.migrationRebuildMissingExpenseRules_();
+  assert.equal(sheetRows(built.spreadsheet, 'expense_rules').rows.length, 2, 'idempotent');
+});
+
+test('rule rebuild leaves a healthy ledger untouched', () => {
+  const TX = ['id', 'vendor', 'purchase_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'status', 'reconciliation_state', 'source_rule_id'];
+  const RULES = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'frequency', 'start_date', 'end_date', 'active', 'notes', 'created_at', 'updated_at'];
+  const built = expenseMigrationContext({
+    expense_rules: [RULES, ['legacy-rule-d1', 'Insurer', '', 'Insurance', 'cat-1', 308, 'taxable', 28, 1, 'FALSE', 'monthly', '2026-08-08', '', 'TRUE', '', '', '']],
+    expense_transactions: [TX, ['legacy-expense-d1-2026-08-08', 'Insurer', '2026-08-08', 308, 'taxable', 28, 1, 'recorded', 'legacy_unreconciled', 'legacy-rule-d1']]
+  });
+  built.context.migrationRebuildMissingExpenseRules_();
+  const rules = sheetRows(built.spreadsheet, 'expense_rules');
+  assert.equal(rules.rows.length, 1, 'no duplicate rule appended');
+  assert.equal(String(rules.rows[0][rules.headers.indexOf('notes')]), '', 'the existing rule is not rewritten');
+});
+
+test('the reported three-deduction sheet migrates to rules, transactions and payments end to end', () => {
+  // Verbatim from the live sheet: two monthly donations (no GST) and a one-off insurance premium
+  // whose GST the user had already stated as 28.00.
+  const rows = [
+    ['a8efd4e0-c1a4-4bdf-8d0d-5fe04bd562cd', 'Backpack Bed Donation', '', 'TRUE', 'standard', 'flat', 10.56, 'FALSE', 0, 'monthly', '2026-08-08', '', '', 'TRUE', '2026-08-08T06:57:13Z', '2026-08-08T06:57:13Z', 1],
+    ['7ddb6359-cc77-41fd-838a-b2f7d41edeb5', 'Share the Dignity Donation', '', 'TRUE', 'standard', 'flat', 5.28, 'FALSE', 0, 'monthly', '2026-08-08', '', '', 'TRUE', '2026-08-08T06:57:37Z', '2026-08-08T06:57:37Z', 2],
+    ['7b27c85d-34d2-4772-a2c3-6dff6b923da6', 'Psychology Insurance', '', 'TRUE', 'standard', 'flat', 308, 'TRUE', 28, 'once', '2026-08-08', '', '', 'TRUE', '2026-08-08T06:57:59Z', '2026-08-08T06:57:59Z', 3]
+  ];
+  const built = expenseMigrationContext({ deductions: [DEDUCTION_HEADERS, ...rows] });
+  built.context.migrationToday_ = () => '2026-08-23';
+  built.context.migrationCompanyExpenses_();
+
+  const rules = sheetRows(built.spreadsheet, 'expense_rules');
+  const field = (set, row, name) => row[set.headers.indexOf(name)];
+  assert.equal(rules.rows.length, 3, 'a rule per deduction, which is the row that went missing in the wild');
+  assert.deepStrictEqual(
+    Array.from(rules.rows.map((row) => field(rules, row, 'frequency'))),
+    ['monthly', 'monthly', 'once'],
+    'each schedule survives the move'
+  );
+  rules.rows.forEach((row) => assert.equal(String(field(rules, row, 'active')), 'TRUE'));
+
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  assert.equal(transactions.rows.length, 3, 'one occurrence each between 8 Aug and the migration date');
+  const insurance = transactions.rows.filter((row) => field(transactions, row, 'vendor') === 'Psychology Insurance')[0];
+  assert.equal(field(transactions, insurance, 'gst_code'), 'taxable');
+  assert.equal(field(transactions, insurance, 'gst_amount'), 28, "the user's own GST figure is carried over, not recomputed");
+  const donation = transactions.rows.filter((row) => field(transactions, row, 'vendor') === 'Backpack Bed Donation')[0];
+  assert.equal(field(transactions, donation, 'gst_code'), 'out_of_scope', 'a donation claims no GST credit');
+
+  const payments = sheetRows(built.spreadsheet, 'expense_payments');
+  assert.equal(payments.rows.length, 3);
+  assert.equal(payments.rows.reduce((sum, row) => sum + Number(field(payments, row, 'amount')), 0), 323.84);
+  assert.equal(sheetRows(built.spreadsheet, 'deductions').rows.length, 0, 'and the source rows are released');
+});
+
+test('rules are rebuilt from the archive even when no transaction references them', () => {
+  const archivedDeduction = (id, name, amount, frequency, gstInclusive, gstAmount) => ({
+    id: id, name: name, category_id: '', company_expense: 'TRUE', deduction_type: 'standard', amount_type: 'flat',
+    amount_value: amount, gst_inclusive: gstInclusive, gst_amount: gstAmount, frequency: frequency,
+    start_date: '2026-08-08', end_date: '', notes: '', active: 'TRUE',
+    created_at: '2026-08-08T06:57:13Z', updated_at: '2026-08-08T06:57:13Z'
+  });
+  const archiveRows = [
+    archivedDeduction('a8efd4e0-c1a4-4bdf-8d0d-5fe04bd562cd', 'Backpack Bed Donation', 10.56, 'monthly', 'FALSE', 0),
+    archivedDeduction('7ddb6359-cc77-41fd-838a-b2f7d41edeb5', 'Share the Dignity Donation', 5.28, 'monthly', 'FALSE', 0),
+    archivedDeduction('7b27c85d-34d2-4772-a2c3-6dff6b923da6', 'Psychology Insurance', 308, 'once', 'TRUE', 28)
+  ].map((record, index) => ['arch-' + index, '2026-08-company-expense-ledger', 'deductions', JSON.stringify(record), 'moved_to_expense_ledger', '2026-08-08T00:00:00Z']);
+
+  // Transactions written by an older release: no source_rule_id at all, so nothing points at a rule.
+  const TX = ['id', 'vendor', 'purchase_date', 'amount', 'gst_code', 'gst_amount', 'status', 'reconciliation_state'];
+  const built = expenseMigrationContext({
+    expense_transactions: [TX, ['legacy-expense-1', 'Backpack Bed Donation', '2026-08-08', 10.56, 'out_of_scope', 0, 'recorded', 'legacy_unreconciled']],
+    migration_archive: [['id', 'migration_id', 'source_sheet', 'source_row_json', 'reason', 'archived_at'], ...archiveRows]
+  });
+
+  const before = built.context.api_getExpenseLedgerDiagnostic();
+  assert.equal(before.expense_rules.rows, 0);
+  assert.equal(before.transactions_with_source_rule_id, 0, 'nothing to key off on the transaction side');
+  assert.equal(before.archived_company_expense_deductions, 3);
+  assert.equal(before.rules_rebuildable, 3, 'but the archive still owes three rules');
+
+  built.context.migrationRebuildMissingExpenseRules_();
+  const rules = sheetRows(built.spreadsheet, 'expense_rules');
+  assert.equal(rules.rows.length, 3);
+  const field = (row, name) => row[rules.headers.indexOf(name)];
+  assert.deepStrictEqual(Array.from(rules.rows.map((row) => field(row, 'frequency'))), ['monthly', 'monthly', 'once']);
+  rules.rows.forEach((row) => assert.equal(String(field(row, 'active')), 'TRUE', 'archive-restored rules are live'));
+  assert.equal(field(rules.rows.filter((row) => field(row, 'vendor') === 'Psychology Insurance')[0], 'gst_code'), 'taxable');
+
+  const after = built.context.api_getExpenseLedgerDiagnostic();
+  assert.equal(after.rules_rebuildable, 0);
+  assert.equal(after.expense_rules.rows, 3);
+  built.context.migrationRebuildMissingExpenseRules_();
+  assert.equal(sheetRows(built.spreadsheet, 'expense_rules').rows.length, 3, 'idempotent');
+});
+
+test('the ledger diagnostic reports flags and applied migrations without creating sheets', () => {
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description'], ['enable_expenses', 'TRUE', '', ''], ['enable_company_tracking_features', 'FALSE', '', '']]
+  });
+  built.properties.setProperty('tempus_migrations_applied', JSON.stringify(['2026-08-company-expense-ledger']));
+  const report = built.context.api_getExpenseLedgerDiagnostic();
+  assert.equal(report.enable_expenses, true);
+  assert.equal(report.enable_company_tracking_features, false);
+  assert.deepStrictEqual(Array.from(report.applied_migrations), ['2026-08-company-expense-ledger']);
+  // Nothing was conjured into existence just by asking.
+  assert.equal(report.expense_rules.exists, false);
+  assert.equal(report.expense_transactions.exists, false);
+  assert.equal(built.spreadsheet.getSheetByName('expense_rules'), null);
+});
+
+test('the diagnostic can be written to a sheet while an upgrade is still pending', () => {
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description'], ['enable_expenses', 'FALSE', '', '']]
+  });
+  // The whole point of this path: it must work when getOrCreateSheet would refuse.
+  built.context.MIGRATION_CONTEXT.active = false;
+  built.context.assertMigrationsSettled_ = () => { throw new Error('upgrade_required'); };
+  built.context.getOrCreateSheet = () => { throw new Error('upgrade_required'); };
+
+  const result = built.context.writeExpenseLedgerDiagnostic();
+  assert.match(String(result), /_diagnostic sheet/);
+  const rows = built.spreadsheet.getSheetByName('_diagnostic').snapshot();
+  assert.deepStrictEqual(Array.from(rows[0]), ['field', 'value']);
+  const map = {};
+  rows.slice(1).forEach((row) => { map[row[0]] = row[1]; });
+  assert.equal(map['enable_expenses'], 'false');
+  assert.equal(map['expense_rules.rows'], '0');
+  // The harness seeds an applied-migration marker; the report must reflect the property, not invent it.
+  assert.equal(map['applied_migrations'], 'tests-ready');
+  built.properties.setProperty('tempus_migrations_applied', JSON.stringify([]));
+  built.context.writeExpenseLedgerDiagnostic();
+  const rerun = {};
+  built.spreadsheet.getSheetByName('_diagnostic').snapshot().slice(1).forEach((row) => { rerun[row[0]] = row[1]; });
+  assert.equal(rerun['applied_migrations'], '(none)');
+  assert.ok(Object.prototype.hasOwnProperty.call(map, 'rules_rebuildable'));
+
+  // Re-running replaces rather than appends.
+  const before = built.spreadsheet.getSheetByName('_diagnostic').snapshot().length;
+  built.context.writeExpenseLedgerDiagnostic();
+  assert.equal(built.spreadsheet.getSheetByName('_diagnostic').snapshot().length, before);
 });
 
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');

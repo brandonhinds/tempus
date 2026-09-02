@@ -282,8 +282,9 @@ function expenseClaimableGst_(transaction) {
 function api_getExpenseReport(filters) {
   var financialYear = Number(filters && filters.financial_year);
   if (!isFinite(financialYear)) throw new Error('Financial year is required.');
-  var from = (financialYear - 1) + '-07-01';
-  var to = financialYear + '-06-30';
+  // financial_year is the FY START year: 2026 means FY 2026-27, as everywhere else.
+  var from = financialYear + '-07-01';
+  var to = (financialYear + 1) + '-06-30';
   var transactions = api_listExpenseTransactions({ from: from, to: to });
   var actual = 0, gstCreditable = 0, unreconciled = 0, nonCreditable = 0;
   transactions.forEach(function(transaction) {
@@ -307,5 +308,5 @@ function api_exportExpenseReportCsv(filters) {
   var report = api_getExpenseReport(filters);
   var rows = [['Date', 'Vendor', 'ABN', 'Description', 'Category', 'Amount', 'GST code', 'GST amount', 'Claimable GST', 'Reconciliation', 'Status']];
   report.transactions.forEach(function(item) { rows.push([item.purchase_date, item.vendor, item.vendor_abn, item.description, item.category, roundMoney_(item.amount), item.gst_code, roundMoney_(item.gst_amount), expenseClaimableGst_(item), item.reconciliation_state, item.status]); });
-  return { success: true, filename: 'tempus-expenses-fy' + report.financial_year + '.csv', csv: rows.map(function(row) { return row.map(csvSafeCell_).join(','); }).join('\r\n') };
+  return { success: true, filename: 'tempus-expenses-fy' + financialYearLabelSlug_(report.financial_year) + '.csv', csv: rows.map(function(row) { return row.map(csvSafeCell_).join(','); }).join('\r\n') };
 }

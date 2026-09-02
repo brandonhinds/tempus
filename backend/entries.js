@@ -318,6 +318,13 @@ function buildEntryIndexFromValues(values, headers, defaultHourTypeId) {
   return index;
 }
 
+/**
+ * A derived entry is deduplicated by (source_type, source_id, source_occurrence_key). An EMPTY
+ * occurrence key means "this row carries no derived identity" and is load-bearing, not a gap: the row
+ * is identified by its own id and stays distinct from every sibling of the same source. Writers of
+ * many-rows-per-source-per-day data — assessment actual-hours tracking above all — MUST leave the
+ * occurrence key empty, because keying those on the date collapses a day's rows into one.
+ */
 function entryIdentityKey_(entry, defaultHourTypeId) {
   if (!entry) return '';
   var sourceType = String(entry.source_type || 'manual');

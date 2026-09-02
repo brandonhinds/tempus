@@ -4432,6 +4432,7 @@ let ratePreviewInputSyncing = false;
 
     renderBasInvoiceTable();
     if (typeof renderBasLedgerSummary === 'function') renderBasLedgerSummary();
+    if (typeof renderTransferSplit === 'function') renderTransferSplit();
   }
 
   function renderBasInvoiceTable() {

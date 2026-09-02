@@ -27,7 +27,7 @@
   </form>
   <div id="expense-transactions-panel"><div class="ts-toolbar" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;"><div><label for="expense-filter-from">From</label><input id="expense-filter-from" type="date"></div><div><label for="expense-filter-to">To</label><input id="expense-filter-to" type="date"></div><div><label for="expense-filter-state">Reconciliation</label><select id="expense-filter-state"><option value="">All</option><option value="unreconciled">Unreconciled</option><option value="legacy_unreconciled">Legacy unreconciled</option><option value="reconciled">Reconciled</option><option value="scheduled">Scheduled</option></select></div><button type="button" class="ghost" id="expense-filter-apply">Apply filters</button></div><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
   <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar"><p class="ts-note">Changing a rule never rewrites recorded transactions.</p><div style="display:flex;gap:8px;"><button type="button" id="expense-rule-generate" class="ghost">Generate next 12 months</button><button type="button" id="expense-rule-add" class="ghost">Add rule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
-  <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year ending</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
+  <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year starting</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
 </section>
 
 <section class="ts-card ts-card--wide" id="page-assessments" style="display:none;">
@@ -82,6 +82,9 @@
   .ts-ledger-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); }
   .ts-ledger-summary > div { padding:18px; background:var(--panel); }
   .ts-ledger-summary strong { display:block; margin-top:5px; font-size:22px; font-variant-numeric:tabular-nums; }
+  #bas-transfer-split-table td { font-variant-numeric:tabular-nums; }
+  /* A negative transfer is money coming back out of that account, not a payment into it. */
+  .ts-amount--negative { color:var(--danger); }
   .ts-help-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; margin-top:24px; border-top:1px solid var(--border); }
   .ts-help-grid details { padding:18px 0; border-bottom:1px solid var(--border); }
   .ts-help-grid summary { cursor:pointer; font-weight:750; }

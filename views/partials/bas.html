@@ -5,6 +5,37 @@
   </div>
   <div id="bas-ledger-summary" class="ts-ledger-summary" style="margin-bottom:18px;"></div>
   <div id="bas-ledger-warnings" class="ts-note" style="margin-bottom:20px;"></div>
+  <div id="bas-transfer-split-section" style="display:none; margin-bottom:24px;">
+    <div class="ts-toolbar" style="margin-bottom:8px; align-items:flex-end;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <div class="ts-kicker">Monthly transfers</div>
+        <h3 style="margin:2px 0 4px;">Business account and offset</h3>
+        <p class="ts-note" style="margin:0; max-width:640px;">What to move to the business account each month to cover GST, tax and super. The remainder is your income, free to go to the offset.</p>
+      </div>
+      <button type="button" class="ghost" id="bas-transfer-split-export">Export CSV</button>
+    </div>
+    <p class="ts-note" id="bas-transfer-split-method" style="margin:0 0 8px;"></p>
+    <div id="bas-transfer-split-warnings" class="ts-note" style="margin-bottom:10px;"></div>
+    <div class="ts-bas-table-wrapper">
+      <table class="ts-table" id="bas-transfer-split-table" style="width:100%; min-width:820px;">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>BAS</th>
+            <th style="text-align:right;">Money in</th>
+            <th style="text-align:right;">Costs paid</th>
+            <th style="text-align:right;">Net GST</th>
+            <th style="text-align:right;">Super</th>
+            <th style="text-align:right;">Tax</th>
+            <th style="text-align:right;">To business account</th>
+            <th style="text-align:right;">To offset</th>
+          </tr>
+        </thead>
+        <tbody id="bas-transfer-split-body"></tbody>
+        <tfoot id="bas-transfer-split-foot"></tfoot>
+      </table>
+    </div>
+  </div>
   <div class="ts-toolbar" style="margin-bottom:12px;">
     <div style="display:flex; flex-direction:column; gap:4px;">
       <h3 style="margin:0;">BAS Reporting</h3>

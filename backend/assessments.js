@@ -1,6 +1,35 @@
 /** Generic, user-configured assessments integrated with the canonical invoice ledger. */
 var ASSESSMENT_CACHE_PREFIX = 'assessments_v2_';
 var ASSESSMENT_FIELD_INPUT_TYPES = { text: true, textarea: true, date: true, number: true, email: true, select: true };
+/**
+ * Two different kinds of timesheet row carry source_type 'assessment', and they must never share an
+ * identity. The billable row is auto-managed, exactly one per assessment, and derives the income the
+ * assessment invoices — it takes this constant occurrence key so it is stable even when the assessment
+ * date moves. Actual-hours tracking rows are user-created, unbounded per assessment AND per day, so
+ * they carry NO occurrence key. Keying tracking rows on their date is what collapsed a day's billable
+ * row together with its tracking rows and destroyed the tracked hours.
+ */
+var ASSESSMENT_BILLABLE_OCCURRENCE_KEY = 'billable';
+
+function assessmentBillableHourTypeId_() {
+  var resolved = resolveDefaultHourTypeId();
+  if (resolved) return String(resolved);
+  var types = [];
+  try { types = api_getHourTypes() || []; } catch (error) { types = []; }
+  var income = (Array.isArray(types) ? types : []).filter(function(type) { return type && type.contributes_to_income === true; })[0];
+  return income ? String(income.id) : '';
+}
+
+function assessmentEntryIsBillable_(entry) {
+  return !!entry && String(entry.source_type || '') === 'assessment' &&
+    String(entry.source_occurrence_key || '') === ASSESSMENT_BILLABLE_OCCURRENCE_KEY;
+}
+
+function findAssessmentBillableEntry_(assessmentId) {
+  return api_getEntries({}).filter(function(entry) {
+    return assessmentEntryIsBillable_(entry) && String(entry.source_id) === String(assessmentId);
+  })[0] || null;
+}
 
 function assessmentJson_(value, fallback) { try { var parsed = JSON.parse(value || ''); return parsed === null ? fallback : parsed; } catch (error) { return fallback; } }
 function assessmentNow_() { return invoiceToIsoDateTime(new Date()); }
@@ -183,8 +212,11 @@ function syncAssessmentEntry_(assessment) {
   if (!contract || Number(contract.hourly_rate) <= 0) return null;
   var amount = resolveAssessmentLines_(assessment).reduce(function(sum, line) { return sum + line.amount; }, 0);
   var duration = Math.max(1, Math.round((amount / Number(contract.hourly_rate)) * 60));
-  var existing = api_getEntries({ startDate: assessment.assessment_date, endDate: assessment.assessment_date }).filter(function(entry) { return entry.source_type === 'assessment' && String(entry.source_id) === String(assessment.id); })[0];
-  var payload = { id: existing ? existing.id : '', date: assessment.assessment_date, duration_minutes: duration, contract_id: contract.id, hour_type_id: resolveDefaultHourTypeId(), entry_type: 'basic', assessment_id: assessment.id, source_type: 'assessment', source_id: assessment.id, source_occurrence_key: assessment.assessment_date };
+  // Match on the billable identity across every date, never on the assessment date alone: a date-scoped
+  // lookup both adopted whichever tracking row happened to share that date (overwriting the tracked
+  // hours with billable values) and orphaned the real billable row whenever the assessment date moved.
+  var existing = findAssessmentBillableEntry_(assessment.id);
+  var payload = { id: existing ? existing.id : '', date: assessment.assessment_date, duration_minutes: duration, contract_id: contract.id, hour_type_id: assessmentBillableHourTypeId_(), entry_type: 'basic', assessment_id: assessment.id, source_type: 'assessment', source_id: assessment.id, source_occurrence_key: ASSESSMENT_BILLABLE_OCCURRENCE_KEY };
   var result = existing ? api_updateEntry(payload) : api_addEntry(payload);
   return result && result.entry ? result.entry : null;
 }
@@ -260,8 +292,11 @@ function api_sendAssessmentInvoice(payload) {
 }
 
 function api_listAssessmentTimeEntries(assessmentId) {
+  // The auto-managed billable row is not tracked time; listing it invites editing or deleting the row
+  // the assessment invoices from.
   return api_getEntries({}).filter(function(entry) {
-    return entry.source_type === 'assessment' && (!assessmentId || String(entry.source_id) === String(assessmentId));
+    return entry.source_type === 'assessment' && !assessmentEntryIsBillable_(entry) &&
+      (!assessmentId || String(entry.source_id) === String(assessmentId));
   });
 }
 
@@ -269,16 +304,23 @@ function api_upsertAssessmentTimeEntry(payload) {
   payload = payload || {};
   var assessmentId = String(payload.assessment_id || payload.source_id || '').trim();
   if (!assessmentId || !assessmentFind_('assessments', assessmentId).item) return apiRecoverableFailure_('assessment_required', 'A valid assessment is required.');
+  if (payload.id) {
+    var target = findTimesheetEntryById(payload.id);
+    if (target && assessmentEntryIsBillable_(target)) return apiRecoverableFailure_('billable_entry', 'That row is the assessment\'s billable entry and is maintained automatically.');
+  }
   payload.source_type = 'assessment';
   payload.source_id = assessmentId;
   payload.assessment_id = assessmentId;
-  payload.source_occurrence_key = payload.source_occurrence_key || payload.date || '';
+  // Tracking rows are unbounded per assessment per day, so they carry no occurrence key and stay
+  // distinct from each other and from the billable row. See ASSESSMENT_BILLABLE_OCCURRENCE_KEY.
+  payload.source_occurrence_key = '';
   return payload.id ? api_updateEntry(payload) : api_addEntry(payload);
 }
 
 function api_deleteAssessmentTimeEntry(id) {
   var entry = findTimesheetEntryById(id);
   if (!entry || entry.source_type !== 'assessment') return apiRecoverableFailure_('not_found', 'Assessment time entry not found.');
+  if (assessmentEntryIsBillable_(entry)) return apiRecoverableFailure_('billable_entry', 'That row is the assessment\'s billable entry and is maintained automatically.');
   return api_deleteEntry(id);
 }
 
