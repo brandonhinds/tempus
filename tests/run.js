@@ -1720,4 +1720,96 @@ test('the agenda week total honours the billable-only flag without touching the 
   assert.equal(context.agendaDayInfo('2026-09-04').billableMinutes, 0);
 });
 
+test('contract client-timesheet fields round-trip and survive a partial update', () => {
+  const { context, spreadsheet } = createAppsScriptContext({});
+  context.assertMigrationsSettled_ = () => true;
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/contracts.js');
+
+  const created = context.api_addContract({
+    name: 'Acme', start_date: '2026-07-01', hourly_rate: 150,
+    specified_personnel: '  Geoff V  ',
+    work_order_number: 'WO-12345',
+    contract_reference: 'C-2026-088',
+    timesheet_statement: 'Line one.\nLine two.'
+  }).contract;
+  assert.equal(created.specified_personnel, 'Geoff V', 'surrounding whitespace is trimmed');
+  assert.equal(created.work_order_number, 'WO-12345');
+  assert.equal(created.timesheet_statement, 'Line one.\nLine two.', 'the declaration keeps its line breaks');
+
+  // Declared in the canonical schema, so getOrCreateSheet appends them by name — no migration id, and no
+  // existing spreadsheet is gated behind an upgrade screen just to gain these columns.
+  const headers = sheetHeaderRow(spreadsheet, 'contracts');
+  ['specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement']
+    .forEach((column) => assert.ok(headers.indexOf(column) !== -1, 'missing contracts column: ' + column));
+
+  const read = context.api_getContracts()[0];
+  assert.equal(read.work_order_number, 'WO-12345');
+  assert.equal(read.contract_reference, 'C-2026-088');
+
+  // A partial update — the shape used when saving a line-item template or archiving — must not silently
+  // blank the buyer-facing fields, or the next client timesheet prints without its work order.
+  context.api_updateContract({ id: created.id, name: 'Acme', start_date: '2026-07-01', hourly_rate: 150 });
+  const preserved = context.api_getContracts()[0];
+  assert.equal(preserved.specified_personnel, 'Geoff V');
+  assert.equal(preserved.work_order_number, 'WO-12345');
+  assert.equal(preserved.timesheet_statement, 'Line one.\nLine two.');
+
+  // An explicit empty string still clears a field (the form always sends all four).
+  context.api_updateContract({ id: created.id, name: 'Acme', start_date: '2026-07-01', hourly_rate: 150, work_order_number: '' });
+  assert.equal(context.api_getContracts()[0].work_order_number, '');
+  assert.equal(context.api_getContracts()[0].contract_reference, 'C-2026-088', 'clearing one field leaves the others alone');
+});
+
+test('client timesheet is company-gated, contract-driven, and shares the print builders', () => {
+  const navbar = fs.readFileSync(path.join(root, 'views/partials/navbar.html'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(root, 'views/partials/dashboard.html'), 'utf8');
+  const contractsHtml = fs.readFileSync(path.join(root, 'views/partials/contracts.html'), 'utf8');
+  const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+
+  assert.match(navbar, /id="calendar-client-timesheet-btn"/);
+  assert.match(dashboard, /id="modal-client-timesheet"/);
+  assert.match(dashboard, /id="client-timesheet-contract"/);
+  // The client modal offers the same bulk "Unselect all" for non-income types as the internal print modal.
+  assert.match(dashboard, /id="btn-client-timesheet-unselect-other"/);
+  assert.match(scripts, /btnClientTimesheetUnselectOther\.addEventListener\('click', clientTimesheetUnselectAllOther\)/);
+  // The internal print modal's own bulk control must stay wired.
+  assert.match(dashboard, /id="btn-unselect-all-other"/);
+  assert.match(scripts, /btnUnselectAllOther\.addEventListener\('click', unselectAllOtherHourTypes\)/);
+  ['contract-specified-personnel', 'contract-work-order-number', 'contract-contract-reference', 'contract-timesheet-statement']
+    .forEach((id) => assert.ok(contractsHtml.indexOf('id="' + id + '"') !== -1, 'contract form is missing ' + id));
+
+  // Company tracking gates the button; it deliberately has no feature flag of its own.
+  assert.match(scripts, /clientTimesheetBtn\.style\.display = visible \? 'inline-flex' : 'none'/);
+  assert.match(scripts, /const visible = !!state\.companyTrackingEnabled;/);
+  assert.ok(scripts.indexOf("'calendar-client-timesheet-btn'") !== -1, 'button must join the Tools disclosure list');
+
+  // Both printed surfaces must run through the shared builders (defined once, called by each generator)
+  // rather than keeping private copies of the calendar/totals/CSS that could drift apart.
+  ['printCalendarHtml', 'printTotalsHtml', 'printSummaryHtml', 'printPaperCss', 'printCollectMonthTotals', 'printRoundedHours']
+    .forEach((fn) => {
+      const uses = (scripts.match(new RegExp(fn + '\\(', 'g')) || []).length;
+      assert.ok(uses >= 3, fn + ' should be defined once and used by both print generators (found ' + uses + ')');
+    });
+
+  // Only entries booked to a DIFFERENT contract are excluded. Leave, sick days and public holidays are
+  // stored with contract_id '' (see backend/publicholidays.js), so filtering on equality alone silently
+  // erased every non-billable hour from the sheet.
+  assert.match(scripts, /const entryContractId = String\(entry\.contract_id \|\| ''\);/);
+  assert.match(scripts, /if \(contractId && entryContractId && entryContractId !== String\(contractId\)\) return;/);
+  // The sign-off block is unconditional — the buyer signs whether or not a declaration is configured.
+  assert.match(scripts, /BUYER’S REPRESENTATIVE/);
+  assert.match(scripts, /\['Signature', 'Date', 'Printed name', 'Position'\]/);
+  // The whole sheet has to land on one A4 page, so the client variant renders the calendar with the
+  // compact tile metrics while the internal view keeps the roomy ones.
+  assert.match(scripts, /function printTileMetrics\(compact\)/);
+  assert.match(scripts, /printCalendarHtml\(year, month, selectedTypes, dailySummaries, incomeAccent, roundInterval, true\)/);
+  assert.match(scripts, /printCalendarHtml\(year, month, selectedTypes, dailySummaries, incomeAccent, roundInterval, false\)/);
+  // Identification is one horizontal band, and the contract's friendly name stays out of the printed body.
+  assert.match(scripts, /class="ct-facts"/);
+  assert.match(scripts, /\['Work order #', contract\.work_order_number\]/);
+  assert.match(scripts, /\['Contract ref', contract\.contract_reference\]/);
+});
+
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');

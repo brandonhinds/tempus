@@ -12,9 +12,14 @@ var TEMPUS_SHEET_SCHEMAS = {
   user_settings: { headers: ['key', 'value', 'type'], text: ['key', 'type'] },
   feature_flags: { headers: ['feature', 'enabled', 'name', 'description'], text: ['feature', 'enabled', 'name', 'description'] },
   contracts: {
-    headers: ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at'],
+    // The last four are optional client-timesheet fields (see backend/contracts.js CONTRACT_TEXT_FIELDS).
+    // Appended LAST so existing rows stay column-aligned; getOrCreateSheet adds them by name on first read,
+    // so no migration id is needed and no spreadsheet is gated behind an upgrade for them.
+    headers: ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement'],
     defaults: { total_hours: 0, include_weekends: 'FALSE', standard_hours_per_day: 7.5, archived: 'FALSE' },
-    text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at']
+    // All four are forced to plain text: a work order number like "2026-14" or a bare digit string is
+    // otherwise coerced by Sheets into a date/number and reads back mangled on the printed timesheet.
+    text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement']
   },
   // Quick-action fields: each hour type can opt into the calendar right-click quick-fill bar with its
   // own one-click duration and icon. quick_fill_mode decides what the one click DOES: 'hours' fills the

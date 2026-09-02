@@ -1,5 +1,25 @@
 var CONTRACT_CACHE_PREFIX = 'contracts_v2_';
 
+// Optional free-text contract fields consumed by the client timesheet print variant. Every one of them may
+// be blank — the printout simply omits the line. `max` caps a stray paste so it can't bloat the sheet;
+// only the declaration statement keeps its line breaks (the others are single-line identifiers).
+var CONTRACT_TEXT_FIELDS = {
+  specified_personnel: { max: 200, multiline: false },
+  work_order_number: { max: 100, multiline: false },
+  contract_reference: { max: 100, multiline: false },
+  timesheet_statement: { max: 2000, multiline: true }
+};
+
+function normalizeContractText_(value, maxLength, allowMultiline) {
+  if (value == null) return '';
+  var text = String(value);
+  // Collapse runs of spaces/tabs either way; newlines survive only where they carry meaning.
+  text = allowMultiline ? text.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ') : text.replace(/\s+/g, ' ');
+  text = text.trim();
+  var cap = Number(maxLength) > 0 ? Number(maxLength) : 200;
+  return text.length > cap ? text.slice(0, cap) : text;
+}
+
 function normalizeHourlyRate(value) {
   if (value === null || value === undefined || value === '') return 0;
   var num = Number(value);
@@ -80,6 +100,10 @@ function normalizeContractObject(contract) {
     created_at: toIsoDateTime(contract.created_at)
   };
   if (!normalized.end_date || normalized.end_date === 'Invalid Date') normalized.end_date = '';
+  Object.keys(CONTRACT_TEXT_FIELDS).forEach(function(field) {
+    var spec = CONTRACT_TEXT_FIELDS[field];
+    normalized[field] = normalizeContractText_(contract[field], spec.max, spec.multiline);
+  });
   return normalized;
 }
 
@@ -115,6 +139,7 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     standard_day_json: normalized.standard_day_json || '',
     created_at: createdAt || normalized.created_at || toIsoDateTime(new Date())
   };
+  Object.keys(CONTRACT_TEXT_FIELDS).forEach(function(field) { byName[field] = normalized[field] || ''; });
   if (headers && headers.length) {
     return headers.map(function(header, idx) {
       if (Object.prototype.hasOwnProperty.call(byName, header)) return byName[header];
@@ -135,7 +160,11 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     byName.archived,
     byName.entry_mode,
     byName.standard_day_json,
-    byName.created_at
+    byName.created_at,
+    byName.specified_personnel,
+    byName.work_order_number,
+    byName.contract_reference,
+    byName.timesheet_statement
   ];
 }
 
@@ -245,6 +274,16 @@ function updateContractUnlocked_(contract) {
       if (contract.standard_day_json == null && standardDayIdx !== -1) {
         normalized.standard_day_json = values[i][standardDayIdx] || '';
       }
+      // Same again for the optional client-timesheet fields. Partial updates (saving a line-item template,
+      // archiving) don't carry them, and blanking a work order number or declaration silently would be a
+      // nasty surprise the next time the user printed a client timesheet.
+      Object.keys(CONTRACT_TEXT_FIELDS).forEach(function(field) {
+        if (contract[field] != null) return;
+        var textIdx = headers.indexOf(field);
+        if (textIdx === -1) return;
+        var spec = CONTRACT_TEXT_FIELDS[field];
+        normalized[field] = normalizeContractText_(values[i][textIdx], spec.max, spec.multiline);
+      });
       // Header-keyed write aligned to the sheet's real columns, preserving any column we don't manage —
       // so a column reorder can never shift a value into the wrong field and corrupt the row.
       var row = buildContractRow(normalized, normalized.created_at, headers, values[i]);

@@ -3197,6 +3197,11 @@ let ratePreviewInputSyncing = false;
     clone.entry_mode = (clone.entry_mode === 'simple' || clone.entry_mode === 'detailed') ? clone.entry_mode : '';
     // Standard-day session template (JSON string; '' = none).
     clone.standard_day_json = (typeof clone.standard_day_json === 'string') ? clone.standard_day_json : (clone.standard_day_json ? String(clone.standard_day_json) : '');
+    // Optional client-timesheet fields: always present as strings so the print variant can test them with a
+    // plain truthiness check rather than guarding for undefined on every line.
+    ['specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement'].forEach((field) => {
+      clone[field] = clone[field] == null ? '' : String(clone[field]);
+    });
     delete clone.startDate;
     delete clone.endDate;
     delete clone.hourlyRate;
@@ -13248,6 +13253,23 @@ function updateDeductionFormVisibility() {
   const contractRateInput = document.getElementById('contract-rate');
   const contractTotalHoursInput = document.getElementById('contract-total-hours');
   const contractStandardHoursInput = document.getElementById('contract-standard-hours');
+  // Optional client-timesheet fields, keyed by their payload/sheet field name so the form wiring (reset,
+  // collect, populate) stays one loop instead of four near-identical blocks. Mirrors CONTRACT_TEXT_FIELDS
+  // in backend/contracts.js — keep the two lists in step.
+  const CONTRACT_TEXT_FIELD_INPUTS = {
+    specified_personnel: document.getElementById('contract-specified-personnel'),
+    work_order_number: document.getElementById('contract-work-order-number'),
+    contract_reference: document.getElementById('contract-contract-reference'),
+    timesheet_statement: document.getElementById('contract-timesheet-statement')
+  };
+  function contractTextFieldPayload() {
+    const payload = {};
+    Object.keys(CONTRACT_TEXT_FIELD_INPUTS).forEach((field) => {
+      const el = CONTRACT_TEXT_FIELD_INPUTS[field];
+      payload[field] = el ? String(el.value == null ? '' : el.value).trim() : '';
+    });
+    return payload;
+  }
   const contractIncludeWeekendsRow = document.getElementById('contract-weekends-row');
   const contractIncludeWeekendsInput = document.getElementById('contract-include-weekends');
   const contractSaveBtn = document.getElementById('contract-save');
@@ -13309,6 +13331,18 @@ function updateDeductionFormVisibility() {
   const printViewWarningText = document.getElementById('print-view-warning-text');
   const btnCancelPrintView = document.getElementById('btn-cancel-print-view');
   const btnGeneratePrintView = document.getElementById('btn-generate-print-view');
+  const clientTimesheetBtn = document.getElementById('calendar-client-timesheet-btn');
+  const clientTimesheetModal = document.getElementById('modal-client-timesheet');
+  const clientTimesheetMonthDisplay = document.getElementById('client-timesheet-month-display');
+  const clientTimesheetContractSelect = document.getElementById('client-timesheet-contract');
+  const clientTimesheetContractNotice = document.getElementById('client-timesheet-contract-notice');
+  const clientTimesheetIncomeList = document.getElementById('client-timesheet-income-list');
+  const clientTimesheetOtherList = document.getElementById('client-timesheet-other-list');
+  const clientTimesheetWarning = document.getElementById('client-timesheet-warning');
+  const clientTimesheetWarningText = document.getElementById('client-timesheet-warning-text');
+  const btnCancelClientTimesheet = document.getElementById('btn-cancel-client-timesheet');
+  const btnGenerateClientTimesheet = document.getElementById('btn-generate-client-timesheet');
+  const btnClientTimesheetUnselectOther = document.getElementById('btn-client-timesheet-unselect-other');
   const btnUnselectAllOther = document.getElementById('btn-unselect-all-other');
   const timesheet1Btn = document.getElementById('btn-timesheet1-importer');
   const timesheet1Modal = document.getElementById('modal-timesheet1-importer');
@@ -13406,6 +13440,10 @@ function updateDeductionFormVisibility() {
     if (contractRateInput) contractRateInput.value = '';
     if (contractTotalHoursInput) contractTotalHoursInput.value = '';
     if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = false;
+    Object.keys(CONTRACT_TEXT_FIELD_INPUTS).forEach((field) => {
+      const el = CONTRACT_TEXT_FIELD_INPUTS[field];
+      if (el) el.value = '';
+    });
     // New contracts start on "Use default" (inherit the global entry mode).
     const contractEntryModeSelect = document.getElementById('contract-entry-mode');
     if (contractEntryModeSelect) { syncContractEntryModeDefaultLabel(); contractEntryModeSelect.value = ''; }
@@ -13529,7 +13567,8 @@ function updateDeductionFormVisibility() {
       line_item_templates_json: lineItemTemplatesJson,
       color,
       entry_mode: entryMode,
-      standard_day_json: (typeof contractStandardDayPayloadJson === 'function') ? contractStandardDayPayloadJson() : (contract ? (contract.standard_day_json || '') : '')
+      standard_day_json: (typeof contractStandardDayPayloadJson === 'function') ? contractStandardDayPayloadJson() : (contract ? (contract.standard_day_json || '') : ''),
+      ...contractTextFieldPayload()
     };
   }
 
@@ -13779,6 +13818,10 @@ function updateDeductionFormVisibility() {
       contractStandardHoursInput.value = String(standardHours);
     }
     if (contractIncludeWeekendsInput) contractIncludeWeekendsInput.checked = !!contract.include_weekends;
+    Object.keys(CONTRACT_TEXT_FIELD_INPUTS).forEach((field) => {
+      const el = CONTRACT_TEXT_FIELD_INPUTS[field];
+      if (el) el.value = contract[field] || '';
+    });
     const contractEntryModeSelect = document.getElementById('contract-entry-mode');
     if (contractEntryModeSelect) {
       syncContractEntryModeDefaultLabel();
@@ -16729,6 +16772,24 @@ function updateDeductionFormVisibility() {
   if (printMonthlyBtn) {
     printMonthlyBtn.addEventListener('click', openPrintViewConfigModal);
   }
+  if (clientTimesheetBtn) {
+    clientTimesheetBtn.addEventListener('click', openClientTimesheetModal);
+  }
+  if (btnCancelClientTimesheet) {
+    btnCancelClientTimesheet.addEventListener('click', closeClientTimesheetModal);
+  }
+  if (btnGenerateClientTimesheet) {
+    btnGenerateClientTimesheet.addEventListener('click', generateClientTimesheet);
+  }
+  if (btnClientTimesheetUnselectOther) {
+    btnClientTimesheetUnselectOther.addEventListener('click', clientTimesheetUnselectAllOther);
+  }
+  if (clientTimesheetContractSelect) {
+    clientTimesheetContractSelect.addEventListener('change', () => {
+      renderClientTimesheetContractNotice();
+      validateClientTimesheetSelection();
+    });
+  }
   if (btnCancelPrintView) {
     btnCancelPrintView.addEventListener('click', closePrintViewConfigModal);
   }
@@ -18151,6 +18212,14 @@ function getCachedIncomeSummary(monthKey) {
       printMonthlyBtn.style.display = visible ? 'inline-flex' : 'none';
       printMonthlyBtn.title = 'Generate printable monthly hours view';
     }
+    // The client timesheet is a company-mode artifact: it evidences hours worked under a buyer's work
+    // order. A personal/sole-trader setup has no buyer's representative to sign it, so the button only
+    // exists when company tracking is on — no feature flag of its own to turn on as well.
+    if (clientTimesheetBtn) {
+      const visible = !!state.companyTrackingEnabled;
+      clientTimesheetBtn.style.display = visible ? 'inline-flex' : 'none';
+      clientTimesheetBtn.title = 'Generate a buyer-facing timesheet for one contract';
+    }
     if (timesheet1Btn) {
       const visible = getFeatureFlag('enable_timesheet1_importer');
       timesheet1Btn.style.display = visible ? 'inline-flex' : 'none';
@@ -19038,80 +19107,100 @@ function getCachedIncomeSummary(monthKey) {
     }
   }
 
-  function generatePrintView() {
-    ensureCalendarState();
-    const { year, month } = state.calendar;
+  // ================================================================================================
+  // Shared print builders
+  // ------------------------------------------------------------------------------------------------
+  // Two printed surfaces exist: the internal "Print month" view and the Client timesheet. Both render the
+  // same calendar tiles, the same per-hour-type totals cards and the same paper CSS, so those are built
+  // here once and called by each generator — the same reasoning that makes entry-core shared between
+  // desktop and mobile. Two copies of this much layout would drift, and a client timesheet that disagreed
+  // with the internal one about a day's hours would be worse than no client timesheet at all.
+  //
+  // The client sheet spends vertical space the internal one doesn't (identification band, declaration,
+  // signature block) and still has to land on one A4 page, so it renders the calendar in a compact metric
+  // set. The internal view keeps the original metrics exactly — see printTileMetrics.
+  // ================================================================================================
 
-    if (printViewSelectedHourTypes.size === 0) {
-      return;
+  // Hours rounded by the user's interval, in the app's decimal style (8.5, not 8.50). A worked duration
+  // never rounds away to nothing — it floors to one interval, matching roundDuration on the client and
+  // applyRoundInterval on the server.
+  function printRoundedHours(minutes, roundInterval) {
+    let displayMinutes = minutes;
+    if (roundInterval > 1 && minutes > 0) {
+      displayMinutes = Math.max(roundInterval, Math.round(minutes / roundInterval) * roundInterval);
     }
+    return formatDecimalHours(displayMinutes / 60);
+  }
 
-    // Get rounding interval
-    const roundInterval = getRoundInterval();
+  // Calendar tile sizing. The "roomy" column is the internal print view's long-standing look and must not
+  // change; "compact" buys back the ~200px the client sheet needs for its identification and sign-off
+  // blocks. Tile heights are minimums — a day carrying several hour types still grows to fit.
+  function printTileMetrics(compact) {
+    return compact
+      ? { tileMin: 62, tilePad: '6px 7px', gridGap: 4, weekdayFont: 9, dayFont: 10, hoursFont: 14, suffixFont: 8, labelFont: 8, labelGap: 3, dotSize: 5, blockGap: 4, holidayFont: 8 }
+      : { tileMin: 96, tilePad: '8px 9px', gridGap: 6, weekdayFont: 10, dayFont: 11, hoursFont: 17, suffixFont: 10, labelFont: 9, labelGap: 5, dotSize: 6, blockGap: 6, holidayFont: 9 };
+  }
 
-    // Helper to format hours with rounding
-    function formatHours(minutes) {
-      let displayMinutes = minutes;
-      if (roundInterval > 1 && minutes > 0) {
-        displayMinutes = Math.max(roundInterval, Math.round(minutes / roundInterval) * roundInterval);
-      }
-      return (displayMinutes / 60).toFixed(2);
-    }
-
-    // Same rounding as formatHours, but rendered in the app's decimal style (8.5, not 8.50).
-    function formatHoursDecimal(minutes) {
-      let displayMinutes = minutes;
-      if (roundInterval > 1 && minutes > 0) {
-        displayMinutes = Math.max(roundInterval, Math.round(minutes / roundInterval) * roundInterval);
-      }
-      return formatDecimalHours(displayMinutes / 60);
-    }
-
-    // Get selected hour types
-    const selectedTypes = Array.from(printViewSelectedHourTypes)
+  // Selected hour types in render order: income first, then alphabetical. Tiles and totals rows both follow
+  // this order so the page reads the same way top to bottom.
+  function printOrderedHourTypes(selectedIds) {
+    return Array.from(selectedIds)
       .map(id => state.hourTypeMap[id])
       .filter(Boolean)
       .sort((a, b) => {
-        // Sort income types first
         if (a.contributes_to_income && !b.contributes_to_income) return -1;
         if (!a.contributes_to_income && b.contributes_to_income) return 1;
         return a.name.localeCompare(b.name);
       });
+  }
 
-    // Get all entries for the month
-    const monthEntries = entriesForMonth(year, month);
-
-    const selectedIncomeTypes = selectedTypes.filter(ht => ht.contributes_to_income);
-    const incomeAccent = selectedIncomeTypes.length ? (selectedIncomeTypes[0].color || '#0d6efd') : '#0d6efd';
-
-    // Build daily summaries and monthly totals
+  // Per-day and per-hour-type minute totals for the month, limited to the selected hour types and — when
+  // contractId is given (the client timesheet) — to a single contract's entries.
+  function printCollectMonthTotals(year, month, selectedIds, contractId) {
     const dailySummaries = {};
     const hourTypeTotals = {};
-    monthEntries.forEach(entry => {
+    entriesForMonth(year, month).forEach(entry => {
       const hourTypeId = entry.hour_type_id || getDefaultHourTypeId();
-      if (!printViewSelectedHourTypes.has(hourTypeId)) return;
-
-      if (!dailySummaries[entry.date]) {
-        dailySummaries[entry.date] = {};
-      }
-      if (!dailySummaries[entry.date][hourTypeId]) {
-        dailySummaries[entry.date][hourTypeId] = 0;
-      }
-
+      if (!selectedIds.has(hourTypeId)) return;
+      // An entry with no contract at all — leave, sick days, public holidays; non-income hour types
+      // rarely require one — belongs to the month whichever contract is being invoiced. Excluding it
+      // would erase a fortnight of leave from the sheet and leave unexplained gaps in the calendar, so
+      // only entries booked against a DIFFERENT contract are dropped.
+      const entryContractId = String(entry.contract_id || '');
+      if (contractId && entryContractId && entryContractId !== String(contractId)) return;
+      if (!dailySummaries[entry.date]) dailySummaries[entry.date] = {};
+      if (!dailySummaries[entry.date][hourTypeId]) dailySummaries[entry.date][hourTypeId] = 0;
       const minutes = entry.duration_minutes || 0;
       dailySummaries[entry.date][hourTypeId] += minutes;
-
-      if (!hourTypeTotals[hourTypeId]) {
-        hourTypeTotals[hourTypeId] = 0;
-      }
-      hourTypeTotals[hourTypeId] += minutes;
+      hourTypeTotals[hourTypeId] = (hourTypeTotals[hourTypeId] || 0) + minutes;
     });
+    return { dailySummaries, hourTypeTotals };
+  }
 
-    // Generate HTML
-    const monthDate = new Date(year, month, 1);
-    const monthName = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  function printAccentColor(selectedTypes) {
+    const incomeTypes = selectedTypes.filter(ht => ht.contributes_to_income);
+    return incomeTypes.length ? (incomeTypes[0].color || '#0d6efd') : '#0d6efd';
+  }
 
-    // Build calendar grid
+  function printTotalMinutes(hourTypeTotals) {
+    return Object.keys(hourTypeTotals).reduce((acc, id) => acc + (hourTypeTotals[id] || 0), 0);
+  }
+
+  function printDaysWorked(dailySummaries) {
+    let daysWorked = 0;
+    Object.keys(dailySummaries).forEach(dateStr => {
+      const dayTotal = Object.keys(dailySummaries[dateStr]).reduce((acc, id) => acc + (dailySummaries[dateStr][id] || 0), 0);
+      if (dayTotal > 0) daysWorked++;
+    });
+    return daysWorked;
+  }
+
+  // The month grid of day tiles. Each in-month day is its own rounded card with a hairline border and a
+  // small gap between, echoing the in-app calendar (tiles that gather into a month) rather than a rigid
+  // ledger grid. Worked days are crisp white tiles; empty in-month days are faintly recessed; out-of-month
+  // fillers are blank.
+  function printCalendarHtml(year, month, selectedTypes, dailySummaries, incomeAccent, roundInterval, compact) {
+    const m = printTileMetrics(compact);
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
@@ -19121,43 +19210,33 @@ function getCachedIncomeSummary(monthKey) {
     const holidaysEnabled = (typeof getFeatureFlag === 'function') && getFeatureFlag('enable_public_holidays');
     const esc = (typeof escapeHtmlSafe === 'function') ? escapeHtmlSafe : (s => String(s == null ? '' : s));
 
-    // Public-holiday accent (badge border/text + legend swatch)
-    const holidayAccent = '#b8860b';
-    const holidayTint = 'rgba(184,134,11,0.10)';
-    let hasHolidayThisMonth = false;
-
-    // Tiled days: each in-month day is its own rounded card with a hairline border and a small gap between,
-    // echoing the in-app calendar (tiles that gather into a month) rather than a rigid ledger grid. Worked
-    // days are crisp white tiles; empty in-month days are faintly recessed; out-of-month fillers are blank.
-    const tileBase = 'min-height:96px; border-radius:7px; padding:8px 9px; display:flex; flex-direction:column; justify-content:space-between;';
+    const tileBase = `min-height:${m.tileMin}px; border-radius:7px; padding:${m.tilePad}; display:flex; flex-direction:column; justify-content:space-between;`;
     const workedTile = tileBase + ' background:#ffffff; border:1px solid #e6e2d8;';
     const emptyTile = tileBase + ' background:#f7f5f0; border:1px solid #efebe2;';
-    const fillerCell = 'min-height:96px;';
+    const fillerCell = `min-height:${m.tileMin}px;`;
 
     // Weekday header row: light, left-aligned labels (no dark bar), aligned to the tiles below.
-    let calendarHtml = '<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; margin-bottom:6px;">';
+    let calendarHtml = `<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:${m.gridGap}px; margin-bottom:${m.gridGap}px;">`;
     ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(day => {
-      calendarHtml += `<div style="font-size:10px; font-weight:600; letter-spacing:0.7px; color:#a89f92; padding-left:3px;">${day.toUpperCase()}</div>`;
+      calendarHtml += `<div style="font-size:${m.weekdayFont}px; font-weight:600; letter-spacing:0.7px; color:#a89f92; padding-left:3px;">${day.toUpperCase()}</div>`;
     });
     calendarHtml += '</div>';
 
-    calendarHtml += '<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:6px;">';
+    calendarHtml += `<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:${m.gridGap}px;">`;
 
     // Leading filler cells so the 1st lands under the right weekday
     for (let i = 0; i < startOffset; i++) {
       calendarHtml += `<div style="${fillerCell}"></div>`;
     }
 
-    // Add days
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const daySummary = dailySummaries[dateStr] || {};
       const holiday = holidaysEnabled && state.publicHolidayMap ? state.publicHolidayMap[dateStr] : null;
       const holidayName = holiday ? (holiday.localName || holiday.name || '') : '';
-      if (holidayName) hasHolidayThisMonth = true;
 
-      // Collect the day's hours into uniform entry blocks. Income types are summed into one
-      // block; each non-income type is its own block. Every block is rendered identically.
+      // Collect the day's hours into uniform entry blocks. Income types are summed into one block; each
+      // non-income type is its own block. Every block is rendered identically.
       let incomeMinutesForDay = 0;
       let incomeColor = incomeAccent;
       const incomeNames = [];
@@ -19171,29 +19250,29 @@ function getCachedIncomeSummary(monthKey) {
           incomeColor = hourType.color || incomeColor;
           if (incomeNames.indexOf(hourType.name) === -1) incomeNames.push(hourType.name);
         } else {
-          dayEntries.push({ hours: formatHoursDecimal(minutes), label: hourType.name, color: hourType.color || '#8a8175' });
+          dayEntries.push({ hours: printRoundedHours(minutes, roundInterval), label: hourType.name, color: hourType.color || '#8a8175' });
         }
       });
       // Income block first so it leads the stack, then each non-income type
       if (incomeMinutesForDay > 0) {
-        dayEntries.unshift({ hours: formatHoursDecimal(incomeMinutesForDay), label: incomeNames.join(' · '), color: incomeColor });
+        dayEntries.unshift({ hours: printRoundedHours(incomeMinutesForDay, roundInterval), label: incomeNames.join(' · '), color: incomeColor });
       }
 
       const hasContent = dayEntries.length > 0 || !!holidayName;
       calendarHtml += `<div style="${hasContent ? workedTile : emptyTile}">`;
 
       // Day number, anchored top-left, alone — gives the day room to breathe.
-      calendarHtml += `<div style="font-size:11px; font-weight:600; color:#b0a89c; line-height:1;">${day}</div>`;
+      calendarHtml += `<div style="font-size:${m.dayFont}px; font-weight:600; color:#b0a89c; line-height:1;">${day}</div>`;
 
       // Entry block, anchored bottom-left: holiday name (soft amber text, no box) then each hours/type block.
       calendarHtml += '<div>';
       if (holidayName) {
-        calendarHtml += `<div style="font-size:9px; font-weight:600; color:#9a6a18; line-height:1.25;">${esc(holidayName)}</div>`;
+        calendarHtml += `<div style="font-size:${m.holidayFont}px; font-weight:600; color:#9a6a18; line-height:1.25;">${esc(holidayName)}</div>`;
       }
       dayEntries.forEach((e, idx) => {
-        calendarHtml += `<div style="margin-top:${idx === 0 && !holidayName ? '0' : '6px'};">`;
-        calendarHtml += `<div style="font-weight:600; font-size:17px; color:#2a2724; line-height:1; letter-spacing:-0.2px;">${e.hours}<span style="font-size:10px; font-weight:500; color:#a89f92; margin-left:2px;">h</span></div>`;
-        calendarHtml += `<div style="display:flex; align-items:center; gap:5px; font-size:9px; color:#8a8175; margin-top:5px;"><span style="width:6px; height:6px; border-radius:50%; background:${e.color}; flex-shrink:0;"></span>${esc(e.label)}</div>`;
+        calendarHtml += `<div style="margin-top:${idx === 0 && !holidayName ? '0' : m.blockGap + 'px'};">`;
+        calendarHtml += `<div style="font-weight:600; font-size:${m.hoursFont}px; color:#2a2724; line-height:1; letter-spacing:-0.2px;">${e.hours}<span style="font-size:${m.suffixFont}px; font-weight:500; color:#a89f92; margin-left:2px;">h</span></div>`;
+        calendarHtml += `<div style="display:flex; align-items:center; gap:5px; font-size:${m.labelFont}px; color:#8a8175; margin-top:${m.labelGap}px;"><span style="width:${m.dotSize}px; height:${m.dotSize}px; border-radius:50%; background:${e.color}; flex-shrink:0;"></span>${esc(e.label)}</div>`;
         calendarHtml += '</div>';
       });
       calendarHtml += '</div>';
@@ -19208,8 +19287,13 @@ function getCachedIncomeSummary(monthKey) {
     }
 
     calendarHtml += '</div>';
+    return calendarHtml;
+  }
 
-    // Per-hour-type totals, split into billable (income) and other
+  // Per-hour-type totals, split into billable (income) and other, as side-by-side cards.
+  function printTotalsHtml(selectedTypes, hourTypeTotals, roundInterval) {
+    const esc = (typeof escapeHtmlSafe === 'function') ? escapeHtmlSafe : (s => String(s == null ? '' : s));
+
     const incomeRows = selectedTypes
       .filter(ht => ht.contributes_to_income)
       .map(hourType => ({ hourType: hourType, minutes: hourTypeTotals[hourType.id] || 0 }))
@@ -19220,51 +19304,44 @@ function getCachedIncomeSummary(monthKey) {
       .map(hourType => ({ hourType: hourType, minutes: hourTypeTotals[hourType.id] || 0 }))
       .filter(row => row.minutes > 0);
 
-    // Header summary line: total + billable hours and the number of days actually worked. No standalone
-    // legend/divider — every calendar tile self-labels its type, and the totals cards below are the colour
-    // key, so a top legend would just repeat what's already on the page. Unit ("hrs") is stated once on the
-    // total; "billable" is obviously hours by parallel, and "days worked" carries its own unit.
-    const summaryAllMinutes = Object.keys(hourTypeTotals).reduce((acc, id) => acc + (hourTypeTotals[id] || 0), 0);
-    const summaryBillableMinutes = selectedTypes
-      .filter(ht => ht.contributes_to_income)
-      .reduce((acc, ht) => acc + (hourTypeTotals[ht.id] || 0), 0);
-    let daysWorked = 0;
-    Object.keys(dailySummaries).forEach(dateStr => {
-      const dayTotal = Object.keys(dailySummaries[dateStr]).reduce((acc, id) => acc + (dailySummaries[dateStr][id] || 0), 0);
-      if (dayTotal > 0) daysWorked++;
-    });
-    const daysWorkedLabel = daysWorked === 1 ? 'day worked' : 'days worked';
-    const summaryHtml = `<div class="pv-summary">${formatHoursDecimal(summaryAllMinutes)} total hrs &nbsp;&middot;&nbsp; ${formatHoursDecimal(summaryBillableMinutes)} billable &nbsp;&middot;&nbsp; ${daysWorked} ${daysWorkedLabel}</div>`;
-    const genDate = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-
-    // Totals as side-by-side cards
-    function buildTotalsCard(title, rows, accentColor) {
+    function buildTotalsCard(title, rows) {
       if (!rows.length) return '';
       const totalMinutes = rows.reduce((acc, row) => acc + row.minutes, 0);
       let html = '<div class="pv-card">';
       html += `<div class="pv-card-head"><span>${title}</span><span>HOURS</span></div>`;
       rows.forEach(row => {
         const dotColor = row.hourType.color || '#8a8175';
-        html += `<div class="pv-card-row"><span class="pv-card-name"><span class="pv-dot" style="background:${dotColor};"></span>${esc(row.hourType.name)}</span><span class="pv-card-val">${formatHoursDecimal(row.minutes)}</span></div>`;
+        html += `<div class="pv-card-row"><span class="pv-card-name"><span class="pv-dot" style="background:${dotColor};"></span>${esc(row.hourType.name)}</span><span class="pv-card-val">${printRoundedHours(row.minutes, roundInterval)}</span></div>`;
       });
-      html += `<div class="pv-card-total"><span>Total</span><span>${formatHoursDecimal(totalMinutes)}</span></div>`;
+      html += `<div class="pv-card-total"><span>Total</span><span>${printRoundedHours(totalMinutes, roundInterval)}</span></div>`;
       html += '</div>';
       return html;
     }
 
     let totalsHtml = '<div class="pv-totals">';
-    totalsHtml += buildTotalsCard('BILLABLE', incomeRows, incomeAccent);
-    totalsHtml += buildTotalsCard('OTHER', otherRows, '#495057');
+    totalsHtml += buildTotalsCard('BILLABLE', incomeRows);
+    totalsHtml += buildTotalsCard('OTHER', otherRows);
     totalsHtml += '</div>';
+    return totalsHtml;
+  }
 
-    // Complete HTML document
-    const printHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Monthly Hours - ${monthName}</title>
-  <style>
+  // Header summary line: total + billable hours and the number of days actually worked. No standalone
+  // legend/divider — every calendar tile self-labels its type, and the totals cards below are the colour
+  // key, so a top legend would just repeat what's already on the page. Unit ("hrs") is stated once on the
+  // total; "billable" is obviously hours by parallel, and "days worked" carries its own unit.
+  function printSummaryHtml(selectedTypes, hourTypeTotals, dailySummaries, roundInterval) {
+    const summaryAllMinutes = printTotalMinutes(hourTypeTotals);
+    const summaryBillableMinutes = selectedTypes
+      .filter(ht => ht.contributes_to_income)
+      .reduce((acc, ht) => acc + (hourTypeTotals[ht.id] || 0), 0);
+    const daysWorked = printDaysWorked(dailySummaries);
+    const daysWorkedLabel = daysWorked === 1 ? 'day worked' : 'days worked';
+    return `<div class="pv-summary">${printRoundedHours(summaryAllMinutes, roundInterval)} total hrs &nbsp;&middot;&nbsp; ${printRoundedHours(summaryBillableMinutes, roundInterval)} billable &nbsp;&middot;&nbsp; ${daysWorked} ${daysWorkedLabel}</div>`;
+  }
+
+  // The paper stylesheet both printed pages share.
+  function printPaperCss() {
+    return `
     @page {
       size: A4 portrait;
       margin: 12mm;
@@ -19361,7 +19438,49 @@ function getCachedIncomeSummary(monthKey) {
       font-size: 9px;
       color: #b0a89c;
       text-align: center;
+    }`;
+  }
+
+  // Hand the assembled document to a popup and let it print itself. A blocked popup used to fail silently,
+  // leaving the user looking at nothing with no idea why — say so instead.
+  function openPrintWindow(html) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setStatus('Allow pop-ups for this site to open the print view', 'error');
+      return false;
     }
+    printWindow.document.write(html);
+    printWindow.document.close();
+    return true;
+  }
+
+  function generatePrintView() {
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+
+    if (printViewSelectedHourTypes.size === 0) {
+      return;
+    }
+
+    const roundInterval = getRoundInterval();
+    const selectedTypes = printOrderedHourTypes(printViewSelectedHourTypes);
+    const incomeAccent = printAccentColor(selectedTypes);
+    const { dailySummaries, hourTypeTotals } = printCollectMonthTotals(year, month, printViewSelectedHourTypes, '');
+
+    const monthDate = new Date(year, month, 1);
+    const monthName = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const calendarHtml = printCalendarHtml(year, month, selectedTypes, dailySummaries, incomeAccent, roundInterval, false);
+    const totalsHtml = printTotalsHtml(selectedTypes, hourTypeTotals, roundInterval);
+    const summaryHtml = printSummaryHtml(selectedTypes, hourTypeTotals, dailySummaries, roundInterval);
+    const genDate = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Monthly Hours - ${monthName}</title>
+  <style>${printPaperCss()}
   </style>
 </head>
 <body>
@@ -19381,14 +19500,357 @@ function getCachedIncomeSummary(monthKey) {
 </body>
 </html>`;
 
-    // Open in new window
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printHtml);
-      printWindow.document.close();
+    openPrintWindow(printHtml);
+    closePrintViewConfigModal();
+  }
+
+  // ================================================================================================
+  // Client timesheet
+  // ------------------------------------------------------------------------------------------------
+  // A buyer-facing variant of the monthly print view. It shows one contract's hours only, and carries the
+  // identification and sign-off a buyer's representative needs: the Specified Personnel, the work order
+  // number, the contract reference, the declaration statement, and ruled space to record the date,
+  // signature, printed name and position. Those four contract fields are all optional — a blank one is
+  // left off the page rather than printing an empty label.
+  //
+  // The contract's *name* deliberately never prints: it is the friendly label the user picks contracts by
+  // inside Tempus, whereas the buyer knows the engagement by its contract reference. The name is used only
+  // for the document title, which becomes the saved PDF's filename.
+  //
+  // Everything must land on ONE A4 page — a signature block orphaned onto page two is a sheet a buyer can
+  // hand back. That budget is why the page has no period line (the month is already the subtitle), packs
+  // identification into a single horizontal band, and renders the calendar with the compact tile metrics.
+  // Beyond those, it is the internal print view plus the buyer-facing extras: same summary line, same day
+  // tiles, same billable/other totals cards.
+  // ================================================================================================
+
+  let clientTimesheetSelectedHourTypes = new Set();
+
+  function clientTimesheetContractOptions() {
+    // Every contract, not just those active this month: a timesheet is often printed for a period after the
+    // engagement has ended or been archived, and refusing to list it would make that impossible.
+    return (state.contracts || []).slice().sort((a, b) => {
+      if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }
+
+  // Pre-select whichever contract holds the most logged minutes this month — nearly always the one being
+  // invoiced, so the common case is one click.
+  function clientTimesheetDefaultContractId(year, month) {
+    const minutesByContract = {};
+    entriesForMonth(year, month).forEach(entry => {
+      const contractId = String(entry.contract_id || '');
+      if (!contractId) return;
+      minutesByContract[contractId] = (minutesByContract[contractId] || 0) + (Number(entry.duration_minutes) || 0);
+    });
+    let bestId = '';
+    let bestMinutes = -1;
+    Object.keys(minutesByContract).forEach(contractId => {
+      if (minutesByContract[contractId] > bestMinutes) { bestMinutes = minutesByContract[contractId]; bestId = contractId; }
+    });
+    if (bestId && state.contractMap[bestId]) return bestId;
+    const options = clientTimesheetContractOptions();
+    return options.length ? String(options[0].id) : '';
+  }
+
+  // One hour-type toggle row, matching the internal print modal's rows.
+  function clientTimesheetHourTypeRow(hourType) {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.alignItems = 'center';
+    row.style.padding = '8px';
+    row.style.borderRadius = '6px';
+
+    const leftSide = document.createElement('div');
+    leftSide.style.display = 'flex';
+    leftSide.style.alignItems = 'center';
+    leftSide.style.gap = '8px';
+
+    const colorDot = document.createElement('span');
+    colorDot.style.width = '12px';
+    colorDot.style.height = '12px';
+    colorDot.style.borderRadius = '50%';
+    colorDot.style.backgroundColor = dataColor(hourType.color || '#6b7280');
+    colorDot.style.flexShrink = '0';
+
+    const name = document.createElement('span');
+    name.textContent = hourType.name;
+
+    leftSide.appendChild(colorDot);
+    leftSide.appendChild(name);
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'ts-toggle';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.dataset.hourTypeId = hourType.id;
+    checkbox.addEventListener('change', (event) => {
+      const id = event.target.dataset.hourTypeId;
+      if (event.target.checked) clientTimesheetSelectedHourTypes.add(id);
+      else clientTimesheetSelectedHourTypes.delete(id);
+      validateClientTimesheetSelection();
+    });
+
+    const track = document.createElement('span');
+    track.className = 'ts-toggle-track';
+    const thumb = document.createElement('span');
+    thumb.className = 'ts-toggle-thumb';
+    track.appendChild(thumb);
+
+    toggleLabel.appendChild(checkbox);
+    toggleLabel.appendChild(track);
+
+    row.appendChild(leftSide);
+    row.appendChild(toggleLabel);
+    return row;
+  }
+
+  // Same layout budget as the internal view: at least one income type, at most two non-income types, so the
+  // tiles stay legible on one A4 page.
+  function validateClientTimesheetSelection() {
+    const selected = Array.from(clientTimesheetSelectedHourTypes)
+      .map(id => state.hourTypeMap[id])
+      .filter(Boolean);
+    const invalidIncome = selected.filter(ht => ht.contributes_to_income).length === 0;
+    const invalidNonIncome = selected.filter(ht => !ht.contributes_to_income).length > 2;
+    const noContract = !clientTimesheetContractSelect || !clientTimesheetContractSelect.value;
+    const isInvalid = invalidIncome || invalidNonIncome || noContract;
+
+    if (clientTimesheetWarning) {
+      clientTimesheetWarning.style.display = isInvalid ? 'block' : 'none';
+      if (clientTimesheetWarningText) {
+        if (noContract) {
+          clientTimesheetWarningText.textContent = 'Select the contract this timesheet covers.';
+        } else if (invalidIncome && invalidNonIncome) {
+          clientTimesheetWarningText.textContent = 'Select at least one income hour type and keep non-income hour types to two or fewer.';
+        } else if (invalidIncome) {
+          clientTimesheetWarningText.textContent = 'Select at least one income hour type.';
+        } else if (invalidNonIncome) {
+          clientTimesheetWarningText.textContent = 'Maximum 2 non-income hour types allowed.';
+        }
+      }
+    }
+    if (btnGenerateClientTimesheet) {
+      btnGenerateClientTimesheet.disabled = isInvalid || clientTimesheetSelectedHourTypes.size === 0;
+    }
+  }
+
+  // Warn before printing when the contract is missing the details that make this variant worth using, so a
+  // half-configured contract is caught in the modal rather than on the buyer's desk.
+  function renderClientTimesheetContractNotice() {
+    if (!clientTimesheetContractNotice) return;
+    const contract = clientTimesheetContractSelect ? state.contractMap[clientTimesheetContractSelect.value] : null;
+    if (!contract) { clientTimesheetContractNotice.style.display = 'none'; return; }
+    const missing = [];
+    if (!contract.specified_personnel) missing.push('Specified Personnel');
+    if (!contract.work_order_number) missing.push('work order number');
+    if (!contract.contract_reference) missing.push('contract reference');
+    if (!contract.timesheet_statement) missing.push('declaration statement');
+    if (!missing.length) { clientTimesheetContractNotice.style.display = 'none'; return; }
+    clientTimesheetContractNotice.style.display = 'block';
+    clientTimesheetContractNotice.textContent = 'This contract has no ' + missing.join(', ').replace(/, ([^,]*)$/, ' or $1')
+      + '. Those lines will be left off the printed sheet — add them under Contracts → Client timesheet details.';
+  }
+
+  function openClientTimesheetModal() {
+    if (!clientTimesheetModal) return;
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+
+    if (clientTimesheetMonthDisplay) {
+      clientTimesheetMonthDisplay.textContent = new Date(year, month, 1)
+        .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     }
 
-    closePrintViewConfigModal();
+    if (clientTimesheetContractSelect) {
+      const options = clientTimesheetContractOptions();
+      const preferred = clientTimesheetDefaultContractId(year, month);
+      clientTimesheetContractSelect.innerHTML = options.length
+        ? options.map(contract => {
+            const label = contract.name + (contract.archived ? ' (archived)' : '');
+            const selected = String(contract.id) === String(preferred) ? ' selected' : '';
+            return `<option value="${escapeHtmlSafe(String(contract.id))}"${selected}>${escapeHtmlSafe(label)}</option>`;
+          }).join('')
+        : '<option value="">No contracts defined</option>';
+      if (options.length && preferred) clientTimesheetContractSelect.value = preferred;
+    }
+
+    // Only offer hour types that actually carry hours this month, same as the internal print modal.
+    const monthEntries = entriesForMonth(year, month);
+    const presentIds = new Set();
+    monthEntries.forEach(entry => presentIds.add(entry.hour_type_id || getDefaultHourTypeId()));
+    const present = Array.from(presentIds).map(id => state.hourTypeMap[id]).filter(Boolean);
+    const incomeTypes = present.filter(ht => ht.contributes_to_income).sort((a, b) => a.name.localeCompare(b.name));
+    const otherTypes = present.filter(ht => !ht.contributes_to_income).sort((a, b) => a.name.localeCompare(b.name));
+
+    clientTimesheetSelectedHourTypes = new Set();
+    incomeTypes.forEach(ht => clientTimesheetSelectedHourTypes.add(ht.id));
+    otherTypes.forEach(ht => clientTimesheetSelectedHourTypes.add(ht.id));
+
+    [[clientTimesheetIncomeList, incomeTypes, 'No income-generating hour types in this month'],
+     [clientTimesheetOtherList, otherTypes, 'No non-income hour types in this month']].forEach(([listEl, types, emptyText]) => {
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      if (!types.length) {
+        const note = document.createElement('div');
+        note.className = 'ts-note';
+        note.textContent = emptyText;
+        listEl.appendChild(note);
+        return;
+      }
+      types.forEach(hourType => listEl.appendChild(clientTimesheetHourTypeRow(hourType)));
+    });
+
+    renderClientTimesheetContractNotice();
+    validateClientTimesheetSelection();
+    showModal(clientTimesheetModal);
+  }
+
+  // Mirrors the internal print modal's "Unselect all": the same max-two-non-income rule applies here, and
+  // clearing them one toggle at a time is tedious when a month carries several.
+  function clientTimesheetUnselectAllOther() {
+    if (!clientTimesheetOtherList) return;
+    clientTimesheetOtherList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+      if (!checkbox.checked) return;
+      checkbox.checked = false;
+      clientTimesheetSelectedHourTypes.delete(checkbox.dataset.hourTypeId);
+    });
+    validateClientTimesheetSelection();
+  }
+
+  function closeClientTimesheetModal() {
+    if (!clientTimesheetModal) return;
+    hideModal(clientTimesheetModal);
+    clientTimesheetSelectedHourTypes.clear();
+  }
+
+  function generateClientTimesheet() {
+    ensureCalendarState();
+    const { year, month } = state.calendar;
+    if (clientTimesheetSelectedHourTypes.size === 0) return;
+
+    const contractId = clientTimesheetContractSelect ? clientTimesheetContractSelect.value : '';
+    const contract = contractId ? state.contractMap[contractId] : null;
+    if (!contract) {
+      customAlert('Select the contract this timesheet covers.');
+      return;
+    }
+
+    const esc = (typeof escapeHtmlSafe === 'function') ? escapeHtmlSafe : (s => String(s == null ? '' : s));
+    const roundInterval = getRoundInterval();
+    const selectedTypes = printOrderedHourTypes(clientTimesheetSelectedHourTypes);
+    const incomeAccent = printAccentColor(selectedTypes);
+    const { dailySummaries, hourTypeTotals } = printCollectMonthTotals(year, month, clientTimesheetSelectedHourTypes, contractId);
+
+    const monthName = new Date(year, month, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const calendarHtml = printCalendarHtml(year, month, selectedTypes, dailySummaries, incomeAccent, roundInterval, true);
+    const totalsHtml = printTotalsHtml(selectedTypes, hourTypeTotals, roundInterval);
+    const summaryHtml = printSummaryHtml(selectedTypes, hourTypeTotals, dailySummaries, roundInterval);
+    const genDate = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // Identification band: one horizontal strip of label-over-value cells rather than a stacked list, which
+    // cost ~100px of page height for three short values. Blank contract fields drop out entirely and the
+    // remaining cells share the width. No period row — the month is already the subtitle.
+    const factCells = [
+      ['Specified Personnel', contract.specified_personnel],
+      ['Work order #', contract.work_order_number],
+      ['Contract ref', contract.contract_reference]
+    ].filter(([, value]) => String(value || '').trim() !== '');
+    // A contract with none of the three configured gets no band at all, rather than an empty bordered box.
+    const factsHtml = factCells.length
+      ? `<div class="ct-facts" style="grid-template-columns:repeat(${factCells.length}, minmax(0, 1fr));">`
+        + factCells.map(([label, value]) => `<div><div class="ct-fact-label">${esc(label)}</div><div class="ct-fact-value">${esc(String(value).trim())}</div></div>`).join('')
+        + '</div>'
+      : '';
+
+    // Sign-off. The ruled block prints whether or not a statement is configured — the buyer still has to
+    // sign — but the statement paragraph itself is omitted when the contract has none. One row of four
+    // fields rather than two rows of two: it saves a page-height row and still leaves the signature the
+    // widest column.
+    const statementHtml = String(contract.timesheet_statement || '').trim()
+      ? `<div class="ct-statement">${esc(String(contract.timesheet_statement).trim())}</div>`
+      : '';
+    const signoffHtml = '<div class="ct-signoff">'
+      + statementHtml
+      + '<div class="ct-signoff-title">BUYER’S REPRESENTATIVE</div>'
+      + '<div class="ct-signoff-grid">'
+      + ['Signature', 'Date', 'Printed name', 'Position']
+        .map(label => `<div><div class="ct-field-rule"></div><div class="ct-field-label">${esc(label)}</div></div>`).join('')
+      + '</div></div>';
+
+    const printHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Timesheet - ${esc(contract.name)} - ${monthName}</title>
+  <style>${printPaperCss()}
+    /* Compact overrides. The client sheet carries an identification band, a declaration and a signature
+       block that the internal view does not, and all of it has to share one A4 page — so the shared
+       chrome is tightened here rather than in printPaperCss, which the internal view still uses as-is. */
+    h1 { font-size: 18px; }
+    .pv-sub { font-size: 12px; }
+    .pv-totals { margin-top: 12px; gap: 12px; }
+    .pv-card-head { padding: 6px 11px; font-size: 9px; }
+    .pv-card-row { padding: 6px 11px; font-size: 11px; }
+    .pv-card-total { padding: 7px 11px; font-size: 11px; }
+    .pv-dot { width: 7px; height: 7px; }
+    .pv-summary { margin: 6px 0 10px; }
+    .pv-footer { margin-top: 10px; padding-top: 6px; }
+
+    .ct-facts {
+      display: grid;
+      gap: 4px 16px;
+      border: 1px solid #e6e2d8;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin: 0 0 12px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .ct-fact-label { font-size: 8px; font-weight: 600; letter-spacing: 0.6px; color: #a89f92; text-transform: uppercase; }
+    .ct-fact-value { font-size: 11px; color: #2a2724; line-height: 1.3; overflow-wrap: anywhere; }
+    .ct-signoff {
+      margin-top: 12px;
+      border: 1px solid #e6e2d8;
+      border-radius: 10px;
+      padding: 11px 14px 13px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    /* pre-line keeps the paragraph breaks the user typed into the declaration. */
+    .ct-statement { font-size: 10px; line-height: 1.45; color: #3f3a33; margin-bottom: 12px; white-space: pre-line; }
+    .ct-signoff-title { font-size: 9px; font-weight: 600; letter-spacing: 0.6px; color: #8a8175; margin-bottom: 10px; }
+    .ct-signoff-grid { display: grid; grid-template-columns: 2.2fr 1fr 1.7fr 1.2fr; gap: 16px; }
+    .ct-field-rule { border-bottom: 1px solid #b0a89c; height: 22px; }
+    .ct-field-label { font-size: 8px; color: #8a8175; margin-top: 3px; letter-spacing: 0.4px; }
+  </style>
+</head>
+<body>
+  <div class="pv-page">
+  <h1>Timesheet</h1>
+  <div class="pv-sub">${monthName}</div>
+  ${summaryHtml}
+  ${factsHtml}
+  <div class="pv-calendar">${calendarHtml}</div>
+  ${totalsHtml}
+  ${signoffHtml}
+  <div class="pv-footer">Generated from Tempus on ${genDate}</div>
+  </div>
+  <script>
+    window.onload = function() {
+      window.print();
+    };
+  <\/script>
+</body>
+</html>`;
+
+    openPrintWindow(printHtml);
+    closeClientTimesheetModal();
   }
 
   function buildIncomeSummary(year, month) {
@@ -24706,7 +25168,8 @@ function getCachedIncomeSummary(monthKey) {
   // least one tool is enabled (no empty header), collapsed by default, with a count of enabled tools.
   const TOOLS_SECTION_BUTTON_IDS = [
     'btn-manage-bulk', 'btn-manage-recurring', 'calendar-actual-income-btn', 'calendar-print-monthly-btn',
-    'calendar-xero-helper', 'calendar-myob-helper', 'btn-timesheet1-importer', 'btn-mobile-view-shortcut'
+    'calendar-client-timesheet-btn', 'calendar-xero-helper', 'calendar-myob-helper', 'btn-timesheet1-importer',
+    'btn-mobile-view-shortcut'
   ];
   const TOOLS_EXPANDED_KEY = 'tempus_nav_tools_expanded';
 
