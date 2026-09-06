@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "channel": "stable",
+  "commit_sha": "fcfb606b0c9113a98310cdb71b6a69a9ca576b47",
+  "published_at": "2026-09-06T11:24:13Z",
+  "display_version": "2026-09-06+fcfb606b0c91",
+  "archive_url": "https://github.com/brandonhinds/tempus/archive/refs/heads/release.zip"
+}
