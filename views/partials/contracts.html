@@ -98,6 +98,23 @@
                (theme-gallery pattern), which is also the empty state — no separate Add button. -->
           <div id="contract-standard-day-list"></div>
         </div>
+        <!-- Client timesheet details (Tools -> Client timesheet). Every field is optional; a blank one is
+             simply left off the printed page, so contracts that never go to a buyer can ignore this whole
+             section. Kept last because it affects only the printout, not how time is logged. -->
+        <div id="contract-client-timesheet-section" style="margin-top:16px;">
+          <div style="font-weight:600; margin-bottom:8px;">Client timesheet details <span class="ts-info-icon" data-tip="Optional. Printed by Tools &rarr; Client timesheet so the sheet identifies the personnel and work order, and carries the declaration the buyer's representative signs. Blank fields are omitted.">i</span></div>
+          <div class="ts-note" style="margin-bottom:12px;">All optional, and used only by <strong>Tools &rarr; Client timesheet</strong>. Anything left blank is omitted from the printed page.</div>
+          <div class="ts-grid ts-grid--gap-md ts-grid--align-start">
+            <div class="ts-col-span-4"><label for="contract-specified-personnel">Specified Personnel</label><input id="contract-specified-personnel" maxlength="200" placeholder="Name as it appears on the work order" /></div>
+            <div class="ts-col-span-4"><label for="contract-work-order-number">Work order number</label><input id="contract-work-order-number" maxlength="100" placeholder="e.g. WO-12345" /></div>
+            <div class="ts-col-span-4"><label for="contract-contract-reference">Contract reference</label><input id="contract-contract-reference" maxlength="100" placeholder="e.g. C-2026-088" /></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label for="contract-timesheet-statement">Declaration statement</label>
+            <textarea id="contract-timesheet-statement" rows="3" maxlength="2000" placeholder="The statement the buyer's representative signs against, e.g. I certify that the hours recorded are a true and accurate record of work performed under this work order."></textarea>
+            <div class="ts-note">Printed immediately above the buyer's representative signature block.</div>
+          </div>
+        </div>
         <div style="margin-top:36px; margin-bottom:8px; display:flex; align-items:center; gap:10px;">
           <!-- Delete + Archive group on the left (edit-only); Cancel/Save on the right. Delete's default
                margin-right:auto is overridden so the spacer below does the left/right split. -->

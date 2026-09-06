@@ -1188,6 +1188,51 @@
   </div>
 </div>
 
+<!-- Client Timesheet Modal. The buyer-facing variant of the monthly print view: one contract, its
+     identification details, and a sign-off block. Gated on company tracking (see updatePayrollHelperButtons). -->
+<div class="ts-modal" id="modal-client-timesheet" style="display:none;">
+  <div class="ts-modal-content" style="max-width: 540px;">
+    <div class="ts-modal-header">
+      <h3>Client Timesheet</h3>
+    </div>
+    <div class="ts-modal-body">
+      <div style="text-align:center; font-size:calc(var(--font-size-base) + 2px); font-weight:600; margin-bottom:16px; padding:12px; background:var(--bg); border-radius:8px;" id="client-timesheet-month-display">
+        <!-- Populated by JavaScript -->
+      </div>
+      <div class="ts-note" style="margin-bottom:16px;">
+        A buyer-facing sheet covering a single contract. Its Specified Personnel, work order number and declaration statement print alongside the hours, above space for the buyer's representative to sign. Only the selected contract's hours are included.
+      </div>
+      <div style="margin-bottom:16px;">
+        <label for="client-timesheet-contract">Contract</label>
+        <select id="client-timesheet-contract" aria-label="Contract for this timesheet"></select>
+        <div class="ts-note" id="client-timesheet-contract-notice" style="display:none; margin-top:6px;"></div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 8px 0; font-size:calc(var(--font-size-xs) + 1px); font-weight:600; color:var(--muted);">Income-Generating Hours</h4>
+        <div id="client-timesheet-income-list" style="display:flex; flex-direction:column; gap:4px;">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="margin:0; font-size:calc(var(--font-size-xs) + 1px); font-weight:600; color:var(--muted);">Other Hour Types</h4>
+          <button class="ghost" id="btn-client-timesheet-unselect-other" style="font-size:var(--font-size-xs); padding:4px 8px;">Unselect all</button>
+        </div>
+        <div id="client-timesheet-other-list" style="display:flex; flex-direction:column; gap:4px;">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+      <div class="ts-warning" id="client-timesheet-warning" style="display:none; margin-top:12px;">
+        <span id="client-timesheet-warning-text"></span>
+      </div>
+    </div>
+    <div class="ts-modal-footer">
+      <button class="ghost" id="btn-cancel-client-timesheet">Cancel</button>
+      <button id="btn-generate-client-timesheet">Generate Timesheet</button>
+    </div>
+  </div>
+</div>
+
 <!-- Reusable "explain this metric" modal. Any report can open it via openMetricExplainer({title, subtitle, bodyHtml}). -->
 <div class="ts-modal" id="modal-metric-explainer" style="display:none;">
   <div class="ts-modal-content ts-explainer-modal" style="max-width:620px;">
