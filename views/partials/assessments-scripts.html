@@ -1,5 +1,5 @@
 <script>
-  const lilState = { month: todayIso().slice(0,7), months: {}, selection: {}, editors: {}, pending: new Map(), failures: new Map(), chains: {}, generation: {}, checking: {}, epoch: 0, search: '', scroll: {}, last: {}, setupReturn: false };
+  const lilState = { month: todayIso().slice(0,7), months: {}, selection: {}, editors: {}, pending: new Map(), failures: new Map(), chains: {}, generation: {}, checking: {}, hydrated: new Set(), epoch: 0, search: '', scroll: {}, last: {}, setupReturn: false };
   const lilEl = id => document.getElementById('lil-' + id);
   const lilEscape = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const lilMoney = value => new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(Number(value)||0);
@@ -34,9 +34,63 @@
     (deletedIds||[]).forEach(id=>{if(typeof recordPendingEntryDelete==='function') recordPendingEntryDelete(id);});
     state.entries.sort(entrySort);markAllIncomeSummariesDirty();saveCache();renderEntries();
   }
+  // Contracts and hour types arrive with the month payload but belong to the whole app, so they are
+  // adopted into `state` rather than kept per month. A cached month carries neither (the main browser
+  // cache already holds them), hence the presence checks.
+  function lilAdoptReferenceData(data) {
+    if(Array.isArray(data.contracts)){state.contracts=data.contracts.map(sanitizeContract);updateContractMap();}
+    if(Array.isArray(data.hour_types)){state.hourTypes=data.hour_types.map(sanitizeHourType);updateHourTypeMap();}
+    if(data.saved_default_hour_type_id!==undefined)state.settings.assessment_time_hour_type_id=data.saved_default_hour_type_id||'';
+  }
+  // Lil works in this month and the one she is invoicing, so those two ride along in the app's browser
+  // cache and paint before any round trip. Every other month is still fetched on demand.
+  function lilCacheMonths() {
+    const now=new Date(todayIso()+'T12:00:00');
+    const key=(year,month)=>year+'-'+String(month+1).padStart(2,'0');
+    const previous=new Date(now.getFullYear(),now.getMonth()-1,1);
+    return [key(now.getFullYear(),now.getMonth()),key(previous.getFullYear(),previous.getMonth())];
+  }
+  // Read by saveCacheNow_ in scripts.html. A month with an unconfirmed save is skipped: optimistic state
+  // is not server truth and must not be restored as if it were.
+  function serializeAssessmentMonths() {
+    const out={};
+    lilCacheMonths().forEach(month=>{
+      const data=lilState.months[month];
+      if(!data||!Array.isArray(data.assessments)||lilMonthPending(month)||lilMonthFailed(month))return;
+      const copy={...data};delete copy.contracts;delete copy.hour_types;
+      out[month]=copy;
+    });
+    return out;
+  }
+  function lilPersist() { if(typeof saveCache==='function')saveCache(); }
+  // A cached month paints at once, then confirms itself against the sheet once per session. A failure
+  // leaves the cached view in place: this is a background check over data already on screen, so there is
+  // nothing to report and nothing for the user to retry.
+  async function lilRevalidate(month) {
+    if(!lilState.hydrated.has(month))return;
+    lilState.hydrated.delete(month);
+    const epoch=lilState.epoch;
+    try{
+      const data=await lilApi('api_getAssessmentsForMonth',Number(month.slice(0,4)),Number(month.slice(5,7)));
+      if(epoch!==lilState.epoch || lilMonthPending(month))return;
+      lilState.months[month]=data;lilAdoptReferenceData(data);lilPersist();
+      if(month===lilState.month)lilRender();
+    }catch(error){
+      console.warn('[Tempus assessments] Background refresh of '+month+' failed; the cached month stands:',error);
+    }
+  }
   // lilState.month is the source of truth; the toolbar shows it as the label on the month button, which
   // opens the same picker the calendar's month label does.
   function lilSetMonthControl(month) { lilEl('month-label').textContent=lilMonthLabel(month); }
+  // Write markup only when it actually differs. .ts-income-breakdown, .ts-note and .ts-empty-state all
+  // start at opacity:0 behind a fadeIn, so replacing a node with identical markup restarts that fade and
+  // reads as a flash. lilRender() repaints the invoice panel whenever anything on the page changes —
+  // selecting a row, typing in the search box — none of which alters the invoice, so most of those
+  // repaints were rewriting byte-identical HTML.
+  function lilPaint(host, html) {
+    if(!host || host.__lilHtml===html)return false;
+    host.__lilHtml=html;host.innerHTML=html;return true;
+  }
   function lilStatCard(label, value, sub, hero) {
     return `<div class="ts-stat-card ts-stat-card--static${hero?' ts-stat-card--hero':''}">`
       + `<span class="ts-stat-card-label">${lilEscape(label)}</span>`
@@ -71,7 +125,7 @@
   async function renderAssessmentsPage(options) {
     if(!getFeatureFlag('enable_lil_assessments_mode') && !window.__TEMPUS_LIL_MODE__) return;
     const month=lilState.month;
-    if(lilData() && !options?.force){lilRender();return;}
+    if(lilData() && !options?.force){lilRender();lilRevalidate(month);return;}
     const epoch=lilState.epoch, ticket=lilRequestId();
     lilState.fetchTicket=ticket;
     // Cached months repaint instantly above; only a month we have never read shows loading state.
@@ -79,9 +133,8 @@
     try {
       const data=await lilApi('api_getAssessmentsForMonth',Number(month.slice(0,4)),Number(month.slice(5,7)));
       if(epoch!==lilState.epoch || lilMonthPending(month)) return;
-      lilState.months[month]=data;
-      state.contracts=data.contracts.map(sanitizeContract);updateContractMap();
-      state.hourTypes=data.hour_types.map(sanitizeHourType);updateHourTypeMap();state.settings.assessment_time_hour_type_id=data.saved_default_hour_type_id||'';
+      lilState.months[month]=data;lilState.hydrated.delete(month);
+      lilAdoptReferenceData(data);lilPersist();
       if(month===lilState.month && ticket===lilState.fetchTicket) lilRender();
     } catch(error){if(month===lilState.month){
         lilEl('add').disabled=false;
@@ -152,7 +205,9 @@
     open.hidden=!url;open.onclick=url?(()=>window.open(url,'_blank','noopener')):null;
     const button=lilEl('generate');button.disabled=!!working||!!checking||!!info.generating||pending||failed||!data.assessments.length||!!blocked;button.textContent=pending?'Saving assessments…':working?'Generating…':checking?'Checking…':'Generate invoice';button.title=failed?'Resolve the unconfirmed save before generating.':blocked||`Generate an invoice for all assessments in ${lilMonthLabel(month)}`;
     lilRenderSnapshot(info);
-    lilEl('historical-invoices').replaceChildren();(info.historical_invoices||[]).forEach(inv=>{if(!/^https:\/\//.test(inv.generated_doc_url||''))return;const link=document.createElement('button');link.type='button';link.className='ghost small';link.textContent='Open invoice '+inv.invoice_number;link.onclick=()=>window.open(inv.generated_doc_url,'_blank','noopener');lilEl('historical-invoices').append(link);});
+    const historical=(info.historical_invoices||[]).filter(inv=>/^https:\/\//.test(inv.generated_doc_url||''));
+    if(lilPaint(lilEl('historical-invoices'),historical.map(inv=>`<button type="button" class="ghost small" data-invoice-url="${lilEscape(inv.generated_doc_url)}">Open invoice ${lilEscape(inv.invoice_number)}</button>`).join('')))
+      lilEl('historical-invoices').querySelectorAll('[data-invoice-url]').forEach(link=>link.onclick=()=>window.open(link.dataset.invoiceUrl,'_blank','noopener'));
   }
   // Frozen at generation, so it answers "how much of this is mine once it is paid". It goes out of date
   // when the month's invoice inputs change — not when time is logged, which never alters a fee.
@@ -173,14 +228,14 @@
   function lilRenderSnapshot(info) {
     const host=lilEl('snapshot'),snap=info&&info.snapshot;
     host.hidden=!snap;
-    if(!snap)return;
+    if(!snap){lilPaint(host,'');return;}
     const stale=!!info.stale,total=Number(snap.invoice_total)||0,muted=stale;
     const generated=info.invoice&&info.invoice.generated_at?new Date(info.invoice.generated_at).toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'}):'';
     const gstHeld=snap.net_gst!=null?snap.net_gst:snap.gst;
     const credits=Number(snap.gst_credits)||0;
     const segment=(value,colour)=>`<div class="ts-income-bd-bar-seg" style="flex:${Math.max(0,Number(value)||0).toFixed(2)}; background:${colour};"></div>`;
     const legend=(label,colour)=>`<span class="ts-income-bd-legend-item"><span class="ts-income-bd-legend-dot" style="background:${colour};"></span>${label}</span>`;
-    host.innerHTML=(stale?`<p class="ts-warning ts-asm-alert">These figures are from the invoice generated ${lilEscape(generated)}. This month has changed since — generate a new invoice to bring them up to date.</p>`:'')
+    lilPaint(host,(stale?`<p class="ts-warning ts-asm-alert">These figures are from the invoice generated ${lilEscape(generated)}. This month has changed since — generate a new invoice to bring them up to date.</p>`:'')
       + `<div class="ts-income-breakdown">`
       + `<div class="ts-income-bd-viz">`
       +   `<div class="ts-income-bd-head"><span class="ts-income-bd-title">Where this invoice goes</span><span class="ts-income-bd-gross">${lilMoney(total)} including GST</span></div>`
@@ -203,7 +258,7 @@
       + `<div class="ts-asm-note-stack">`
       + (stale?'':'<p class="ts-note">GST, tax, super and this month’s business expenses stay in the business account. Logging time never changes these figures.</p>')
       + (snap.warnings||[]).map(text=>`<p class="ts-note">${lilEscape(text)}</p>`).join('')
-      + `</div>`;
+      + `</div>`);
   }
   function lilOpenDetail() { lilState.scroll[lilState.month]=window.scrollY;lilEl('workspace').classList.add('has-detail'); }
   function lilBack() { lilEl('workspace').classList.remove('has-detail');window.scrollTo({top:lilState.scroll[lilState.month]||0});lilEl('list').querySelector('[aria-current="true"]')?.focus({preventScroll:true}); }
@@ -359,7 +414,7 @@
     const done=(async()=>{
       try{const result=await save();lilFeedback('');settle(result);lilState.failures.delete(key);}
       catch(error){revert(error);lilState.failures.set(key,{months,retry});lilFeedback((error.message||'Save not confirmed.')+' Your changes are retained for retry.',retry);}
-      finally{lilState.pending.delete(key);lilState.epoch++;lilRender();
+      finally{lilState.pending.delete(key);lilState.epoch++;lilRender();lilPersist();
         if(!lilState.failures.has(key)) months.forEach(m=>lilRefreshInvoice(m));}
     })();
     lilState.chains[key]=done;
@@ -490,7 +545,7 @@
   }
   async function lilRefreshInvoice(month) {
     if(!lilState.months[month])return;
-    try{const info=await lilApi('api_getLilInvoiceGeneration',Number(month.slice(0,4)),Number(month.slice(5,7)));if(!lilMonthPending(month))lilState.months[month].invoice=info;if(month===lilState.month)lilRenderInvoice();}catch(error){if(month===lilState.month)lilFeedback('Could not refresh the invoice status. '+(error.message||''),()=>lilRefreshInvoice(month));}
+    try{const info=await lilApi('api_getLilInvoiceGeneration',Number(month.slice(0,4)),Number(month.slice(5,7)));if(!lilMonthPending(month)){lilState.months[month].invoice=info;lilPersist();}if(month===lilState.month)lilRenderInvoice();}catch(error){if(month===lilState.month)lilFeedback('Could not refresh the invoice status. '+(error.message||''),()=>lilRefreshInvoice(month));}
   }
   async function lilGenerate(existingRequest) {
     const month=lilState.month,data=lilData();if(!data||lilState.generation[month]||lilState.checking[month]||lilMonthPending(month)||lilMonthFailed(month))return;
@@ -530,6 +585,19 @@
   };
   [['prev',-1],['next',1]].forEach(([id,delta])=>lilEl(id).onclick=()=>{const d=new Date(lilState.month+'-01T12:00:00');d.setMonth(d.getMonth()+delta);lilChangeMonth(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));});
   lilEl('search').oninput=e=>{lilState.search=e.target.value;lilRender(true);};lilEl('generate').onclick=()=>lilGenerate();
+  // loadCache() parked the restored months on state before this partial existed; adopt them now, keeping
+  // only the two that are still current — reopening after a couple of months away must not resurrect a
+  // month that is no longer cacheable.
+  (function(){
+    const cached=state.assessmentMonths;
+    if(!cached||typeof cached!=='object')return;
+    const allowed=new Set(lilCacheMonths());
+    Object.keys(cached).forEach(month=>{
+      const data=cached[month];
+      if(!allowed.has(month)||!data||!Array.isArray(data.assessments))return;
+      lilState.months[month]=data;lilState.hydrated.add(month);
+    });
+  })();
   if(state.currentPage==='assessments')renderAssessmentsPage();
   function lilSyncHourDefaultControl(hourType) {
     const row=document.getElementById('hour-type-assessment-default-row'),toggle=document.getElementById('hour-type-assessment-default');

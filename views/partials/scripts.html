@@ -448,6 +448,10 @@ let ratePreviewInputSyncing = false;
     cacheKeys: { core: 'tempus_cache_v3_core', income: 'tempus_cache_v3_income', reports: 'tempus_cache_v3_reports' },
     cacheHadStoredData: false,
     tempusUrlWriteAttempted: false,
+    // Assessment months restored from the browser cache. loadCache() runs before
+    // views/partials/assessments-scripts.html is parsed, so the raw blob is parked here and that partial
+    // adopts it into lilState.months; saveCacheNow_ reads it back out via serializeAssessmentMonths().
+    assessmentMonths: {},
     entriesSyncSucceeded: false,
     entriesSyncEmpty: false,
     updateCheckAttempted: false,
@@ -10409,6 +10413,7 @@ function updateDeductionFormVisibility() {
       state.invoices = Array.isArray(obj.invoices) ? obj.invoices.map((invoice) => ({ ...invoice })) : [];
       state.invoiceMap = Object.fromEntries(state.invoices.map(invoice => [invoice.id, invoice]));
       state.invoiceListLoading = false;
+      state.assessmentMonths = obj.assessmentMonths && typeof obj.assessmentMonths === 'object' ? obj.assessmentMonths : {};
       if (obj.incomeSummaryCache && typeof obj.incomeSummaryCache === 'object') {
         state.incomeSummaryCache = deserializeIncomeSummaryCache(obj.incomeSummaryCache);
       } else {
@@ -10518,6 +10523,7 @@ function updateDeductionFormVisibility() {
         publicHolidays: state.publicHolidays,
         actualIncome: state.actualIncome,
         invoices: invoicesForCache,
+        assessmentMonths: typeof serializeAssessmentMonths === 'function' ? serializeAssessmentMonths() : (state.assessmentMonths || {}),
         incomeSummaryCache: serializeIncomeSummaryCache(),
         incomeCacheMetadata: state.incomeCacheMetadata,
         potentialIncomeCache: state.potentialIncomeCache,

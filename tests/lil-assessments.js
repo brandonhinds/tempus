@@ -522,6 +522,61 @@ module.exports={lilContext,mockDrive,run(test){
     const backend=fs.readFileSync(path.join(__dirname,'../backend/assessmentInvoices.js'),'utf8');
     assert.match(backend,/retained_in_business: roundMoney_\(netGst \+ tax \+ superAmount \+ expenses\.paid\)/);
   });
+  test('this month and last ride along in the browser cache, and repainting does not restart the fade',()=>{
+    const ui=fs.readFileSync(path.join(__dirname,'../views/partials/assessments-scripts.html'),'utf8');
+    const client=fs.readFileSync(path.join(__dirname,'../views/partials/scripts.html'),'utf8');
+    const shared=fs.readFileSync(path.join(__dirname,'../views/partials/head.html'),'utf8');
+
+    // Cached through the app's own browser cache, not a private one: the blob rides in the same payload
+    // as entries and contracts, so it is written, versioned and cleared with everything else.
+    assert.match(client,/assessmentMonths: typeof serializeAssessmentMonths === 'function' \? serializeAssessmentMonths\(\) : \(state\.assessmentMonths \|\| \{\}\)/);
+    assert.match(client,/state\.assessmentMonths = obj\.assessmentMonths && typeof obj\.assessmentMonths === 'object' \? obj\.assessmentMonths : \{\}/);
+    assert.match(client,/^\s*assessmentMonths: \{\},$/m,'state declares the restored blob');
+    // loadCache runs from init() before the assessments partial is parsed, so the partial adopts it.
+    assert.match(ui,/const cached=state\.assessmentMonths;[\s\S]*?lilState\.months\[month\]=data;lilState\.hydrated\.add\(month\)/);
+
+    // Exactly two months, derived from today — and the same list gates both the write and the read, so
+    // reopening months later cannot resurrect a month that is no longer cacheable.
+    assert.match(ui,/function lilCacheMonths\(\)[\s\S]*?getMonth\(\)-1/);
+    assert.match(ui,/function serializeAssessmentMonths\(\)[\s\S]*?lilCacheMonths\(\)\.forEach/);
+    assert.match(ui,/const allowed=new Set\(lilCacheMonths\(\)\);/);
+
+    // An unconfirmed save is not server truth and must not be restored as though it were.
+    assert.match(ui,/function serializeAssessmentMonths\(\)[\s\S]*?lilMonthPending\(month\)\|\|lilMonthFailed\(month\)\)return;/);
+    // Contracts and hour types are already in the main payload; a second per-month copy would give the
+    // same records two sources of truth.
+    assert.match(ui,/delete copy\.contracts;delete copy\.hour_types;/);
+    assert.match(ui,/function lilAdoptReferenceData\(data\)[\s\S]*?if\(Array\.isArray\(data\.contracts\)\)/);
+
+    // A cached month paints first, then confirms itself once, and a failed background check leaves the
+    // cached view alone rather than raising an error over data that is already on screen.
+    assert.match(ui,/if\(lilData\(\) && !options\?\.force\)\{lilRender\(\);lilRevalidate\(month\);return;\}/);
+    assert.match(ui,/async function lilRevalidate\(month\)[\s\S]*?lilState\.hydrated\.delete\(month\)/);
+    assert.match(ui,/lilRevalidate[\s\S]*?catch\(error\)\{\s*console\.warn/);
+    const revalidate=ui.slice(ui.indexOf('async function lilRevalidate(month)'));
+    assert.ok(!revalidate.slice(0,revalidate.indexOf('\n  function ')).includes('lilRenderLoading'),
+      'a background refresh must not show loading state');
+
+    // Persisted where the month's data actually moves, never merely on paint.
+    ['lilState.months[month]=data;lilState.hydrated.delete(month);\n      lilAdoptReferenceData(data);lilPersist();',
+     'lilState.months[month]=data;lilAdoptReferenceData(data);lilPersist();',
+     'lilState.epoch++;lilRender();lilPersist();']
+      .forEach(snippet=>assert.ok(ui.includes(snippet),'missing persist point: '+snippet));
+    assert.ok(!/function lilRender\(listOnly\)[\s\S]*?lilPersist\(\)[\s\S]*?function lilRenderInvoice/.test(ui),
+      'lilRender must not persist on every paint');
+
+    // The flash: .ts-income-breakdown and .ts-note both start at opacity:0 behind a fadeIn, so replacing
+    // a node with byte-identical markup restarted the fade. lilRender() repaints the invoice panel on
+    // every selection and every search keystroke, none of which changes the invoice.
+    assert.match(shared,/\.ts-income-breakdown \{[^}]*opacity:0; animation: fadeIn/);
+    assert.match(shared,/\.ts-note \{[^}]*opacity:0; animation: fadeIn/);
+    assert.match(ui,/function lilPaint\(host, html\) \{\s*if\(!host \|\| host\.__lilHtml===html\)return false;/);
+    assert.match(ui,/function lilRenderSnapshot[\s\S]*?lilPaint\(host,\(stale\?/);
+    assert.match(ui,/if\(!snap\)\{lilPaint\(host,''\);return;\}/,'clearing the snapshot must also clear the marker');
+    assert.match(ui,/lilPaint\(lilEl\('historical-invoices'\)/);
+    assert.ok(!/lilEl\('snapshot'\)\.innerHTML=/.test(ui) && !/host\.innerHTML=\(stale/.test(ui),
+      'the snapshot must only be written through lilPaint');
+  });
   test('a date Sheets coerced into a Date still validates, prints DD/MM/YYYY and orders correctly',()=>{
     const {context:c,create,contract,spreadsheet}=lilContext();
     const first=create({assessment_date:'2026-08-28',client_name:'John May',client_dob:'1985-04-12'});
