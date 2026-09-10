@@ -1,0 +1,159 @@
+<style>
+  /* Assessments is built from the ts-* components Time Entry and Annual View already use — the screen has
+     no visual language of its own. What remains here is the handful of things those two do not already
+     provide. lil-assessment-alignment-mockup.html is the study this came from and explains each choice. */
+
+  /* Page-strip width. Time Entry clamps each of its strips to this track (.ts-stat-cards and
+     .ts-agenda-layout carry the max-width themselves; the calendar inherits it from .ts-card) and Annual
+     View gets it once from its outer .ts-card--wide. Assessments has no outer card, so every strip needs
+     it — without it the toolbar and panels sit --space-4 wider on each side than the KPI cards between
+     them, which is exactly how the screen drifted out of alignment. */
+  .ts-asm-strip { width:100%; max-width:min(1280px, calc(100vw - (2 * var(--space-4)))); margin-left:auto; margin-right:auto; }
+  #page-assessments { padding-bottom:var(--space-6); }
+  /* .ts-badge sets display:inline-block, which beats the hidden attribute — and the invoice status badge,
+     the snapshot and the open-invoice link are all toggled with it. */
+  #page-assessments [hidden] { display:none !important; }
+
+  /* Month stepper: the calendar's month button (transparent, no shadow, label + chevron, quiet hover
+     wash), sitting between the agenda's paired nav arrows so the month reads as the thing they move. */
+  .ts-asm-month-btn { display:inline-flex; align-items:baseline; justify-content:center; gap:9px; min-width:172px; padding:6px 10px; min-height:0; background:transparent; border:none; box-shadow:none; border-radius:12px; color:var(--text); font-size:var(--font-size-lg); font-weight:700; letter-spacing:-0.01em; font-variant-numeric:tabular-nums; }
+  .ts-asm-month-btn:hover { background:color-mix(in srgb, var(--text) 6%, transparent); background-image:none; box-shadow:none; }
+  .ts-asm-month-btn svg { width:14px; height:14px; color:var(--muted); }
+
+  /* Panel-head search — the one field that sits in a heading rather than a form, so it needs the compact
+     treatment the full-width global input rule does not give. */
+  .ts-asm-search { display:inline-flex; align-items:center; gap:8px; flex:0 1 auto; width:300px; max-width:100%; padding:0 var(--space-3); border:1px solid transparent; border-radius:10px; background:var(--surface-subtle); color:var(--muted); }
+  .ts-asm-search:focus-within { border-color:var(--border); }
+  .ts-asm-search svg { width:15px; height:15px; flex:none; }
+  .ts-asm-search input { min-width:0; padding:var(--space-2) 0; border:0; background:none; }
+
+  /* Right-hand money block on a list row: a figure over its sub-line, reusing the agenda row's own type
+     ramp for both rather than introducing a third. */
+  .ts-asm-row-amount { flex:none; display:flex; flex-direction:column; align-items:flex-end; gap:2px; text-align:right; }
+  .ts-asm-row-amount .ts-agenda-row-sub { margin:0; }
+
+  /* Read-only facts in the detail panel: the .ts-av-metric label/value ramp without the card chrome,
+     since these are facts inside a panel rather than cards on the page. */
+  .ts-asm-facts { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-3) var(--space-4); margin:0; }
+  .ts-asm-facts dt { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:600; }
+  .ts-asm-facts dd { margin:4px 0 0; font-size:var(--font-size-sm); overflow-wrap:anywhere; }
+
+  /* Action clusters: buttons in a panel head, and the stack of links to previously generated invoices. */
+  .ts-asm-actions { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+  /* .ts-modal-footer is the app's right-aligned Cancel/Save pair. Used inline rather than in a modal it
+     needs the modal chrome dropped: the panel already provides the padding and the surface. */
+  .ts-asm-footer { position:static; padding:var(--space-2) 0 0; border-top:none; background:transparent; }
+  .ts-asm-gap { margin-top:var(--space-3); }
+  .ts-asm-section-gap { margin-top:var(--space-4); }
+  /* Small placements the rendered markup would otherwise repeat as inline styles: the sub-line under a
+     section heading, a note under a form field, an advisory at the top of a section, and the row that
+     leads a footer from the left. */
+  .ts-asm-subnote { margin:4px 0 0; }
+  .ts-asm-fieldnote { margin-top:6px; }
+  .ts-asm-alert { margin:0 0 var(--space-4); }
+  .ts-asm-footer-lead { margin-right:auto; }
+  .ts-asm-loading-note { grid-column:1 / -1; }
+  /* The fee lines are shown in the day editor's list but are not editable rows. */
+  .ts-asm-static-row { cursor:default; }
+  #lil-snapshot .ts-income-breakdown { margin-bottom:0; }
+  /* An out-of-date snapshot still shows its figures, drained of emphasis, because they are what the
+     generated invoice says — the badge and the advisory carry the fact that they have moved on. */
+  .ts-asm-stale-value { color:var(--muted); }
+  .ts-asm-links { display:flex; flex-direction:column; align-items:flex-start; gap:2px; margin-top:var(--space-2); }
+  .ts-asm-note-stack { display:flex; flex-direction:column; gap:var(--space-2); margin-top:var(--space-4); }
+
+  /* Logging hours happens in the day editor's own inline expansion (.ts-day-duration-editor) at the foot
+     of the time list, so it reads as part of the list. One repeating row per day, because several days
+     can be entered in a single submit; the labels sit in one header row so repeats stay aligned, and each
+     control carries its own aria-label so it is still named. */
+  .ts-asm-time-row { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,.7fr); gap:var(--space-2); align-items:center; }
+  .ts-asm-time-row.has-remove { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,.7fr) auto; }
+  .ts-asm-time-row + .ts-asm-time-row { margin-top:var(--space-2); }
+  .ts-asm-time-head > span { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:600; }
+  .ts-asm-time-row input, .ts-asm-time-row select { margin:0; }
+
+  /* Loading placeholders in the shape and at the size of what is coming, so nothing jumps on arrival. */
+  .ts-asm-skeleton { display:flex; align-items:center; gap:var(--space-4); padding:var(--space-4); border:1px solid var(--border); border-radius:12px; }
+  .ts-asm-skeleton span { display:block; height:11px; border-radius:6px; background:color-mix(in srgb, var(--text) 11%, transparent); }
+  .ts-asm-skeleton span:first-child { flex:none; width:34px; height:30px; }
+  .ts-asm-skeleton span:last-child { flex:1 1 auto; max-width:320px; }
+
+  /* .ts-av-two-col already stacks at 1080px. Below 720px the list and the detail swap instead, so
+     neither is squeezed — the master/detail behaviour this screen has always had. */
+  .ts-asm-back { display:none; margin-bottom:var(--space-3); }
+  @media(max-width:768px){
+    .ts-asm-facts { grid-template-columns:1fr; }
+    .ts-asm-search { width:100%; }
+    .ts-asm-time-row, .ts-asm-time-row.has-remove { grid-template-columns:1fr; }
+    .ts-asm-time-head { display:none; }
+  }
+  @media(max-width:720px){
+    #lil-workspace.has-detail > .ts-asm-list-pane { display:none; }
+    #lil-workspace:not(.has-detail) > #lil-detail { display:none; }
+    #lil-workspace.has-detail .ts-asm-back { display:inline-flex; }
+    .ts-asm-month-btn { min-width:0; font-size:var(--font-size-base); }
+  }
+  @media(prefers-reduced-motion:no-preference){
+    .ts-asm-skeleton span { animation:ts-asm-pulse 1.3s ease-in-out infinite; }
+    @keyframes ts-asm-pulse { 50% { opacity:.45; } }
+  }
+</style>
+<section id="page-assessments" style="display:none" aria-labelledby="lil-title">
+
+  <!-- Page head: Annual View's toolbar. The month sits between the agenda's paired arrows and opens the
+       same month picker the calendar's month label opens; lilState.month is the only source of truth. -->
+  <div class="ts-toolbar ts-asm-strip">
+    <div class="ts-stack ts-stack--sm">
+      <h3 id="lil-title" style="margin:0;">Assessments</h3>
+      <p class="ts-note" style="margin:0;">Your assessments, time worked, and the monthly invoice.</p>
+    </div>
+    <div class="ts-toolbar-actions">
+      <div class="ts-agenda-week-stepper">
+        <button id="lil-prev" class="ghost ts-agenda-week-nav" type="button" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <button id="lil-month-btn" class="ts-asm-month-btn" type="button" aria-label="Jump to month"><span id="lil-month-label"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <button id="lil-next" class="ghost ts-agenda-week-nav" type="button" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+      </div>
+      <button id="lil-today" class="ghost" type="button" title="Jump to the current month">This month</button>
+      <button id="lil-add" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Add assessment</button>
+    </div>
+  </div>
+
+  <!-- Month totals: Time Entry's KPI strip, filled by lilRenderSummary. -->
+  <div id="lil-summary" class="ts-stat-cards"></div>
+
+  <!-- Invoice: an Annual View panel. The transfer split inside it is Time Entry's income waterfall. -->
+  <section class="ts-av-panel ts-av-section ts-asm-strip" aria-label="Monthly invoice">
+    <div class="ts-av-head">
+      <div class="ts-av-title">
+        <h4 style="display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap;"><span id="lil-invoice-title"></span><span class="ts-badge" id="lil-invoice-status" hidden></span></h4>
+        <p class="ts-note" id="lil-invoice-meta" style="margin-top:3px;"></p>
+        <div id="lil-historical-invoices" class="ts-asm-links"></div>
+      </div>
+      <div class="ts-asm-actions">
+        <button id="lil-open-invoice" class="ghost" type="button" hidden>Open invoice</button>
+        <button id="lil-generate" type="button">Generate invoice</button>
+      </div>
+    </div>
+    <div id="lil-snapshot" hidden></div>
+  </section>
+
+  <div id="lil-feedback" role="status" aria-live="polite" class="ts-warning ts-asm-strip" style="margin-top:0; margin-bottom:var(--space-4); font-size:var(--font-size-sm);" hidden></div>
+
+  <div id="lil-workspace" class="ts-av-two-col ts-av-section ts-asm-strip">
+    <section class="ts-av-panel ts-asm-list-pane" aria-label="Assessments in the selected month">
+      <div class="ts-av-head">
+        <div class="ts-av-title">
+          <h4>This month&rsquo;s assessments</h4>
+          <p class="ts-note" style="margin-top:3px;">Fees exclude GST &middot; time shown is every hour logged against the assessment, in any month</p>
+        </div>
+        <label class="ts-asm-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+          <input id="lil-search" type="search" aria-label="Search client or organisation" placeholder="Search client or organisation">
+        </label>
+      </div>
+      <div id="lil-list" class="ts-agenda-list"></div>
+    </section>
+    <section id="lil-detail" class="ts-av-panel" aria-label="Selected assessment"></section>
+  </div>
+
+</section>

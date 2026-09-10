@@ -78,6 +78,11 @@ function normalizeContractEntryMode(value) {
   return (v === 'simple' || v === 'detailed') ? v : '';
 }
 
+function assessmentOrganisations_(value) {
+  var seen = {};
+  return String(value || '').split(',').map(function(v) { return v.trim(); }).filter(function(v) { var key = v.toLowerCase(); if (!v || seen[key]) return false; seen[key] = true; return true; });
+}
+
 function normalizeContractObject(contract) {
   if (!contract) return contract;
   var standardHoursRaw = contract.standard_hours_per_day != null ? contract.standard_hours_per_day : contract.standardHoursPerDay;
@@ -92,7 +97,7 @@ function normalizeContractObject(contract) {
     total_hours: normalizeContractTotalHours(contract.total_hours || contract.totalHours),
     standard_hours_per_day: standardHours,
     include_weekends: contractParseBoolean(contract.include_weekends != null ? contract.include_weekends : contract.includeWeekends),
-    line_item_templates_json: contract.line_item_templates_json || '',
+    assessment_organisations: assessmentOrganisations_(contract.assessment_organisations).join(', '),
     color: normalizeContractColor(contract.color),
     archived: contractParseBoolean(contract.archived),
     entry_mode: normalizeContractEntryMode(contract.entry_mode != null ? contract.entry_mode : contract.entryMode),
@@ -132,7 +137,7 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     total_hours: normalized.total_hours,
     include_weekends: normalized.include_weekends ? 'TRUE' : 'FALSE',
     standard_hours_per_day: normalized.standard_hours_per_day,
-    line_item_templates_json: normalized.line_item_templates_json || '',
+    assessment_organisations: normalized.assessment_organisations || '',
     color: normalized.color || '',
     archived: normalized.archived ? 'TRUE' : 'FALSE',
     entry_mode: normalized.entry_mode || '',
@@ -155,7 +160,7 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     byName.total_hours,
     byName.include_weekends,
     byName.standard_hours_per_day,
-    byName.line_item_templates_json,
+    '',
     byName.color,
     byName.archived,
     byName.entry_mode,
@@ -164,7 +169,8 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     byName.specified_personnel,
     byName.work_order_number,
     byName.contract_reference,
-    byName.timesheet_statement
+    byName.timesheet_statement,
+    byName.assessment_organisations
   ];
 }
 
@@ -256,7 +262,7 @@ function updateContractUnlocked_(contract) {
   for (var i = 1; i < values.length; i++) {
     if (values[i][0] === contract.id) {
       var createdValue = createdIdx !== -1 ? values[i][createdIdx] : values[i][6];
-      var normalized = normalizeContractObject(contract);
+      var normalized = normalizeContractObject(Object.assign({}, rowObjectFromHeaders_(headers, values[i]), contract));
       normalized.id = contract.id;
       validateContractDates(normalized);
       normalized.created_at = toIsoDateTime(createdValue);

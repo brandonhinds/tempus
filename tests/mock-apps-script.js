@@ -24,7 +24,24 @@ class MockRange {
     return this;
   }
   setValue(value) { return this.setValues([[value]]); }
-  setNumberFormat() { return this; }
+  setNumberFormat(format) {
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.columns; c++) this.sheet.setFormat(this.row + r, this.column + c, format);
+    return this;
+  }
+  getNumberFormats() {
+    const out = [];
+    for (let r = 0; r < this.rows; r++) {
+      const row = [];
+      for (let c = 0; c < this.columns; c++) row.push(this.sheet.format(this.row + r, this.column + c));
+      out.push(row);
+    }
+    return out;
+  }
+  setNumberFormats(formats) {
+    if (!Array.isArray(formats) || formats.length !== this.rows || formats.some((row) => !Array.isArray(row) || row.length !== this.columns)) throw new Error('Mock range dimensions do not match formats.');
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.columns; c++) this.sheet.setFormat(this.row + r, this.column + c, formats[r][c]);
+    return this;
+  }
   clearContent() {
     for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.columns; c++) this.sheet.setCell(this.row + r, this.column + c, '');
     return this;
@@ -59,6 +76,12 @@ class MockSheet {
   }
   getMaxRows() { return this.maxRows; }
   getMaxColumns() { return this.maxColumns; }
+  format(row, column) { return (this.formats && this.formats[row - 1] && this.formats[row - 1][column - 1]) || 'General'; }
+  setFormat(row, column, value) {
+    if (!this.formats) this.formats = [];
+    if (!this.formats[row - 1]) this.formats[row - 1] = [];
+    this.formats[row - 1][column - 1] = value || 'General';
+  }
   getRange(row, column, rows, columns) { return new MockRange(this, row, column, rows || 1, columns || 1); }
   getDataRange() { return new MockRange(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   insertRowsAfter(after, count) { this.maxRows = Math.max(this.maxRows, after + count); }

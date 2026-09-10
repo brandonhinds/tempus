@@ -155,11 +155,13 @@
     Tempus logo shortcut
    </label>
    <div class="ts-note">
-    Where clicking the Tempus logo &amp; name at the top of the page takes you. Defaults to today&rsquo;s Time Entry.
+    Where clicking the Tempus logo &amp; name at the top of the page takes you. The default follows the mode: Assessments in Lil Assessments mode, otherwise today&rsquo;s Time Entry.
    </div>
    <div class="ts-settings-field ts-settings-control">
     <select id="set-brand-shortcut">
+     <option value="">Default for this mode</option>
      <option value="annual-views">Annual View</option>
+     <option value="assessments" id="brand-shortcut-opt-assessments">Assessments</option>
      <option value="myob-helper" id="brand-shortcut-opt-myob">MYOB Payroll Helper</option>
      <option value="public-holidays" id="brand-shortcut-opt-holidays">Public Holidays</option>
      <option value="settings">Settings</option>
@@ -212,10 +214,10 @@
     PAYG instalment rate (%)
    </label>
    <div class="ts-note">
-    Enter the rate from your ATO instalment notice so Tempus can estimate quarterly BAS repayments.
+    Enter the rate from your ATO instalment notice so Tempus can estimate quarterly BAS repayments. Leave it blank and tax is estimated from year-to-date profit instead, which understates it early in the financial year.
    </div>
    <div class="ts-settings-field ts-settings-control">
-    <input id="set-payg-rate" max="100" min="0" step="0.1" type="number"/>
+    <input id="set-payg-rate" placeholder="2" max="100" min="0" step="0.1" type="number"/>
    </div>
   </div>
   <div class="ts-settings-item" data-setting-key="public_holiday_state" id="public-holiday-state-col">

@@ -40,12 +40,24 @@ function roundMinutesToInterval(minutes, interval) {
  * @param {Object} payload - { yearType: 'financial'|'calendar', startYear: 2024, contractIds: [] }
  * @returns {Object} Annual summary with monthly breakdowns
  */
+function annualRateHourTypeIds_(hourTypes, lilMode, assessmentDefaultId) {
+  if (!lilMode) return hourTypes.filter(function(type) { return type.use_for_rate_calculation; }).map(function(type) { return String(type.id); });
+  var selected = hourTypes.filter(function(type) { return String(type.id) === String(assessmentDefaultId || ''); })[0]
+    || hourTypes.filter(function(type) { return type.slug === 'work'; })[0];
+  return selected ? [String(selected.id)] : [];
+}
+
 function api_getAnnualSummary(payload) {
   var yearType = payload.yearType || 'financial';
   var startYear = Number(payload.startYear) || financialYearStartYear(new Date());
   var contractIds = payload.contractIds || [];
 
-  var cacheKey = 'annual_' + yearType + '_' + startYear + '_' + (contractIds.length > 0 ? contractIds.sort().join(',') : 'all');
+  var flags = api_getFeatureFlags();
+  var lilMode = !!(flags.enable_lil_assessments_mode && flags.enable_lil_assessments_mode.enabled);
+  var hourTypes = api_getHourTypes();
+  var rateCalcHourTypeIds = annualRateHourTypeIds_(hourTypes, lilMode, api_getSettings().assessment_time_hour_type_id);
+  var cacheKey = 'annual_v3_' + yearType + '_' + startYear + '_' + (contractIds.length > 0 ? contractIds.sort().join(',') : 'all')
+    + '_' + (lilMode ? 'lil' : 'standard') + '_' + rateCalcHourTypeIds.slice().sort().join(',');
   var cached = cacheGet(cacheKey);
   if (cached) {
     Logger.log('Returning cached annual summary for ' + cacheKey);
@@ -67,7 +79,6 @@ function api_getAnnualSummary(payload) {
   var sheet = getOrCreateSheet('timesheet_entries');
   var contractsSheet = getOrCreateSheet('contracts');
   var deductionsSheet = getOrCreateSheet('deductions');
-  var hourTypesSheet = getHourTypesSheet();
 
   // Build lookup maps
   var contractMap = {};
@@ -82,18 +93,7 @@ function api_getAnnualSummary(payload) {
   }
 
   var hourTypeMap = {};
-  var hourTypesData = hourTypesSheet.getDataRange().getValues();
-  for (var i = 1; i < hourTypesData.length; i++) {
-    var row = hourTypesData[i];
-    hourTypeMap[row[0]] = {
-      id: row[0],
-      name: row[1],
-      slug: row[2],
-      color: row[3],
-      contributes_to_income: row[4] === 'TRUE' || row[4] === true,
-      use_for_rate_calculation: row[7] === 'TRUE' || row[7] === true
-    };
-  }
+  hourTypes.forEach(function(type) { hourTypeMap[type.id] = type; });
 
   // Get all entries
   var entriesData = sheet.getDataRange().getValues();
@@ -106,6 +106,9 @@ function api_getAnnualSummary(payload) {
       date: row[1],
       duration_minutes: Number(row[2]) || 0,
       contract_id: row[3],
+      source_type: row[entriesData[0].indexOf('source_type')] || '',
+      source_occurrence_key: row[entriesData[0].indexOf('source_occurrence_key')] || '',
+      income_amount: row[entriesData[0].indexOf('income_amount')],
       hour_type_id: row[7]  // Column 7, not 6 (entry_type is in column 6)
     });
   }
@@ -116,14 +119,6 @@ function api_getAnnualSummary(payload) {
     filteredEntries = allEntries.filter(function(entry) {
       return contractIds.indexOf(entry.contract_id) >= 0;
     });
-  }
-
-  // Find all hour types marked for rate calculation
-  var rateCalcHourTypeIds = [];
-  for (var htid in hourTypeMap) {
-    if (hourTypeMap[htid] && hourTypeMap[htid].use_for_rate_calculation) {
-      rateCalcHourTypeIds.push(htid);
-    }
   }
 
   // Build monthly summaries
@@ -295,7 +290,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
       totalMinutes += minutes;
       var contract = contractMap[entry.contract_id];
       if (contract) {
-        var income = hours * contract.hourly_rate;
+        var income = entry.source_type === 'assessment' && entry.source_occurrence_key === 'billable' && entry.income_amount !== '' && entry.income_amount != null ? Number(entry.income_amount) : hours * contract.hourly_rate;
         if (!contractIncome[entry.contract_id]) {
           contractIncome[entry.contract_id] = 0;
         }
@@ -305,17 +300,18 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   }
 
   var roundedMinutes = roundMinutesToInterval(totalMinutes, roundingInterval);
-  var roundingScale = totalMinutes > 0 ? (roundedMinutes / totalMinutes) : 0;
+  var hasAssessmentFees = monthEntries.some(function(e) { return e.source_type === 'assessment' && e.source_occurrence_key === 'billable' && e.income_amount !== '' && e.income_amount != null; });
+  var roundingScale = totalMinutes > 0 ? (hasAssessmentFees ? 1 : roundedMinutes / totalMinutes) : 0;
   totalHours = roundedMinutes / 60;
   for (var cid in contractIncome) {
     contractIncome[cid] = contractIncome[cid] * roundingScale;
   }
 
-  // Track hour type hours across ALL entries (not filtered by contract)
+  // Keep income and effective-rate hours in the same contract scope.
   var hourTypeHours = {};
   var rateCalcMinutes = 0;
-  for (var i = 0; i < allMonthEntries.length; i++) {
-    var entry = allMonthEntries[i];
+  for (var i = 0; i < monthEntries.length; i++) {
+    var entry = monthEntries[i];
     var hourTypeId = entry.hour_type_id || 'work';
     if (!hourTypeHours[hourTypeId]) {
       hourTypeHours[hourTypeId] = 0;
@@ -323,7 +319,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     var entryMinutes = Number(entry.duration_minutes) || 0;
     hourTypeHours[hourTypeId] += entryMinutes;
 
-    // Track hours for rate calculation hour types (check ALL entries, not just income-contributing)
+    // Rate calculation also includes selected non-income hour types.
     if (rateCalcHourTypeIds && rateCalcHourTypeIds.length > 0 && rateCalcHourTypeIds.indexOf(hourTypeId) !== -1) {
       rateCalcMinutes += entryMinutes;
     }
@@ -546,7 +542,11 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
   // Check for actual income data for this month
   var monthNum = month + 1;
   var monthKey = year + '-' + (monthNum < 10 ? '0' + monthNum : String(monthNum));
-  var actualIncome = actualIncomeMap && actualIncomeMap[monthKey] ? actualIncomeMap[monthKey] : null;
+  var excludesIncome = allMonthEntries.some(function(entry) {
+    var type = hourTypeMap[entry.hour_type_id];
+    return (!type || type.contributes_to_income) && monthEntries.indexOf(entry) === -1;
+  });
+  var actualIncome = !excludesIncome && actualIncomeMap && actualIncomeMap[monthKey] ? actualIncomeMap[monthKey] : null;
 
   // If we have actual income, use it for the relevant fields
   var finalGrossIncome = actualIncome ? actualIncome.gross_income : grossIncome;

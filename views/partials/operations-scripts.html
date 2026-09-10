@@ -1,5 +1,5 @@
 <script>
-  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], assessmentTypes:[], assessments:[], expenseMode:'transaction', expenseEditId:'' };
+  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], expenseMode:'transaction', expenseEditId:'' };
 
   function operationsApi(name, ...args) {
     return new Promise((resolve, reject) => {
@@ -149,36 +149,6 @@
     document.getElementById('expense-vendor').focus();
   }
 
-  async function renderAssessmentsPage() {
-    const list = document.getElementById('assessment-list');
-    if (!list) return;
-    list.textContent='Loading assessments…';
-    try {
-      operationsState.assessmentTypes = await operationsApi('api_listAssessmentTypes', { include_inactive:true }) || [];
-      const today = new Date();
-      const response = await operationsApi('api_getAssessmentsForMonth', today.getFullYear(), today.getMonth()+1);
-      operationsState.assessments = response.assessments || [];
-      const typeSelect = document.getElementById('assessment-type'); typeSelect.replaceChildren();
-      operationsState.assessmentTypes.filter((type) => type.active).forEach((type) => { const option=document.createElement('option'); option.value=type.id; option.textContent=type.name; typeSelect.appendChild(option); });
-      const contractSelect = document.getElementById('assessment-contract'); contractSelect.replaceChildren();
-      (state.contracts || []).filter((contract) => !contract.archived).forEach((contract) => { const option=document.createElement('option'); option.value=contract.id; option.textContent=contract.name; contractSelect.appendChild(option); });
-      renderAssessmentList();
-    } catch (error) { list.textContent=error && error.message ? error.message : 'Could not load assessments.'; }
-  }
-
-  function renderAssessmentList() {
-    const list=document.getElementById('assessment-list'); list.replaceChildren();
-    if (!operationsState.assessmentTypes.length) { ledgerText(list,'ts-empty','Create an assessment type first. Your catalogue intentionally starts empty.'); return; }
-    if (!operationsState.assessments.length) { ledgerText(list,'ts-empty','No assessments in the current month.'); return; }
-    operationsState.assessments.forEach((assessment) => {
-      const row=document.createElement('label'); row.className='ts-ledger-row';
-      const identity=document.createElement('div'); const check=document.createElement('input'); check.type='checkbox'; check.value=assessment.id; check.disabled=assessment.locked; check.className='assessment-select'; identity.appendChild(check); const title=document.createElement('span'); title.className='ts-ledger-row__title'; title.style.marginLeft='10px'; title.textContent=assessment.organisation || 'Unspecified organisation'; identity.appendChild(title); ledgerText(identity,'ts-ledger-row__meta',[assessment.assessment_date,assessment.assessment_type_name].filter(Boolean).join(' · ')); row.appendChild(identity);
-      ledgerText(row,'ts-ledger-row__meta',assessment.locked ? 'Locked by issued invoice' : (assessment.invoice_id ? 'Draft invoice' : 'Ready'));
-      ledgerText(row,'ts-ledger-row__amount',assessment.contract_name || '');
-      const actions=document.createElement('div'); actions.className='ts-ledger-row__actions'; if (!assessment.locked) { const remove=document.createElement('button'); remove.type='button'; remove.className='ghost small'; remove.textContent='Delete'; remove.addEventListener('click',async (event)=>{ event.preventDefault(); remove.textContent=remove.dataset.confirm ? 'Delete' : 'Confirm delete'; if (!remove.dataset.confirm) { remove.dataset.confirm='1'; return; } const result=await operationsApi('api_deleteAssessment',assessment.id); if(result.success===false) operationsStatus(result.message,'warn'); else renderAssessmentsPage(); }); actions.appendChild(remove); } row.appendChild(actions); list.appendChild(row);
-    });
-  }
-
   document.getElementById('expense-add')?.addEventListener('click',()=>openExpenseForm('transaction'));
   document.getElementById('expense-rule-add')?.addEventListener('click',()=>openExpenseForm('rule'));
   document.getElementById('expense-form-cancel')?.addEventListener('click',()=>document.getElementById('expense-form').style.display='none');
@@ -189,44 +159,11 @@
   document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
   document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });
 
-  document.getElementById('assessment-type-add')?.addEventListener('click',()=>{ document.getElementById('assessment-type-form').style.display='block'; document.getElementById('assessment-type-name').focus(); });
-  document.getElementById('assessment-add')?.addEventListener('click',()=>{ if(!operationsState.assessmentTypes.length){operationsStatus('Create an assessment type first.','warn');return;} const form=document.getElementById('assessment-form'); form.style.display='block'; form.reset(); document.getElementById('assessment-date').value=new Date().toISOString().slice(0,10); document.getElementById('assessment-date').focus(); });
-  document.querySelectorAll('[data-close-form]').forEach((button)=>button.addEventListener('click',()=>document.getElementById(button.dataset.closeForm).style.display='none'));
-  document.getElementById('assessment-type-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); try { const result=await operationsApi('api_upsertAssessmentType',{name:document.getElementById('assessment-type-name').value,field_definitions:JSON.parse(document.getElementById('assessment-type-fields').value||'[]'),line_templates:JSON.parse(document.getElementById('assessment-type-lines').value||'[]'),active:true}); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; event.currentTarget.reset(); operationsStatus('Assessment type saved'); renderAssessmentsPage(); } catch(error){operationsStatus(error.message||'Invalid assessment configuration.','warn');} });
-  document.getElementById('assessment-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); try { const result=await operationsApi('api_upsertAssessment',{assessment_date:document.getElementById('assessment-date').value,contract_id:document.getElementById('assessment-contract').value,assessment_type_id:document.getElementById('assessment-type').value,organisation:document.getElementById('assessment-organisation').value,percentage_adjustment:Number(document.getElementById('assessment-adjustment').value),field_values:JSON.parse(document.getElementById('assessment-values').value||'{}')}); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsStatus('Assessment saved'); renderAssessmentsPage(); } catch(error){operationsStatus(error.message||'Invalid field values.','warn');} });
-  document.getElementById('assessment-invoice')?.addEventListener('click',async()=>{ const ids=Array.from(document.querySelectorAll('.assessment-select:checked')).map((input)=>input.value); if(!ids.length){operationsStatus('Select at least one assessment.','warn');return;} const result=await operationsApi('api_generateAssessmentInvoices',{assessment_ids:ids,grouping:'combined',invoice_date:new Date().toISOString().slice(0,10)}); if(result.success===false){operationsStatus(result.message,'warn');return;} operationsStatus('Assessment invoice draft created'); renderAssessmentsPage(); if(typeof loadInvoicesList==='function') loadInvoicesList(); });
-
-  function renderInvoiceLedgerControls(invoice, paymentState) {
-    const status=String(invoice && invoice.status || 'draft');
-    const draft=status==='draft';
-    const issued=status==='issued'||status==='sent';
-    const paid=paymentState && paymentState.state==='paid';
-    const toggle=(id,show,disabled)=>{const el=document.getElementById(id);if(!el)return;el.style.display=show?'inline-flex':'none';el.disabled=!!disabled;};
-    toggle('btn-invoice-recalculate',draft,false); toggle('btn-invoice-issue',draft,false); toggle('btn-invoice-payment',issued,paid); toggle('btn-invoice-revise',status!=='draft',false); toggle('btn-invoice-void',issued,!!(paymentState&&paymentState.paid_amount));
-  }
-
-  async function refreshCurrentInvoice(result) {
-    if(result&&result.success===false){operationsStatus(result.message,'warn');return false;}
-    const detail=result&&result.invoice;
-    const id=detail&&detail.invoice?detail.invoice.id:(detail&&detail.id?detail.id:(state.invoiceSelectedId||''));
-    if(id&&typeof loadInvoiceDetail==='function') loadInvoiceDetail(id,{force:true});
-    if(typeof loadInvoicesList==='function') loadInvoicesList();
-    return true;
-  }
-
-  document.getElementById('btn-invoice-recalculate')?.addEventListener('click',async()=>{ const result=await operationsApi('api_recalculateInvoiceDraft',state.invoiceSelectedId); if(await refreshCurrentInvoice(result)) operationsStatus('Draft recalculated'); });
-  document.getElementById('btn-invoice-issue')?.addEventListener('click',async(event)=>{ const button=event.currentTarget; if(!button.dataset.confirm){button.dataset.confirm='1';button.textContent='Confirm issue';operationsStatus('Issuing locks the invoice and its line snapshots.','warn');return;} const result=await operationsApi('api_issueInvoice',state.invoiceSelectedId); button.dataset.confirm='';button.textContent='Issue'; if(await refreshCurrentInvoice(result)) operationsStatus('Invoice issued'); });
-  document.getElementById('btn-invoice-revise')?.addEventListener('click',async()=>{ const result=await operationsApi('api_reviseInvoice',{id:state.invoiceSelectedId}); if(await refreshCurrentInvoice(result)) operationsStatus('Revision draft created'); });
-  document.getElementById('btn-invoice-void')?.addEventListener('click',(event)=>{ const button=event.currentTarget; const existing=document.getElementById('invoice-void-form'); if(existing){existing.remove();return;} const form=document.createElement('form'); form.id='invoice-void-form'; form.style.cssText='display:flex;gap:8px;align-items:end;margin-top:12px;flex-wrap:wrap'; const wrap=document.createElement('div'); const label=document.createElement('label'); label.htmlFor='invoice-void-reason';label.textContent='Reason for void'; const input=document.createElement('input');input.id='invoice-void-reason';input.required=true;input.maxLength=500; wrap.append(label,input); const confirm=document.createElement('button');confirm.type='submit';confirm.className='danger';confirm.textContent='Confirm void'; const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='Cancel';cancel.addEventListener('click',()=>form.remove()); form.append(wrap,confirm,cancel); form.addEventListener('submit',async(e)=>{e.preventDefault();const result=await operationsApi('api_voidInvoice',{id:state.invoiceSelectedId,reason:input.value});if(await refreshCurrentInvoice(result))operationsStatus('Invoice voided');form.remove();}); button.closest('.ts-card--section').appendChild(form);input.focus(); });
-  document.getElementById('btn-invoice-payment')?.addEventListener('click',()=>{ const form=document.getElementById('invoice-payment-form');form.style.display='flex';document.getElementById('invoice-payment-date').value=new Date().toISOString().slice(0,10);document.getElementById('invoice-payment-amount').focus(); });
-  document.getElementById('invoice-payment-cancel')?.addEventListener('click',()=>document.getElementById('invoice-payment-form').style.display='none');
-  document.getElementById('invoice-payment-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const result=await operationsApi('api_addInvoicePayment',{invoice_id:state.invoiceSelectedId,payment_date:document.getElementById('invoice-payment-date').value,amount:Number(document.getElementById('invoice-payment-amount').value)});if(await refreshCurrentInvoice(result)){operationsStatus('Payment recorded');event.currentTarget.reset();event.currentTarget.style.display='none';}});
-
   async function renderBasLedgerSummary() {
     const target=document.getElementById('bas-ledger-summary');
     if(!target)return;
     const basisSelect=document.getElementById('bas-accounting-basis');
-    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    const basis=(basisSelect&&basisSelect.value)||defaultAccountingBasis();
     if(basisSelect)basisSelect.value=basis;
     const now=new Date();
     const fy=Number(state.basCurrentFy)||financialYearStartYear(now);
@@ -243,8 +180,17 @@
       target.textContent=error.message||'Could not calculate ledger actuals.';
     }
   }
+  function soleTraderMode() {
+    const flag=(state.featureFlags&&state.featureFlags.is_sole_trader)||(typeof DEFAULT_FEATURE_FLAGS!=='undefined'&&DEFAULT_FEATURE_FLAGS.is_sole_trader)||{enabled:false};
+    return !!flag.enabled;
+  }
+  // A saved basis always wins; with nothing saved, sole traders report on an accrual basis.
+  function defaultAccountingBasis() {
+    return (state.settings&&state.settings.accounting_basis)||(soleTraderMode()?'accrual':'cash');
+  }
+
   function transferSplitEnabled() {
-    const flag=(state.featureFlags&&state.featureFlags.enable_assessments)||(typeof DEFAULT_FEATURE_FLAGS!=='undefined'&&DEFAULT_FEATURE_FLAGS.enable_assessments)||{enabled:false};
+    const flag=(state.featureFlags&&state.featureFlags.enable_lil_assessments_mode)||(typeof DEFAULT_FEATURE_FLAGS!=='undefined'&&DEFAULT_FEATURE_FLAGS.enable_lil_assessments_mode)||{enabled:false};
     return !!flag.enabled;
   }
 
@@ -275,7 +221,7 @@
     const body=document.getElementById('bas-transfer-split-body');
     const foot=document.getElementById('bas-transfer-split-foot');
     const basisSelect=document.getElementById('bas-accounting-basis');
-    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    const basis=(basisSelect&&basisSelect.value)||defaultAccountingBasis();
     const now=new Date();
     const fy=Number(state.basCurrentFy)||financialYearStartYear(now);
     section.style.display='block';
@@ -305,7 +251,7 @@
     const fy=operationsState.transferSplitFy;
     if(!fy) return;
     const basisSelect=document.getElementById('bas-accounting-basis');
-    const basis=(basisSelect&&basisSelect.value)||(state.settings&&state.settings.accounting_basis)||'cash';
+    const basis=(basisSelect&&basisSelect.value)||defaultAccountingBasis();
     const result=await operationsApi('api_exportMonthlyTransferSplitCsv',{financial_year:fy,accounting_basis:basis});
     const link=document.createElement('a');
     link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'}));

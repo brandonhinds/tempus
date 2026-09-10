@@ -12,6 +12,12 @@ function doGet(e) {
   // Inject the user's saved time view (Agenda/Calendar) so the page paints directly on their preference
   // on any browser — no default-then-switch flash. Always defined so the template scriptlet can't throw.
   tpl.initialTimeView = pickInitialTimeView(bootSettings);
+  var bootFlags = api_getFeatureFlags();
+  var lilMode = !!(bootFlags.enable_lil_assessments_mode && bootFlags.enable_lil_assessments_mode.enabled);
+  var requestedPage = e && e.parameter ? String(e.parameter.page || '') : '';
+  tpl.initialPage = pickInitialPage_(lilMode, requestedPage);
+  tpl.lilModeJson = JSON.stringify(lilMode);
+  tpl.explicitPageJson = JSON.stringify(!!requestedPage);
   // The mobile redirect gate paints before the app boots, so it can't read the theme from CSS. Resolve
   // the active theme's core colours server-side here and hand them to the page (see views/index.html +
   // views/partials/mobile-detect) so the splash renders in the user's theme on the first frame.
@@ -467,4 +473,11 @@ function DANGER_resetToFactorySettings() {
     deletedSheets: deletedSheets,
     errors: errors
   };
+}
+
+function pickInitialPage_(lilMode, requestedPage) {
+  if (requestedPage === 'invoices') return lilMode ? 'assessments' : 'time';
+  if (requestedPage === 'assessments') return lilMode ? 'assessments' : 'time';
+  if (['time','contracts','hour-types','annual-views','settings','help','themes','about','bas','expenses','deductions','rate-preview','public-holidays'].indexOf(requestedPage) !== -1) return requestedPage;
+  return lilMode ? 'assessments' : 'time';
 }

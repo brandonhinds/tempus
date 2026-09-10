@@ -14,13 +14,17 @@ Timed Sessions appear first and are ordered chronologically. The section total i
 
 Select a session row to edit its start, end, hour type or contract. Use **Add session** for another timed period, or the clock action to start or finish work now. New sessions only offer hour types and contracts currently configured for Detailed entry. Historical sessions remain editable when configuration changes later.
 
+Times accept 24-hour input such as `17:30` or `1730`, as well as `5:30pm`. Without AM/PM, times use the preceding session or start time as context: `9` then `5` becomes 9am–5pm. You can pause while typing; unfinished text stays in the field until you finish it.
+
+Session additions, time edits, hour type or contract changes, and deletions remain unsaved as you move between rows. Click **Save** or press **Enter** to save the complete batch. **Cancel** discards the batch. A failed save keeps your draft available to retry. Clock in/out remain immediate actions.
+
 ## Duration Entries
 
 Duration Entries list each fixed-duration record separately with its hour type, contract context, billable state and duration. The heading total covers only these records.
 
 Select a row to expand its editor. **Save changes** updates that exact record, **Cancel** restores the saved values, and **Delete** removes only that record. Use **Add duration entry** to create another fixed amount. New entries only offer Simple-compatible configuration; historical records remain accessible.
 
-Only one session or duration draft can be active at once. When a dirty draft would be replaced, Tempus asks whether to save or discard it. Closing the day editor also requires confirmation before unsaved work is discarded.
+One row editor is expanded at a time; session changes remain buffered when switching between session rows. Switching between the session and duration sections prompts you to save or discard unsaved changes. Closing the day editor also requires confirmation before unsaved work is discarded.
 
 ## Day Details
 

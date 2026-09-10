@@ -2,6 +2,7 @@
 <html>
   <head>
     <base target="_top">
+    <script>window.__TEMPUS_LIL_MODE__ = <?!= lilModeJson ?>;</script>
     <?!= include('views/partials/head'); ?>
     <!-- First-paint theming (see doGet): for a custom theme this overrides the empty .ts-theme-custom
          placeholder with its dominant colours so the page renders in-theme immediately; '' for built-ins. -->
@@ -11,6 +12,7 @@
     <?!= include('views/partials/mobile-shell-scripts'); ?>
     <div id="ts-toast-container" class="ts-toast-container" aria-live="polite" aria-atomic="true"></div>
     <main class="ts-container ts-mobile-container">
+      <? if (lilModeJson === 'true') { ?><a class="ghost" href="<?= webAppUrl ?>?page=assessments" target="_top">Back to Assessments</a><? } ?>
       <?!= include('views/partials/mobile-entry'); ?>
     </main>
     <?!= include('views/partials/entry-core'); ?>

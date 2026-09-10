@@ -275,6 +275,10 @@ function api_updateHourType(id, data) {
 }
 
 function updateHourTypeUnlocked_(id, data) {
+  if (data.contributes_to_income === true || String(data.contributes_to_income).toUpperCase() === 'TRUE') {
+    if (api_getEntries({}).some(function(e) { return String(e.hour_type_id) === String(id) && e.source_type === 'assessment' && !assessmentEntryIsBillable_(e); })) throw new Error('This type has actual assessment hours and must remain non-billable.');
+    if (String(api_getSettings().assessment_time_hour_type_id || '') === String(id)) throw new Error('Clear or replace the assessment time default before making this type billable.');
+  }
   var sh = getHourTypesSheet();
   var allData = sh.getDataRange().getValues();
   var headers = allData[0];
@@ -446,6 +450,7 @@ function deleteHourTypeUnlocked_(id) {
 
   if (hourTypeReferenceCount_(id) > 0) throw new Error('Cannot delete an hour type referenced by entries, schedules, or invoice lines.');
 
+  if (String(api_getSettings().assessment_time_hour_type_id || '') === String(id)) updateSettingsUnlocked_({ assessment_time_hour_type_id: '' });
   sh.deleteRow(rowIndex + 2);
 
   cacheClearPrefix('hour_types');

@@ -148,6 +148,41 @@
       return [dateIso || '', hourTypeId || '', contractId || ''].join('|');
     };
 
+    // The automatic assessment billing row is maintained by the Assessments screen, and the ordinary
+    // entry endpoints reject edits and deletes of it. It must never be offered as "the existing entry".
+    const entryIsAssessmentBilling = (entry) => !!entry
+      && String(entry.source_type || '') === 'assessment'
+      && String(entry.source_occurrence_key || '') === 'billable';
+
+    // A duplicate is a genuine double-entry: same day, same hour type, same contract, the same recorded
+    // time, and the same origin. Two different sessions on one day are separate records, which is what
+    // the server already says (backend/entries.js entryIdentityKey_: "Manual work sessions are
+    // intentionally distinct even when date, contract and hour type match"). Keying on date + hour type
+    // alone made an assessment's tracked hours collide with ordinary time logged the same day, and made
+    // two tracked sessions on one day collide with each other.
+    const entryDuplicateKey = (entry, defaultHourTypeId) => {
+      if (!entry) return '';
+      const entryType = String(entry.entry_type || 'basic');
+      // Break and comment rows stay deliberately one-per-day-per-contract.
+      if (entryType === 'break' || entryType === 'comment') {
+        return [entry.date || '', '__' + entryType + '__', entry.contract_id || ''].join('|');
+      }
+      const minutes = Math.max(0, Math.round(Number(entry.duration_minutes) || 0));
+      const punches = normalizePunchList(entry.punches != null ? entry.punches : entry.punches_json);
+      // A basic entry's only "time" is its duration; a 00:00-anchored punch pair is how basic hours are
+      // stored, so it is not a distinguishing clock time either.
+      const isBasic = entryType === 'basic' || !punches.length
+        || (punches.length === 1 && punches[0].in === '00:00');
+      const time = isBasic
+        ? 'd:' + minutes
+        : 'p:' + minutes + ':' + punches.map((punch) => (punch.in || '') + '-' + (punch.out || '')).join(',');
+      // Rows derived from different parents — two assessments' tracked hours — are never copies of each
+      // other, and a derived row is never a copy of a manual one.
+      const sourceType = String(entry.source_type || 'manual');
+      const origin = sourceType === 'manual' ? 'manual' : sourceType + ':' + String(entry.source_id || '');
+      return [entry.date || '', String(entry.hour_type_id || defaultHourTypeId || ''), entry.contract_id || '', time, origin].join('|');
+    };
+
     // Minutes-since-midnight from a time-of-day value. Tolerates a plain "HH:MM" as well as a Google Sheets
     // time serial that arrives as a datetime ("1899-12-30T17:00:00", "1899-12-30 17:00:00"). Null if no
     // sensible time of day can be read.
@@ -288,6 +323,8 @@
       contractIsValid,
       endTimeSuggestion,
       entryCompositeKey,
+      entryDuplicateKey,
+      entryIsAssessmentBilling,
       isoDateTime,
       minutesToTime,
       normalizePunchList,

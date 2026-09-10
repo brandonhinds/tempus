@@ -4,7 +4,8 @@
       clampRoundInterval,
       contractIsValid,
       endTimeSuggestion,
-      entryCompositeKey,
+      entryDuplicateKey,
+      entryIsAssessmentBilling,
       isoDateTime,
       minutesToTime,
       normalizePunchList,
@@ -1304,9 +1305,14 @@
       setStatus('');
     };
 
+    // Same rule as desktop (entryCore.entryDuplicateKey): a duplicate needs matching times and origin,
+    // not just a matching day and hour type, or an assessment's tracked hours would clash with ordinary
+    // time logged the same day.
     const findDuplicate = (payload) => {
-      const key = entryCompositeKey(payload.date, payload.hour_type_id, payload.contract_id);
-      return state.entries.find((e) => entryCompositeKey(e.date, e.hour_type_id, e.contract_id) === key && e.id !== payload.id) || null;
+      const key = entryDuplicateKey(payload, defaultHourTypeId());
+      if (!key) return null;
+      return state.entries.find((e) => e.id !== payload.id && !entryIsAssessmentBilling(e)
+        && entryDuplicateKey(e, defaultHourTypeId()) === key) || null;
     };
 
     const getManualPayload = () => {

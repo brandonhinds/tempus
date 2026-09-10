@@ -18,7 +18,8 @@ function listMigrations() {
     { id: '2026-08-repair-assessment-entry-identity', run: migrationRepairAssessmentEntryIdentity_ },
     { id: '2026-08-reveal-migrated-expense-ledger', run: migrationRevealExpenseLedger_ },
     { id: '2026-08-usable-legacy-expenses', run: migrationUsableLegacyExpenses_ },
-    { id: '2026-08-rebuild-missing-expense-rules', run: migrationRebuildMissingExpenseRules_ }
+    { id: '2026-08-rebuild-missing-expense-rules', run: migrationRebuildMissingExpenseRules_ },
+    { id: '2026-09-lil-assessments-mode', run: migrationLilAssessments_ }
   ];
 }
 
@@ -95,6 +96,7 @@ function api_runUpgrade() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return { success: false, error: 'upgrade_busy', message: 'Another upgrade is already running.' };
   var props = PropertiesService.getScriptProperties();
+  migrationArchiveReset_();
   try {
     var pending = pendingMigrations(props);
     if (!pending.length) return api_getMigrationStatus();
@@ -614,21 +616,88 @@ function migrationIdSet_(sheetName) {
   return result;
 }
 
-function archiveMigrationRow_(migrationId, sourceSheet, rowNumber, reason) {
-  var archive = getOrCreateSheet('migration_archive');
-  var sourceValues = sourceSheet.getRange(rowNumber, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
-  var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
-  var sourceJson = JSON.stringify(rowObjectFromHeaders_(headers, sourceValues));
-  var existing = archive.getDataRange().getValues();
-  if (existing.length > 1) {
-    var migrationIndex = existing[0].indexOf('migration_id');
-    var sheetIndex = existing[0].indexOf('source_sheet');
-    var jsonIndex = existing[0].indexOf('source_row_json');
-    for (var row = 1; row < existing.length; row++) {
-      if (String(existing[row][migrationIndex]) === String(migrationId) && String(existing[row][sheetIndex]) === sourceSheet.getName() && String(existing[row][jsonIndex]) === sourceJson) return;
+/** Archive index for this execution. The archive is append-only while migrations run, so the
+ * duplicate check is answered from memory instead of re-reading a growing sheet for every row.
+ * Re-reading it per row made archiving quadratic, which is what made the upgrade take minutes. */
+var __migrationArchive = null;
+
+function migrationArchiveReset_() { __migrationArchive = null; }
+
+function migrationArchiveKey_(migrationId, sheetName, json) {
+  return String(migrationId) + '|' + String(sheetName) + '|' + json;
+}
+
+function migrationArchive_() {
+  if (__migrationArchive && __migrationArchive.sheet.getLastRow() === __migrationArchive.rows) return __migrationArchive;
+  var sheet = getOrCreateSheet('migration_archive');
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0] || [];
+  var migrationIndex = headers.indexOf('migration_id');
+  var sheetIndex = headers.indexOf('source_sheet');
+  var jsonIndex = headers.indexOf('source_row_json');
+  var seen = {};
+  if (migrationIndex !== -1 && sheetIndex !== -1 && jsonIndex !== -1) {
+    for (var row = 1; row < values.length; row++) {
+      seen[migrationArchiveKey_(values[row][migrationIndex], values[row][sheetIndex], String(values[row][jsonIndex]))] = true;
     }
   }
-  archive.appendRow([Utilities.getUuid(), migrationId, sourceSheet.getName(), sourceJson, reason, migrationIsoNow_()]);
+  __migrationArchive = { sheet: sheet, headers: headers, seen: seen, rows: sheet.getLastRow() };
+  return __migrationArchive;
+}
+
+/** Append already-loaded rows in one write. `rowValues` are raw row arrays matching `headers`. */
+function archiveMigrationValues_(migrationId, sheetName, headers, rowValues, reason) {
+  if (!rowValues || !rowValues.length) return 0;
+  var archive = migrationArchive_(), now = migrationIsoNow_(), pending = [];
+  rowValues.forEach(function(values) {
+    if (!values) return;
+    var json = JSON.stringify(rowObjectFromHeaders_(headers, values));
+    var key = migrationArchiveKey_(migrationId, sheetName, json);
+    if (archive.seen[key]) return;
+    archive.seen[key] = true;
+    pending.push(rowValuesFromObject_(archive.headers, { id: Utilities.getUuid(), migration_id: migrationId, source_sheet: sheetName, source_row_json: json, reason: reason, archived_at: now }));
+  });
+  if (!pending.length) return 0;
+  var start = archive.sheet.getLastRow() + 1;
+  ensureSheetCapacity_(archive.sheet, start + pending.length - 1, archive.headers.length);
+  archive.sheet.getRange(start, 1, pending.length, archive.headers.length).setValues(pending);
+  archive.rows = archive.sheet.getLastRow();
+  return pending.length;
+}
+
+function archiveMigrationRow_(migrationId, sourceSheet, rowNumber, reason) {
+  var lastColumn = sourceSheet.getLastColumn();
+  if (!lastColumn || Number(rowNumber) < 2) return 0;
+  var headers = sourceSheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  var values = sourceSheet.getRange(Number(rowNumber), 1, 1, lastColumn).getValues()[0];
+  return archiveMigrationValues_(migrationId, sourceSheet.getName(), headers, [values], reason);
+}
+
+/** One read of a sheet, plus a single whole-block write for whatever changed. */
+function migrationSheetBlock_(name) {
+  var sheet = getOrCreateSheet(name);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0] || [];
+  var rows = [];
+  for (var index = 1; index < values.length; index++) {
+    var item = rowObjectFromHeaders_(headers, values[index]);
+    item.__row = index + 1;
+    item.__values = values[index];
+    rows.push(item);
+  }
+  return {
+    sheet: sheet, headers: headers, rows: rows,
+    write: function(records) {
+      if (!records || !records.length || !rows.length) return;
+      var byId = {};
+      records.forEach(function(record) { byId[String(record.id)] = record; });
+      var block = rows.map(function(row) {
+        var record = byId[String(row.id)];
+        return record ? rowValuesFromObject_(headers, record, row.__values) : row.__values;
+      });
+      sheet.getRange(2, 1, block.length, headers.length).setValues(block);
+    }
+  };
 }
 
 function migrationCompanyExpenses_() {
@@ -1048,4 +1117,155 @@ function migrationLegacyAssessmentInvoices_() {
     });
     archiveMigrationRow_('2026-08-generic-assessments-unified-invoices', legacySheet, row + 1, 'migrated_to_invoice_ledger');
   }
+}
+
+/** One-time conversion. Archives the rows it rewrites or deletes; unresolved historical records stay
+ * visible and read-only in reporting. Nothing here deletes payments, rewrites actual hours, or touches
+ * a Drive document.
+ *
+ * Every sheet is read once and written once. The whole-file safety net is the verified pre-upgrade
+ * spreadsheet copy (ensureVerifiedUpgradeBackup_), so the archive records only affected rows — copying
+ * whole sheets into it row by row made the upgrade take minutes on an ordinary spreadsheet. */
+function migrationLilAssessments_() {
+  var migration = '2026-09-lil-assessments-mode';
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('lil_assessments_migrated') === '1') return;
+
+  var flagData = migrationSheetBlock_('feature_flags');
+  var flags = {}, enabled = false;
+  flagData.rows.forEach(function(r) { flags[String(r.feature)] = r; });
+  ['enable_assessments','enable_assessments_mode'].forEach(function(key) { if (flags[key] && migrationBoolean_(flags[key].enabled)) enabled = true; });
+  var settingsData = migrationSheetBlock_('user_settings');
+  settingsData.rows.forEach(function(r) { if (['enable_assessments','enable_assessments_mode'].indexOf(String(r.key)) !== -1 && migrationBoolean_(r.value)) enabled = true; });
+  var retiredFlags = flagData.rows.filter(function(r) { return ['enable_assessments','enable_assessments_mode','enable_invoices','enable_contract_line_item_templates'].indexOf(String(r.feature)) !== -1; });
+  archiveMigrationValues_(migration,'feature_flags',flagData.headers,retiredFlags.map(function(r) { return r.__values; }),'retired_flag');
+  if (!flags.enable_lil_assessments_mode) flagData.sheet.appendRow(rowValuesFromObject_(flagData.headers,{feature:'enable_lil_assessments_mode',enabled:enabled?'TRUE':'FALSE',name:'Enable Lil Assessments mode'}));
+  deleteSheetRowsDescending_(flagData.sheet,retiredFlags.map(function(r) { return r.__row; }));
+
+  var typeData = migrationSheetBlock_('assessment_types');
+  var aliases = {};
+  LIL_ASSESSMENT_TYPES.forEach(function(t) { aliases[t.id] = t.id; });
+  var unknownTypes = [];
+  typeData.rows.forEach(function(t) {
+    var match = LIL_ASSESSMENT_TYPES.filter(function(f) { return f.name.toLowerCase() === String(t.name).trim().toLowerCase(); })[0];
+    if (match) aliases[String(t.id)] = match.id; else unknownTypes.push(t.__values);
+  });
+  // A custom type nobody can map is the one type definition worth keeping a copy of.
+  archiveMigrationValues_(migration,'assessment_types',typeData.headers,unknownTypes,'custom_type_needs_review');
+
+  var contractData = migrationSheetBlock_('contracts');
+  var contractsById = {};
+  contractData.rows.forEach(function(c) { contractsById[String(c.id)] = c; });
+  // Index the invoice lines once; the old code re-scanned every line for every assessment and invoice.
+  var lines = listInvoiceLineItemsInternal(), linesByAssessment = {}, linesByInvoice = {};
+  lines.forEach(function(l) {
+    var invoiceKey = String(l.invoice_id);
+    (linesByInvoice[invoiceKey] = linesByInvoice[invoiceKey] || []).push(l);
+    if (l.source_type === 'assessment') { var key = String(l.source_id); (linesByAssessment[key] = linesByAssessment[key] || []).push(l); }
+  });
+
+  var assessmentData = migrationSheetBlock_('assessments'), converted = [], assessmentArchive = [];
+  assessmentData.rows.forEach(function(r) {
+    // Idempotence across interrupted upgrades: converted records are not repriced.
+    if (r.lil_migrated === 'TRUE') return;
+    assessmentArchive.push(r.__values);
+    var values = assessmentJsonSafeMigration_(r.field_values_json, {}), warnings = [];
+    r.assessment_date = toIsoDate(r.assessment_date || r.interview_date || '');
+    r.client_name = String(r.client_name || values.client_name || values.subject_name || values.name || r.interviewee_name || '').trim();
+    r.client_dob = toIsoDate(r.client_dob || values.client_dob || values.subject_date_of_birth || values.dob || r.interviewee_dob || '');
+    r.organisation = String(r.organisation || values.organisation || values.org || r.org || '').trim();
+    if (!aliases[String(r.assessment_type_id)]) warnings.push('Historical custom type needs review. Original fields are preserved.');
+    else r.assessment_type_id = aliases[String(r.assessment_type_id)];
+    if (r.percentage_adjustment === '' || r.percentage_adjustment == null) {
+      var surge = Number(r.surge_percentage || 0); r.percentage_adjustment = surge > 1 ? surge/100 : surge;
+    }
+    var contract = contractsById[String(r.contract_id)] || null, type = assessmentTypeById_(r.assessment_type_id);
+    if (!r.pricing_snapshot_json && contract && type) {
+      var rate = Number(r.rate_snapshot || r.hourly_rate_snapshot || contract.hourly_rate), savedLines = linesByAssessment[String(r.id)] || [];
+      var legacyOverrides = assessmentJsonSafeMigration_(contract.assessment_type_multipliers_json, []).filter(function(t) { return aliases[String(t.type_id)] === r.assessment_type_id; })[0];
+      var multipliers = legacyOverrides && legacyOverrides.multipliers;
+      if (savedLines.length && savedLines.every(function(l) { return l.amount > 0; })) {
+        r.pricing_snapshot_json = JSON.stringify({ rate: rate, lines: savedLines.map(function(l,index) { return { id: type.id+'-'+(index+1), template: type.lines[index] ? type.lines[index].template : l.description, multiplier: l.amount / rate / (1 + Number(r.percentage_adjustment || 0)), amount: l.amount, gst_code: l.gst_code, gst_rate: l.gst_rate, gst_amount: l.gst_amount }; }) });
+      } else if (isFinite(rate) && rate > 0) r.pricing_snapshot_json = JSON.stringify({ rate: rate, lines: type.lines.map(function(l,index) { var multiplier = multipliers && multipliers[index] != null ? Number(multipliers[index]) : l.multiplier; return { id:type.id+'-'+(index+1),template:l.template,multiplier:multiplier,amount:roundMoney_(rate*multiplier*(1+Number(r.percentage_adjustment||0))) }; }) });
+    }
+    if (!r.client_name || !r.client_dob || !r.organisation || !r.pricing_snapshot_json) warnings.push('Complete the missing client, organisation or pricing details before invoicing.');
+    r.migration_warning = warnings.join(' '); r.revision = Number(r.revision)||1; r.lil_migrated = 'TRUE';
+    converted.push(r);
+  });
+  archiveMigrationValues_(migration,'assessments',assessmentData.headers,assessmentArchive,'before_lil_assessments');
+  assessmentData.write(converted);
+
+  var assessments = assessmentData.rows, organisationsByContract = {}, assessmentsById = {}, assessmentsByInvoice = {};
+  assessments.forEach(function(a) {
+    var contractKey = String(a.contract_id);
+    (organisationsByContract[contractKey] = organisationsByContract[contractKey] || []).push(a.organisation);
+    assessmentsById[String(a.id)] = a;
+    var invoiceKey = String(a.invoice_id || '');
+    if (invoiceKey) (assessmentsByInvoice[invoiceKey] = assessmentsByInvoice[invoiceKey] || []).push(a);
+  });
+  var contractUpdates = [], contractArchive = [];
+  contractData.rows.forEach(function(c) {
+    if (c.assessment_organisations) return;
+    var names = assessmentOrganisations_((organisationsByContract[String(c.id)] || []).join(',')).join(', ');
+    // Nothing to initialise from means nothing to rewrite; missing data stays visible to resolve.
+    if (!names) return;
+    contractArchive.push(c.__values);
+    contractUpdates.push({ id: c.id, assessment_organisations: names });
+  });
+  archiveMigrationValues_(migration,'contracts',contractData.headers,contractArchive,'before_lil_assessments');
+  contractData.write(contractUpdates);
+  cacheClearPrefix('contracts');
+
+  // Adopt only one complete, unpaid, assessment-only invoice for a source month. Other cases keep
+  // explicit month evidence and links, and block duplicate monthly generation until reconciled.
+  var invoiceData = migrationSheetBlock_('invoices'), invoices = listInvoicesInternal(), evidence = {};
+  invoices.forEach(function(inv) {
+    if (inv.kind === 'lil_assessment' || inv.status === 'void') return;
+    var ownLines = linesByInvoice[String(inv.id)] || [], related = {};
+    (assessmentsByInvoice[String(inv.id)] || []).forEach(function(a) { related[String(a.id)] = a; });
+    ownLines.forEach(function(l) { if (l.source_type === 'assessment' && assessmentsById[String(l.source_id)]) related[String(l.source_id)] = assessmentsById[String(l.source_id)]; });
+    var relatedList = Object.keys(related).map(function(key) { return related[key]; }).sort(function(a,b) { return a.__row - b.__row; });
+    if (!relatedList.length) return;
+    var months = {};
+    relatedList.forEach(function(a) { var p = String(a.assessment_date).slice(0,7); if (/^\d{4}-\d{2}$/.test(p)) months[p] = true; });
+    evidence[inv.id] = { months:Object.keys(months), related:relatedList, lines:ownLines };
+  });
+  var billingByAssessment = {};
+  api_getEntries({}).forEach(function(e) { if (assessmentEntryIsBillable_(e)) billingByAssessment[String(e.source_id)] = e; });
+  var invoiceUpdates = [], invoiceArchive = [], lineUpdates = [], adoptedLines = [];
+  invoices.forEach(function(inv) {
+    var ev = evidence[inv.id]; if (!ev) return;
+    var overlap = invoices.some(function(other) { return other.id !== inv.id && ((evidence[other.id] && evidence[other.id].months.some(function(p) { return ev.months.indexOf(p)!==-1; })) || (other.kind === 'lil_assessment' && ev.months.indexOf(other.source_month)!==-1)); });
+    var canAdopt = ev.months.length === 1 && !overlap && ev.lines.length && ev.lines.every(function(l) { return l.source_type === 'assessment' && Number(l.amount)>0; }) && !invoicePaymentsForInvoice_(inv.id).length;
+    var stored = invoiceData.rows.filter(function(row) { return String(row.id) === String(inv.id); })[0];
+    if (stored) invoiceArchive.push(stored.__values);
+    invoiceUpdates.push({id:inv.id,kind:canAdopt?'lil_assessment':inv.kind,source_month:ev.months.length===1?ev.months[0]:'',migration_warning:canAdopt?'':'Historical assessment invoices need reconciliation for '+ev.months.join(', ')+'. Records and payment references are preserved.'});
+    if (canAdopt) ev.lines.forEach(function(l) { var billing=billingByAssessment[String(l.source_id)]; if (billing) { lineUpdates.push({id:l.id,timesheet_entry_id:billing.id}); adoptedLines.push(String(l.id)); } });
+  });
+  archiveMigrationValues_(migration,'invoices',invoiceData.headers,invoiceArchive,'before_lil_assessments');
+  invoiceData.write(invoiceUpdates);
+  if (lineUpdates.length) {
+    var lineData = migrationSheetBlock_('invoice_line_items');
+    var lineArchive = lineData.rows.filter(function(row) { return adoptedLines.indexOf(String(row.id)) !== -1; }).map(function(row) { return row.__values; });
+    archiveMigrationValues_(migration,'invoice_line_items',lineData.headers,lineArchive,'before_lil_assessments');
+    lineData.write(lineUpdates);
+  }
+
+  var eligible = assessmentEligibleHourTypes_(), settings = api_getSettings(), imported = settings.assessment_time_hour_type_id || settings.assessment_work_hour_type_id || '';
+  if (!eligible.some(function(t) { return String(t.id)===String(imported); })) imported = eligible.length===1?eligible[0].id:'';
+  updateSettingsUnlocked_({assessment_time_hour_type_id:imported});
+
+  var incomeTypes = {};
+  api_getHourTypes().forEach(function(t) { if (t.contributes_to_income) incomeTypes[String(t.id)] = true; });
+  var entryData = migrationSheetBlock_('timesheet_entries');
+  var remapEntries = entryData.rows.filter(function(e) { return e.source_type==='assessment' && !assessmentEntryIsBillable_(e) && incomeTypes[String(e.hour_type_id)]; });
+  archiveMigrationValues_(migration,'timesheet_entries',entryData.headers,remapEntries.map(function(e) { return e.__values; }),'Actual assessment time is on an income-contributing type; deliberately remap this entry in Assessments. Historical income was preserved.');
+
+  // Re-read: updateSettingsUnlocked_ may have added or moved rows since the first read.
+  settingsData = migrationSheetBlock_('user_settings');
+  var retiredSettings = settingsData.rows.filter(function(r) { return /^(enable_assessments|enable_assessments_mode|enable_invoices|enable_contract_line_item_templates|assessment_document_template_id|assessment_output_folder_id|assessment_filename_pattern|assessment_email_.*)$/.test(String(r.key)); });
+  archiveMigrationValues_(migration,'user_settings',settingsData.headers,retiredSettings.map(function(r) { return r.__values; }),'retired_setting');
+  deleteSheetRowsDescending_(settingsData.sheet,retiredSettings.map(function(r) { return r.__row; }));
+  ['settings','feature_flags','contracts','assessments','invoices','hour_types'].forEach(cacheClearPrefix);
+  props.setProperty('lil_assessments_migrated','1');
 }

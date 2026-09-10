@@ -215,6 +215,7 @@ function normalizeEntryForWrite(entry, defaultHourTypeId) {
     id: entry.id || '',
     date: toIsoDate(entry.date),
     duration_minutes: durationMinutes,
+    income_amount: entry.income_amount == null || entry.income_amount === '' ? '' : Number(entry.income_amount),
     contract_id: entry.contract_id || entry.contractId || entry.project || '',
     created_at: toIsoDateTime(entry.created_at),
     punches: punches,
@@ -251,6 +252,7 @@ function normalizeEntryForRead(entry, defaultHourTypeId) {
     id: entry.id || '',
     date: toIsoDate(entry.date),
     duration_minutes: normalizeDurationMinutes(entry.duration_minutes),
+    income_amount: entry.income_amount == null || entry.income_amount === '' ? '' : Number(entry.income_amount),
     contract_id: entry.contract_id || entry.contractId || entry.project || '',
     created_at: toIsoDateTime(entry.created_at),
     punches: punches,
@@ -271,6 +273,7 @@ function buildEntryRow(entry, createdAt, headers, existingRow) {
   var normalized = entry || {};
   var value = {
     id: normalized.id, date: normalized.date, duration_minutes: normalized.duration_minutes, contract_id: normalized.contract_id,
+    income_amount: normalized.income_amount == null ? '' : normalized.income_amount,
     created_at: createdAt || normalized.created_at || toIsoDateTime(new Date()), punches_json: normalized.punches_json || '[]', entry_type: normalized.entry_type || 'basic',
     hour_type_id: normalized.hour_type_id, recurrence_id: normalized.recurrence_id || '', note: normalized.note || '', assessment_id: normalized.assessment_id || '',
     source_type: normalized.source_type || 'manual', source_id: normalized.source_id || '', source_occurrence_key: normalized.source_occurrence_key || '', client_request_id: normalized.client_request_id || ''
@@ -295,7 +298,7 @@ function api_getEntries(filters) {
     headers.forEach(function(h,i){ o[h] = r[i]; });
     return normalizeEntryForRead(o, defaultHourTypeId);
   });
-  var out = rows;
+  var out = rows.filter(function(entry) { return !!entry.id; });
   if (filters && filters.startDate) {
     var startIso = toIsoDate(filters.startDate);
     out = out.filter(function(e){ return !startIso || (e.date && e.date >= startIso); });
@@ -348,6 +351,7 @@ function api_addEntry(entry) {
     id: id,
     date: entry && entry.date ? entry.date : toIsoDate(now),
     duration_minutes: entry && entry.duration_minutes,
+    income_amount: entry && entry.income_amount,
     contract_id: entry && entry.contract_id,
     created_at: toIsoDateTime(now),
     punches: entry && entry.punches,
@@ -369,6 +373,7 @@ function api_addEntry(entry) {
   normalized.created_at = normalized.created_at || toIsoDateTime(now);
   if (normalized.entry_type !== 'break') normalized.hour_type_id = normalized.hour_type_id || defaultHourTypeId;
   try {
+    if (typeof validateAssessmentEntryWrite_ === 'function') validateAssessmentEntryWrite_(normalized);
     var existingData = sh.getDataRange().getValues();
     var headers = existingData && existingData.length ? existingData[0] : [];
     var existingIndex = buildEntryIndexFromValues(existingData, headers, defaultHourTypeId);
@@ -418,6 +423,7 @@ function api_addEntriesBulk(payload) {
         id: entry && entry.id,
         date: entry && entry.date,
         duration_minutes: entry && entry.duration_minutes,
+    income_amount: entry && entry.income_amount,
         contract_id: entry && entry.contract_id,
         created_at: entry && entry.created_at || nowIso,
         punches: entry && entry.punches,
@@ -436,6 +442,7 @@ function api_addEntriesBulk(payload) {
       normalized.id = normalized.id || Utilities.getUuid();
       normalized.created_at = normalized.created_at || nowIso;
 
+      if (typeof validateAssessmentEntryWrite_ === 'function') validateAssessmentEntryWrite_(normalized);
       var key = entryIdentityKey_(normalized, defaultHourTypeId);
       if (key && existingIndex[key]) {
         duplicates += 1;
@@ -512,7 +519,9 @@ function api_updateEntry(update) {
     if (!payload.hasOwnProperty('duration_minutes') && values[i][2] != null) {
       payload = Object.assign({}, payload, { duration_minutes: values[i][2] });
     }
+    payload = Object.assign({}, rowObjectFromHeaders_(values[0], values[i]), payload);
     var normalized = normalizeEntryForWrite(payload, defaultHourTypeId);
+    if (typeof validateAssessmentEntryWrite_ === 'function') validateAssessmentEntryWrite_(normalized, rowObjectFromHeaders_(values[0], values[i]));
     normalized.id = update.id;
     normalized.created_at = toIsoDateTime(originalCreated);
     if (normalized.entry_type !== 'break') normalized.hour_type_id = normalized.hour_type_id || defaultHourTypeId;
@@ -542,6 +551,8 @@ function api_deleteEntry(id) {
     var ids = sh.getRange(2, 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (ids[i][0] === id) {
+        var stored = rowObjectFromHeaders_(sh.getDataRange().getValues()[0], sh.getRange(i + 2, 1, 1, sh.getLastColumn()).getValues()[0]);
+        if (typeof assessmentEntryIsBillable_ === 'function' && assessmentEntryIsBillable_(stored) && !ASSESSMENT_INTERNAL_ENTRY_WRITE_) throw new Error('Delete the assessment to remove its automatic billing entry.');
         sh.deleteRow(i + 2); // +2 accounts for 1-based indexing and header row
         cacheClearPrefix(ENTRY_CACHE_PREFIX);
         return { success: true };
@@ -674,4 +685,80 @@ function api_reroundEntries(payload) {
   var interval = payload && payload.round_interval != null ? payload.round_interval : null;
   var updated = reroundTimesheetEntries(interval);
   return { success: true, updated: updated };
+}
+
+// Save a day editor's complete session draft in one write. Validate every change first and compare
+// the original session values so a concurrent edit cannot silently overwrite someone else's work.
+function api_saveDaySessions(payload) {
+  var lock = TEMPUS_SCRIPT_LOCK_ACTIVE ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(20000);
+  try {
+    if (!payload || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date) || !Array.isArray(payload.changes)) throw new Error('Invalid session batch.');
+    var sh = getOrCreateSheet('timesheet_entries');
+    var range = sh.getDataRange();
+    var values = range.getValues();
+    var headers = values[0];
+    var defaultType = resolveDefaultHourTypeId();
+    var formulas = typeof range.getFormulas === 'function' ? range.getFormulas() : [];
+    var output = values.map(function(row, i) { return row.map(function(value, j) { return formulas[i] && formulas[i][j] || value; }); });
+    var entries = [], deletedIds = [], touched = [], seen = {};
+    var signature = function(entry) { return JSON.stringify({ punches_json: JSON.stringify(normalizePunches(entry.punches_json)), contract_id: entry.contract_id || '', hour_type_id: entry.hour_type_id || defaultType }); };
+    payload.changes.forEach(function(change) {
+      if (!change || !Array.isArray(change.punches)) throw new Error('Invalid sessions.');
+      var rowIndex = -1, original = null;
+      for (var i = 1; i < values.length; i++) {
+        var stored = rowObjectFromHeaders_(headers, values[i]);
+        if ((change.id && stored.id === change.id) || (!change.id && change.client_request_id && stored.client_request_id === change.client_request_id)) { rowIndex = i; original = stored; break; }
+      }
+      var key = change.id || change.client_request_id;
+      if (!key || seen[key]) throw new Error('Duplicate session change.');
+      seen[key] = true;
+      if (original && (toIsoDate(original.date) !== payload.date || original.entry_type !== 'advanced')) throw new Error('This entry is no longer a session on this day. Reload before saving.');
+      if (change.id && !original) {
+        if (!change.punches.length) { deletedIds.push(change.id); return; }
+        throw new Error('A session was removed elsewhere. Reload before saving.');
+      }
+      var previousEnd = null;
+      change.punches.slice().sort(function(a, b) { return String(a.in).localeCompare(String(b.in)); }).forEach(function(punch) {
+        var valid = function(time) { return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time || ''); };
+        if (!valid(punch.in) || (punch.out && (!valid(punch.out) || punch.out <= punch.in))) throw new Error('Enter valid session times with the end after the start.');
+        if (previousEnd !== null && (!previousEnd || punch.in < previousEnd)) throw new Error('Sessions in an entry cannot overlap.');
+        previousEnd = punch.out || '';
+      });
+      var desired = normalizeEntryForWrite(Object.assign({}, original || {}, change, {
+        id: original ? original.id : Utilities.getUuid(), date: payload.date, entry_type: 'advanced',
+        duration_minutes: 0, created_at: original ? original.created_at : toIsoDateTime(new Date())
+      }), defaultType);
+      if (original && change.expected && signature(original) !== JSON.stringify(change.expected)) {
+        // A response can be lost after the write succeeded. An identical retry is already saved.
+        if (change.punches.length && signature(original) === signature(desired)) { entries.push(normalizeEntryForRead(original, defaultType)); return; }
+        throw new Error('A session changed elsewhere. Reload the day before saving.');
+      }
+      if (original && change.id && !change.expected) throw new Error('Missing original session values.');
+      if (typeof validateAssessmentEntryWrite_ === 'function') validateAssessmentEntryWrite_(desired, original);
+      if (!change.punches.length) {
+        if (!original) throw new Error('A new session needs a start time.');
+        output[rowIndex] = headers.map(function() { return ''; });
+        deletedIds.push(original.id); touched.push(rowIndex); return;
+      }
+      if (!desired.contract_id) {
+        var types = typeof api_getHourTypes === 'function' ? api_getHourTypes() : [];
+        var type = types.filter(function(t) { return t.id === desired.hour_type_id; })[0];
+        if (type && (type.requires_contract || type.contributes_to_income)) throw new Error('Select a contract for this hour type.');
+      }
+      if (rowIndex === -1) rowIndex = output.length;
+      output[rowIndex] = buildEntryRow(desired, desired.created_at, headers, output[rowIndex]);
+      touched.push(rowIndex);
+      entries.push(normalizeEntryForRead(desired, defaultType));
+    });
+    if (touched.length) {
+      var first = Math.min.apply(null, touched), last = Math.max.apply(null, touched);
+      if (last + 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), last + 1 - sh.getMaxRows());
+      sh.getRange(first + 1, 1, last - first + 1, headers.length).setValues(output.slice(first, last + 1));
+      cacheClearPrefix(ENTRY_CACHE_PREFIX);
+    }
+    return { success: true, entries: entries, deletedIds: deletedIds };
+  } finally {
+    if (lock) lock.releaseLock();
+  }
 }

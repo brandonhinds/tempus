@@ -142,6 +142,7 @@ test('a fresh fork of a production sheet upgrades and then reads back without du
   load(context, 'backend/hourtypes.js');
   load(context, 'backend/contracts.js');
 
+  ['backend/entries.js','backend/integrity.js','backend/settings.js','backend/invoices.js','backend/invoiceLedger.js','backend/assessments.js','backend/assessmentInvoices.js'].forEach(file=>load(context,file));
   const upgrade = context.api_runUpgrade();
   assert.equal(upgrade.required, false, 'every migration should apply on a fresh fork');
   assert.equal(upgrade.state, 'complete');
@@ -419,29 +420,6 @@ test('BAS fixtures separate cash, accrual, prepayment, void, and unreconciled GS
   assert.deepStrictEqual(JSON.parse(JSON.stringify(cash.actual)), { g1_total_sales:275, gst_on_sales:25, purchases:105, gst_on_purchases:5 });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(accrual.actual)), { g1_total_sales:330, gst_on_sales:30, purchases:215, gst_on_purchases:10 });
   assert.ok(accrual.warnings.some((warning) => warning.includes('excluded from GST credits')));
-});
-
-test('assessment catalogues keep stable generic fields, line IDs, and token output', () => {
-  const { context } = createAppsScriptContext({});
-  context.expenseBoolean_ = (value) => value === true || String(value).toLowerCase() === 'true';
-  context.invoiceToIsoDateTime = (value) => new Date(value).toISOString();
-  context.invoiceToIsoDate = (value) => typeof value === 'string' ? value.slice(0, 10) : new Date(value).toISOString().slice(0, 10);
-  context.roundMoney_ = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-  context.normalizePercentageDecimal_ = (value) => Number(value) > 1 ? Number(value) / 100 : Number(value || 0);
-  load(context, 'backend/assessments.js');
-  const fields = context.normalizeAssessmentFields_([{ key:'reference-number', label:'Reference', input_type:'text', required:true }, { key:'outcome', label:'Outcome', input_type:'select', options:['A','B'] }]);
-  assert.equal(fields[0].key, 'reference_number');
-  assert.equal(fields[1].options.length, 2);
-  assert.throws(() => context.normalizeAssessmentFields_([{key:'same'},{key:'same'}]), /unique/);
-  const lines = context.normalizeAssessmentLines_([{ id:'stable-line', template:'{organisation} – {reference_number}', multiplier:1.5, percentage_adjustment:10 }], 'type-1');
-  assert.equal(lines[0].id, 'stable-line');
-  assert.equal(lines[0].percentage_adjustment, 0.1);
-  context.assessmentTypeById_ = () => ({ id:'type-1', name:'Configured type', lines, fields });
-  context.assessmentContractById_ = () => ({ id:'contract-1', name:'Contract', hourly_rate:100 });
-  const resolved = context.resolveAssessmentLines_({ assessment_type_id:'type-1', contract_id:'contract-1', organisation:'Organisation', assessment_date:'2026-07-01', field_values_json:'{"reference_number":"REF-1"}', percentage_adjustment:0 });
-  assert.equal(resolved[0].description, 'Organisation – REF-1');
-  assert.equal(resolved[0].amount, 165);
-  assert.equal(resolved[0].gst_amount, 16.5);
 });
 
 test('income summaries wait for complete finance data and invalidate on reference-data changes', () => {
@@ -1266,7 +1244,7 @@ test('transfer split is wired into the bas page, gated on the assessments flag, 
   assert.match(markup, /To business account[\s\S]*To offset/);
 
   // Gated on the assessments flag, and hidden rather than left populated when the flag is off.
-  assert.match(client, /function transferSplitEnabled\(\)[\s\S]*enable_assessments/);
+  assert.match(client, /function transferSplitEnabled\(\)[\s\S]*enable_lil_assessments_mode/);
   assert.match(client, /if\(!transferSplitEnabled\(\)\)\{ section\.style\.display='none'; return; \}/);
 
   // Calls the real endpoints, and the export reuses the basis the table was built with.
@@ -1812,4 +1790,8 @@ test('client timesheet is company-gated, contract-driven, and shares the print b
   assert.match(scripts, /\['Contract ref', contract\.contract_reference\]/);
 });
 
+require('./session-updates').run(test);
+
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');
+
+require('./lil-assessments').run(test);

@@ -1,0 +1,556 @@
+<script>
+  const lilState = { month: todayIso().slice(0,7), months: {}, selection: {}, editors: {}, pending: new Map(), failures: new Map(), chains: {}, generation: {}, checking: {}, epoch: 0, search: '', scroll: {}, last: {}, setupReturn: false };
+  const lilEl = id => document.getElementById('lil-' + id);
+  const lilEscape = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const lilMoney = value => new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(Number(value)||0);
+  const lilPercent = value => new Intl.NumberFormat('en-AU',{minimumFractionDigits:1,maximumFractionDigits:1}).format((Number(value)||0)*100)+'%';
+  const lilHours = minutes => new Intl.NumberFormat('en-AU',{maximumFractionDigits:2}).format(Number(minutes||0)/60);
+  const lilDate = (date, full) => date ? new Date(date+'T12:00:00').toLocaleDateString('en-AU',full?{day:'numeric',month:'long',year:'numeric'}:{day:'2-digit',month:'short'}) : 'Missing date';
+  // The list row carries a weekday over a day-of-month numeral, the same shape as the agenda's day rows.
+  const lilDateParts = date => {
+    if(!date) return {weekday:'—',day:'—'};
+    const value=new Date(date+'T12:00:00');
+    return {weekday:value.toLocaleDateString('en-AU',{weekday:'short'}),day:String(value.getDate())};
+  };
+  const lilMonthLabel = month => new Date(month+'-01T12:00:00').toLocaleDateString('en-AU',{month:'long',year:'numeric'});
+  const lilRequestId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generateTempId('lil')+'-'+Math.random().toString(36).slice(2);
+  const lilData = () => lilState.months[lilState.month];
+  const lilSelected = () => lilData()?.assessments.find(a=>a.id===lilState.selection[lilState.month]);
+  function lilApi(method, ...args) {
+    return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(result=>result?.success===false?reject(new Error(result.message||result.error||'Save not confirmed.')):resolve(result)).withFailureHandler(reject)[method](...args));
+  }
+  function lilFeedback(message, retry) {
+    const target=lilEl('feedback'); target.replaceChildren(); target.hidden=!message;
+    if(message) target.append(document.createTextNode(message));
+    if(retry){const button=document.createElement('button');button.type='button';button.className='ghost small';button.textContent='Retry';button.addEventListener('click',retry);target.append(' ',button);}
+  }
+  function lilMonthPending(month) { return Array.from(lilState.pending.values()).some(op=>op.months.includes(month)); }
+  function lilMonthFailed(month) { return Array.from(lilState.failures.values()).some(op=>op.months.includes(month)); }
+  function lilMarkInvoiceChanged(month) { const data=lilState.months[month]; if(data?.invoice) data.invoice.stale=!!data.invoice.invoice?.generated_doc_id; }
+  function lilSyncEntries(entries, deletedIds) {
+    const ids=new Set((deletedIds||[]).concat((entries||[]).map(e=>e.id)));
+    state.entries=(state.entries||[]).filter(e=>!ids.has(e.id));
+    (entries||[]).forEach(e=>{const normalized=sanitizeEntry(e);state.entries.push(normalized);if(typeof recordPendingEntryAdd==='function'){recordPendingEntryAdd(normalized);resolveMarkerAfterSync(()=>resolvePendingEntryAdd(normalized.id));}});
+    (deletedIds||[]).forEach(id=>{if(typeof recordPendingEntryDelete==='function') recordPendingEntryDelete(id);});
+    state.entries.sort(entrySort);markAllIncomeSummariesDirty();saveCache();renderEntries();
+  }
+  // lilState.month is the source of truth; the toolbar shows it as the label on the month button, which
+  // opens the same picker the calendar's month label does.
+  function lilSetMonthControl(month) { lilEl('month-label').textContent=lilMonthLabel(month); }
+  function lilStatCard(label, value, sub, hero) {
+    return `<div class="ts-stat-card ts-stat-card--static${hero?' ts-stat-card--hero':''}">`
+      + `<span class="ts-stat-card-label">${lilEscape(label)}</span>`
+      + `<span class="ts-stat-card-value">${lilEscape(value)}</span>`
+      + `<span class="ts-stat-card-subtext">${lilEscape(sub)}</span></div>`;
+  }
+  // Month totals use Time Entry's KPI strip, so the two screens open on the same shape.
+  function lilRenderSummary(list) {
+    const fees=list.reduce((sum,a)=>sum+a.fee,0),minutes=list.reduce((sum,a)=>sum+a.actual_minutes,0);
+    lilEl('summary').innerHTML=lilStatCard('Assessments',String(list.length),'this month')
+      +lilStatCard('Fees',lilMoney(fees),'excluding GST',true)
+      +lilStatCard('Time logged',lilHours(minutes)+' h','non-billable, all months');
+  }
+  const lilSkeleton = count => '<div class="ts-asm-skeleton" aria-hidden="true"><span></span><span></span></div>'.repeat(count);
+  function lilRenderLoading() {
+    const month=lilState.month,label=lilMonthLabel(month);
+    lilSetMonthControl(month);
+    lilEl('add').disabled=true;
+    lilEl('summary').innerHTML=lilSkeleton(3)+`<span class="ts-note ts-asm-loading-note" role="status">Loading ${lilEscape(label)}…</span>`;
+    lilEl('list').innerHTML=lilSkeleton(3)+`<p class="ts-note" role="status">Loading ${lilEscape(label)}…</p>`;
+    lilEl('detail').innerHTML='<p class="ts-note" role="status">Loading this month’s assessments…</p>';
+    lilEl('invoice-title').textContent=label+' invoice';
+    lilEl('invoice-status').textContent='Loading…';
+    lilEl('invoice-status').className='ts-badge';
+    lilEl('invoice-status').hidden=false;
+    lilEl('invoice-meta').textContent='Checking this month’s invoice…';
+    lilEl('historical-invoices').replaceChildren();
+    lilEl('snapshot').hidden=true;
+    lilEl('open-invoice').hidden=true;
+    const button=lilEl('generate');button.disabled=true;button.textContent='Generate invoice';button.title='Loading '+label+'…';
+  }
+  async function renderAssessmentsPage(options) {
+    if(!getFeatureFlag('enable_lil_assessments_mode') && !window.__TEMPUS_LIL_MODE__) return;
+    const month=lilState.month;
+    if(lilData() && !options?.force){lilRender();return;}
+    const epoch=lilState.epoch, ticket=lilRequestId();
+    lilState.fetchTicket=ticket;
+    // Cached months repaint instantly above; only a month we have never read shows loading state.
+    if(!lilData())lilRenderLoading(); else lilSetMonthControl(month);
+    try {
+      const data=await lilApi('api_getAssessmentsForMonth',Number(month.slice(0,4)),Number(month.slice(5,7)));
+      if(epoch!==lilState.epoch || lilMonthPending(month)) return;
+      lilState.months[month]=data;
+      state.contracts=data.contracts.map(sanitizeContract);updateContractMap();
+      state.hourTypes=data.hour_types.map(sanitizeHourType);updateHourTypeMap();state.settings.assessment_time_hour_type_id=data.saved_default_hour_type_id||'';
+      if(month===lilState.month && ticket===lilState.fetchTicket) lilRender();
+    } catch(error){if(month===lilState.month){
+        lilEl('add').disabled=false;
+        lilEl('summary').innerHTML='';
+        lilEl('list').innerHTML='<p class="ts-note">This month could not be loaded.</p>';
+        lilEl('invoice-status').hidden=true;lilEl('invoice-meta').textContent='';
+        lilFeedback(error.message||'Could not load this month.',()=>renderAssessmentsPage({force:true}));
+      }}
+  }
+  // Rows are the agenda's day rows — a div[role=button], as there, so nothing has to undo the global
+  // button pill. Status rides on a badge rather than a third line of appended grey text.
+  function lilRowHtml(a) {
+    const parts=lilDateParts(a.assessment_date),selected=a.id===lilState.selection[lilState.month];
+    const pending=lilState.pending.has(a.id),failed=lilState.failures.has(a.id),blockers=(a.invoice_blockers||[]).length;
+    const badge=pending?'<span class="ts-badge">Saving…</span>'
+      :failed?'<span class="ts-badge error">Not confirmed</span>'
+      :blockers?'<span class="ts-badge warn">Needs details</span>'
+      :a.percentage_adjustment?`<span class="ts-badge">+${lilEscape(Number((a.percentage_adjustment*100).toFixed(4)))}%</span>`:'';
+    const colour=state.contractMap?.[a.contract_id]?.color;
+    const meta=[a.assessment_type_name,a.organisation,a.contract_name].filter(Boolean).join(' · ');
+    const name=a.client_name||'Unnamed assessment';
+    return `<div class="ts-agenda-row${selected?' is-selected':''}${failed||blockers?' is-open':''}" role="button" tabindex="0"`
+      + ` data-assessment="${lilEscape(a.id)}" aria-current="${selected}" aria-label="${lilEscape(name+', '+lilDate(a.assessment_date,true)+', '+lilMoney(a.fee))}">`
+      + `<div class="ts-agenda-row-date"><p class="ts-agenda-row-wd">${lilEscape(parts.weekday)}</p><p class="ts-agenda-row-day">${lilEscape(parts.day)}</p></div>`
+      + `<div class="ts-agenda-row-sep"></div>`
+      + `<div class="ts-agenda-row-main"><span class="ts-agenda-dot"${colour?` style="background:${lilEscape(typeof dataColor==='function'?dataColor(colour):colour)};"`:''}></span>`
+      + `<div><p class="ts-agenda-row-type">${lilEscape(name)}${badge}</p>`
+      + `<p class="ts-agenda-row-sub">${lilEscape(meta)}</p></div></div>`
+      + `<div class="ts-asm-row-amount"><span class="ts-agenda-row-hours">${lilMoney(a.fee)}</span>`
+      + `<p class="ts-agenda-row-sub">${a.actual_minutes?lilHours(a.actual_minutes)+' h logged':'No time logged'}</p></div>`
+      + `<svg class="ts-agenda-row-chev" viewBox="0 0 8 12" fill="none" aria-hidden="true"><path d="M1.5 1l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+      + `</div>`;
+  }
+  function lilRender(listOnly) {
+    const data=lilData();if(!data)return;
+    lilSetMonthControl(lilState.month);
+    lilEl('add').disabled=false;
+    const list=data.assessments.slice().sort((a,b)=>a.assessment_date.localeCompare(b.assessment_date)||a.client_name.localeCompare(b.client_name)||a.id.localeCompare(b.id));
+    lilRenderSummary(list);
+    const query=lilState.search.trim().toLowerCase(),filtered=list.filter(a=>(a.client_name+' '+a.organisation).toLowerCase().includes(query));
+    lilEl('list').innerHTML=filtered.length?filtered.map(lilRowHtml).join('')
+      :query?`<div class="ts-empty-state ts-empty-state--inline"><p class="ts-empty-state__title">Nothing matches “${lilEscape(lilState.search.trim())}”</p><p class="ts-empty-state__text">No client or organisation in ${lilEscape(lilMonthLabel(lilState.month))} matches your search.</p></div>`
+      :`<div class="ts-empty-state"><div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H5v20h14V7z"/><path d="M14 2v6h5M8 12h8M8 16h6"/></svg></div><p class="ts-empty-state__title">No assessments in ${lilEscape(lilMonthLabel(lilState.month))}</p><p class="ts-empty-state__text">Add an assessment to record its fee, log your time against it, and generate the monthly invoice.</p><div class="ts-empty-state__actions"><button type="button" id="lil-empty-add">Add assessment</button></div></div>`;
+    if(lilEl('empty-add'))lilEl('empty-add').onclick=()=>lilEdit();
+    lilEl('list').querySelectorAll('[data-assessment]').forEach(row=>{
+      const open=()=>lilSelect(row.dataset.assessment);
+      row.addEventListener('click',open);
+      // role=button without keyboard activation is a button in name only.
+      row.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open();}});
+    });
+    lilRenderInvoice();if(!listOnly)lilRenderDetail();
+  }
+  function lilRenderInvoice() {
+    const data=lilData();if(!data)return;
+    const info=data.invoice||{},invoice=info.invoice,month=lilState.month,working=lilState.generation[month],checking=lilState.checking[month],pending=lilMonthPending(month),failed=lilMonthFailed(month);
+    lilEl('invoice-title').textContent=lilMonthLabel(month)+' invoice';
+    const status=lilEl('invoice-status');
+    status.textContent=working?'Generating…':checking?'Checking…':invoice?.generated_doc_id?(info.stale?'Changes since generation':'Generated'):'Not generated';
+    status.className='ts-badge'+(info.stale?' warn':invoice?.generated_doc_id?' success':'');
+    status.hidden=false;
+    // An assessment missing invoice details would fail generation server-side; say so up front.
+    const incomplete=data.assessments.filter(a=>(a.invoice_blockers||[]).length);
+    const blocked=info.warning||(incomplete.length?`${incomplete.length} assessment${incomplete.length===1?' needs':'s need'} details before this month can be invoiced: ${incomplete.slice(0,3).map(a=>a.client_name||'Unnamed assessment').join(', ')}${incomplete.length>3?` and ${incomplete.length-3} more`:''}.`:'');
+    const summary=info.summary,generated=invoice?.generated_at?new Date(invoice.generated_at).toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'}):'';
+    // "All 0 assessments in August" is technically true and reads like a bug.
+    lilEl('invoice-meta').textContent=blocked || (!data.assessments.length?`Add an assessment before ${lilMonthLabel(month)} can be invoiced.`:`All ${data.assessments.length} assessment${data.assessments.length===1?'':'s'} in ${lilMonthLabel(month)}${invoice?.invoice_number?' · Invoice '+invoice.invoice_number:''}${summary&&invoice?.generated_doc_id?' · '+lilMoney(summary.totalAmount)+' + '+lilMoney(summary.gstAmount)+' GST = '+lilMoney(summary.totalWithGst):' · Fees exclude GST'}${generated?' · generated '+generated:''}`);
+    const open=lilEl('open-invoice'),url=/^https:\/\//.test(invoice?.generated_doc_url||'')?invoice.generated_doc_url:'';
+    open.hidden=!url;open.onclick=url?(()=>window.open(url,'_blank','noopener')):null;
+    const button=lilEl('generate');button.disabled=!!working||!!checking||!!info.generating||pending||failed||!data.assessments.length||!!blocked;button.textContent=pending?'Saving assessments…':working?'Generating…':checking?'Checking…':'Generate invoice';button.title=failed?'Resolve the unconfirmed save before generating.':blocked||`Generate an invoice for all assessments in ${lilMonthLabel(month)}`;
+    lilRenderSnapshot(info);
+    lilEl('historical-invoices').replaceChildren();(info.historical_invoices||[]).forEach(inv=>{if(!/^https:\/\//.test(inv.generated_doc_url||''))return;const link=document.createElement('button');link.type='button';link.className='ghost small';link.textContent='Open invoice '+inv.invoice_number;link.onclick=()=>window.open(inv.generated_doc_url,'_blank','noopener');lilEl('historical-invoices').append(link);});
+  }
+  // Frozen at generation, so it answers "how much of this is mine once it is paid". It goes out of date
+  // when the month's invoice inputs change — not when time is logged, which never alters a fee.
+  //
+  // Presented as Time Entry's income waterfall (.ts-income-breakdown / .ts-income-row), because it is
+  // the same question that screen answers: gross in at the top, what is held back in the middle, what is
+  // actually yours at the bottom. The rows balance against the invoice total by construction —
+  // income + retained_in_business === invoice_total — so the allocation bar and the percentages agree.
+  function lilSnapshotRow(label, value, total, options) {
+    const settings=options||{},pct=total?value/total:0;
+    return `<div class="ts-income-row${settings.anchor?' ts-income-row--anchor':''}${settings.net?' ts-income-row--net':''}">`
+      + `<span class="ts-income-row-label">${label}</span>`
+      + `<span class="ts-income-row-actual">${settings.actual?lilEscape(settings.actual):''}</span>`
+      + `<span class="ts-income-row-est${settings.muted?' ts-asm-stale-value':''}">${lilMoney(value)}</span>`
+      + `<span class="ts-income-row-pct">${settings.bare?'':lilPercent(pct)}${settings.bare||!total?'':`<span class="ts-av-mini-bar"><span style="width:${Math.max(0,Math.min(100,pct*100)).toFixed(1)}%"></span></span>`}</span>`
+      + `</div>`;
+  }
+  function lilRenderSnapshot(info) {
+    const host=lilEl('snapshot'),snap=info&&info.snapshot;
+    host.hidden=!snap;
+    if(!snap)return;
+    const stale=!!info.stale,total=Number(snap.invoice_total)||0,muted=stale;
+    const generated=info.invoice&&info.invoice.generated_at?new Date(info.invoice.generated_at).toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'}):'';
+    const gstHeld=snap.net_gst!=null?snap.net_gst:snap.gst;
+    const credits=Number(snap.gst_credits)||0;
+    const segment=(value,colour)=>`<div class="ts-income-bd-bar-seg" style="flex:${Math.max(0,Number(value)||0).toFixed(2)}; background:${colour};"></div>`;
+    const legend=(label,colour)=>`<span class="ts-income-bd-legend-item"><span class="ts-income-bd-legend-dot" style="background:${colour};"></span>${label}</span>`;
+    host.innerHTML=(stale?`<p class="ts-warning ts-asm-alert">These figures are from the invoice generated ${lilEscape(generated)}. This month has changed since — generate a new invoice to bring them up to date.</p>`:'')
+      + `<div class="ts-income-breakdown">`
+      + `<div class="ts-income-bd-viz">`
+      +   `<div class="ts-income-bd-head"><span class="ts-income-bd-title">Where this invoice goes</span><span class="ts-income-bd-gross">${lilMoney(total)} including GST</span></div>`
+      +   `<div class="ts-income-bd-bar">${segment(snap.income,'var(--chart-net)')}${segment(snap.tax,'var(--chart-tax)')}${segment(snap.super,'var(--chart-super)')}${segment(gstHeld,'var(--chart-gross)')}${segment(snap.expenses_paid,'var(--chart-deduct)')}</div>`
+      +   `<div class="ts-income-bd-legend">${legend('Yours to transfer','var(--chart-net)')}${legend('Tax','var(--chart-tax)')}${legend('Super','var(--chart-super)')}${legend('GST','var(--chart-gross)')}${legend('Business expenses','var(--chart-deduct)')}</div>`
+      + `</div>`
+      + `<div class="ts-income-bd-colhead"><span></span><span></span><span>Amount</span><span>% of invoice</span></div>`
+      + lilSnapshotRow('Invoice total',total,total,{anchor:true,bare:true,muted:muted})
+      + lilSnapshotRow('Fees excluding GST',snap.fees_ex_gst,total,{muted:muted})
+      + lilSnapshotRow('GST collected',snap.gst,total,{muted:muted})
+      + `<div class="ts-income-divider"></div>`
+      + lilSnapshotRow('GST held'+(credits?` <span class="ts-info-icon" role="button" tabindex="0" aria-label="GST collected, less the credit already claimed on this month’s expenses" data-tip="GST collected, less the ${lilEscape(lilMoney(credits))} credit already claimed on this month’s expenses.">i</span>`:''),gstHeld,total,{muted:muted})
+      + lilSnapshotRow('Business expenses <span class="ts-info-icon" role="button" tabindex="0" aria-label="This month’s company expenses, including GST" data-tip="This month’s company expenses, including GST. Manage them on the Expenses page.">i</span>',snap.expenses_paid||0,total,{muted:muted})
+      + lilSnapshotRow('Super set aside',snap.super,total,{actual:lilPercent(snap.super_rate)+' of '+lilMoney(snap.profit_before_super),muted:muted})
+      + lilSnapshotRow('Tax set aside',snap.tax,total,{actual:'on '+lilMoney(snap.taxable_profit)+' taxable',muted:muted})
+      + lilSnapshotRow('Stays in business',snap.retained_in_business,total,{anchor:true,muted:muted})
+      + `<div class="ts-income-divider"></div>`
+      + lilSnapshotRow('Yours to transfer once paid',snap.income,total,{anchor:true,net:!stale,muted:muted})
+      + `</div>`
+      + `<div class="ts-asm-note-stack">`
+      + (stale?'':'<p class="ts-note">GST, tax, super and this month’s business expenses stay in the business account. Logging time never changes these figures.</p>')
+      + (snap.warnings||[]).map(text=>`<p class="ts-note">${lilEscape(text)}</p>`).join('')
+      + `</div>`;
+  }
+  function lilOpenDetail() { lilState.scroll[lilState.month]=window.scrollY;lilEl('workspace').classList.add('has-detail'); }
+  function lilBack() { lilEl('workspace').classList.remove('has-detail');window.scrollTo({top:lilState.scroll[lilState.month]||0});lilEl('list').querySelector('[aria-current="true"]')?.focus({preventScroll:true}); }
+  async function lilSelect(id) {
+    if(lilState.editors[lilState.month] && !(await customConfirm('Discard this unsaved assessment draft?',{title:'Open another assessment?',okText:'Discard draft'})))return;
+    delete lilState.editors[lilState.month];lilState.selection[lilState.month]=id;lilOpenDetail();lilRender();
+  }
+  // Detail is the Time Entry day editor, section for section: the .ts-entry-editing header with its
+  // figure on the right, then .ts-day-editor-section blocks, then the day editor's own list for both the
+  // fee lines and the hours. Clicking an hour row expands the editor in place, as it does there.
+  function lilTimeSectionHtml(a) {
+    const types=state.hourTypeMap||{},eligible=state.hourTypes.filter(t=>t.contributes_to_income===false);
+    const rows=a.time_entries.slice().sort((x,y)=>String(x.date).localeCompare(String(y.date))).map(e=>{
+      const type=types[e.hour_type_id];
+      const meta=lilDate(e.date,true)+(type?(type.contributes_to_income?' · Billable history — open to repair':''):' · Historical hour type');
+      return `<button class="ts-day-duration-row" type="button" data-edit-time="${lilEscape(e.id)}" aria-expanded="false">`
+        + `<span class="ts-day-duration-dot"${type?.color?` style="background:${lilEscape(typeof dataColor==='function'?dataColor(type.color):type.color)};"`:''}></span>`
+        + `<span class="ts-day-duration-main"><span class="ts-day-duration-label">${lilEscape(type?.name||'Historical hour type')}</span>`
+        + `<span class="ts-day-duration-meta">${lilEscape(meta)}</span></span>`
+        + `<span class="ts-day-duration-value">${lilHours(e.duration_minutes)} h</span></button>`;
+    }).join('');
+    return `<section class="ts-day-editor-section">`
+      + `<div class="ts-day-section-head"><h3>Time worked</h3><span class="ts-day-section-total"><strong>${lilHours(a.actual_minutes)} h</strong><small>non-billable</small></span></div>`
+      + `<div class="ts-day-duration-list">`
+      +   (rows||'<p class="ts-day-duration-empty">No time logged yet.</p>')
+      +   `<div id="lil-time-host"></div>`
+      +   (eligible.length
+            ? `<button class="ts-day-duration-add" type="button" id="lil-log-hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Log hours</button>`
+            : `<p class="ts-day-duration-empty">Create a non-billable hour type before logging assessment time. <button type="button" class="ghost small" id="lil-setup-hours">Open Hour Types</button></p>`)
+      + `</div>`
+      + `<p class="ts-note ts-asm-gap">Log time at any stage — your ${lilEscape(lilMonthLabel(lilState.month))} invoice stays the same.</p>`
+      + `</section>`;
+  }
+  function lilRenderDetail() {
+    const draft=lilState.editors[lilState.month];if(draft){lilRenderForm(draft);return;}
+    const a=lilSelected(),target=lilEl('detail');
+    if(!a){
+      target.innerHTML='<div class="ts-empty-state ts-empty-state--inline"><p class="ts-empty-state__title">Nothing selected</p><p class="ts-empty-state__text">Choose an assessment to see its fee and the time worked on it, or add a new one.</p></div>';
+      return;
+    }
+    const pending=lilState.pending.has(a.id),blockers=(a.invoice_blockers||[]).length;
+    target.innerHTML=`<button type="button" class="ghost small ts-asm-back" id="lil-back">Back to assessments</button>`
+      + `<div class="ts-entry-editing"><div>`
+      +   `<p class="ts-entry-editing-wd">${lilEscape(a.assessment_type_name||'Assessment')}</p>`
+      +   `<p class="ts-entry-editing-date">${lilEscape(a.client_name||'Unnamed assessment')}</p>`
+      +   `<p class="ts-note ts-asm-subnote">${lilEscape(lilDate(a.assessment_date,true))}${pending?' · Saving…':''}</p>`
+      + `</div><div class="ts-day-overall"><span>${lilMoney(a.fee)}</span><small>fee, excl GST</small></div></div>`
+      + (blockers?`<p class="ts-warning ts-asm-alert">${lilEscape(a.invoice_blockers.join(' '))}</p>`:'')
+      + `<section class="ts-day-editor-section">`
+      +   `<div class="ts-day-section-head"><h3>Details</h3><button class="ghost small" id="lil-edit" type="button">Edit</button></div>`
+      +   `<dl class="ts-asm-facts">`
+      +     `<div><dt>Organisation</dt><dd>${lilEscape(a.organisation||'Missing organisation')}</dd></div>`
+      +     `<div><dt>Contract</dt><dd>${lilEscape(a.contract_name)}</dd></div>`
+      +     `<div><dt>Date of birth</dt><dd>${lilEscape(lilDate(a.client_dob,true))}</dd></div>`
+      +     `<div><dt>Adjustment</dt><dd>${lilEscape(Number((a.percentage_adjustment*100).toFixed(4)))}%${a.percentage_adjustment?'':' · standard fee'}</dd></div>`
+      +   `</dl>`
+      + `</section>`
+      + `<section class="ts-day-editor-section">`
+      +   `<div class="ts-day-section-head"><h3>Fee</h3><span class="ts-day-section-total"><strong>${lilMoney(a.fee)}</strong><small>excl GST</small></span></div>`
+      +   `<div class="ts-day-duration-list">${a.lines.map(line=>`<div class="ts-day-duration-row ts-asm-static-row"><span class="ts-day-duration-dot"></span><span class="ts-day-duration-main"><span class="ts-day-duration-label">${lilEscape(line.description||line.label||'Fee line')}</span><span class="ts-day-duration-meta">${lilEscape(a.assessment_type_name||'Assessment')} line item</span></span><span class="ts-day-duration-value">${lilMoney(line.amount)}</span></div>`).join('')||'<p class="ts-day-duration-empty">No fee lines.</p>'}</div>`
+      + `</section>`
+      + lilTimeSectionHtml(a)
+      + `<div class="ts-entry-actions"><div class="ts-entry-actions-row"><button class="ghost danger" id="lil-delete" type="button">Delete assessment</button></div></div>`;
+    lilEl('back').onclick=lilBack;lilEl('edit').onclick=()=>lilEdit(a);lilEl('delete').onclick=()=>lilDelete(a);
+    target.querySelectorAll('[data-edit-time]').forEach(row=>row.onclick=()=>lilTimeForm(a,a.time_entries.find(e=>e.id===row.dataset.editTime)));
+    if(lilEl('log-hours'))lilEl('log-hours').onclick=()=>lilTimeForm(a);
+    if(lilEl('setup-hours'))lilEl('setup-hours').onclick=()=>lilSetup('hour-types');
+  }
+  function lilEdit(a) {
+    const draft=a?{...a,original:a,adjustment_percent:Number((a.percentage_adjustment*100).toFixed(4)),request_id:lilRequestId()}:{assessment_date:lilState.month===todayIso().slice(0,7)?todayIso():'',contract_id:lilState.last.contract_id||'',assessment_type_id:lilState.last.assessment_type_id||'standard',organisation:lilState.last.organisation||'',client_name:'',client_dob:'',adjustment_percent:0,request_id:lilRequestId(),client_request_id:lilRequestId()};
+    lilState.editors[lilState.month]=draft;lilOpenDetail();lilRenderForm(draft);lilEl('assessment-date')?.focus();
+  }
+  function lilOptions(items, selected, placeholder) { return (placeholder?`<option value="">${lilEscape(placeholder)}</option>`:'')+items.map(item=>`<option value="${lilEscape(item.id)}" ${String(item.id)===String(selected)?'selected':''}>${lilEscape(item.name)}</option>`).join(''); }
+  function lilOrganisations(value) { const seen=new Set();return String(value||'').split(',').map(v=>v.trim()).filter(v=>{const key=v.toLowerCase();if(!v||seen.has(key))return false;seen.add(key);return true;}); }
+  // The form is the app's 12-column .ts-grid with the global label and input rules, so its fields match
+  // every other form in Tempus rather than being a private 12px scale.
+  function lilRenderForm(draft) {
+    const lastDay=new Date(Number(lilState.month.slice(0,4)),Number(lilState.month.slice(5,7)),0).getDate();
+    const bounds=draft.id?'':` min="${lilState.month}-01" max="${lilState.month}-${String(lastDay).padStart(2,'0')}"`;
+    lilEl('detail').innerHTML=`<button type="button" class="ghost small ts-asm-back" id="lil-back">Back to assessments</button>`
+      + `<div class="ts-entry-editing"><div>`
+      +   `<p class="ts-entry-editing-wd">${draft.id?'Edit assessment':'New assessment'}</p>`
+      +   `<p class="ts-entry-editing-date">${lilEscape(lilMonthLabel(lilState.month))}</p>`
+      +   `<p class="ts-note ts-asm-subnote">The assessment date decides which invoice it lands on.</p>`
+      + `</div></div>`
+      + `<form id="lil-assessment-form" class="ts-asm-form">`
+      + `<div class="ts-grid ts-grid--gap-md">`
+      +   `<div class="ts-col-span-6"><label for="lil-assessment-date">Assessment date</label><input id="lil-assessment-date" name="assessment_date" type="date" required value="${lilEscape(draft.assessment_date)}"${bounds}></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-contract">Contract</label><select id="lil-contract" name="contract_id" required></select></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-type">Type</label><select id="lil-type" name="assessment_type_id" required>${lilOptions(lilData().types,draft.assessment_type_id,'Choose type')}</select></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-organisation">Organisation <span id="lil-org-info" class="ts-info-icon" tabindex="0" role="button" data-tip="Organisation options are managed in Contracts." aria-label="Organisation options are managed in Contracts." hidden>i</span></label><select id="lil-organisation" name="organisation" required></select><p class="ts-note ts-asm-fieldnote" id="lil-org-help" hidden></p></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-client-name">Client name</label><input id="lil-client-name" name="client_name" type="text" required autocomplete="off" value="${lilEscape(draft.client_name)}"></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-client-dob">Date of birth</label><input id="lil-client-dob" name="client_dob" type="date" required max="${todayIso()}" value="${lilEscape(draft.client_dob)}"></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-adjustment">Adjustment (%)</label><input id="lil-adjustment" name="adjustment_percent" type="number" min="0" max="100" step="any" required value="${lilEscape(draft.adjustment_percent)}"><p class="ts-note ts-asm-fieldnote">Applied on top of the standard fee.</p></div>`
+      + `</div>`
+      + `<section class="ts-day-editor-section ts-asm-section-gap">`
+      +   `<div class="ts-day-section-head"><h3>Fee preview</h3><span class="ts-day-section-total"><strong id="lil-fee-preview"></strong><small>excl GST</small></span></div>`
+      +   `<p class="ts-note" id="lil-preview-lines">Excluding GST</p>`
+      + `</section>`
+      + `<p id="lil-form-error" class="ts-warning" role="alert" hidden></p>`
+      + `<div class="ts-modal-footer ts-asm-footer"><button class="ghost" id="lil-cancel" type="button">Cancel</button><button type="submit">Save assessment</button></div>`
+      + `</form>`;
+    lilEl('back').onclick=lilBack;lilEl('cancel').onclick=()=>{delete lilState.editors[lilState.month];lilRenderDetail();lilEl('add').focus();};
+    lilRefreshFormOptions(draft);
+    lilEl('assessment-form').addEventListener('input',event=>{const input=event.target;if(input.name)draft[input.name]=input.value;if(['contract_id','assessment_date'].includes(input.name))lilRefreshFormOptions(draft);lilPreview(draft);});
+    lilEl('assessment-form').addEventListener('change',event=>{const input=event.target;if(input.name)draft[input.name]=input.value;if(['contract_id','assessment_date'].includes(input.name))lilRefreshFormOptions(draft);lilPreview(draft);});
+    lilEl('assessment-form').addEventListener('submit',event=>{event.preventDefault();lilSave(draft);});
+    // Use the app's date control with editable input; native date input remains the fallback.
+    // Dates read DD/MM/YYYY on screen while the named input keeps Y-m-d, so the delegated change
+    // handler and the server still receive an ISO date. altInput hides the original, which would drop it
+    // from browser validation, so `required` is mirrored onto the visible field.
+    if(typeof createDatePicker==='function'){
+      const au={allowInput:true,altInput:true,altFormat:'d/m/Y'};
+      const pickers=[createDatePicker(lilEl('assessment-date'),{...au,minDate:draft.id?null:lilState.month+'-01',maxDate:draft.id?null:lilEl('assessment-date').max}),
+                     createDatePicker(lilEl('client-dob'),{...au,maxDate:todayIso()})];
+      pickers.forEach(fp=>{if(fp&&fp.altInput){fp.altInput.required=true;fp.altInput.placeholder='DD/MM/YYYY';}});
+    }
+    lilPreview(draft);
+  }
+  function lilRefreshFormOptions(draft) {
+    const contracts=state.contracts.filter(c=>draft.assessment_date && (!c.archived||draft.original?.contract_id===c.id)&&(!c.start_date||c.start_date<=draft.assessment_date)&&(!c.end_date||c.end_date>=draft.assessment_date));
+    // A sole valid contract needs no choosing, the same way a sole organisation is preselected below.
+    if(!contracts.some(c=>c.id===draft.contract_id))draft.contract_id=contracts.length===1?contracts[0].id:'';
+    lilEl('contract').innerHTML=lilOptions(contracts,draft.contract_id,draft.assessment_date?'Choose contract':'Choose a date first');
+    const contract=contracts.find(c=>c.id===draft.contract_id),organisations=lilOrganisations(contract?.assessment_organisations);
+    const historical=draft.original?.contract_id===draft.contract_id?draft.original.organisation:'';
+    if(historical && !organisations.includes(historical))organisations.push(historical);
+    // The first configured option is the working default; an existing assessment keeps its own value.
+    if(!organisations.includes(draft.organisation))draft.organisation=organisations[0]||'';
+    lilEl('organisation').innerHTML=lilOptions(organisations.map(name=>({id:name,name:name+(name===historical&&!lilOrganisations(contract?.assessment_organisations).includes(name)?' (historical)':'')})),draft.organisation,'Choose organisation');
+    // Configured options only need a quiet info icon; an empty list needs a visible call to action.
+    const orgInfo=lilEl('org-info'),orgHelp=lilEl('org-help');
+    if(orgInfo)orgInfo.hidden=!organisations.length;
+    orgHelp.hidden=!!organisations.length;
+    orgHelp.innerHTML=organisations.length?'':'Add organisation options in Contracts. <button type="button" class="ghost small" id="lil-setup-contract">Open Contracts</button>';
+    if(lilEl('setup-contract'))lilEl('setup-contract').onclick=()=>lilSetup('contracts');
+  }
+  function lilPreview(draft) {
+    const contract=state.contracts.find(c=>c.id===draft.contract_id),type=lilData().types.find(t=>t.id===draft.assessment_type_id),percent=Number(draft.adjustment_percent),old=draft.original;
+    const unchanged=old && old.contract_id===draft.contract_id && old.assessment_type_id===draft.assessment_type_id && old.percentage_adjustment===percent/100 && old.pricing_snapshot;
+    const lines=unchanged?old.lines:(type?.lines||[]).map((l,index)=>({...l,id:type.id+'-'+(index+1),amount:Math.round((Number(contract?.hourly_rate||0)*l.multiplier*(1+percent/100)+Number.EPSILON)*100)/100}));
+    const fee=lines.reduce((s,l)=>s+l.amount,0);
+    if(lilEl('fee-preview'))lilEl('fee-preview').textContent=contract&&type&&Number.isFinite(percent)?lilMoney(fee):'—';
+    if(lilEl('preview-lines'))lilEl('preview-lines').textContent=lines.length?lines.map(l=>(l.description||l.label||'Fee line')+' '+lilMoney(l.amount)).join(' · '):'Excluding GST';
+    return {fee,lines};
+  }
+  async function lilOperation(key,months,apply,save,settle,revert,retry) {
+    // Queue behind an in-flight operation for the same assessment rather than dropping the action. This
+    // is what lets the detail panel stay usable while a save is still going: logging time against a
+    // brand-new assessment simply waits for its persistent parent id instead of being disabled.
+    while(lilState.pending.has(key)) { try { await lilState.chains[key]; } catch (e) { break; } }
+    lilState.failures.delete(key);lilState.pending.set(key,{months});lilState.epoch++;apply();lilRender();
+    const done=(async()=>{
+      try{const result=await save();lilFeedback('');settle(result);lilState.failures.delete(key);}
+      catch(error){revert(error);lilState.failures.set(key,{months,retry});lilFeedback((error.message||'Save not confirmed.')+' Your changes are retained for retry.',retry);}
+      finally{lilState.pending.delete(key);lilState.epoch++;lilRender();
+        if(!lilState.failures.has(key)) months.forEach(m=>lilRefreshInvoice(m));}
+    })();
+    lilState.chains[key]=done;
+    return done;
+  }
+  function lilSave(draft) {
+    const form=lilEl('assessment-form');if(form && !form.reportValidity())return;
+    const percent=Number(draft.adjustment_percent),date=draft.assessment_date;
+    if(!draft.client_name.trim() || !draft.client_dob || draft.client_dob>todayIso() || !Number.isFinite(percent) || percent<0 || percent>100 || !draft.contract_id || !draft.organisation || (!draft.id&&date.slice(0,7)!==lilState.month)){
+      lilEl('form-error').hidden=false;lilEl('form-error').textContent='Complete the required fields with a valid date, contract, organisation and adjustment from 0–100%.';return;
+    }
+    const month=lilState.month,newMonth=date.slice(0,7),old=draft.original,key=draft.id||draft.client_request_id,{fee,lines}=lilPreview(draft);
+    const type=lilData().types.find(t=>t.id===draft.assessment_type_id),contract=state.contracts.find(c=>c.id===draft.contract_id);
+    const optimistic={...draft,id:key,client_name:draft.client_name.trim(),percentage_adjustment:percent/100,fee,lines,contract_name:contract.name,assessment_type_name:type?.name||'',time_entries:old?.time_entries||[],actual_minutes:old?.actual_minutes||0};
+    const payload={id:draft.id||'',request_id:draft.request_id,client_request_id:draft.client_request_id,expected_revision:old?.revision||0,assessment_date:date,contract_id:draft.contract_id,assessment_type_id:draft.assessment_type_id,organisation:draft.organisation,percentage_adjustment:percent/100,client_name:draft.client_name.trim(),client_dob:draft.client_dob};
+    const remove=()=>[month,newMonth].forEach(m=>{if(lilState.months[m])lilState.months[m].assessments=lilState.months[m].assessments.filter(a=>a.id!==key);});
+    const apply=()=>{remove();if(lilState.months[newMonth])lilState.months[newMonth].assessments.push(optimistic);delete lilState.editors[month];lilState.selection[newMonth]=key;[month,newMonth].forEach(lilMarkInvoiceChanged);};
+    const settle=result=>{remove();if(lilState.months[newMonth])lilState.months[newMonth].assessments.push(result.assessment);lilState.selection[newMonth]=result.assessment.id;lilState.last={contract_id:draft.contract_id,assessment_type_id:draft.assessment_type_id,organisation:draft.organisation};lilSyncEntries([result.billable_entry].filter(Boolean));if(month!==newMonth){lilFeedback('Assessment moved to '+lilMonthLabel(newMonth)+'.');const link=document.createElement('button');link.className='ghost small';link.textContent='Open '+lilMonthLabel(newMonth);link.onclick=()=>lilChangeMonth(newMonth);lilEl('feedback').append(' ',link);}lilRefreshInvoice(month);if(month!==newMonth)lilRefreshInvoice(newMonth);};
+    const revert=()=>{remove();if(old)lilState.months[month].assessments.push(old);lilState.editors[month]=draft;};
+    const run=()=>lilOperation(key,[month,newMonth],apply,()=>lilApi('api_upsertAssessment',payload),settle,revert,run);run();
+  }
+  async function lilDelete(a) {
+    if(!(await customConfirm(`Delete ${a.client_name||'this assessment'} and its ${a.time_entries.length} time ${a.time_entries.length===1?'entry':'entries'}? Its automatic billing entry will also be removed. Existing invoices remain available until you replace them.`,{title:'Delete assessment?',okText:'Delete assessment',danger:true})))return;
+    const month=lilState.month,request=lilRequestId(),allEntries=state.entries.filter(e=>e.source_type==='assessment'&&e.source_id===a.id);
+    const apply=()=>{lilState.months[month].assessments=lilState.months[month].assessments.filter(item=>item.id!==a.id);lilMarkInvoiceChanged(month);};
+    const run=()=>lilOperation(a.id,[month],apply,()=>lilApi('api_deleteAssessment',{id:a.id,expected_revision:a.revision,request_id:request}),result=>{lilSyncEntries([],result.deleted_entry_ids||allEntries.map(e=>e.id));lilRefreshInvoice(month);},()=>lilState.months[month].assessments.push(a),run);run();
+  }
+  function lilTimeRowsHtml(rows, types, removable) {
+    // Labels sit in one header row so repeated rows stay aligned and uncluttered; each control carries
+    // its own aria-label so it is still named for a screen reader.
+    return `<div class="ts-asm-time-row ts-asm-time-head${removable?' has-remove':''}" aria-hidden="true"><span>Hour type</span><span>Date worked</span><span>Hours</span>${removable?'<span></span>':''}</div>`
+      + rows.map((row,index)=>`<div class="ts-asm-time-row${removable?' has-remove':''}" data-row="${index}">`
+        + `<select name="hour_type_id" required aria-label="Hour type">${lilOptions(types,row.hour_type_id,'Choose non-billable type')}</select>`
+        + `<input name="date" type="date" required aria-label="Date worked" value="${lilEscape(row.date)}">`
+        + `<input name="hours" type="number" min="0.0083333334" step="any" required aria-label="Hours" placeholder="0.00" value="${lilEscape(row.hours)}">`
+        + (removable?`<button class="ghost small" type="button" data-remove-row="${index}" aria-label="Remove this day">Remove</button>`:'')
+        + `</div>`).join('');
+  }
+  function lilTimeForm(a, entry, retained) {
+    const types=state.hourTypes.filter(t=>t.contributes_to_income===false);
+    const blank=()=>({id:'',hour_type_id:lilData().default_hour_type_id||'',date:todayIso(),hours:'',client_request_id:lilRequestId()});
+    // Editing touches exactly one entry; logging new hours can cover several days at once.
+    const rows=retained||(entry?[{id:entry.id,hour_type_id:entry.hour_type_id,date:entry.date,hours:entry.duration_minutes/60,client_request_id:entry.client_request_id||lilRequestId()}]:[blank()]);
+    const host=lilEl('time-host');if(!host)return;
+    // The form is the day editor's inline expansion, so it reads as part of the list it belongs to.
+    host.className='ts-day-duration-editor';
+    if(lilEl('log-hours'))lilEl('log-hours').hidden=true;
+    const paint=()=>{
+      const removable=!entry&&rows.length>1;
+      lilEl('time-rows').innerHTML=lilTimeRowsHtml(rows,types,removable);
+      lilEl('time-rows').querySelectorAll('[data-remove-row]').forEach(button=>button.onclick=()=>{rows.splice(Number(button.dataset.removeRow),1);paint();});
+      if(typeof createDatePicker==='function')lilEl('time-rows').querySelectorAll('input[name="date"]').forEach(input=>{
+        const picker=createDatePicker(input,{allowInput:true,altInput:true,altFormat:'d/m/Y'});
+        if(picker&&picker.altInput){picker.altInput.required=true;picker.altInput.placeholder='DD/MM/YYYY';picker.altInput.setAttribute('aria-label','Date worked');}
+      });
+    };
+    host.innerHTML=`<form id="lil-time-form"><div class="ts-day-section-head"><h3>${entry?'Edit time':'Log hours'}</h3></div><div id="lil-time-rows"></div>`
+      + (entry?'':`<button class="ghost small ts-asm-gap" type="button" id="lil-time-add-row">Add another day</button>`)
+      + `<p class="ts-note ts-asm-gap">Non-billable · actual time never changes the assessment fee.</p>`
+      + `<div class="ts-modal-footer ts-asm-footer">`
+      + (entry?`<button class="ghost danger ts-asm-footer-lead" type="button" id="lil-time-delete">Delete hours</button>`:'')
+      + `<button class="ghost" type="button" id="lil-time-cancel">Cancel</button><button type="submit" id="lil-time-save">Save hours</button></div></form>`;
+    paint();
+    lilEl('time-cancel').onclick=lilRenderDetail;
+    if(lilEl('time-delete'))lilEl('time-delete').onclick=()=>lilDeleteTime(a,entry);
+    if(lilEl('time-add-row'))lilEl('time-add-row').onclick=()=>{
+      // Carry the previous day's hour type and date forward: several rows on one date are legitimate,
+      // so nothing is guessed about the next date.
+      const last=rows[rows.length-1]||blank();
+      rows.push({id:'',hour_type_id:last.hour_type_id,date:last.date,hours:'',client_request_id:lilRequestId()});
+      paint();
+      const inputs=lilEl('time-rows').querySelectorAll('[data-row] input[name="hours"]');
+      inputs[inputs.length-1]?.focus();
+    };
+    host.querySelector('select')?.focus();
+    const form=lilEl('time-form');
+    const capture=event=>{const target=event.target,cell=target.closest?target.closest('[data-row]'):null;
+      if(!cell||!target.name)return;const index=Number(cell.dataset.row);if(rows[index])rows[index][target.name]=target.value;};
+    form.oninput=capture;form.onchange=capture;
+    form.onsubmit=event=>{
+      event.preventDefault();
+      if(!form.reportValidity())return;
+      const prepared=[];
+      for(const row of rows){
+        const minutes=Math.round(Number(row.hours)*60);
+        if(!Number.isFinite(minutes)||minutes<1){lilFeedback('Enter hours that round to at least one minute on every day.');return;}
+        if(!row.hour_type_id){lilFeedback('Choose a non-billable hour type on every day.');return;}
+        if(!row.date){lilFeedback('Enter the date worked on every day.');return;}
+        prepared.push({...row,duration_minutes:minutes});
+      }
+      const month=lilState.month,old=a.time_entries.slice();
+      const total=list=>list.reduce((sum,item)=>sum+Number(item.duration_minutes||0),0);
+      const optimistic=prepared.map(row=>({id:row.id||row.client_request_id,client_request_id:row.client_request_id,hour_type_id:row.hour_type_id,
+        date:row.date,duration_minutes:row.duration_minutes,source_type:'assessment',source_id:a.id,assessment_id:a.id,
+        source_occurrence_key:'',entry_type:'basic',contract_id:a.contract_id}));
+      const replacing=new Set(optimistic.map(item=>item.id));
+      const apply=()=>{a.time_entries=a.time_entries.filter(e=>!replacing.has(e.id)).concat(optimistic);a.actual_minutes=total(a.time_entries);};
+      const save=async()=>{
+        const saved=[];
+        // One row at a time: each call takes the assessment lock, and a failure part-way must not hide
+        // the rows that did commit.
+        for(const row of prepared){
+          try{ saved.push((await lilApi('api_upsertAssessmentTimeEntry',{assessment_id:a.id,id:row.id||'',client_request_id:row.client_request_id,
+            hour_type_id:row.hour_type_id,date:row.date,hours:row.duration_minutes/60})).entry); }
+          catch(error){ error.partial=saved; throw error; }
+        }
+        return saved;
+      };
+      const settle=saved=>{a.time_entries=a.time_entries.filter(e=>!replacing.has(e.id)).concat(saved);a.actual_minutes=total(a.time_entries);lilSyncEntries(saved);};
+      const revert=error=>{
+        // Keep whatever actually committed and re-open the form with only the days still unsaved.
+        const saved=(error&&error.partial)||[];
+        const savedRequests=new Set(saved.map(item=>String(item.client_request_id||'')));
+        const savedIds=new Set(saved.map(item=>item.id));
+        a.time_entries=old.filter(e=>!savedIds.has(e.id)).concat(saved);
+        a.actual_minutes=total(a.time_entries);
+        if(saved.length)lilSyncEntries(saved);
+        const remaining=prepared.filter(row=>!savedRequests.has(String(row.client_request_id)));
+        setTimeout(()=>{if(lilSelected()?.id===a.id)lilTimeForm(a,entry,remaining.length?remaining:null);},0);
+      };
+      const run=()=>lilOperation(a.id,[month],apply,save,settle,revert,run);run();
+    };
+  }
+  async function lilDeleteTime(a,entry) {
+    if(!(await customConfirm(`Delete ${lilHours(entry.duration_minutes)} hours worked on ${lilDate(entry.date,true)}?`,{title:'Delete time entry?',okText:'Delete hours',danger:true})))return;
+    const month=lilState.month,old=a.time_entries.slice(),oldMinutes=a.actual_minutes;
+    const run=()=>lilOperation(a.id,[month],()=>{a.time_entries=a.time_entries.filter(e=>e.id!==entry.id);a.actual_minutes=a.time_entries.reduce((s,e)=>s+Number(e.duration_minutes),0);},()=>lilApi('api_deleteAssessmentTimeEntry',{id:entry.id,assessment_id:a.id}),()=>lilSyncEntries([],[entry.id]),()=>{a.time_entries=old;a.actual_minutes=oldMinutes;},run);run();
+  }
+  async function lilRefreshInvoice(month) {
+    if(!lilState.months[month])return;
+    try{const info=await lilApi('api_getLilInvoiceGeneration',Number(month.slice(0,4)),Number(month.slice(5,7)));if(!lilMonthPending(month))lilState.months[month].invoice=info;if(month===lilState.month)lilRenderInvoice();}catch(error){if(month===lilState.month)lilFeedback('Could not refresh the invoice status. '+(error.message||''),()=>lilRefreshInvoice(month));}
+  }
+  async function lilGenerate(existingRequest) {
+    const month=lilState.month,data=lilData();if(!data||lilState.generation[month]||lilState.checking[month]||lilMonthPending(month)||lilMonthFailed(month))return;
+    // Acknowledge the click before the pre-flight refresh: that refresh is a round trip, so the action
+    // must not sit there looking inert while it runs.
+    lilState.checking[month]=true;lilRenderInvoice();
+    // Refresh saved content/revision first; search only filters the list, never the invoice scope.
+    try{ await lilRefreshInvoice(month); } finally { delete lilState.checking[month]; if(month===lilState.month)lilRenderInvoice(); }
+    const info=data.invoice,invoice=info?.invoice;
+    if(invoice?.generated_doc_id && !existingRequest && !(await customConfirm(`This will replace the generated invoice with all ${data.assessments.length} assessments currently in ${lilMonthLabel(month)}. Manual edits to the generated document will be lost. Copies you have already downloaded or sent will not change.`,{title:`Replace the ${lilMonthLabel(month)} invoice?`,okText:'Replace invoice'})))return;
+    const request=existingRequest||{year:Number(month.slice(0,4)),month:Number(month.slice(5,7)),request_id:lilRequestId(),expected_hash:info.content_hash,confirmed_document_id:invoice?.generated_doc_id||''};
+    lilState.generation[month]=request;lilRenderInvoice();lilFeedback('');
+    try{const result=await lilApi('api_generateLilMonthlyInvoice',request);data.invoice.invoice=result.invoice;data.invoice.stale=false;await lilRefreshInvoice(month);if(state.companyTrackingEnabled)loadInvoicesList();}
+    catch(error){
+      // A lost response may still have committed. Read state before offering the same request again.
+      await lilRefreshInvoice(month);
+      if(data.invoice?.invoice?.generation_request_id!==request.request_id)lilFeedback(error.message||'Generation was not confirmed. Your previous invoice is still available.',()=>lilGenerate(request));
+    }finally{delete lilState.generation[month];if(month===lilState.month)lilRenderInvoice();}
+  }
+  function lilChangeMonth(month) {
+    if(!/^\d{4}-\d{2}$/.test(month))return;
+    lilState.month=month;lilState.search='';lilEl('search').value='';lilEl('workspace').classList.remove('has-detail');lilFeedback('');renderAssessmentsPage({force:!lilState.months[month]});
+  }
+  function lilSetup(page) {
+    lilState.setupReturn=true;showPage(page);
+    const target=document.getElementById('page-'+page);if(!target)return;
+    let back=document.getElementById('lil-setup-return');if(back)back.remove();back=document.createElement('button');back.id='lil-setup-return';back.className='ghost';back.textContent='Back to assessment';back.type='button';target.prepend(back);
+    back.onclick=()=>{back.remove();lilState.setupReturn=false;showPage('assessments');const draft=lilState.editors[lilState.month];if(draft)lilRenderForm(draft);};
+  }
+  lilEl('add').onclick=()=>{if(lilData())lilEdit();};lilEl('today').onclick=()=>lilChangeMonth(todayIso().slice(0,7));
+  // The month button opens the calendar's own month picker, so both screens jump months the same way.
+  lilEl('month-btn').onclick=event=>{
+    event.stopPropagation();
+    if(typeof openMonthPickerFor!=='function')return;
+    openMonthPickerFor(lilEl('month-btn'),{year:Number(lilState.month.slice(0,4)),month:Number(lilState.month.slice(5,7))-1},
+      (year,month)=>lilChangeMonth(year+'-'+String(month+1).padStart(2,'0')));
+  };
+  [['prev',-1],['next',1]].forEach(([id,delta])=>lilEl(id).onclick=()=>{const d=new Date(lilState.month+'-01T12:00:00');d.setMonth(d.getMonth()+delta);lilChangeMonth(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));});
+  lilEl('search').oninput=e=>{lilState.search=e.target.value;lilRender(true);};lilEl('generate').onclick=()=>lilGenerate();
+  if(state.currentPage==='assessments')renderAssessmentsPage();
+  function lilSyncHourDefaultControl(hourType) {
+    const row=document.getElementById('hour-type-assessment-default-row'),toggle=document.getElementById('hour-type-assessment-default');
+    if(!row||!toggle)return;
+    row.hidden=!getFeatureFlag('enable_lil_assessments_mode')||!!hourType?.contributes_to_income;
+    toggle.checked=!!hourType?.id && state.settings.assessment_time_hour_type_id===hourType.id;
+    toggle.disabled=!hourType?.id;
+    document.getElementById('hour-type-assessment-default-help').textContent=hourType?.id?'Preselected when you log time against an assessment.':'Save this non-billable hour type to make it the assessment default.';
+    toggle.onchange=async()=>{
+      const previous=state.settings.assessment_time_hour_type_id||'',next=toggle.checked?hourType.id:'';
+      state.settings.assessment_time_hour_type_id=next;toggle.disabled=true;renderHourTypes();
+      Object.values(lilState.months).forEach(data=>data.default_hour_type_id=next);
+      try{await lilApi('api_setAssessmentTimeDefault',next);saveCache();}
+      catch(error){state.settings.assessment_time_hour_type_id=previous;toggle.checked=previous===hourType.id;Object.values(lilState.months).forEach(data=>data.default_hour_type_id=previous);setStatus(error.message||'Could not save assessment default','error');}
+      finally{toggle.disabled=false;renderHourTypes();}
+    };
+  }
+  document.getElementById('hour-type-contributes-income')?.addEventListener('change',event=>{
+    const row=document.getElementById('hour-type-assessment-default-row');if(row)row.hidden=event.target.checked||!getFeatureFlag('enable_lil_assessments_mode');
+  });
+  document.getElementById('contract-assessment-organisations')?.addEventListener('input',event=>{
+    document.getElementById('contract-organisations-preview').textContent=lilOrganisations(event.target.value).join(' · ')||'No organisation options yet.';
+  });
+</script>

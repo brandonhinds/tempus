@@ -30,41 +30,15 @@
   <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year starting</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
 </section>
 
-<section class="ts-card ts-card--wide" id="page-assessments" style="display:none;">
-  <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
-    <div><div class="ts-kicker">Configurable workflow</div><h3 style="margin:2px 0 4px;">Assessments</h3><p class="ts-note" style="margin:0; max-width:620px;">Define your own fields and invoice language. Tempus starts with no profession-specific catalogue.</p></div>
-    <div style="display:flex; gap:8px;"><button class="ghost" id="assessment-type-add">Configure type</button><button id="assessment-add">New assessment</button></div>
-  </div>
-  <form id="assessment-type-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
-    <div class="ts-toolbar"><h4 style="margin:0;">Assessment type</h4><button type="button" class="ghost" data-close-form="assessment-type-form">Cancel</button></div>
-    <label for="assessment-type-name">Name</label><input id="assessment-type-name" required maxlength="140">
-    <label for="assessment-type-fields" style="margin-top:10px;">Field definitions (JSON)</label><textarea id="assessment-type-fields" rows="5" spellcheck="false" placeholder='[{"key":"reference","label":"Reference","input_type":"text","required":true}]'></textarea>
-    <label for="assessment-type-lines" style="margin-top:10px;">Invoice lines (JSON)</label><textarea id="assessment-type-lines" rows="5" spellcheck="false" placeholder='[{"id":"initial","template":"{organisation} – {reference}","multiplier":1,"display_order":1}]'></textarea>
-    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save type</button></div>
-  </form>
-  <form id="assessment-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
-    <div class="ts-toolbar"><h4 style="margin:0;">New assessment</h4><button type="button" class="ghost" data-close-form="assessment-form">Cancel</button></div>
-    <div class="ts-grid ts-grid--gap-md">
-      <div class="ts-col-span-4"><label for="assessment-date">Date</label><input id="assessment-date" type="date" required></div>
-      <div class="ts-col-span-4"><label for="assessment-contract">Contract</label><select id="assessment-contract" required></select></div>
-      <div class="ts-col-span-4"><label for="assessment-type">Type</label><select id="assessment-type" required></select></div>
-      <div class="ts-col-span-6"><label for="assessment-organisation">Organisation</label><input id="assessment-organisation" required maxlength="180"></div>
-      <div class="ts-col-span-6"><label for="assessment-adjustment">Adjustment (%)</label><input id="assessment-adjustment" type="number" step="0.01" value="0"></div>
-      <div class="ts-col-span-12"><label for="assessment-values">Field values (JSON)</label><textarea id="assessment-values" rows="4" spellcheck="false" placeholder='{"reference":"ABC-123"}'></textarea></div>
-    </div>
-    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save assessment</button></div>
-  </form>
-  <div class="ts-toolbar" style="margin:18px 0 8px;"><p class="ts-note" id="assessment-selection-note" style="margin:0;">Select draft assessments to prepare an invoice.</p><button class="ghost" id="assessment-invoice">Create draft invoice</button></div>
-  <div id="assessment-list" class="ts-ledger-list" aria-live="polite"></div>
-</section>
+
 
 <section class="ts-card ts-card--wide" id="page-help" style="display:none;">
   <div class="ts-kicker">Bundled guide</div><h3 style="margin:2px 0 6px;">Help</h3><p class="ts-note" style="max-width:680px;">This guide ships with the same build as the app, so its workflows match the version you are using.</p>
   <div class="ts-help-grid">
     <details open><summary>Upgrade and backups</summary><p>Tempus disables financial pages until the one-time upgrade has created and verified a spreadsheet copy. Failed migrations show their error and resume from the unfinished step.</p></details>
     <details><summary>Expenses and GST</summary><p>Record purchases as transactions and payments. A recurring rule is only a forecast. Taxable GST is included in BAS actuals only after reconciliation, claimable-GST confirmation and receipt attachment.</p></details>
-    <details><summary>Invoice lifecycle</summary><p>Drafts can be edited and recalculated. Issued, sent and paid invoices are immutable. Correct history by voiding the original and creating a revision; payments are tracked separately.</p></details>
-    <details><summary>Assessments</summary><p>Enable assessments, configure stable field keys and invoice line templates, then create records. Issued assessment invoices lock their source records. Voiding releases the sources for revision.</p></details>
+    <details><summary>Assessments</summary><p>Turn on Lil Assessments mode to open Assessments at the current month. Record the client, date of birth, contract, organisation and one of the five assessment types; the assessment date decides its billing month. Time you log against an assessment is tracked separately on a non-billable hour type and never changes the fee.</p></details>
+    <details><summary>Monthly invoice</summary><p>Generate Invoice copies your Google Docs template once for every assessment in the selected month, across contracts and organisations. Generating again asks first, keeps the month’s invoice number, and only replaces the link after the new document is written. Logging time does not make an invoice out of date; adding, editing or deleting an assessment does.</p></details>
     <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense rules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
     <details><summary>Tax estimates</summary><p id="help-tax-table-status">Checking the bundled PAYG table…</p><p class="ts-note">Estimates use ATO Scale 2 and are guidance only. Confirm payroll and tax obligations with the ATO or your adviser.</p></details>
     <details><summary>Keyboard access</summary><p>Use Tab to move through controls. Quick-action menus support the Menu key or Shift+F10, arrow keys, Enter and Escape. Focus remains visible in every theme.</p></details>

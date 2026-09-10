@@ -18,6 +18,7 @@
 -->
 <script>
   (function () {
+    if (window.__TEMPUS_LIL_MODE__ || window.__TEMPUS_EXPLICIT_PAGE__) return;
     var VIEW_PREF_KEY = 'ts_view_pref';
 
     function getPref() {

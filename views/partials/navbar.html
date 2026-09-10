@@ -25,6 +25,7 @@
          config live behind the gear menu on the right. Buttons keep their original ids so the existing
          click handlers (showPage) and gating logic still bind. -->
     <nav class="ts-topnav" id="primary-nav" aria-label="Primary">
+      <button class="ts-topnav-link" id="nav-assessments" type="button" style="display:none;">Assessments</button>
       <button class="ts-topnav-link" id="nav-time" type="button">Time Entry</button>
       <button class="ts-topnav-link" id="nav-annual-views" type="button">Annual View</button>
     </nav>
@@ -56,9 +57,7 @@
         <button class="ghost" id="nav-hour-types" style="display:none;">Hour Types</button>
         <button class="ghost" id="nav-rate-preview" style="display:none;">Rate Preview</button>
         <button class="ghost" id="nav-bas" style="display:none;">BAS Reporting</button>
-        <button class="ghost" id="nav-invoices" style="display:none;">Invoices</button>
         <button class="ghost" id="nav-expenses" style="display:none;">Expenses</button>
-        <button class="ghost" id="nav-assessments" style="display:none;">Assessments</button>
         <button class="ghost" id="nav-public-holidays" style="display:none;">Public Holidays</button>
         <button class="ghost" id="nav-themes">Themes</button>
         <!-- Tools: gated bulk/recurring/payroll/print actions. Moved out of the calendar toolbar so both

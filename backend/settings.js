@@ -89,6 +89,7 @@ function api_updateSettings(settings) {
 
 function updateSettingsUnlocked_(settings) {
   settings = settings || {};
+  if (settings.assessment_time_hour_type_id && !assessmentEligibleHourTypes_().some(function(t) { return String(t.id) === String(settings.assessment_time_hour_type_id); })) throw new Error('Assessment time default must be non-billable.');
   if (Object.prototype.hasOwnProperty.call(settings, 'accounting_basis') && ['cash', 'accrual'].indexOf(String(settings.accounting_basis)) === -1) throw new Error('Accounting basis must be cash or accrual.');
   ['tempus_url'].forEach(function(key) { if (settings[key]) settings[key] = requireHttpUrl_(settings[key], key.replace(/_/g, ' '), true); });
   var sh = getOrCreateSheet('user_settings');
@@ -173,6 +174,9 @@ function api_getFeatureFlags() {
 }
 
 function api_setFeatureFlag(payload) {
+  return withScriptLock_('feature flag update', function() { return setFeatureFlagUnlocked_(payload); });
+}
+function setFeatureFlagUnlocked_(payload) {
   if (!payload || !payload.feature) {
     throw new Error('Feature identifier is required.');
   }

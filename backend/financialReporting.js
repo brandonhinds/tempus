@@ -81,7 +81,7 @@ function timesheetForecastForPeriod_(from, to) {
       var entry = rowObjectFromHeaders_(headers, row);
       var date = String(entry.date || '');
       if (date < from || date > to || !incomeTypes[String(entry.hour_type_id)]) return;
-      var amount = (Number(entry.duration_minutes) || 0) / 60 * (contractRates[String(entry.contract_id)] || 0);
+      var amount = entry.source_type === 'assessment' && entry.source_occurrence_key === 'billable' && entry.income_amount !== '' && entry.income_amount != null ? Number(entry.income_amount) : (Number(entry.duration_minutes) || 0) / 60 * (contractRates[String(entry.contract_id)] || 0);
       total += amount;
       if (!invoicedEntries[String(entry.id)]) uninvoiced += amount;
     });
