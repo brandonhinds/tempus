@@ -194,6 +194,13 @@ function resolveRoundInterval(payloadInterval) {
   return fromPayload || settingsInterval || 0;
 }
 
+// Sheets may coerce date-shaped occurrence keys into Date cells. Keep their sheet-local day while
+// returning plain strings: a Date anywhere in an entry makes the entire RPC response invalid.
+function normalizeEntryOccurrenceKey_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') return toIsoDate(value);
+  return value == null ? '' : String(value);
+}
+
 function normalizeEntryForWrite(entry, defaultHourTypeId) {
   if (!entry) return entry;
   var roundInterval = resolveRoundInterval(entry.round_interval);
@@ -227,7 +234,7 @@ function normalizeEntryForWrite(entry, defaultHourTypeId) {
     assessment_id: entry.assessment_id || entry.assessmentId || '',
     source_type: entry.source_type || entry.sourceType || (entry.assessment_id ? 'assessment' : (entry.recurrence_id ? 'recurring' : 'manual')),
     source_id: entry.source_id || entry.sourceId || entry.assessment_id || entry.recurrence_id || '',
-    source_occurrence_key: entry.source_occurrence_key || entry.sourceOccurrenceKey || '',
+    source_occurrence_key: normalizeEntryOccurrenceKey_(entry.source_occurrence_key || entry.sourceOccurrenceKey || ''),
     client_request_id: entry.client_request_id || entry.clientRequestId || ''
   };
 }
@@ -264,7 +271,7 @@ function normalizeEntryForRead(entry, defaultHourTypeId) {
     assessment_id: entry.assessment_id || entry.assessmentId || '',
     source_type: entry.source_type || entry.sourceType || (entry.assessment_id ? 'assessment' : (entry.recurrence_id ? 'recurring' : 'manual')),
     source_id: entry.source_id || entry.sourceId || entry.assessment_id || entry.recurrence_id || '',
-    source_occurrence_key: entry.source_occurrence_key || entry.sourceOccurrenceKey || '',
+    source_occurrence_key: normalizeEntryOccurrenceKey_(entry.source_occurrence_key || entry.sourceOccurrenceKey || ''),
     client_request_id: entry.client_request_id || entry.clientRequestId || ''
   };
 }
@@ -729,7 +736,9 @@ function api_saveDaySessions(payload) {
         id: original ? original.id : Utilities.getUuid(), date: payload.date, entry_type: 'advanced',
         duration_minutes: 0, created_at: original ? original.created_at : toIsoDateTime(new Date())
       }), defaultType);
-      if (original && change.expected && signature(original) !== JSON.stringify(change.expected)) {
+      // RPC serialization can reorder object properties. Compare both snapshots through the same
+      // normalization so JSON formatting and punch order do not masquerade as concurrent edits.
+      if (original && change.expected && signature(original) !== signature(change.expected)) {
         // A response can be lost after the write succeeded. An identical retry is already saved.
         if (change.punches.length && signature(original) === signature(desired)) { entries.push(normalizeEntryForRead(original, defaultType)); return; }
         throw new Error('A session changed elsewhere. Reload the day before saving.');

@@ -38,6 +38,65 @@ function backend() {
   return env;
 }
 exports.run = test => {
+  test('entry reload returns RPC-safe occurrence keys when Sheets stores them as dates', () => {
+    const {context:c,spreadsheet}=backend();
+    const generated=c.api_addEntry({date:'2026-06-09',contract_id:'a',entry_type:'basic',duration_minutes:450,
+      source_type:'bulk',source_id:'schedule',source_occurrence_key:'2026-06-09'}).entry;
+    const manual=c.api_addEntry({date:'2026-09-11',contract_id:'a',entry_type:'advanced',
+      punches:[{in:'09:00',out:'12:30'},{in:'13:00',out:'17:10'}]}).entry;
+    const sheet=spreadsheet.getSheetByName('timesheet_entries');
+    const headers=sheet.snapshot()[0];
+    const date=new Date('2026-06-08T14:00:00Z'); // June 9, midnight in Sydney
+    sheet.setCell(2,headers.indexOf('source_occurrence_key')+1,date);
+    const formatDate=c.Utilities.formatDate;
+    c.Utilities.formatDate=(value,zone,pattern)=>{
+      if (+value===+date && zone==='Australia/Sydney' && pattern==='yyyy-MM-dd') return '2026-06-09';
+      return formatDate(value,zone,pattern);
+    };
+    const before=sheet.snapshot();
+    const entries=c.api_getEntries({});
+    const assertRpcSafe=value=>{
+      assert.notEqual(Object.prototype.toString.call(value),'[object Date]','Dates cannot cross google.script.run, even inside an older entry');
+      if (value && typeof value==='object') Object.values(value).forEach(assertRpcSafe);
+    };
+    assertRpcSafe(entries);
+    assert.equal(entries.find(e=>e.id===generated.id).source_occurrence_key,'2026-06-09');
+    assert.equal(entries.find(e=>e.id===manual.id).punches.length,2);
+    assert.deepEqual(sheet.snapshot(),before,'reload never rewrites stored cells');
+    for (const key of ['', 'billable', '2026-09-11', 'custom-occurrence']) {
+      assert.equal(c.normalizeEntryForRead({source_occurrence_key:key}).source_occurrence_key,key);
+      assert.equal(c.normalizeEntryForWrite({source_occurrence_key:key}).source_occurrence_key,key);
+    }
+    assert.equal(c.normalizeEntryForWrite({source_occurrence_key:date}).source_occurrence_key,'2026-06-09');
+  });
+  test('invalid entry reload responses preserve saved browser entries in both sync paths', () => {
+    for (const name of ['fetchEntriesFromServer','refreshEntriesFromServer']) {
+      for (const response of [null,undefined,{},[]]) {
+        let success, saved=0;
+        const original=[{id:'saved-session',date:'2026-09-11'}];
+        const c={state:{entries:original,entriesSyncSucceeded:true,entriesSyncEmpty:false},
+          beginEntriesSync:()=>1,endEntriesSync:()=>true,setStatus:message=>{c.message=message;},
+          sanitizeEntry:e=>e,mergeEntriesWithServerEntries:entries=>{c.state.entries=entries;},
+          saveCache:()=>{saved++;},markIncomeDependencyReady:()=>{},renderEntries:()=>{},updateTabStates:()=>{},
+          maybePromptDuplicateCleanup:()=>{},ensurePunchDraft:()=>{},settleStatus:()=>{},refreshRestingStatus:()=>{},
+          renderBasReporting:()=>{},maybeAutoPopulatePublicHolidayEntries:()=>{},onCalendarMonthChange:()=>{},markAllIncomeSummariesDirty:()=>{}};
+        const runner={withSuccessHandler(cb){success=cb;return this;},withFailureHandler(){return this;},api_getEntries(){}};
+        c.google={script:{run:runner}};
+        vm.runInNewContext(fn(name),c);
+        c[name]();success(response);
+        if (Array.isArray(response)) {
+          assert.equal(c.state.entries.length,0,'a real empty array remains authoritative');
+          assert.equal(saved,1);
+        } else {
+          assert.strictEqual(c.state.entries,original,'an invalid response must not erase cached sessions');
+          assert.equal(saved,0);
+          assert.equal(c.state.entriesSyncSucceeded,false);
+          assert.equal(c.state.entriesSyncEmpty,false);
+          assert.match(c.message,/could not be loaded/i);
+        }
+      }
+    }
+  });
   test('smart session time accepts 24h, preserves exact minutes and contextual 12h inference', () => {
     const c = client();
     for (const [raw, min] of [['0',0],['00:00',0],['0930',570],['17',1020],['1737',1057],['23:59',1439],['9:07',547],['5pm',1020],['12am',0],['12pm',720]]) assert.equal(c.parseSmartTime(raw).min,min,raw);
@@ -187,5 +246,54 @@ exports.run = test => {
     const saved=result.entries.find(e=>e.id===original.id);
     c.api_saveDaySessions({date:payload.date,changes:[{id:original.id,expected:{punches_json:saved.punches_json,contract_id:'a',hour_type_id:saved.hour_type_id},punches:[]}]});
     assert.equal(c.api_getEntries({}).length,2,'deleted batch rows are excluded from reads');
+  });
+  test('browser batches save multiple sessions after RPC reorders snapshot properties', () => {
+    for (const sameContract of [true, false]) {
+      const {context:server}=backend(), c=client();
+      const date=c.state.selectedCalendarDate;
+      server.api_addEntry({date,contract_id:'a',entry_type:'advanced',punches:sameContract
+        ? [{in:'09:00',out:'12:00'},{in:'13:00',out:'17:00'}]
+        : [{in:'09:00',out:'12:00'}]});
+      if (!sameContract) server.api_addEntry({date,contract_id:'b',entry_type:'advanced',punches:[{in:'13:00',out:'17:00'}]});
+      c.state.entries=server.api_getEntries({});
+      const first=c.state.entries[0], last=c.state.entries[c.state.entries.length-1];
+      c.daySessionsPending.set(first.id+'#0',{inVal:'09:07',outVal:'12:00',htId:first.hour_type_id,contractId:first.contract_id});
+      c.daySessionsPending.set(last.id+'#'+(sameContract?1:0),{inVal:'13:00',outVal:'17:05',htId:last.hour_type_id,contractId:last.contract_id});
+      c.daySessionsEdit={mode:'add',inRaw:'18:00',outRaw:'19:00',htId:first.hour_type_id,contractId:'a'};
+      assert.equal(c.stashDaySessionEdit(),true);
+      const payload=JSON.parse(JSON.stringify(c.buildDaySessionsBatch()));
+      payload.changes.forEach(change=>{
+        const expected=change.expected;
+        // RPC objects need not retain the browser's property insertion order.
+        change.expected={hour_type_id:expected.hour_type_id,contract_id:expected.contract_id,punches_json:expected.punches_json};
+      });
+      server.api_saveDaySessions(payload);
+      const saved=server.api_getEntries({});
+      assert.deepEqual(JSON.parse(JSON.stringify(saved.flatMap(e=>e.punches))).sort((a,b)=>a.in.localeCompare(b.in)),
+        [{in:'09:07',out:'12:00'},{in:'13:00',out:'17:05'},{in:'18:00',out:'19:00'}]);
+      server.api_saveDaySessions(payload);
+      assert.deepEqual(server.api_getEntries({}),saved,'retry keeps every session without duplication');
+    }
+  });
+  test('session snapshot normalization accepts equivalent JSON but rejects concurrent changes atomically', () => {
+    for (const concurrent of [null, {punches:[{in:'09:10',out:'12:00'}]}, {contract_id:'b'}, {hour_type_id:'other'}]) {
+      const {context:c,spreadsheet}=backend();
+      const date='2026-09-08';
+      const original=c.api_addEntry({date,contract_id:'a',entry_type:'advanced',punches:[{in:'09:00',out:'12:00'},{in:'13:00',out:'17:00'}]}).entry;
+      const payload={date,changes:[
+        {client_request_id:'additional-session',contract_id:'c',punches:[{in:'18:00',out:'19:00'}]},
+        {id:original.id,expected:{contract_id:'a',hour_type_id:original.hour_type_id,
+          punches_json:JSON.stringify([{out:'17:00',in:'13:00'},{out:'12:00',in:'09:00'}],null,2)},
+        punches:[{in:'09:07',out:'12:00'},{in:'13:00',out:'17:05'}]}
+      ]};
+      if (concurrent) c.api_updateEntry(Object.assign({},original,concurrent));
+      const sheet=spreadsheet.getSheetByName('timesheet_entries'), before=sheet.snapshot();
+      if (concurrent) {
+        assert.throws(()=>c.api_saveDaySessions(payload),/changed elsewhere/);
+        assert.deepEqual(sheet.snapshot(),before,'conflict prevents the entire batch from writing');
+      } else {
+        assert.equal(c.api_saveDaySessions(payload).entries.length,2);
+      }
+    }
   });
 };

@@ -26185,7 +26185,16 @@ function getCachedIncomeSummary(monthKey) {
           // newer sync was issued while this one was flying, this response is stale — skip the merge/render
           // so it can't clobber the newer state, but still settle the promise.
           if (!endEntriesSync(reqSeq)) { resolve(true); return; }
-          const sanitizedEntries = (entries || []).map(sanitizeEntry);
+          // A failed Apps Script serialization can produce null. Only an actual array is an
+          // authoritative snapshot; never turn a broken response into an empty timesheet.
+          if (!Array.isArray(entries)) {
+            state.entriesSyncSucceeded = false;
+            state.entriesSyncEmpty = false;
+            setStatus('Entries could not be loaded. Your saved browser data has been kept. Refresh to retry.', 'error');
+            resolve(false);
+            return;
+          }
+          const sanitizedEntries = entries.map(sanitizeEntry);
           state.entriesSyncSucceeded = true;
           state.entriesSyncEmpty = sanitizedEntries.length === 0;
           mergeEntriesWithServerEntries(sanitizedEntries);
@@ -30453,7 +30462,14 @@ function getCachedIncomeSummary(monthKey) {
       .withSuccessHandler((entries) => {
         // Superseded by a newer sync while in flight → don't apply this stale payload (see fetchEntries).
         if (!endEntriesSync(reqSeq)) { if (typeof onComplete === 'function') onComplete(); return; }
-        const sanitized = (entries || []).map(sanitizeEntry);
+        if (!Array.isArray(entries)) {
+          state.entriesSyncSucceeded = false;
+          state.entriesSyncEmpty = false;
+          setStatus('Entries could not be loaded. Your saved browser data has been kept. Refresh to retry.', 'error');
+          if (typeof onComplete === 'function') onComplete();
+          return;
+        }
+        const sanitized = entries.map(sanitizeEntry);
         mergeEntriesWithServerEntries(sanitized);
         state.entriesLoaded = true;
         markAllIncomeSummariesDirty();
