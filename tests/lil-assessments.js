@@ -212,6 +212,51 @@ module.exports={lilContext,mockDrive,run(test){
     assert.match(client,/function createDatePicker\(input, extraOpts\)[\s\S]*?firstDayOfWeek: 1/);
     assert.equal((client.match(/window\.flatpickr\(/g)||[]).length,1,'one picker factory, so week start cannot drift');
   });
+  test('assessment validation identifies every bad field and checks real dates and contract eligibility',()=>{
+    const partial=fs.readFileSync(path.join(__dirname,'../views/partials/assessments-scripts.html'),'utf8');
+    const grab=name=>{const at=partial.indexOf('  function '+name+'('),next=partial.indexOf('\n  function ',at+1);return partial.slice(at,next);};
+    const contract={id:'c1',start_date:'2025-01-01',end_date:'2026-12-31',assessment_organisations:'Northbridge'};
+    const sandbox={state:{contracts:[contract]},lilState:{month:'2026-09'},todayIso:()=> '2026-09-12',lilData:()=>({types:[{id:'standard'}]}),lilMonthLabel:month=>month};
+    vm.runInNewContext(['lilOrganisations','lilValidDate','lilAssessmentErrors','lilReadAssessmentForm'].map(grab).join('\n'),sandbox);
+    const valid={assessment_date:'2026-09-04',contract_id:'c1',assessment_type_id:'standard',organisation:'Northbridge',client_name:'Maya',client_dob:'1992-02-29',adjustment_percent:0};
+    const errors=patch=>sandbox.lilAssessmentErrors({...valid,...patch});
+    assert.equal(errors({}).length,0);
+    assert.equal(errors({adjustment_percent:100}).length,0);
+    assert.equal(errors({adjustment_percent:12.5}).length,0);
+    for(const value of ['', ' ', 'abc', -1, 101, Infinity])assert.equal(errors({adjustment_percent:value})[0].field,'adjustment_percent');
+    for(const value of ['', '2026-02-30', '2026-13-04', '04/09/2026'])assert.match(errors({assessment_date:value})[0].message,/Assessment date: enter a valid date/);
+    assert.match(errors({assessment_date:'2026-08-04'})[0].message,/2026-09.*switch to 2026-08/);
+    assert.equal(errors({id:'existing',assessment_date:'2026-08-04'}).length,0,'editing may move an assessment to another month');
+    assert.match(errors({client_dob:'2026-09-13'})[0].message,/Date of birth:.*earlier/);
+    assert.match(errors({client_dob:'1991-02-29'})[0].message,/Date of birth: enter a valid date/);
+    assert.equal(errors({client_dob:'2026-09-12'}).length,0);
+    assert.match(errors({contract_id:'missing'})[0].message,/Contract:/);
+    assert.equal(errors({assessment_type_id:'missing'})[0].field,'assessment_type_id');
+    assert.equal(errors({organisation:'Other'})[0].field,'organisation');
+    assert.equal(errors({organisation:'Historical',original:{contract_id:'c1',organisation:'Historical'}}).length,0);
+    assert.equal(errors({client_name:'  '})[0].field,'client_name');
+    contract.archived=true;
+    assert.match(errors({})[0].message,/Contract: this contract is not active/);
+    assert.equal(errors({id:'existing',original:{contract_id:'c1'}}).length,0);
+    contract.archived=false;contract.end_date='2026-09-01';
+    assert.match(errors({})[0].message,/Contract: this contract is not active/);
+    contract.end_date='2026-12-31';
+    assert.deepEqual(Array.from(errors({client_name:'',client_dob:'',adjustment_percent:''}),error=>error.field),['client_name','client_dob','adjustment_percent']);
+
+    // The visible picker and autofilled controls can be ahead of both the hidden ISO input and draft.
+    const nodes=Object.entries(valid).map(([name,value])=>({name,value}));
+    const dob=nodes.find(node=>node.name==='client_dob');dob.value='';dob._flatpickr={altInput:{value:'14/02/1992'}};
+    const date=nodes.find(node=>node.name==='assessment_date');date._flatpickr={altInput:{value:'5/9/2026'}};
+    sandbox.lilEl=()=>({querySelectorAll:()=>nodes});
+    const draft={...valid,client_name:'',client_dob:'',assessment_date:''};
+    sandbox.lilReadAssessmentForm(draft);
+    assert.equal(draft.client_dob,'1992-02-14');assert.equal(draft.assessment_date,'2026-09-05');assert.equal(draft.client_name,'Maya');
+    assert.equal(sandbox.lilAssessmentErrors(draft).length,0);
+    dob._flatpickr.altInput.value='31/02/1992';sandbox.lilReadAssessmentForm(draft);
+    assert.equal(sandbox.lilAssessmentErrors(draft)[0].field,'client_dob','impossible typed dates must not roll into the next month');
+    dob._flatpickr.altInput.value='';sandbox.lilReadAssessmentForm(draft);
+    assert.equal(draft.client_dob,'','clearing the visible date must not reuse an old hidden value');
+  });
   test('the Lil migration archives only affected rows and its cost does not grow with sheet size',()=>{
     // Rebuilding the migration_archive index per row, and copying whole sheets into it, made the
     // upgrade quadratic. Guard both: bounded Sheets traffic, and an archive scoped to changed rows.

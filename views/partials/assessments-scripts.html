@@ -344,7 +344,7 @@
       +   `<p class="ts-entry-editing-date">${lilEscape(lilMonthLabel(lilState.month))}</p>`
       +   `<p class="ts-note ts-asm-subnote">The assessment date decides which invoice it lands on.</p>`
       + `</div></div>`
-      + `<form id="lil-assessment-form" class="ts-asm-form">`
+      + `<form id="lil-assessment-form" class="ts-asm-form" novalidate>`
       + `<div class="ts-grid ts-grid--gap-md">`
       +   `<div class="ts-col-span-6"><label for="lil-assessment-date">Assessment date</label><input id="lil-assessment-date" name="assessment_date" type="date" required value="${lilEscape(draft.assessment_date)}"${bounds}></div>`
       +   `<div class="ts-col-span-6"><label for="lil-contract">Contract</label><select id="lil-contract" name="contract_id" required></select></div>`
@@ -358,7 +358,7 @@
       +   `<div class="ts-day-section-head"><h3>Fee preview</h3><span class="ts-day-section-total"><strong id="lil-fee-preview"></strong><small>excl GST</small></span></div>`
       +   `<p class="ts-note" id="lil-preview-lines">Excluding GST</p>`
       + `</section>`
-      + `<p id="lil-form-error" class="ts-warning" role="alert" hidden></p>`
+      + `<div id="lil-form-error" class="ts-warning" role="alert" hidden></div>`
       + `<div class="ts-modal-footer ts-asm-footer"><button class="ghost" id="lil-cancel" type="button">Cancel</button><button type="submit">Save assessment</button></div>`
       + `</form>`;
     lilEl('back').onclick=lilBack;lilEl('cancel').onclick=()=>{delete lilState.editors[lilState.month];lilRenderDetail();lilEl('add').focus();};
@@ -374,7 +374,7 @@
       const au={allowInput:true,altInput:true,altFormat:'d/m/Y'};
       const pickers=[createDatePicker(lilEl('assessment-date'),{...au,minDate:draft.id?null:lilState.month+'-01',maxDate:draft.id?null:lilEl('assessment-date').max}),
                      createDatePicker(lilEl('client-dob'),{...au,maxDate:todayIso()})];
-      pickers.forEach(fp=>{if(fp&&fp.altInput){fp.altInput.required=true;fp.altInput.placeholder='DD/MM/YYYY';}});
+      pickers.forEach(fp=>{if(fp&&fp.altInput){fp.altInput.required=true;fp.altInput.placeholder='DD/MM/YYYY';fp.altInput.setAttribute('aria-label',fp.input.name==='client_dob'?'Date of birth':'Assessment date');}});
     }
     lilPreview(draft);
   }
@@ -420,12 +420,63 @@
     lilState.chains[key]=done;
     return done;
   }
-  function lilSave(draft) {
-    const form=lilEl('assessment-form');if(form && !form.reportValidity())return;
-    const percent=Number(draft.adjustment_percent),date=draft.assessment_date;
-    if(!draft.client_name.trim() || !draft.client_dob || draft.client_dob>todayIso() || !Number.isFinite(percent) || percent<0 || percent>100 || !draft.contract_id || !draft.organisation || (!draft.id&&date.slice(0,7)!==lilState.month)){
-      lilEl('form-error').hidden=false;lilEl('form-error').textContent='Complete the required fields with a valid date, contract, organisation and adjustment from 0–100%.';return;
+  function lilReadAssessmentForm(draft) {
+    // Read the controls again on Save: autofill and editable picker text need not have emitted
+    // a change on the named input. Flatpickr's visible input has no name and holds DD/MM/YYYY.
+    lilEl('assessment-form').querySelectorAll('input[name],select[name]').forEach(input=>{
+      let value=input.value;
+      if(['assessment_date','client_dob'].includes(input.name) && input._flatpickr?.altInput){
+        const text=input._flatpickr.altInput.value.trim(),parts=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+        value=parts?`${parts[3]}-${parts[2].padStart(2,'0')}-${parts[1].padStart(2,'0')}`:'';
+      }
+      draft[input.name]=value;
+    });
+  }
+  function lilValidDate(value) {
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return false;
+    const date=new Date(value+'T12:00:00Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10)===value && value.slice(0,4)!=='0000';
+  }
+  function lilAssessmentErrors(draft) {
+    const errors=[],add=(field,message)=>errors.push({field,message});
+    const date=draft.assessment_date,validDate=lilValidDate(date),percent=Number(draft.adjustment_percent);
+    const contract=state.contracts.find(c=>c.id===draft.contract_id);
+    if(!validDate)add('assessment_date','Assessment date: enter a valid date in DD/MM/YYYY format.');
+    else if(!draft.id && date.slice(0,7)!==lilState.month)add('assessment_date',`Assessment date: choose a date in ${lilMonthLabel(lilState.month)}, or switch to ${lilMonthLabel(date.slice(0,7))} to add this assessment.`);
+    if(!contract)add('contract_id','Contract: choose a contract valid on the assessment date.');
+    else if(validDate && ((contract.archived && draft.original?.contract_id!==contract.id) || (contract.start_date && date<contract.start_date) || (contract.end_date && date>contract.end_date)))add('contract_id','Contract: this contract is not active on the assessment date. Choose another contract or correct the date.');
+    if(!lilData().types.some(t=>t.id===draft.assessment_type_id))add('assessment_type_id','Type: choose an assessment type.');
+    const historical=draft.original?.contract_id===draft.contract_id && draft.original?.organisation===draft.organisation;
+    if(!String(draft.organisation||'').trim() || (!historical && !lilOrganisations(contract?.assessment_organisations).includes(draft.organisation)))add('organisation','Organisation: choose an organisation for this contract. If none are listed, add organisation options in Contracts.');
+    if(!String(draft.client_name||'').trim())add('client_name','Client name: enter the client’s name.');
+    if(!lilValidDate(draft.client_dob))add('client_dob','Date of birth: enter a valid date in DD/MM/YYYY format.');
+    else if(draft.client_dob>todayIso())add('client_dob','Date of birth: enter today’s date or an earlier date.');
+    if(String(draft.adjustment_percent??'').trim()==='' || !Number.isFinite(percent) || percent<0 || percent>100)add('adjustment_percent','Adjustment (%): enter a number from 0 to 100. Use 0 for the standard fee.');
+    return errors;
+  }
+  function lilShowAssessmentErrors(errors) {
+    const form=lilEl('assessment-form'),summary=lilEl('form-error');
+    summary.hidden=!errors.length;
+    summary.textContent=errors.length?'Assessment not saved. Check the following fields:':'';
+    if(errors.length){
+      const list=document.createElement('ul');
+      errors.forEach(error=>{const item=document.createElement('li');item.textContent=error.message;list.appendChild(item);});
+      summary.appendChild(list);
     }
+    form.querySelectorAll('input[name],select[name]').forEach(input=>{
+      const invalid=errors.some(error=>error.field===input.name),control=getFieldVisibleControl(input);
+      setFieldInvalid(input,invalid);
+      control.setAttribute('aria-invalid',String(invalid));
+      if(invalid)control.setAttribute('aria-describedby','lil-form-error');
+      else control.removeAttribute('aria-describedby');
+    });
+    if(errors.length)focusField(form.querySelector(`[name="${errors[0].field}"]`));
+  }
+  function lilSave(draft) {
+    lilReadAssessmentForm(draft);
+    const errors=lilAssessmentErrors(draft);lilShowAssessmentErrors(errors);
+    if(errors.length)return;
+    const percent=Number(draft.adjustment_percent),date=draft.assessment_date;
     const month=lilState.month,newMonth=date.slice(0,7),old=draft.original,key=draft.id||draft.client_request_id,{fee,lines}=lilPreview(draft);
     const type=lilData().types.find(t=>t.id===draft.assessment_type_id),contract=state.contracts.find(c=>c.id===draft.contract_id);
     const optimistic={...draft,id:key,client_name:draft.client_name.trim(),percentage_adjustment:percent/100,fee,lines,contract_name:contract.name,assessment_type_name:type?.name||'',time_entries:old?.time_entries||[],actual_minutes:old?.actual_minutes||0};
