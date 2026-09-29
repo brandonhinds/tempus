@@ -116,10 +116,13 @@ function generateExpenseOccurrencesForRules_(rules, today, through) {
   rules.forEach(function(rule) {
     if (!expenseBoolean_(rule.active)) return;
     var ruleEnd = rule.end_date && rule.end_date < through ? rule.end_date : through;
-    migrationOccurrenceDates_(rule.start_date, ruleEnd, rule.frequency).forEach(function(date) {
+    // An occurrence recorded before schedules were anchored to their start date carries its drifted date as
+    // its key (28 March for a 31 January start). It is still that occurrence, so it keeps its month claimed.
+    migrationOccurrencePairs_(rule.start_date, ruleEnd, rule.frequency).forEach(function(pair) {
+      var date = pair.date;
       if (date < today) return;
       var tuple = String(rule.id) + '|' + date;
-      if (existing[tuple]) return;
+      if (existing[tuple] || existing[String(rule.id) + '|' + pair.drifted]) return;
       var transaction = normalizeExpenseTransaction_({
         id: 'expense-rule-' + sha256Hex_(tuple).substring(0, 24), vendor: rule.vendor, vendor_abn: rule.vendor_abn, description: rule.description,
         category: rule.category, purchase_date: date, supplier_invoice_date: '', amount: rule.amount, gst_code: rule.gst_code, gst_amount: rule.gst_amount,

@@ -94,11 +94,75 @@ exports.run = test => {
     const { context: c } = backend();
     const client = {};
     vm.runInNewContext(extract(operationsScripts, 'expenseScheduleDates'), client);
-    [['2026-01-31', '2027-12-31', 'monthly'], ['2026-09-15', '', 'weekly'], ['2026-02-28', '2031-01-01', 'yearly'], ['2026-03-31', '', 'quarterly'], ['2026-10-10', '', 'fortnightly'], ['2026-11-01', '', 'once']].forEach(([start, end, frequency]) => {
-      const horizon = end || '2028-10-01';
+    [['2026-01-31', '2027-12-31', 'monthly'], ['2026-08-31', '', 'monthly'], ['2026-09-15', '', 'weekly'], ['2026-02-28', '2031-01-01', 'yearly'], ['2028-02-29', '', 'yearly'], ['2026-03-31', '', 'quarterly'], ['2026-10-10', '', 'fortnightly'], ['2026-11-01', '', 'once']].forEach(([start, end, frequency]) => {
+      const horizon = end || '2033-01-01';
       const backendDates = Array.from(c.migrationOccurrenceDates_(start, horizon, frequency)).filter(d => d >= TODAY).slice(0, 5);
       assert.deepStrictEqual(Array.from(client.expenseScheduleDates(start, end, frequency, TODAY, 5)), backendDates, frequency + ' from ' + start);
     });
+  });
+
+  test('a schedule after a short month returns to its start day instead of drifting', () => {
+    const { context: c } = backend();
+    const dates = (start, end, frequency) => Array.from(c.migrationOccurrenceDates_(start, end, frequency));
+    assert.deepStrictEqual(dates('2026-01-31', '2026-05-01', 'monthly'), ['2026-01-31', '2026-02-28', '2026-03-31', '2026-04-30']);
+    assert.deepStrictEqual(dates('2025-11-30', '2026-08-31', 'quarterly'), ['2025-11-30', '2026-02-28', '2026-05-30', '2026-08-30']);
+    assert.deepStrictEqual(dates('2028-02-29', '2032-03-01', 'yearly'), ['2028-02-29', '2029-02-28', '2030-02-28', '2031-02-28', '2032-02-29']);
+    assert.deepStrictEqual(dates('2026-09-01', '2026-09-29', 'weekly'), ['2026-09-01', '2026-09-08', '2026-09-15', '2026-09-22', '2026-09-29']);
+    assert.deepStrictEqual(dates('2026-09-01', '2027-09-01', 'once'), ['2026-09-01']);
+    const rule = c.api_upsertExpenseRule(rulePayload({ start_date: '2026-08-31' })).rule;
+    assert.deepStrictEqual(scheduled(c, rule.id).slice(0, 4), ['2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31']);
+  });
+
+  function driftedLedger(today) {
+    const env = backend(today), c = env.context;
+    const rules = c.getOrCreateSheet('expense_rules'), transactions = c.getOrCreateSheet('expense_transactions');
+    const ruleHeaders = rules.getDataRange().getValues()[0], txHeaders = transactions.getDataRange().getValues()[0];
+    rules.appendRow(c.rowValuesFromObject_(ruleHeaders, { id: 'r31', vendor: 'Landlord', amount: 110, gst_code: 'taxable', gst_amount: 10, business_use_percentage: 1, frequency: 'monthly', start_date: '2026-01-31', end_date: '2027-03-29', active: 'TRUE' }));
+    rules.appendRow(c.rowValuesFromObject_(ruleHeaders, { id: 'r15', vendor: 'Insurer', amount: 50, gst_code: 'taxable', gst_amount: 0, business_use_percentage: 1, frequency: 'monthly', start_date: '2026-01-15', end_date: '', active: 'TRUE' }));
+    const row = (ruleId, key, status, overrides) => transactions.appendRow(c.rowValuesFromObject_(txHeaders, Object.assign({
+      id: ruleId + '-' + key + '-' + status, vendor: 'Landlord', purchase_date: key, amount: 110, gst_code: 'taxable', gst_amount: 10, business_use_percentage: 1,
+      status: status, reconciliation_state: status === 'scheduled' ? 'scheduled' : 'unreconciled', source_rule_id: ruleId, source_occurrence_key: key, attachments_json: '[]'
+    }, overrides || {})));
+    // What the drifting generator left behind: history on drifted dates, and drifted future schedule.
+    row('r31', '2026-08-28', 'void');
+    row('r31', '2026-09-28', 'recorded');
+    ['2026-10-28', '2026-11-28', '2027-01-28', '2027-02-28', '2027-03-28'].forEach(key => row('r31', key, 'scheduled'));
+    row('r31', '2026-12-28', 'scheduled', { purchase_date: '2026-12-20' });
+    row('r15', '2026-10-15', 'scheduled');
+    return env;
+  }
+  const byRule = (c, ruleId) => c.api_listExpenseTransactions({}).filter(t => t.source_rule_id === ruleId);
+
+  test('drifted scheduled occurrences move to their anchored dates, and history stays put', () => {
+    const { context: c } = driftedLedger('2026-09-29');
+    const before = byRule(c, 'r15');
+    c.migrationAnchorScheduledExpenseDates_();
+    const rows = byRule(c, 'r31');
+    const keys = status => rows.filter(t => t.status === status).map(t => t.source_occurrence_key).sort();
+    assert.deepStrictEqual(keys('scheduled'), ['2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31', '2027-02-28'], 'the occurrence past the end date is dropped');
+    assert.deepStrictEqual(keys('recorded'), ['2026-09-28']);
+    assert.deepStrictEqual(keys('void'), ['2026-08-28']);
+    assert.equal(rows.find(t => t.status === 'recorded').purchase_date, '2026-09-28', 'a recorded date is not rescheduled');
+    assert.equal(rows.find(t => t.source_occurrence_key === '2026-12-31').purchase_date, '2026-12-20', 'a hand-moved date is kept');
+    assert.equal(rows.find(t => t.source_occurrence_key === '2026-10-31').purchase_date, '2026-10-31');
+    assert.equal(new Set(rows.map(t => t.id)).size, rows.length, 'ids stay unique');
+    assert.deepStrictEqual(byRule(c, 'r15'), before, 'a rule that never drifted is untouched');
+
+    // Rolling forward neither re-adds September (the drifted recorded row still claims it) nor duplicates.
+    assert.deepStrictEqual(Array.from(c.api_generateExpenseRuleOccurrences({}).transactions.filter(t => t.source_rule_id === 'r31')), []);
+    const snapshot = JSON.stringify(byRule(c, 'r31'));
+    c.migrationAnchorScheduledExpenseDates_();
+    assert.equal(JSON.stringify(byRule(c, 'r31')), snapshot, 'idempotent');
+  });
+
+  test('an anchored date already taken absorbs its drifted scheduled duplicate', () => {
+    const { context: c } = driftedLedger('2026-09-29');
+    const transactions = c.getOrCreateSheet('expense_transactions');
+    const txHeaders = transactions.getDataRange().getValues()[0];
+    transactions.appendRow(c.rowValuesFromObject_(txHeaders, { id: 'paid-oct', vendor: 'Landlord', purchase_date: '2026-10-31', amount: 110, status: 'recorded', source_rule_id: 'r31', source_occurrence_key: '2026-10-31' }));
+    c.migrationAnchorScheduledExpenseDates_();
+    const october = byRule(c, 'r31').filter(t => t.source_occurrence_key.startsWith('2026-10'));
+    assert.deepStrictEqual(october.map(t => t.id), ['paid-oct']);
   });
 
   function recordedExpense(c, overrides) {

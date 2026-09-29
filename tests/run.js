@@ -1440,6 +1440,19 @@ test('a company expense with no parseable start date is kept, not deleted for an
   assert.ok(!deductions.rows.some((row) => row[deductions.headers.indexOf('id')] === 'd-move'));
 });
 
+test('a month-end company expense migrates on anchored dates and keeps an exception on its drifted date', () => {
+  const built = expenseMigrationContext({
+    deductions: [DEDUCTION_HEADERS, deductionRow('d-end', '2026-01-31'), deductionRow('d-skip', '2026-01-31')],
+    // The Deductions page drifted after February, so it keyed March's occurrence to the 28th.
+    deduction_occurrence_exceptions: [['id', 'deduction_id', 'original_date', 'exception_type', 'new_date', 'new_amount', 'notes'], ['x-1', 'd-skip', '2026-03-28', 'skip', '', '', '']]
+  });
+  built.context.migrationCompanyExpenses_();
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  const keysFor = (ruleId) => transactions.rows.filter((row) => row[transactions.headers.indexOf('source_rule_id')] === ruleId).map((row) => String(row[transactions.headers.indexOf('source_occurrence_key')]));
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-end')), ['2026-01-31', '2026-02-28', '2026-03-31']);
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-skip')), ['2026-01-31', '2026-02-28'], 'March was skipped on the Deductions page');
+});
+
 test('repair migration makes already-migrated expenses usable without double-paying', () => {
   const TX_HEADERS = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
   const legacy = (id, date) => ['legacy-expense-' + id, 'Insurer', '', 'Insurance', 'cat-1', date, date, 110, 'taxable', 10, 1, 'FALSE', '', 'legacy_unreconciled', 'legacy_unreconciled', 'legacy-rule-1', date, '[]', '', '', ''];
