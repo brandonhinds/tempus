@@ -299,6 +299,97 @@ exports.run = (test) => {
     assert.equal(ui.hidden, 1);
   });
 
+  test('recurring schedules saved or deleted while a sync is in flight keep the change', () => {
+    const noop = () => {};
+    const form = { draft: null };
+    const c = context({
+      state: { featureFlags: { recurring_time_entries: { enabled: true } }, recurringEntryForm: { editingId: '' },
+        recurringTimeEntries: [{ id: 's1', label: 'Mornings' }, { id: 's2', label: 'Doomed' }] },
+      sanitizeRecurringEntry: (x) => (x ? { ...x } : null), showWorkingToast: () => noop, updateRecurringSyncStatus: noop,
+      renderRecurringEntriesList: noop, refreshEntriesFromServer: (done) => done(), getRecurringFormValues: () => ({ ...form.draft }),
+      flagRecurringRequiredFields: () => true, validateRecurringForm: () => '', setRecurringFormError: noop,
+      hasFutureRecurringEntries: () => false, setRecurringFormDraft: noop, handleRecurringFormBusy: noop,
+      setRecurringBusy: noop, clearRecurringBusy: noop, runRecurringSync: noop, recurringDeleteBtn: null,
+      showRecurringInitialState: () => { c.state.recurringEntryForm.editingId = ''; }
+    }, ['scheduleFormSnapshot', 'scheduleFormIsEdited', 'syncRecurringEntries', 'cloneRecurringEntries', 'upsertRecurringEntryLocal',
+      'removeRecurringEntryLocal', 'handleRecurringSave', 'handleRecurringDelete']);
+    const labels = () => Object.fromEntries(c.state.recurringTimeEntries.map((x) => [x.id, x.label]));
+    const oldServer = [{ id: 's1', label: 'Mornings' }, { id: 's2', label: 'Doomed' }, { id: 's3', label: 'From another device' }];
+
+    c.syncRecurringEntries({ silent: true });
+    form.draft = { id: 's1', label: 'Mornings, edited' };
+    c.handleRecurringSave();
+    form.draft = { id: '', label: 'Added' };
+    c.handleRecurringSave();
+    c.state.recurringEntryForm.editingId = 's2';
+    c.handleRecurringDelete();
+    const tempId = c.state.recurringTimeEntries.find((x) => x.label === 'Added').id;
+    assert.deepEqual(c.confirmedSliceList('recurringTimeEntries', c.state.recurringTimeEntries).map((x) => x.label).sort(), ['Doomed', 'Mornings'],
+      'the browser cache stores confirmed schedules');
+    take(c.calls, 'api_syncRecurringTimeEntries').success({ entries: oldServer, generatedEntries: 0 });
+    assert.deepEqual(labels(), { s1: 'Mornings, edited', [tempId]: 'Added', s3: 'From another device' });
+
+    // Each write's reply carries the list as it stood then; it must not revert the others still saving.
+    c.syncRecurringEntries({ silent: true });
+    take(c.calls, 'api_upsertRecurringTimeEntry', (d) => d.id === 's1').success({ success: true, entry: { id: 's1', label: 'Mornings, edited' },
+      entries: [{ id: 's1', label: 'Mornings, edited' }, { id: 's2', label: 'Doomed' }, { id: 's3', label: 'From another device' }] });
+    assert.deepEqual(labels(), { s1: 'Mornings, edited', [tempId]: 'Added', s3: 'From another device' });
+    take(c.calls, 'api_upsertRecurringTimeEntry').success({ success: true, entry: { id: 'real-1', label: 'Added' },
+      entries: [{ id: 's1', label: 'Mornings, edited' }, { id: 's2', label: 'Doomed' }, { id: 's3', label: 'From another device' }, { id: 'real-1', label: 'Added' }] });
+    take(c.calls, 'api_deleteRecurringTimeEntry').success({ success: true, entries: [{ id: 's1', label: 'Mornings, edited' }, { id: 's3', label: 'From another device' }, { id: 'real-1', label: 'Added' }] });
+    take(c.calls, 'api_syncRecurringTimeEntries').success({ entries: oldServer });
+    assert.deepEqual(labels(), { s1: 'Mornings, edited', s3: 'From another device', 'real-1': 'Added' }, 'a sync sent before the writes confirmed');
+
+    c.syncRecurringEntries({ silent: true });
+    take(c.calls, 'api_syncRecurringTimeEntries').success({ entries: [{ id: 's1', label: 'Renamed elsewhere' }, { id: 'real-1', label: 'Added' }] });
+    assert.deepEqual(labels(), { s1: 'Renamed elsewhere', 'real-1': 'Added' }, 'a sync sent after the writes is truth');
+    assert.equal(c.syncSliceGuards.recurringTimeEntries.pending.size, 0);
+    assert.equal(c.syncSliceGuards.recurringTimeEntries.touched.size, 0);
+  });
+
+  test('deduction categories added, edited or deleted during an in-flight GET are not reverted', () => {
+    const noop = () => {};
+    const nameInput = { value: '' };
+    const c = context({
+      state: { deductionCategories: [{ id: 'k1', name: 'Travel' }, { id: 'k2', name: 'Doomed' }], deductionCategoryMap: {},
+        annualCategoryFilters: [], annualCategoryExpansion: {}, deductions: [{ id: 'd1', category_id: 'k2' }] },
+      deductionCategoryNameInput: nameInput, deductionCategoryColorInput: { value: '#000000' }, flagRequiredFields: () => true,
+      deductionCategoryFormState: { mode: 'create', editingId: '' }, deductionCategorySavePending: false, btnSaveDeductionCategory: null,
+      deductionCategoryDeleteId: null, sanitizeDeductionCategory: (x) => ({ id: x.id, name: x.name }), isDeductionCategoriesEnabled: () => true,
+      updateDeductionCategoryMap: noop, ensureDeductionCategoryCollapseState: noop, renderDeductionCategoryOptions: noop,
+      renderDeductionCategoryList: noop, renderDeductionsList: noop, renderAnnualCategorySection: noop, hideDeductionCategoryForm: noop
+    }, ['dedupeById', 'fetchDeductionCategoriesFromServer', 'handleSaveDeductionCategory', 'confirmDeleteDeductionCategory']);
+    const names = () => Object.fromEntries(c.state.deductionCategories.map((x) => [x.id, x.name]));
+    const save = (mode, id, name) => {
+      c.deductionCategoryFormState = { mode, editingId: id };
+      nameInput.value = name;
+      c.handleSaveDeductionCategory();
+      c.deductionCategorySavePending = false;
+    };
+    const oldServer = [{ id: 'k1', name: 'Travel' }, { id: 'k2', name: 'Doomed' }, { id: 'k3', name: 'From another device' }];
+
+    c.fetchDeductionCategoriesFromServer();
+    save('edit', 'k1', 'Travel (edited)');
+    save('create', '', 'Added');
+    c.confirmDeleteDeductionCategory({ id: 'k2' });
+    const tempId = c.state.deductionCategories.find((x) => x.name === 'Added').id;
+    assert.deepEqual(c.confirmedSliceList('deductionCategories', c.state.deductionCategories).map((x) => x.name).sort(), ['Doomed', 'Travel']);
+    take(c.calls, 'api_getDeductionCategories').success(oldServer);
+    assert.deepEqual(names(), { k1: 'Travel (edited)', [tempId]: 'Added', k3: 'From another device' });
+
+    c.fetchDeductionCategoriesFromServer();
+    take(c.calls, 'api_upsertDeductionCategory', (p) => p.id === 'k1').success({ success: true, category: { id: 'k1', name: 'Travel (edited)' } });
+    take(c.calls, 'api_upsertDeductionCategory').success({ success: true, category: { id: 'real-1', name: 'Added' } });
+    take(c.calls, 'api_deleteDeductionCategory').success({ success: true });
+    take(c.calls, 'api_getDeductionCategories').success(oldServer);
+    assert.deepEqual(names(), { k1: 'Travel (edited)', 'real-1': 'Added', k3: 'From another device' });
+
+    c.fetchDeductionCategoriesFromServer();
+    take(c.calls, 'api_getDeductionCategories').success([{ id: 'k1', name: 'Renamed elsewhere' }, { id: 'real-1', name: 'Added' }]);
+    assert.deepEqual(names(), { k1: 'Renamed elsewhere', 'real-1': 'Added' });
+    assert.equal(c.syncSliceGuards.deductionCategories.pending.size, 0);
+  });
+
   test('a failed deduction write is not re-applied by a stale GET', () => {
     const c = context({
       state: { deductions: [{ id: 'd1', name: 'Old' }], deductionExceptions: [] },
