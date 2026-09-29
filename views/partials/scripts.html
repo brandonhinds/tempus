@@ -3461,10 +3461,6 @@ let ratePreviewInputSyncing = false;
     });
   }
 
-  function cloneRecurringEntries(list) {
-    return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
-  }
-
   function upsertRecurringEntryLocal(entry) {
     const sanitized = sanitizeRecurringEntry(entry);
     if (!sanitized || !sanitized.id) return;
@@ -8071,9 +8067,9 @@ function updateDeductionFormVisibility() {
     const previousList = state.deductions.slice();
     let splitWrite = null;
     const revertOptimisticSplit = () => {
-      if (splitWrite) splitWrite.settle();
-      state.deductions = previousList.slice();
-      state.deductions = dedupeById(state.deductions);
+      if (!splitWrite) return;
+      splitWrite.settle();
+      state.deductions = dedupeById(splitWrite.rollback(state.deductions));
       saveCache();
       renderDeductionsList();
       renderIncomeSummary();
@@ -8209,7 +8205,6 @@ function updateDeductionFormVisibility() {
 
   function saveDeductionDirectly(payload, existing) {
     const isEdit = !!existing;
-    const previousList = state.deductions.slice();
     const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
     const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
     const optimisticId = isEdit ? payload.id : `temp_${Date.now()}`;
@@ -8263,8 +8258,7 @@ function updateDeductionFormVisibility() {
           setStatus('Deduction saved', 'success');
           } else {
             write.settle();
-            state.deductions = previousList;
-            state.deductions = dedupeById(state.deductions);
+            state.deductions = dedupeById(write.rollback(state.deductions));
             saveCache();
             renderDeductionsList();
             renderIncomeSummary();
@@ -8274,8 +8268,7 @@ function updateDeductionFormVisibility() {
         })
         .withFailureHandler(() => {
           write.settle();
-          state.deductions = previousList;
-          state.deductions = dedupeById(state.deductions);
+          state.deductions = dedupeById(write.rollback(state.deductions));
           saveCache();
           renderDeductionsList();
           renderIncomeSummary();
@@ -8334,7 +8327,6 @@ function updateDeductionFormVisibility() {
       monthKeyFromDateIso(deduction.end_date)
     ];
     markIncomeMonthsDirtyForDeductionChange(deduction, null, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
-    const previousList = state.deductions.slice();
     const write = beginSliceWrite('deductions', [deduction.id], state.deductions);
     state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
     state.deductions = dedupeById(state.deductions);
@@ -8353,8 +8345,7 @@ function updateDeductionFormVisibility() {
       })
       .withFailureHandler(() => {
         write.settle();
-        state.deductions = previousList;
-        state.deductions = dedupeById(state.deductions);
+        state.deductions = dedupeById(write.rollback(state.deductions));
         saveCache();
         renderDeductionsList();
         renderIncomeSummary();
@@ -8514,8 +8505,6 @@ function updateDeductionFormVisibility() {
 
     const nowIso = new Date().toISOString();
     const isEdit = deductionCategoryFormState.mode === 'edit' && deductionCategoryFormState.editingId;
-    const previousCategories = state.deductionCategories.slice();
-    const previousMap = { ...state.deductionCategoryMap };
     const previousFilters = state.annualCategoryFilters.slice();
     const previousExpansion = { ...state.annualCategoryExpansion };
 
@@ -8584,8 +8573,8 @@ function updateDeductionFormVisibility() {
           deductionCategoryDeleteId = null;
         } else {
           categoryWrite.settle();
-          state.deductionCategories = previousCategories;
-          state.deductionCategoryMap = previousMap;
+          state.deductionCategories = dedupeById(categoryWrite.rollback(state.deductionCategories));
+          updateDeductionCategoryMap();
           state.annualCategoryFilters = previousFilters;
           state.annualCategoryExpansion = previousExpansion;
           ensureDeductionCategoryCollapseState();
@@ -8604,8 +8593,8 @@ function updateDeductionFormVisibility() {
           btnSaveDeductionCategory.textContent = 'Save category';
         }
         categoryWrite.settle();
-        state.deductionCategories = previousCategories;
-        state.deductionCategoryMap = previousMap;
+        state.deductionCategories = dedupeById(categoryWrite.rollback(state.deductionCategories));
+        updateDeductionCategoryMap();
         state.annualCategoryFilters = previousFilters;
         state.annualCategoryExpansion = previousExpansion;
         ensureDeductionCategoryCollapseState();
@@ -8622,11 +8611,8 @@ function updateDeductionFormVisibility() {
   function confirmDeleteDeductionCategory(category) {
     if (!category || !category.id) return;
     deductionCategoryDeleteId = null;
-    const previousCategories = state.deductionCategories.slice();
-    const previousMap = { ...state.deductionCategoryMap };
     const previousFilters = state.annualCategoryFilters.slice();
     const previousExpansion = { ...state.annualCategoryExpansion };
-    const previousDeductions = state.deductions.map((item) => ({ ...item }));
     const deductionWrite = beginSliceWrite('deductions',
       state.deductions.filter((item) => item.category_id === category.id).map((item) => item.id), state.deductions);
     const categoryWrite = beginSliceWrite('deductionCategories', [category.id], state.deductionCategories);
@@ -8661,11 +8647,10 @@ function updateDeductionFormVisibility() {
       .withFailureHandler(() => {
         deductionWrite.settle();
         categoryWrite.settle();
-        state.deductionCategories = previousCategories;
-        state.deductionCategoryMap = previousMap;
+        state.deductionCategories = dedupeById(categoryWrite.rollback(state.deductionCategories));
+        state.deductions = dedupeById(deductionWrite.rollback(state.deductions));
         state.annualCategoryFilters = previousFilters;
         state.annualCategoryExpansion = previousExpansion;
-        state.deductions = dedupeById(previousDeductions.map((item) => ({ ...item })));
         updateDeductionCategoryMap();
         ensureDeductionCategoryCollapseState();
         renderDeductionCategoryOptions('');
@@ -10406,6 +10391,7 @@ function updateDeductionFormVisibility() {
   //
   //   const write = beginSliceWrite('deductions', [id], state.deductions);  // before the optimistic change
   //   // server replied: write.touch(realId) when a temp id was swapped, then write.settle() (success or failure)
+  //   // write failed: state.deductions = write.rollback(state.deductions) puts back only this write's rows
   //   const ticket = beginSliceFetch('deductions');                          // before the GET
   //   state.deductions = mergeSliceList(ticket, serverList, state.deductions);   // lists keyed by .id
   //   state.featureFlags = mergeSliceFields(ticket, serverFlags, state.featureFlags); // objects keyed by key
@@ -10416,10 +10402,15 @@ function updateDeductionFormVisibility() {
   // dropped outright. A failed request must still call endSliceFetch(ticket) so settled writes can be
   // forgotten. saveCacheNow_ stores confirmedSliceList/confirmedSliceFields, which put back the pre-write
   // value of anything still pending, so an unconfirmed write is never restored from cache as truth.
+  //
+  // write.rollback(current) undoes one failed write without replacing the whole list: each id it held goes
+  // back to that write's own pre-write copy (a deleted row is re-inserted where it was, a temp row is
+  // removed), and rows merged in by a fetch or changed by other writes are left alone. An id that a later
+  // write has started on since is skipped, so the failure cannot clobber the newer value.
   const syncSliceGuards = {};
   function syncSlice(name) {
     if (!syncSliceGuards[name]) {
-      syncSliceGuards[name] = { epoch: 0, fetchSeq: 0, pending: new Map(), touched: new Map(), before: new Map(), inflight: new Map() };
+      syncSliceGuards[name] = { epoch: 0, fetchSeq: 0, writeSeq: 0, pending: new Map(), touched: new Map(), before: new Map(), inflight: new Map(), lastWrite: new Map() };
     }
     return syncSliceGuards[name];
   }
@@ -10437,19 +10428,70 @@ function updateDeductionFormVisibility() {
     return { present: false };
   }
 
+  // This write's own copy of a row or field before it changed (shallow, so Dates and references survive),
+  // plus the row's index so a deleted row can be put back in place.
+  function sliceRowCopy_(current, key) {
+    const copy = (value) => (Array.isArray(value) ? value.map((row) => (row && typeof row === 'object' ? { ...row } : row))
+      : (value && typeof value === 'object' ? { ...value } : value));
+    if (key === '*') return { present: current !== undefined, value: copy(current) };
+    if (Array.isArray(current)) {
+      const index = current.findIndex((row) => row && row.id === key);
+      return index === -1 ? { present: false } : { present: true, value: copy(current[index]), index };
+    }
+    if (current && typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, key)) {
+      return { present: true, value: copy(current[key]) };
+    }
+    return { present: false };
+  }
+
   function beginSliceWrite(name, ids, current) {
     const slice = syncSlice(name);
     const keys = new Set();
+    const own = new Map();
+    slice.writeSeq += 1;
+    const seq = slice.writeSeq;
     let settled = false;
     const hold = (key, snapshotFrom) => {
       if (key == null || key === '' || keys.has(key)) return;
       keys.add(key);
       if (!slice.before.has(key) && snapshotFrom !== undefined) slice.before.set(key, sliceSnapshot_(snapshotFrom, key));
+      if (snapshotFrom !== undefined) {
+        own.set(key, sliceRowCopy_(snapshotFrom, key));
+        slice.lastWrite.set(key, seq);
+      }
       slice.pending.set(key, (slice.pending.get(key) || 0) + 1);
     };
     slice.epoch += 1;
     (Array.isArray(ids) ? ids : [ids]).forEach((key) => hold(key, current));
     return {
+      // Undo this write in `current` (a list keyed by .id, or an object keyed by field) and return the
+      // result; see the note above syncSliceGuards. Works before or after settle().
+      rollback(currentValue) {
+        let out = Array.isArray(currentValue) ? currentValue.slice()
+          : (currentValue && typeof currentValue === 'object' ? { ...currentValue } : currentValue);
+        own.forEach((prior, key) => {
+          if (slice.lastWrite.get(key) !== seq) return;
+          const value = prior.present ? sliceRowCopy_(prior.value, '*').value : undefined;
+          if (key === '*') {
+            if (prior.present) out = value;
+            return;
+          }
+          if (Array.isArray(out)) {
+            const index = out.findIndex((row) => row && row.id === key);
+            if (!prior.present) {
+              if (index !== -1) out.splice(index, 1);
+            } else if (index !== -1) {
+              out[index] = value;
+            } else {
+              out.splice(Math.min(prior.index, out.length), 0, value);
+            }
+          } else if (out && typeof out === 'object') {
+            if (prior.present) out[key] = value;
+            else delete out[key];
+          }
+        });
+        return out;
+      },
       // Ids learned from the server reply (a temp id's real id). They have no pre-write value to cache.
       touch(...more) {
         if (!settled) more.forEach((key) => hold(key, undefined));
@@ -15969,7 +16011,7 @@ function updateDeductionFormVisibility() {
     };
     const failure = () => {
       contractWrite.settle();
-      if (optimisticContract) { state.contracts = state.contracts.filter(c => c.id !== optimisticContract.id); if (previousContract) state.contracts.push(previousContract); updateContractMap(); }
+      if (optimisticContract) { state.contracts = contractWrite.rollback(state.contracts); updateContractMap(); }
       contractSaveBtn.disabled = false;
       setStatus('Contract save failed', 'error');
     };
@@ -18189,7 +18231,6 @@ function getCachedIncomeSummary(monthKey) {
     };
 
     // Optimistic update
-    const previousList = state.actualIncome.slice();
     const optimisticId = state.editingActualIncomeId || ('temp_' + Date.now());
     const incomeWrite = beginSliceWrite('actualIncome', [optimisticId], state.actualIncome);
     if (state.editingActualIncomeId) {
@@ -18225,7 +18266,7 @@ function getCachedIncomeSummary(monthKey) {
           setStatus('Actual income saved', 'success');
         } else {
           incomeWrite.settle();
-          state.actualIncome = previousList;
+          state.actualIncome = incomeWrite.rollback(state.actualIncome);
           refreshActualIncomeMap();
           saveCache();
           renderIncomeSummary();
@@ -18234,7 +18275,7 @@ function getCachedIncomeSummary(monthKey) {
       })
       .withFailureHandler(() => {
         incomeWrite.settle();
-        state.actualIncome = previousList;
+        state.actualIncome = incomeWrite.rollback(state.actualIncome);
         refreshActualIncomeMap();
         saveCache();
         renderIncomeSummary();
@@ -18248,7 +18289,6 @@ function getCachedIncomeSummary(monthKey) {
     const confirmed = await customConfirm("This permanently removes this income entry. This can't be undone.", { title: 'Delete entry?', okText: 'Delete', danger: true });
     if (!confirmed) return;
 
-    const previousList = state.actualIncome.slice();
     const incomeWrite = beginSliceWrite('actualIncome', [state.editingActualIncomeId], state.actualIncome);
     state.actualIncome = state.actualIncome.filter(item => item.id !== state.editingActualIncomeId);
     refreshActualIncomeMap();
@@ -18264,7 +18304,7 @@ function getCachedIncomeSummary(monthKey) {
       })
       .withFailureHandler(() => {
         incomeWrite.settle();
-        state.actualIncome = previousList;
+        state.actualIncome = incomeWrite.rollback(state.actualIncome);
         refreshActualIncomeMap();
         saveCache();
         renderIncomeSummary();
@@ -27978,7 +28018,7 @@ function getCachedIncomeSummary(monthKey) {
 
     const revertOptimistic = () => {
       exceptionWrite.settle();
-      state.deductionExceptions = previousExceptions;
+      state.deductionExceptions = exceptionWrite.rollback(state.deductionExceptions);
       saveCache();
       renderIncomeSummary();
       renderAnnualCategorySection();
@@ -28059,7 +28099,7 @@ function getCachedIncomeSummary(monthKey) {
 
     const revertDeleteOptimistic = () => {
       exceptionWrite.settle();
-      state.deductionExceptions = previousExceptions;
+      state.deductionExceptions = exceptionWrite.rollback(state.deductionExceptions);
       saveCache();
       renderIncomeSummary();
       renderAnnualCategorySection();
@@ -30640,7 +30680,6 @@ function getCachedIncomeSummary(monthKey) {
     }
     setBulkFormError('');
     const isEdit = !!draft.id;
-    const previousEntries = cloneBulkEntries(state.bulkEntries);
     const previousDraft = state.bulkEntryForm.draft ? { ...state.bulkEntryForm.draft } : null;
     const previousEditingId = state.bulkEntryForm.editingId;
     let optimisticId = draft.id;
@@ -30693,7 +30732,7 @@ function getCachedIncomeSummary(monthKey) {
           rangeWrite.settle();
           endSliceFetch(listTicket);
           const message = res && res.error ? res.error : 'Failed to save bulk range.';
-          state.bulkEntries = previousEntries;
+          state.bulkEntries = rangeWrite.rollback(state.bulkEntries);
           renderBulkEntriesList();
           if (previousDraft) {
             setBulkFormDraft(previousDraft);
@@ -30708,7 +30747,7 @@ function getCachedIncomeSummary(monthKey) {
         clearBulkBusy();
         rangeWrite.settle();
         endSliceFetch(listTicket);
-        state.bulkEntries = previousEntries;
+        state.bulkEntries = rangeWrite.rollback(state.bulkEntries);
         renderBulkEntriesList();
         if (previousDraft) {
           setBulkFormDraft(previousDraft);
@@ -30730,7 +30769,6 @@ function getCachedIncomeSummary(monthKey) {
     if (!id) return;
     // Close the choice popup immediately; the busy spinner in the modal header carries progress from here.
     toggleBulkDeleteConfirm(false);
-    const previousEntries = cloneBulkEntries(state.bulkEntries);
     const previousDraft = state.bulkEntryForm.draft ? { ...state.bulkEntryForm.draft } : null;
     const previousEditingId = state.bulkEntryForm.editingId;
     const listTicket = beginSliceFetch('bulkEntries');
@@ -30757,7 +30795,7 @@ function getCachedIncomeSummary(monthKey) {
         clearBulkBusy();
         rangeWrite.settle();
         endSliceFetch(listTicket);
-        state.bulkEntries = previousEntries;
+        state.bulkEntries = rangeWrite.rollback(state.bulkEntries);
         renderBulkEntriesList();
         if (previousDraft) {
           setBulkFormDraft(previousDraft);
@@ -30768,10 +30806,6 @@ function getCachedIncomeSummary(monthKey) {
         setStatus('Failed to remove bulk range', 'error');
       })
       .api_deleteBulkTimeEntry(id, keepEntries);
-  }
-
-  function cloneBulkEntries(list) {
-    return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
   }
 
   function upsertBulkEntryLocal(entry) {
@@ -31296,7 +31330,6 @@ function getCachedIncomeSummary(monthKey) {
         }
       );
     }
-    const previousEntries = cloneRecurringEntries(state.recurringTimeEntries);
     const previousDraft = state.recurringEntryForm.draft ? { ...state.recurringEntryForm.draft } : null;
     const previousEditingId = state.recurringEntryForm.editingId;
     let optimisticId = draft.id;
@@ -31353,7 +31386,7 @@ function getCachedIncomeSummary(monthKey) {
           scheduleWrite.settle();
           endSliceFetch(listTicket);
           const message = res && res.error ? res.error : 'Failed to save schedule.';
-          state.recurringTimeEntries = previousEntries;
+          state.recurringTimeEntries = scheduleWrite.rollback(state.recurringTimeEntries);
           renderRecurringEntriesList();
           if (previousDraft) {
             setRecurringFormDraft(previousDraft);
@@ -31368,7 +31401,7 @@ function getCachedIncomeSummary(monthKey) {
         clearRecurringBusy();
         scheduleWrite.settle();
         endSliceFetch(listTicket);
-        state.recurringTimeEntries = previousEntries;
+        state.recurringTimeEntries = scheduleWrite.rollback(state.recurringTimeEntries);
         renderRecurringEntriesList();
         if (previousDraft) {
           setRecurringFormDraft(previousDraft);
@@ -31399,7 +31432,6 @@ function getCachedIncomeSummary(monthKey) {
       );
     }
     if (recurringDeleteBtn) recurringDeleteBtn.disabled = true;
-    const previousEntries = cloneRecurringEntries(state.recurringTimeEntries);
     const previousDraft = state.recurringEntryForm.draft ? { ...state.recurringEntryForm.draft } : null;
     const previousEditingId = state.recurringEntryForm.editingId;
     const listTicket = beginSliceFetch('recurringTimeEntries');
@@ -31432,7 +31464,7 @@ function getCachedIncomeSummary(monthKey) {
         clearRecurringBusy();
         scheduleWrite.settle();
         endSliceFetch(listTicket);
-        state.recurringTimeEntries = previousEntries;
+        state.recurringTimeEntries = scheduleWrite.rollback(state.recurringTimeEntries);
         renderRecurringEntriesList();
         if (previousDraft) {
           setRecurringFormDraft(previousDraft);
