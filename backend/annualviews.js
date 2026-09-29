@@ -334,6 +334,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
   // Get deductions for this month
   var deductionsData = deductionsSheet.getDataRange().getValues();
+  var anchorDayIndex = deductionsData.length ? deductionsData[0].indexOf('anchor_day') : -1;
   var extraSuperFlat = 0;
   var extraSuperPercentRate = 0;
   var otherDeductions = 0;
@@ -364,6 +365,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
     var endDate = row[11] && String(row[11]).trim() !== '' ? new Date(row[11]) : null;
 
     if (!startDate) continue;
+    var anchorDay = anchorDayIndex === -1 ? null : normalizeDeductionAnchorDay_(row[anchorDayIndex], startDate, frequency);
 
     // Check if deduction applies to this month
     if (startDate > periodEnd) continue;
@@ -371,7 +373,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 
     // Get occurrences with exceptions applied
     var occurrencesWithExceptions = getDeductionOccurrencesWithExceptions(
-      deductionId, frequency, startDate, endDate, periodStart, periodEnd
+      deductionId, frequency, startDate, endDate, periodStart, periodEnd, anchorDay
     );
     if (!occurrencesWithExceptions || !occurrencesWithExceptions.length) continue;
 
@@ -606,7 +608,7 @@ function buildMonthlySummaryForAnnual(year, month, filteredEntries, allEntries, 
 /**
  * Calculate deduction occurrences in a period
  */
-function calculateDeductionOccurrences(frequency, startDate, endDate, periodStart, periodEnd) {
+function calculateDeductionOccurrences(frequency, startDate, endDate, periodStart, periodEnd, anchorDay) {
   if (!startDate) return 0;
   if (frequency === 'once') {
     return (startDate >= periodStart && startDate <= periodEnd) ? 1 : 0;
@@ -617,14 +619,14 @@ function calculateDeductionOccurrences(frequency, startDate, endDate, periodStar
   if (current > upperBound) return 0;
 
   while (current < periodStart) {
-    current = advanceDateByFrequency(current, frequency, startDate);
+    current = advanceDateByFrequency(current, frequency, startDate, anchorDay);
     if (!current || current > upperBound) return 0;
   }
 
   var occurrences = 0;
   while (current && current >= periodStart && current <= upperBound) {
     occurrences++;
-    current = advanceDateByFrequency(current, frequency, startDate);
+    current = advanceDateByFrequency(current, frequency, startDate, anchorDay);
   }
 
   return occurrences;
@@ -634,7 +636,7 @@ function calculateDeductionOccurrences(frequency, startDate, endDate, periodStar
  * Generate occurrence dates for a deduction within a period
  * Returns array of ISO date strings
  */
-function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd) {
+function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd, anchorDay) {
   var dates = [];
   if (!startDate) return dates;
 
@@ -650,13 +652,13 @@ function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodS
   if (current > upperBound) return dates;
 
   while (current < periodStart) {
-    current = advanceDateByFrequency(current, frequency, startDate);
+    current = advanceDateByFrequency(current, frequency, startDate, anchorDay);
     if (!current || current > upperBound) return dates;
   }
 
   while (current && current >= periodStart && current <= upperBound) {
     dates.push(toIsoDate(current));
-    current = advanceDateByFrequency(current, frequency, startDate);
+    current = advanceDateByFrequency(current, frequency, startDate, anchorDay);
   }
 
   return dates;
@@ -666,13 +668,15 @@ function generateDeductionOccurrenceDates(frequency, startDate, endDate, periodS
  * Get deduction occurrences with exceptions applied
  * Returns array of occurrence objects with amount adjustments
  */
-function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate, endDate, periodStart, periodEnd) {
+function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate, endDate, periodStart, periodEnd, anchorDay) {
   // Generate base occurrence dates
-  var occurrenceDates = generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd);
+  var occurrenceDates = generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd, anchorDay);
 
   // Load exceptions for this deduction
   // Exceptions the legacy Deductions page recorded against drifted dates apply to their anchored occurrence.
-  var exceptions = anchorDeductionExceptions_(listDeductionExceptionsInternal(deductionId), frequency, startDate);
+  // A schedule with an anchor_day was created after anchoring (by a split), so it has none.
+  var exceptions = listDeductionExceptionsInternal(deductionId);
+  if (!anchorDay) exceptions = anchorDeductionExceptions_(exceptions, frequency, startDate);
 
   // Apply exceptions
   var occurrencesWithExceptions = applyExceptionsToOccurrences(occurrenceDates, exceptions, periodStart, periodEnd);
@@ -686,9 +690,14 @@ function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate
   return occurrencesWithExceptions;
 }
 
-function advanceDateByFrequency(date, frequency, anchorDate) {
+/**
+ * The occurrence after `date`. Month-based steps land on the anchor date's day (or `anchorDay`, a
+ * deduction's anchor_day, when given), clamped to the target month's last day.
+ */
+function advanceDateByFrequency(date, frequency, anchorDate, anchorDay) {
   var next = new Date(date.getTime());
   var anchor = anchorDate instanceof Date ? anchorDate : date;
+  var day = anchorDay || anchor.getDate();
   switch (frequency) {
     case 'weekly':
       next.setDate(next.getDate() + 7);
@@ -699,18 +708,18 @@ function advanceDateByFrequency(date, frequency, anchorDate) {
     case 'monthly':
       next.setDate(1);
       next.setMonth(next.getMonth() + 1);
-      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+      next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
       break;
     case 'quarterly':
       next.setDate(1);
       next.setMonth(next.getMonth() + 3);
-      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+      next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
       break;
     case 'yearly':
       next.setDate(1);
       next.setMonth(anchor.getMonth());
       next.setFullYear(next.getFullYear() + 1);
-      next.setDate(Math.min(anchor.getDate(), new Date(next.getFullYear(), anchor.getMonth() + 1, 0).getDate()));
+      next.setDate(Math.min(day, new Date(next.getFullYear(), anchor.getMonth() + 1, 0).getDate()));
       break;
     default:
       return null;
