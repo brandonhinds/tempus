@@ -152,6 +152,44 @@ exports.run = test => {
     assert.equal(c.daySessionsEdit.inRaw,'9:07');
     c.saveDaySession(); assert.equal(calls,2);
   });
+  test('pending entry markers survive overlapping syncs until the in-flight write resolves', () => {
+    const c={state:{entries:[],breaks:[],comments:[],pendingEntryAdds:new Map(),pendingEntryUpdates:new Map(),pendingEntryDeletes:new Set()},
+      entriesSyncInFlightCount:0,entriesSyncRequestSeq:0,deferredMarkerResolves:[],lastEntriesSyncSettledAt:0,
+      STALE_PENDING_MS:45000,pendingDeleteRecordedAt:new Map(),entriesDivergenceHealed:false,
+      allEntryRecords:()=>c.state.entries.slice(),setEntriesAndBreaks:list=>{c.state.entries=list;},
+      reconcileIncomeMetadataWithEntries:()=>{},scheduleBreakReconcile:()=>{},entrySort:()=>0,setStatus:()=>{},Date};
+    ['resolveMarkerAfterSync','beginEntriesSync','endEntriesSync','recordPendingEntryAdd','updatePendingEntryAddId','resolvePendingEntryAdd',
+      'recordPendingEntryUpdate','resolvePendingEntryUpdate','recordPendingEntryDelete','resolvePendingEntryDelete','livePendingMarker','mergeEntriesWithServerEntries']
+      .forEach(name=>vm.runInNewContext(fn(name),c));
+    const old={id:'e1',date:'2026-09-08',punches:[{in:'09:00',out:'12:00'}]};
+    const edited={id:'e1',date:'2026-09-08',punches:[{in:'09:00',out:'13:00'}]};
+    const added={id:'temp_'+Date.now(),date:'2026-09-08',punches:[{in:'14:00',out:'15:00'}]};
+    c.state.entries=[edited,added];
+    c.recordPendingEntryUpdate('e1',edited); c.recordPendingEntryAdd(added);   // save now in flight
+    const shown=()=>c.state.entries.find(e=>e.id==='e1').punches[0].out;
+    for (const round of [1,2]) {                                                // two overlapping syncs
+      const seq=c.beginEntriesSync();
+      c.mergeEntriesWithServerEntries([old]);
+      c.endEntriesSync(seq);
+      assert.equal(shown(),'13:00','sync '+round+' keeps the in-flight edit');
+      assert.ok(c.state.entries.some(e=>e.id===added.id),'sync '+round+' keeps the in-flight add');
+    }
+    const seq=c.beginEntriesSync();
+    c.mergeEntriesWithServerEntries([old]);                                     // overlapping the success below
+    const confirmedAdd=Object.assign({},added,{id:'real-2'});
+    c.recordPendingEntryUpdate('e1',edited); c.resolveMarkerAfterSync(()=>c.resolvePendingEntryUpdate('e1'));
+    c.updatePendingEntryAddId(added.id,confirmedAdd); c.resolveMarkerAfterSync(()=>c.resolvePendingEntryAdd('real-2'));
+    assert.equal(c.state.pendingEntryUpdates.size,1,'resolution waits for the in-flight sync');
+    c.endEntriesSync(seq);
+    assert.equal(c.state.pendingEntryUpdates.size+c.state.pendingEntryAdds.size,0,'markers clear once the write resolved');
+    c.mergeEntriesWithServerEntries([edited,confirmedAdd]);
+    assert.equal(shown(),'13:00');
+    // Leak backstop: a marker whose write never resolved gives way to the server after the staleness window.
+    c.recordPendingEntryUpdate('e1',edited);
+    c.state.pendingEntryUpdates.get('e1').timestamp=Date.now()-46000;
+    c.mergeEntriesWithServerEntries([old]);
+    assert.equal(shown(),'12:00'); assert.equal(c.state.pendingEntryUpdates.size,0);
+  });
   test('annual contract filters remove income overrides and filter effective-rate hours', () => {
     const c={state:{hourTypes:[{id:'work',use_for_rate_calculation:true}],contractMap:{a:{hourly_rate:100},b:{hourly_rate:200}},deductions:[],actualIncomeMap:{'2026-08':{gross_income:10000,superannuation:1000,tax:2000,net_income:8000}}},
       ensureIncomeCacheStructures:()=>{},getDefaultIncomeOffset:()=>0, entriesForMonth:()=>[{date:'2026-08-01',contract_id:'a',hour_type_id:'work',duration_minutes:60},{date:'2026-08-02',contract_id:'b',hour_type_id:'work',duration_minutes:120}],

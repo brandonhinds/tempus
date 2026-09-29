@@ -927,6 +927,19 @@ let ratePreviewInputSyncing = false;
     });
   }
 
+  // A pending add/update marker is live until its write resolves. As a leak backstop (a handler that never
+  // fires, a code path that forgets to resolve) a marker older than the staleness window is dropped and the
+  // server wins — the same self-heal the delete markers get.
+  function livePendingMarker(markers, id) {
+    const marker = markers.get(id);
+    if (!marker) return null;
+    if (marker.timestamp && (Date.now() - marker.timestamp) > STALE_PENDING_MS) {
+      markers.delete(id);
+      return null;
+    }
+    return marker;
+  }
+
   function mergeEntriesWithServerEntries(freshEntries) {
     // Merge over the COMBINED work+break list — breaks ride the same pending/self-heal machinery —
     // then split back out at the end so state.entries stays break-free.
@@ -956,23 +969,24 @@ let ratePreviewInputSyncing = false;
         }
       }
 
-      const pendingAdd = state.pendingEntryAdds.get(id);
+      // Pending add/update markers are NOT consumed here: they stay until the write that recorded them
+      // resolves (its success/failure handler clears them, via resolveMarkerAfterSync), so a second sync
+      // overlapping the same in-flight save still sees them and can't flash the old server value.
+      const pendingAdd = livePendingMarker(state.pendingEntryAdds, id);
       if (pendingAdd && pendingAdd.entry) {
         if (!seenIds.has(id)) {
           merged.push(pendingAdd.entry);
           seenIds.add(id);
         }
-        state.pendingEntryAdds.delete(id);
         return;
       }
 
-      const pendingUpdate = state.pendingEntryUpdates.get(id);
+      const pendingUpdate = livePendingMarker(state.pendingEntryUpdates, id);
       if (pendingUpdate && pendingUpdate.entry) {
         if (!seenIds.has(id)) {
           merged.push(pendingUpdate.entry);
           seenIds.add(id);
         }
-        state.pendingEntryUpdates.delete(id);
         return;
       }
 
@@ -993,18 +1007,16 @@ let ratePreviewInputSyncing = false;
       const isTemp = id.startsWith('temp_');
       const tempBornAt = isTemp ? parseInt(id.replace(/^temp_(break_|comment_)?/, ''), 10) : 0;
       const tempFresh = isTemp && Number.isFinite(tempBornAt) && (Date.now() - tempBornAt) < STALE_PENDING_MS;
-      const hasPendingAdd = state.pendingEntryAdds.has(id);
+      const hasPendingAdd = !!livePendingMarker(state.pendingEntryAdds, id);
       if ((isTemp && tempFresh) || hasPendingAdd) {
         merged.push(entry);
         seenIds.add(id);
-        if (hasPendingAdd) state.pendingEntryAdds.delete(id);
         return;
       }
       if (isTemp) return; // stale orphan temp — drop it
-      if (state.pendingEntryUpdates.has(id)) {
+      if (livePendingMarker(state.pendingEntryUpdates, id)) {
         merged.push(entry);
         seenIds.add(id);
-        state.pendingEntryUpdates.delete(id);
       }
     });
 
