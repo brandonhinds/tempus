@@ -8060,7 +8060,9 @@ function updateDeductionFormVisibility() {
     setStatus('Splitting deduction...', 'warn');
 
     const previousList = state.deductions.slice();
+    let splitWrite = null;
     const revertOptimisticSplit = () => {
+      if (splitWrite) splitWrite.settle();
       state.deductions = previousList.slice();
       state.deductions = dedupeById(state.deductions);
       saveCache();
@@ -8085,6 +8087,7 @@ function updateDeductionFormVisibility() {
       monthKeyFromDateIso(newDeduction.end_date)
     ];
 
+    splitWrite = beginSliceWrite('deductions', [originalDeduction.id, optimisticNewId], state.deductions);
     const originalIndex = state.deductions.findIndex((item) => item.id === originalDeduction.id);
     if (originalIndex !== -1) {
       state.deductions.splice(originalIndex, 1, optimisticOriginal);
@@ -8108,10 +8111,13 @@ function updateDeductionFormVisibility() {
           google.script.run
             .withSuccessHandler((res2) => {
               if (res2 && res2.success) {
-                // Reload deductions
+                // Both writes are confirmed, so a reload sent from here on is truth for the split rows;
+                // the ticket still keeps any other deduction edited meanwhile.
+                splitWrite.settle();
+                const reloadTicket = beginSliceFetch('deductions');
                 google.script.run
                   .withSuccessHandler((deductions) => {
-                    const nextList = dedupeById((deductions || []).map(sanitizeDeduction));
+                    const nextList = dedupeById(mergeSliceList(reloadTicket, (deductions || []).map(sanitizeDeduction), state.deductions));
                     const prevMap = new Map(previousList.map((d) => [d.id, d]));
                     const nextMap = new Map(nextList.map((d) => [d.id, d]));
                     const changedIds = new Set([originalDeduction.id]);
@@ -8138,6 +8144,7 @@ function updateDeductionFormVisibility() {
                     setStatus('Deduction split successfully', 'success');
                   })
                   .withFailureHandler(() => {
+                    endSliceFetch(reloadTicket);
                     revertOptimisticSplit();
                     setStatus('Failed to reload deductions', 'error');
                   })
@@ -8194,6 +8201,7 @@ function updateDeductionFormVisibility() {
     const existingIndex = isEdit ? state.deductions.findIndex((item) => item.id === payload.id) : -1;
     const optimisticId = isEdit ? payload.id : `temp_${Date.now()}`;
     const optimisticDeduction = buildOptimisticDeduction({ ...payload, id: optimisticId }, existing);
+    const write = beginSliceWrite('deductions', [optimisticId], state.deductions);
 
     if (isEdit && existingIndex !== -1) {
       state.deductions.splice(existingIndex, 1, optimisticDeduction);
@@ -8221,6 +8229,7 @@ function updateDeductionFormVisibility() {
       .withSuccessHandler((res) => {
         if (res && res.success && res.deduction) {
           const updated = sanitizeDeduction(res.deduction);
+          write.touch(updated.id).settle();
           const matchIndex = state.deductions.findIndex((item) => item.id === optimisticId);
           if (matchIndex !== -1) {
             state.deductions.splice(matchIndex, 1, updated);
@@ -8240,6 +8249,7 @@ function updateDeductionFormVisibility() {
           }
           setStatus('Deduction saved', 'success');
           } else {
+            write.settle();
             state.deductions = previousList;
             state.deductions = dedupeById(state.deductions);
             saveCache();
@@ -8250,6 +8260,7 @@ function updateDeductionFormVisibility() {
         }
         })
         .withFailureHandler(() => {
+          write.settle();
           state.deductions = previousList;
           state.deductions = dedupeById(state.deductions);
           saveCache();
@@ -8311,6 +8322,7 @@ function updateDeductionFormVisibility() {
     ];
     markIncomeMonthsDirtyForDeductionChange(deduction, null, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
     const previousList = state.deductions.slice();
+    const write = beginSliceWrite('deductions', [deduction.id], state.deductions);
     state.deductions = state.deductions.filter((item) => item.id !== deduction.id);
     state.deductions = dedupeById(state.deductions);
     saveCache();
@@ -8320,12 +8332,14 @@ function updateDeductionFormVisibility() {
     setStatus('Deleting deduction...', 'warn');
     google.script.run
       .withSuccessHandler(() => {
+        write.settle();
         if (state.annualData) {
           loadAnnualData();
         }
         setStatus('Deduction deleted', 'success');
       })
       .withFailureHandler(() => {
+        write.settle();
         state.deductions = previousList;
         state.deductions = dedupeById(state.deductions);
         saveCache();
@@ -8596,6 +8610,8 @@ function updateDeductionFormVisibility() {
     const previousFilters = state.annualCategoryFilters.slice();
     const previousExpansion = { ...state.annualCategoryExpansion };
     const previousDeductions = state.deductions.map((item) => ({ ...item }));
+    const deductionWrite = beginSliceWrite('deductions',
+      state.deductions.filter((item) => item.category_id === category.id).map((item) => item.id), state.deductions);
 
     state.deductionCategories = state.deductionCategories.filter((item) => item.id !== category.id);
     state.deductions.forEach((deduction) => {
@@ -8619,10 +8635,12 @@ function updateDeductionFormVisibility() {
 
     google.script.run
       .withSuccessHandler(() => {
+        deductionWrite.settle();
         setStatus('Category deleted', 'success');
         renderAnnualCategorySection();
       })
       .withFailureHandler(() => {
+        deductionWrite.settle();
         state.deductionCategories = previousCategories;
         state.deductionCategoryMap = previousMap;
         state.annualCategoryFilters = previousFilters;
@@ -10349,6 +10367,205 @@ function updateDeductionFormVisibility() {
     return result;
   }
 
+  // Stale-response guard for state slices that paint optimistically. Entries have their own pending
+  // markers and mergeEntriesWithServerEntries; every other slice goes through this.
+  //
+  // The app paints from cache, then background GETs replace whole slices. A GET sent before a local write
+  // can land after it carrying the pre-write row, which used to revert the edit on screen and in the
+  // browser cache. Modelled on the Assessments epoch/pending pattern (assessments-scripts.html), each named
+  // slice ('deductions', 'settings', 'featureFlags', ...) keeps:
+  //   epoch    - bumped when a local write starts and again when it settles;
+  //   pending  - id or key -> count of unconfirmed writes touching it;
+  //   touched  - id or key -> the epoch its last write settled at;
+  //   before   - id or key -> its value before its first unconfirmed write (what the cache stores);
+  //   inflight - fetch ticket -> the epoch its request was sent at.
+  //
+  //   const write = beginSliceWrite('deductions', [id], state.deductions);  // before the optimistic change
+  //   // server replied: write.touch(realId) when a temp id was swapped, then write.settle() (success or failure)
+  //   const ticket = beginSliceFetch('deductions');                          // before the GET
+  //   state.deductions = mergeSliceList(ticket, serverList, state.deductions);   // lists keyed by .id
+  //   state.featureFlags = mergeSliceFields(ticket, serverFlags, state.featureFlags); // objects keyed by key
+  //
+  // An id is protected from a response while it has a pending write, or when its write settled after that
+  // response's request was sent. Protected ids keep their local value (absent locally means deleted);
+  // everything else takes the server's. The id '*' protects the whole slice, so a stale response is
+  // dropped outright. A failed request must still call endSliceFetch(ticket) so settled writes can be
+  // forgotten. saveCacheNow_ stores confirmedSliceList/confirmedSliceFields, which put back the pre-write
+  // value of anything still pending, so an unconfirmed write is never restored from cache as truth.
+  const syncSliceGuards = {};
+  function syncSlice(name) {
+    if (!syncSliceGuards[name]) {
+      syncSliceGuards[name] = { epoch: 0, fetchSeq: 0, pending: new Map(), touched: new Map(), before: new Map(), inflight: new Map() };
+    }
+    return syncSliceGuards[name];
+  }
+
+  function sliceSnapshot_(current, key) {
+    const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+    if (key === '*') return { present: current !== undefined, value: clone(current) };
+    if (Array.isArray(current)) {
+      const item = current.find((row) => row && row.id === key);
+      return item ? { present: true, value: clone(item) } : { present: false };
+    }
+    if (current && typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, key)) {
+      return { present: true, value: clone(current[key]) };
+    }
+    return { present: false };
+  }
+
+  function beginSliceWrite(name, ids, current) {
+    const slice = syncSlice(name);
+    const keys = new Set();
+    let settled = false;
+    const hold = (key, snapshotFrom) => {
+      if (key == null || key === '' || keys.has(key)) return;
+      keys.add(key);
+      if (!slice.before.has(key) && snapshotFrom !== undefined) slice.before.set(key, sliceSnapshot_(snapshotFrom, key));
+      slice.pending.set(key, (slice.pending.get(key) || 0) + 1);
+    };
+    slice.epoch += 1;
+    (Array.isArray(ids) ? ids : [ids]).forEach((key) => hold(key, current));
+    return {
+      // Ids learned from the server reply (a temp id's real id). They have no pre-write value to cache.
+      touch(...more) {
+        if (!settled) more.forEach((key) => hold(key, undefined));
+        return this;
+      },
+      settle() {
+        if (settled) return;
+        settled = true;
+        slice.epoch += 1;
+        keys.forEach((key) => {
+          const left = (slice.pending.get(key) || 1) - 1;
+          if (left > 0) {
+            slice.pending.set(key, left);
+          } else {
+            slice.pending.delete(key);
+            slice.before.delete(key);
+          }
+          slice.touched.set(key, slice.epoch);
+        });
+      }
+    };
+  }
+
+  function beginSliceFetch(name) {
+    const slice = syncSlice(name);
+    slice.fetchSeq += 1;
+    const ticket = { name, epoch: slice.epoch, seq: slice.fetchSeq, done: false, guard: null };
+    slice.inflight.set(ticket.seq, ticket.epoch);
+    return ticket;
+  }
+
+  // Closes a fetch ticket and returns what its response must not overwrite: null for nothing, '*' for
+  // the whole slice, otherwise a Set of ids or keys.
+  function endSliceFetch(ticket) {
+    if (!ticket) return null;
+    if (ticket.done) return ticket.guard;
+    const slice = syncSlice(ticket.name);
+    const guarded = new Set(slice.pending.keys());
+    slice.touched.forEach((epoch, key) => { if (epoch > ticket.epoch) guarded.add(key); });
+    ticket.done = true;
+    ticket.guard = guarded.has('*') ? '*' : (guarded.size ? guarded : null);
+    slice.inflight.delete(ticket.seq);
+    // A settled write only matters to requests sent before it settled; forget it once none are in flight.
+    let oldest = slice.epoch;
+    slice.inflight.forEach((epoch) => { if (epoch < oldest) oldest = epoch; });
+    slice.touched.forEach((epoch, key) => { if (epoch <= oldest) slice.touched.delete(key); });
+    return ticket.guard;
+  }
+
+  function mergeSliceList(ticket, serverList, localList) {
+    const server = Array.isArray(serverList) ? serverList : [];
+    const guard = endSliceFetch(ticket);
+    if (!guard) return server.slice();
+    const local = Array.isArray(localList) ? localList : [];
+    if (guard === '*') return local.slice();
+    const localById = new Map(local.filter((item) => item && item.id != null).map((item) => [item.id, item]));
+    const merged = [];
+    const placed = new Set();
+    server.forEach((item) => {
+      const id = item ? item.id : null;
+      if (id != null && guard.has(id)) {
+        if (localById.has(id)) merged.push(localById.get(id));
+        placed.add(id);
+        return;
+      }
+      merged.push(item);
+    });
+    local.forEach((item) => {
+      if (item && guard.has(item.id) && !placed.has(item.id)) merged.push(item);
+    });
+    return merged;
+  }
+
+  function mergeSliceFields(ticket, serverFields, localFields) {
+    const server = serverFields && typeof serverFields === 'object' ? serverFields : {};
+    const guard = endSliceFetch(ticket);
+    if (!guard) return { ...server };
+    const local = localFields && typeof localFields === 'object' ? localFields : {};
+    if (guard === '*') return { ...local };
+    const merged = { ...server };
+    guard.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(local, key)) merged[key] = local[key];
+      else delete merged[key];
+    });
+    return merged;
+  }
+
+  // True while a key has an unconfirmed write, or a settled one that a request still in flight predates.
+  function sliceKeyIsGuarded(name, key) {
+    const slice = syncSliceGuards[name];
+    if (!slice) return false;
+    if (slice.pending.has(key) || slice.pending.has('*')) return true;
+    let oldest = null;
+    slice.inflight.forEach((epoch) => { if (oldest === null || epoch < oldest) oldest = epoch; });
+    return oldest !== null && (slice.touched.get(key) || 0) > oldest;
+  }
+
+  function confirmedSliceList(name, list) {
+    const current = Array.isArray(list) ? list : [];
+    const slice = syncSliceGuards[name];
+    if (!slice || !slice.pending.size) return current;
+    if (slice.before.has('*')) {
+      const whole = slice.before.get('*');
+      return whole.present && Array.isArray(whole.value) ? whole.value : current;
+    }
+    const out = [];
+    const placed = new Set();
+    current.forEach((item) => {
+      const id = item ? item.id : null;
+      if (!slice.pending.has(id) || !slice.before.has(id)) {
+        out.push(item);
+        return;
+      }
+      placed.add(id);
+      const prior = slice.before.get(id);
+      if (prior.present) out.push(prior.value);
+    });
+    slice.before.forEach((prior, id) => {
+      if (!placed.has(id) && prior.present && slice.pending.has(id)) out.push(prior.value);
+    });
+    return out;
+  }
+
+  function confirmedSliceFields(name, fields) {
+    const current = fields && typeof fields === 'object' ? fields : {};
+    const slice = syncSliceGuards[name];
+    if (!slice || !slice.pending.size) return current;
+    if (slice.before.has('*')) {
+      const whole = slice.before.get('*');
+      return whole.present && whole.value && typeof whole.value === 'object' ? whole.value : current;
+    }
+    const out = { ...current };
+    slice.before.forEach((prior, key) => {
+      if (!slice.pending.has(key)) return;
+      if (prior.present) out[key] = prior.value;
+      else delete out[key];
+    });
+    return out;
+  }
+
   function loadCache() {
     try {
       const unwrap = (raw) => {
@@ -10506,7 +10723,7 @@ function updateDeductionFormVisibility() {
         hourTypes: state.hourTypes.map(sanitizeHourType),
         recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
         bulkEntries: state.bulkEntries.map((item) => sanitizeBulkEntry(item)),
-        deductions: state.deductions.map(sanitizeDeduction),
+        deductions: confirmedSliceList('deductions', state.deductions).map(sanitizeDeduction),
         deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
         settingsSectionCollapse: state.settingsSectionCollapse,
@@ -26385,10 +26602,12 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchDeductionsFromServer() {
+    const ticket = beginSliceFetch('deductions');
     return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler((deductions) => {
-          state.deductions = dedupeById((deductions || []).map(sanitizeDeduction));
+          const serverDeductions = dedupeById((deductions || []).map(sanitizeDeduction));
+          state.deductions = dedupeById(mergeSliceList(ticket, serverDeductions, state.deductions));
           markIncomeDependencyReady('deductions');
           markAllIncomeSummariesDirty();
           saveCache();
@@ -26399,6 +26618,7 @@ function getCachedIncomeSummary(monthKey) {
           resolve(true);
         })
         .withFailureHandler(() => {
+          endSliceFetch(ticket);
           setStatus('Deductions sync failed', 'error');
           resolve(false);
         })
