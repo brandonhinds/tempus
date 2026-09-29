@@ -190,6 +190,34 @@ exports.run = test => {
     c.mergeEntriesWithServerEntries([old]);
     assert.equal(shown(),'12:00'); assert.equal(c.state.pendingEntryUpdates.size,0);
   });
+  test('an entries sync keeps a dirty punch draft but still refreshes a clean one', () => {
+    let rendered=0;
+    const server={id:'e1',date:'2026-09-08',contract_id:'a',hour_type_id:'work',punches:[{in:'09:00',out:'12:00'}]};
+    const c={state:{entries:[server],hourTypeMap:{work:{requires_contract:true}},currentTab:'sessions'},
+      punchHourType:{value:'work'},punchContract:{value:'a'},hourTypeNeedsContract:ht=>!!ht.requires_contract,
+      updatePunchContractOptions:preferred=>preferred||'a',currentPunchDate:()=> '2026-09-08',
+      clonePunches:list=>list.map(p=>Object.assign({},p)),updatePunchContractVisibility:()=>{},
+      renderPunchDraft:()=>{rendered++;},focusDefaultEntryField:()=>{}};
+    vm.runInNewContext(fn('ensurePunchDraft')+fn('setPunchDraftDirty'),c);
+    c.ensurePunchDraft('a');
+    assert.equal(c.state.punchDraft.punches[0].out,'12:00');
+    c.state.punchDraft.punches[0].out='13:30'; c.setPunchDraftDirty();          // user edits a punch time
+    c.state.entries=[Object.assign({},server,{punches:[{in:'09:00',out:'12:00'}]})];
+    const renders=rendered;
+    c.ensurePunchDraft('a',undefined,{keepDirty:true});                          // a sync lands (tab return / boot tier)
+    assert.equal(c.state.punchDraft.punches[0].out,'13:30','edited value survives the sync');
+    assert.equal(c.state.punchDraft.dirty,true);
+    assert.equal(rendered,renders,'the editor is not re-rendered under the user');
+    c.state.entries=[Object.assign({},server,{id:'e1-rekeyed'})];
+    c.ensurePunchDraft('a',undefined,{keepDirty:true});
+    assert.equal(c.state.punchDraft.entryId,'e1-rekeyed','a re-keyed entry link is refreshed');
+    assert.equal(c.state.punchDraft.punches[0].out,'13:30');
+    c.ensurePunchDraft('a');                                                    // Discard / explicit reload
+    assert.equal(c.state.punchDraft.punches[0].out,'12:00');
+    c.state.entries=[Object.assign({},server,{id:'e1-rekeyed',punches:[{in:'09:00',out:'15:00'}]})];
+    c.ensurePunchDraft('a',undefined,{keepDirty:true});
+    assert.equal(c.state.punchDraft.punches[0].out,'15:00','a clean draft refreshes from the server');
+  });
   test('annual contract filters remove income overrides and filter effective-rate hours', () => {
     const c={state:{hourTypes:[{id:'work',use_for_rate_calculation:true}],contractMap:{a:{hourly_rate:100},b:{hourly_rate:200}},deductions:[],actualIncomeMap:{'2026-08':{gross_income:10000,superannuation:1000,tax:2000,net_income:8000}}},
       ensureIncomeCacheStructures:()=>{},getDefaultIncomeOffset:()=>0, entriesForMonth:()=>[{date:'2026-08-01',contract_id:'a',hour_type_id:'work',duration_minutes:60},{date:'2026-08-02',contract_id:'b',hour_type_id:'work',duration_minutes:120}],

@@ -10735,7 +10735,22 @@ function updateDeductionFormVisibility() {
     updatePunchContractOptions(preferredContractId != null ? preferredContractId : (punchContract ? punchContract.value : ''));
   }
 
-  function ensurePunchDraft(preferredContractId, entryOverride) {
+  // opts.keepDirty (background entry syncs): a draft the user is still editing for the same date survives
+  // the sync instead of being rebuilt from the server copy — only its entry link is refreshed, in case the
+  // entry it points at was re-keyed (temp id confirmed) or removed. Explicit callers (Discard, date or
+  // contract changes, opening an entry) omit it and always rebuild.
+  function ensurePunchDraft(preferredContractId, entryOverride, opts) {
+    const current = state.punchDraft;
+    if (opts && opts.keepDirty && current && current.dirty && current.date === currentPunchDate()) {
+      const stillThere = state.entries.some((e) => e && e.id === current.entryId);
+      if (current.entryId && !stillThere) {
+        const htId = punchHourType ? punchHourType.value : null;
+        const match = state.entries.find((e) => e && e.date === current.date && (e.contract_id || '') === (current.contractId || '')
+          && (!htId || !e.hour_type_id || e.hour_type_id === htId));
+        current.entryId = match ? match.id : null;
+      }
+      return;
+    }
     const selHourType = punchHourType ? state.hourTypeMap[punchHourType.value] : null;
     const contractOptional = !!(selHourType && !hourTypeNeedsContract(selHourType));
     const preferred = preferredContractId != null ? preferredContractId : (entryOverride ? entryOverride.contract_id : undefined);
@@ -26216,7 +26231,7 @@ function getCachedIncomeSummary(monthKey) {
           renderEntries();
           updateTabStates();
           maybePromptDuplicateCleanup();
-        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined);
+        ensurePunchDraft(state.punchDraft ? state.punchDraft.contractId : undefined, undefined, { keepDirty: true });
         // No "Synced" confirmation — the "Syncing…" indicator clearing already says it finished.
         settleStatus();
         // After a reload the open-punch state lives only in the freshly-synced entries (the in-memory
