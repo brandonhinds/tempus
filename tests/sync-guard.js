@@ -11,7 +11,7 @@ function fn(name) {
   const match = source.match(new RegExp('\\n  (?:async )?function ' + name + '\\([\\s\\S]*?\\n  \\}'));
   assert.ok(match, name); return match[0];
 }
-const GUARD = ['syncSlice', 'sliceSnapshot_', 'sliceKeyIsPending', 'beginSliceWrite', 'beginSliceFetch', 'endSliceFetch', 'mergeSliceList',
+const GUARD = ['syncSlice', 'sliceSnapshot_', 'sliceRowCopy_', 'sliceKeyIsPending', 'beginSliceWrite', 'beginSliceFetch', 'endSliceFetch', 'mergeSliceList',
   'mergeSliceFields', 'confirmedSliceList', 'confirmedSliceFields'];
 
 // google.script.run whose calls are queued so a test can answer them in any order.
@@ -311,7 +311,7 @@ exports.run = (test) => {
       hasFutureRecurringEntries: () => false, setRecurringFormDraft: noop, handleRecurringFormBusy: noop,
       setRecurringBusy: noop, clearRecurringBusy: noop, runRecurringSync: noop, recurringDeleteBtn: null,
       showRecurringInitialState: () => { c.state.recurringEntryForm.editingId = ''; }
-    }, ['scheduleFormSnapshot', 'scheduleFormIsEdited', 'syncRecurringEntries', 'cloneRecurringEntries', 'upsertRecurringEntryLocal',
+    }, ['scheduleFormSnapshot', 'scheduleFormIsEdited', 'syncRecurringEntries', 'upsertRecurringEntryLocal',
       'removeRecurringEntryLocal', 'handleRecurringSave', 'handleRecurringDelete']);
     const labels = () => Object.fromEntries(c.state.recurringTimeEntries.map((x) => [x.id, x.label]));
     const oldServer = [{ id: 's1', label: 'Mornings' }, { id: 's2', label: 'Doomed' }, { id: 's3', label: 'From another device' }];
@@ -402,5 +402,80 @@ exports.run = (test) => {
     take(c.calls, 'api_upsertDeduction').failure(new Error('offline'));
     take(c.calls, 'api_getDeductions').success([{ id: 'd1', name: 'Old' }]);
     assert.deepEqual(c.state.deductions.map((d) => d.name), ['Old']);
+  });
+
+  test('rollback undoes only its own write: fetched rows and concurrent writes survive', () => {
+    const c = context();
+    let list = [{ id: 'a', v: 1 }, { id: 'b', v: 1 }, { id: 'c', v: 1 }];
+    const edit = c.beginSliceWrite('rows', ['a'], list);
+    list = list.map((row) => (row.id === 'a' ? { ...row, v: 2 } : row));
+    const del = c.beginSliceWrite('rows', ['b'], list);
+    list = list.filter((row) => row.id !== 'b');
+    const add = c.beginSliceWrite('rows', ['temp_1'], list);
+    list = list.concat({ id: 'temp_1', v: 1 });
+    list = c.mergeSliceList(c.beginSliceFetch('rows'), [{ id: 'a', v: 1 }, { id: 'b', v: 1 }, { id: 'c', v: 9 }, { id: 'd', v: 1 }], list);
+
+    edit.settle();
+    list = edit.rollback(list);
+    assert.deepEqual(list, [{ id: 'a', v: 1 }, { id: 'c', v: 9 }, { id: 'd', v: 1 }, { id: 'temp_1', v: 1 }],
+      'only a reverts; the fetched c and d, the pending delete of b and the pending add stay');
+    del.settle();
+    list = del.rollback(list);
+    assert.deepEqual(list.map((row) => row.id), ['a', 'b', 'c', 'd', 'temp_1'], 'a failed delete puts the row back where it was');
+    add.settle();
+    list = add.rollback(list);
+    assert.deepEqual(list.map((row) => row.id), ['a', 'b', 'c', 'd'], 'a failed add drops its temp row');
+    assert.equal(c.syncSliceGuards.rows.pending.size, 0, 'settle still clears the pending ids');
+
+    const first = c.beginSliceWrite('rows', ['a'], list);
+    list = list.map((row) => (row.id === 'a' ? { ...row, v: 3 } : row));
+    const second = c.beginSliceWrite('rows', ['a'], list);
+    list = list.map((row) => (row.id === 'a' ? { ...row, v: 4 } : row));
+    first.settle();
+    assert.deepEqual(first.rollback(list)[0], { id: 'a', v: 4 }, 'a newer write on the same row is not clobbered');
+    second.settle();
+    assert.deepEqual(second.rollback(list)[0], { id: 'a', v: 3 });
+  });
+
+  test('a failed deduction save reverts only that deduction, keeping fetched rows and a concurrent add', () => {
+    const c = context({
+      state: { deductions: [{ id: 'd1', name: 'Old' }, { id: 'd2', name: 'Doomed' }], deductionExceptions: [] },
+      sanitizeDeduction: (d) => ({ ...d }), buildOptimisticDeduction: (payload, existing) => ({ ...(existing || {}), ...payload }),
+      monthKeyFromDateIso: () => null, markIncomeMonthsDirtyForDeductionChange: () => {},
+      renderDeductionsList: () => {}, renderAnnualCategorySection: () => {}, customConfirm: () => true
+    }, ['dedupeById', 'fetchDeductionsFromServer', 'saveDeductionDirectly', 'handleDeleteDeduction']);
+    const names = () => c.state.deductions.map((d) => d.name);
+    c.fetchDeductionsFromServer();
+    c.saveDeductionDirectly({ id: 'd1', name: 'Edited' }, c.state.deductions[0]);
+    c.saveDeductionDirectly({ name: 'Added' }, null);
+    c.handleDeleteDeduction(c.state.deductions.find((d) => d.id === 'd2'));
+    take(c.calls, 'api_getDeductions').success([{ id: 'd1', name: 'Old' }, { id: 'd2', name: 'Doomed' }, { id: 'd3', name: 'From another device' }]);
+    take(c.calls, 'api_upsertDeduction', (p) => p.id === 'd1').failure(new Error('offline'));
+    assert.deepEqual(names(), ['Old', 'From another device', 'Added'], 'the edit reverts; the fetched row and the pending add stay');
+    take(c.calls, 'api_deleteDeduction').failure(new Error('offline'));
+    assert.deepEqual(names(), ['Old', 'Doomed', 'From another device', 'Added'], 'the failed delete comes back in place');
+    take(c.calls, 'api_upsertDeduction').success({ success: false });
+    assert.deepEqual(names(), ['Old', 'Doomed', 'From another device'], 'the refused add drops only its temp row');
+    assert.equal(c.syncSliceGuards.deductions.pending.size, 0);
+  });
+
+  test('a failed category delete restores the category and its deductions, not rows fetched meanwhile', () => {
+    const noop = () => {};
+    const c = context({
+      state: { deductionCategories: [{ id: 'k1', name: 'Travel' }, { id: 'k2', name: 'Doomed' }], deductionCategoryMap: {},
+        annualCategoryFilters: ['k2'], annualCategoryExpansion: {}, deductions: [{ id: 'd1', category_id: 'k2' }, { id: 'd2', category_id: 'k1' }] },
+      deductionCategoryDeleteId: null, sanitizeDeductionCategory: (x) => ({ id: x.id, name: x.name }), isDeductionCategoriesEnabled: () => true,
+      updateDeductionCategoryMap: noop, ensureDeductionCategoryCollapseState: noop, renderDeductionCategoryOptions: noop,
+      renderDeductionCategoryList: noop, renderDeductionsList: noop, renderAnnualCategorySection: noop
+    }, ['dedupeById', 'fetchDeductionCategoriesFromServer', 'confirmDeleteDeductionCategory']);
+    c.fetchDeductionCategoriesFromServer();
+    c.confirmDeleteDeductionCategory({ id: 'k2' });
+    assert.equal(c.state.deductions[0].category_id, '');
+    take(c.calls, 'api_getDeductionCategories').success([{ id: 'k1', name: 'Travel (renamed)' }, { id: 'k2', name: 'Doomed' }, { id: 'k3', name: 'New' }]);
+    c.state.deductions[1] = { id: 'd2', category_id: 'k3' };
+    take(c.calls, 'api_deleteDeductionCategory').failure(new Error('offline'));
+    assert.deepEqual(c.state.deductionCategories.map((x) => x.name), ['Travel (renamed)', 'Doomed', 'New']);
+    assert.deepEqual(c.state.deductions, [{ id: 'd1', category_id: 'k2' }, { id: 'd2', category_id: 'k3' }], 'd2 changed meanwhile and keeps it');
+    assert.deepEqual(c.state.annualCategoryFilters, ['k2']);
   });
 };
