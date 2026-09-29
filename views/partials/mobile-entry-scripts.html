@@ -137,7 +137,6 @@
       draftPunches: [{ in: '', out: '' }],
       currentEntry: null,
       selectedHourTypeId: '',
-      loading: false,
       staticLoaded: false,
       prefetchedRange: null,
       cacheHydrated: false,
@@ -482,7 +481,9 @@
       if (dom.punchToggle) {
         dom.punchToggle.textContent = open ? 'Punch Out' : 'Punch In';
         dom.punchToggle.classList.toggle('is-out', !!open);
-        dom.punchToggle.disabled = state.loading || (hourTypeNeedsContract(ht) && !hasContract);
+        // Never disabled by an in-flight save: writes run in the background (queued per entry), so the
+        // clock stays tappable. Only a missing required contract blocks it.
+        dom.punchToggle.disabled = hourTypeNeedsContract(ht) && !hasContract;
       }
       if (dom.punchClockstat) dom.punchClockstat.style.display = open ? 'flex' : 'none';
       if (open && dom.punchSince) dom.punchSince.textContent = to12h(open.in);
@@ -578,12 +579,11 @@
     };
 
     // Delete an entry given the entry object (used by swipe-to-delete, independent of the form's
-    // currentEntry). Optimistic: removes locally and re-renders at once, then syncs the server in the
-    // background and restores on failure. Backend delete is idempotent, so a phantom row clears too.
+    // currentEntry). Optimistic via deleteEntryOptimistic: removed locally and re-rendered at once, synced
+    // in the background, and only this entry is restored if the server delete fails.
     const swipeDelete = async (entry) => {
       if (!entry) return;
-      const id = entry.id;
-      const isCurrent = state.currentEntry && state.currentEntry.id === id;
+      const isCurrent = state.currentEntry && state.currentEntry.id === entry.id;
       if (isCurrent) {
         state.currentEntry = null;
         state.draftHours = '';
@@ -591,26 +591,9 @@
         state.punchDirty = false;
         hydrateDraftFromEntry(null, { preserveMode: true });
       }
-      const backup = getCachedEntriesForDate(state.currentDate).slice();
-      removeEntryLocally(id);
-      renderDayCard();
+      const pending = deleteEntryOptimistic(entry);
       scrollToTop(); // user scrolled down to the entries list to delete — bring them back to the top
-      if (typeof id === 'string' && id.indexOf('temp_') === 0) {
-        setStatus('Removed.', 'success');
-        return;
-      }
-      // Already removed optimistically above — no "Deleting…" flash; just confirm or roll back.
-      const res = await run('api_deleteEntry', id);
-      if (res === null) {
-        // Genuine server error — restore the entry and re-render.
-        state.entryCache[state.currentDate] = backup;
-        state.entries = backup;
-        persistCache();
-        renderDayCard();
-        setStatus('Delete failed. Please try again.', 'error');
-      } else {
-        setStatus('Deleted.', 'success');
-      }
+      await pending;
     };
 
     // Animate a row out (slide off in the swipe direction + collapse its height) before removing it,
@@ -867,7 +850,6 @@
     // desktop: overnight punches split across two days, and an accidental too-fast clock-out is abandoned
     // (you stay on the clock) instead of logging a zero-length session.
     const togglePunch = async () => {
-      if (state.loading) return;
       const hourTypeId = state.selectedHourTypeId || defaultHourTypeId();
       const hourType = state.hourTypeMap[hourTypeId] || {};
       const contractId = dom.punchContract ? dom.punchContract.value : '';
@@ -1016,21 +998,175 @@
 
     const getCachedEntriesForDate = (dateIso) => state.entryCache[dateIso] || [];
 
-    const removeEntryLocally = (id) => {
-      const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
-      state.entryCache[state.currentDate] = filtered;
-      state.entries = filtered;
+    const findCachedEntry = (id) => {
+      const key = String(id);
+      const dates = Object.keys(state.entryCache);
+      for (let i = 0; i < dates.length; i += 1) {
+        const hit = (state.entryCache[dates[i]] || []).find((e) => e && String(e.id) === key);
+        if (hit) return hit;
+      }
+      return null;
+    };
+
+    const removeCachedEntry = (id) => {
+      const key = String(id);
+      Object.keys(state.entryCache).forEach((d) => {
+        const list = state.entryCache[d] || [];
+        if (list.some((e) => e && String(e.id) === key)) state.entryCache[d] = list.filter((e) => !e || String(e.id) !== key);
+      });
       persistCache();
     };
 
+    // Point the day view back at the cache and repaint — but only if that day is still the one on screen.
+    const repaintDay = (dateIso) => {
+      if (state.currentDate !== dateIso) return;
+      state.entries = getCachedEntriesForDate(dateIso);
+      renderDayCard();
+    };
+
+    // ----- Pending write markers ---------------------------------------------------------------------
+    // A lighter mirror of desktop's pendingEntryAdds/Updates/Deletes (scripts.html). Every local write
+    // records a marker on its entry id, and every server read (tab-return refresh, day fetch, prefetch) is
+    // MERGED through them instead of replacing the day: a pending add/edit keeps its local copy and a
+    // pending delete stays hidden, so a background read can't revert an edit or resurrect a swiped-away
+    // row. Reads and write settlements share one sequence: a settled marker still protects its entry from
+    // any read issued BEFORE it settled (that read may predate the write server-side), and the first read
+    // issued after it drops the marker — from then on the server is the truth again.
+    const pendingOps = new Map(); // id -> { kind: 'add'|'update'|'delete', date, op, settledSeq }
+    let syncSeq = 0;
+    let tempSeq = 0;
+    const isTempId = (id) => typeof id === 'string' && id.indexOf('temp_') === 0;
+    const newTempId = (prefix) => (prefix || 'temp_') + Date.now() + '_' + (tempSeq += 1);
+
+    const recordPendingEntry = (kind, id, date) => {
+      const op = (syncSeq += 1);
+      pendingOps.set(String(id), { kind, date, op, settledSeq: null });
+      return op;
+    };
+    // The write finished. The marker lingers, settled, until a read issued after this point merges.
+    const settlePendingEntry = (id, op) => {
+      const marker = pendingOps.get(String(id));
+      if (marker && marker.op === op) marker.settledSeq = (syncSeq += 1);
+    };
+    // Forget a marker outright — used by rollbacks, where the local copy is put back to server state.
+    const dropPendingEntry = (id, op) => {
+      const marker = pendingOps.get(String(id));
+      if (marker && (op == null || marker.op === op)) pendingOps.delete(String(id));
+    };
+    // A newer write to the same entry supersedes this one: it owns the local copy (and its rollback).
+    const isLatestPendingOp = (id, op) => {
+      const marker = pendingOps.get(String(id));
+      return !!marker && marker.op === op;
+    };
+    const beginEntriesRead = () => (syncSeq += 1);
+    const pendingGuard = (id, readSeq) => {
+      const marker = pendingOps.get(String(id));
+      return marker && (marker.settledSeq == null || marker.settledSeq > readSeq) ? marker : null;
+    };
+
+    // Merge a server read covering [startIso, endIso] into the cache. Server rows are the truth for those
+    // days — so a row deleted on desktop drops out — except where a pending marker guards the entry.
+    const mergeServerEntries = (serverEntries, startIso, endIso, readSeq) => {
+      const inRange = (d) => !!d && d >= startIso && d <= endIso;
+      const localById = {};
+      const days = new Set();
+      Object.keys(state.entryCache).forEach((d) => {
+        if (!inRange(d)) return;
+        days.add(d);
+        (state.entryCache[d] || []).forEach((e) => { if (e && e.id != null) localById[String(e.id)] = e; });
+      });
+      const next = {};
+      const seen = new Set();
+      const put = (entry) => { (next[entry.date] = next[entry.date] || []).push(entry); days.add(entry.date); };
+      (serverEntries || []).forEach((entry) => {
+        if (!entry || entry.id == null || !entry.date) return;
+        const id = String(entry.id);
+        if (seen.has(id)) return;
+        seen.add(id);
+        const guard = pendingGuard(id, readSeq);
+        if (guard && guard.kind === 'delete') return;
+        put(guard && localById[id] ? localById[id] : entry);
+      });
+      // Local rows the server didn't report survive only while a write for them is pending (an add not
+      // confirmed yet, or an edit this read predates). Anything else was deleted elsewhere, or is an orphan.
+      Object.keys(localById).forEach((id) => {
+        if (seen.has(id)) return;
+        const guard = pendingGuard(id, readSeq);
+        if (guard && guard.kind !== 'delete') put(localById[id]);
+      });
+      days.forEach((d) => { state.entryCache[d] = next[d] || []; });
+      pendingOps.forEach((marker, id) => {
+        if (marker.settledSeq != null && marker.settledSeq < readSeq && inRange(marker.date)) pendingOps.delete(id);
+      });
+      persistCache();
+    };
+
+    // Local upsert by id (optimistic writes and confirmed write responses). Pending-aware: never re-adds
+    // a row with a pending delete, so a late response echoing it back can't resurrect it.
     const storeEntries = (entries) => {
       (entries || []).forEach((entry) => {
         if (!entry || !entry.date) return;
-        const existing = getCachedEntriesForDate(entry.date).filter((e) => e.id !== entry.id);
+        const marker = pendingOps.get(String(entry.id));
+        if (marker && marker.kind === 'delete') return;
+        const existing = getCachedEntriesForDate(entry.date).filter((e) => String(e.id) !== String(entry.id));
         existing.push(entry);
         state.entryCache[entry.date] = existing;
       });
       persistCache();
+    };
+
+    // Writes to one entry run one at a time, in order: GAS calls otherwise race, so a quick Punch In →
+    // Punch Out could land out of order. It also lets an edit or delete of a row whose add is still in
+    // flight wait for that add, then target the real id (serverIdFor), instead of sending a temp id.
+    const writeQueues = new Map(); // entry id -> tail of its queued writes
+    const tempIdAliases = new Map(); // temp id -> server id once its add lands (null if it failed)
+    const queueEntryWrite = (id, task) => {
+      const key = String(id);
+      const result = (writeQueues.get(key) || Promise.resolve()).then(task);
+      const tail = result.catch(() => {});
+      writeQueues.set(key, tail);
+      tail.then(() => { if (writeQueues.get(key) === tail) writeQueues.delete(key); });
+      return result;
+    };
+    const serverIdFor = (id) => {
+      if (!isTempId(id)) return String(id);
+      return tempIdAliases.get(id) || null;
+    };
+
+    // Put one entry back (or remove it, when there was nothing before) — the per-entry rollback.
+    const restoreCachedEntry = (id, entry) => {
+      removeCachedEntry(id);
+      if (entry) storeEntries([{ ...entry, id }]);
+    };
+
+    // Optimistic delete shared by swipe-to-delete and deleteEntry: the row goes at once, the server
+    // delete runs behind it, and a failure restores just this entry with a message. The backend delete is
+    // idempotent, so a phantom row clears too.
+    const deleteEntryOptimistic = async (entry) => {
+      if (!entry || entry.id == null) return;
+      // A row rendered before its add confirmed may still carry the temp id; follow it to the real row.
+      const id = String((isTempId(entry.id) && tempIdAliases.get(entry.id)) || entry.id);
+      const date = entry.date || state.currentDate;
+      const snapshot = { ...entry };
+      removeCachedEntry(id);
+      const op = recordPendingEntry('delete', id, date);
+      repaintDay(date);
+      const outcome = await queueEntryWrite(id, async () => {
+        const serverId = serverIdFor(id);
+        // Never reached the server (an orphan temp, or an add that failed) — the local removal is all.
+        if (!serverId) { dropPendingEntry(id, op); return 'local'; }
+        const res = await run('api_deleteEntry', serverId);
+        if (res === null) {
+          dropPendingEntry(serverId, op);
+          if (!findCachedEntry(serverId)) storeEntries([{ ...snapshot, id: serverId }]);
+          return 'failed';
+        }
+        settlePendingEntry(serverId, op);
+        return 'deleted';
+      });
+      repaintDay(date);
+      if (outcome === 'failed') setStatus('Delete failed. Please try again.', 'error');
+      else setStatus(outcome === 'local' ? 'Removed.' : 'Deleted.', 'success');
     };
 
     const persistCache = () => {
@@ -1119,12 +1255,17 @@
       if (!state.cacheHydrated) state.cacheHydrated = true;
     };
 
+    // Read [startDate, endDate] from the server and merge it in (see mergeServerEntries). Returns false
+    // when the call failed — a null from GAS is a transient hiccup and must never blank the range.
     const fetchEntriesRange = async (startDate, endDate) => {
-      const entries = await run('api_getEntries', { startDate, endDate }) || [];
+      const readSeq = beginEntriesRead();
+      const entries = await run('api_getEntries', { startDate, endDate });
+      if (!Array.isArray(entries)) return false;
       // Break and comment records are desktop Sessions concepts (day shape / day note) — never day
       // entries here. Without the comment filter a day note rendered as a phantom 0h swipeable row.
       const sanitized = entries.map(sanitizeEntry).filter((e) => !(e && (e.entry_type === 'break' || e.entry_type === 'comment')));
-      storeEntries(sanitized);
+      mergeServerEntries(sanitized, startDate, endDate, readSeq);
+      return true;
     };
 
     const rangeCovered = (range, startIso, endIso) => {
@@ -1141,7 +1282,9 @@
         state.prefetchedRange = cachedRange;
         return;
       }
-      await fetchEntriesRange(startIso, endIso);
+      if (!(await fetchEntriesRange(startIso, endIso))) return;
+      // The range read is authoritative for the day on screen too (e.g. a row deleted on desktop).
+      repaintDay(state.currentDate);
       const currentRange = cacheCoverageRange() || { start: startIso, end: endIso };
       const mergedStart = currentRange.start && currentRange.start < startIso ? currentRange.start : startIso;
       const mergedEnd = currentRange.end && currentRange.end > endIso ? currentRange.end : endIso;
@@ -1164,6 +1307,7 @@
     };
 
     const selectHourType = (hourTypeId) => {
+      markDraftEdited();
       state.selectedHourTypeId = hourTypeId || defaultHourTypeId();
       syncHourTypeSelects(state.selectedHourTypeId);
       if (entryModeSource() === 'hour_type') {
@@ -1175,6 +1319,11 @@
       renderContracts();
       renderDayCard();
     };
+
+    // Bumped by every user edit to the add-form (hours, hour type, contract, mode), so hydrateDate can
+    // tell a draft the user started mid-load from the blank form it painted.
+    let draftEditSeq = 0;
+    const markDraftEdited = () => { draftEditSeq += 1; };
 
     const hydrateDraftFromEntry = (entry, opts = {}) => {
       state.currentEntry = entry || null;
@@ -1259,19 +1408,14 @@
       renderDayCard();
     };
 
-    // Returning to the tab silently resyncs the current day's entries from the server — replacing the
-    // day wholesale so desktop-side deletes disappear too (mirrors desktop's tab-return auto-resync).
-    // Skipped mid-save so an optimistic temp can't be clobbered; skipped on failure so a hiccup can't
-    // blank a day that was fine.
+    // Returning to the tab silently resyncs the current day's entries from the server. The read is
+    // merged, not swapped in wholesale: desktop-side deletes still disappear, but pending markers keep
+    // an in-flight add/edit and hide a pending delete, so it's safe to run mid-save. Skipped on failure
+    // so a hiccup can't blank a day that was fine.
     const refreshCurrentDayEntries = async () => {
-      if (state.loading) return;
       const d = state.currentDate;
-      const fresh = await run('api_getEntries', { startDate: d, endDate: d });
-      if (!Array.isArray(fresh) || state.currentDate !== d || state.loading) return;
-      state.entryCache[d] = fresh.map(sanitizeEntry).filter((e) => !(e && (e.entry_type === 'break' || e.entry_type === 'comment')));
-      persistCache();
-      state.entries = getCachedEntriesForDate(d);
-      renderDayCard();
+      if (!(await fetchEntriesRange(d, d))) return;
+      repaintDay(d);
     };
 
     const hydrateDate = async (dateIso) => {
@@ -1290,6 +1434,7 @@
       // than leaving the previous day's showing under "Loading...". Always land on a blank add-form.
       state.entries = getCachedEntriesForDate(target);
       hydrateDraftFromEntry(null, { preserveMode: true });
+      const draftSeqAtPaint = draftEditSeq;
       renderHourTypes();
       renderQuickEntryButton();
       renderDayCard();
@@ -1298,10 +1443,14 @@
       await loadStaticData();
       await loadEntriesForDate(target);
       if (state.currentDate !== target) return; // user already moved to another day — don't clobber it
+      state.entries = getCachedEntriesForDate(target);
       renderHourTypes();
       renderQuickEntryButton();
+      // Re-land on a blank add-form only if the user hasn't started one while the day loaded. Typing
+      // hours (or picking a type/contract) during a cold load used to be wiped here.
+      if (draftEditSeq === draftSeqAtPaint && !state.draftHours) hydrateDraftFromEntry(null, { preserveMode: true });
+      else renderContracts();
       renderDayCard();
-      hydrateDraftFromEntry(null, { preserveMode: true });
       setStatus('');
     };
 
@@ -1574,7 +1723,7 @@
     // quickPunchInForDate. Appends a new session to a completed punch of the same type, else starts fresh.
     // (Only reachable on today: renderQuickList hides punch types on other days.)
     const quickPunchIn = (hourType) => {
-      if (!hourType || state.loading) return;
+      if (!hourType) return;
       const hourTypeId = hourType.id;
       const contractId = resolveQuickContractId(hourType);
       if (hourTypeNeedsContract(hourType) && !contractId) {
@@ -1603,7 +1752,7 @@
     // Log a quick action onto the current day: synthesise a basic entry from the type's quick-fill hours
     // and run it through the shared save path (duplicate guard, optimistic update, server confirm).
     const handleQuickFill = (hourType) => {
-      if (!hourType || state.loading) return;
+      if (!hourType) return;
       if (hourType.quick_fill_mode === 'punch') { quickPunchIn(hourType); return; }
       const minutes = Math.round((quickFillHoursForType(hourType) || 0) * 60);
       if (!minutes) { closeQuickSheet(); return; }
@@ -1628,10 +1777,11 @@
 
     // Apply one of a Detailed contract's day templates to the current day: group the template's sessions
     // by hour type → one advanced entry per (contract, hour type) carrying its punches, created via the
-    // same dedup-safe api_addEntriesBulk path desktop uses. Optimistic: temps show at once and are
-    // swapped for the server's confirmed rows (or dropped, when the server skipped them as duplicates).
+    // same dedup-safe api_addEntriesBulk path desktop uses. Optimistic and non-blocking: temps show at once
+    // (each with a pending-add marker so a refresh can't drop them) and are swapped for the server's
+    // confirmed rows (or dropped, when the server skipped them as duplicates).
     const applyDayTemplate = async (contract, tplIndex) => {
-      if (state.loading || !contract) return;
+      if (!contract) return;
       const tpl = contractStandardDayTemplates(contract)[tplIndex || 0];
       closeQuickSheet();
       if (!tpl) return;
@@ -1642,26 +1792,29 @@
         date: dateIso, contract_id: contract.id, hour_type_id: ht,
         entry_type: 'advanced', punches_json: JSON.stringify(byHt[ht]), round_interval: roundInterval()
       }));
-      setLoading(true);
       // Temps only for payloads with no matching entry yet — mirrors the server's (date, hour type,
       // contract) dedup key so nothing briefly double-shows that the server will skip.
-      const tempIds = [];
-      payloads.forEach((p, i) => {
+      const temps = [];
+      payloads.forEach((p) => {
         const dup = getCachedEntriesForDate(dateIso).some((e) => e
           && (e.hour_type_id || defaultHourTypeId()) === p.hour_type_id
           && (e.contract_id || '') === (p.contract_id || ''));
         if (dup) return;
-        const temp = sanitizeEntry({ ...p, id: 'temp_tpl_' + Date.now() + '_' + i, created_at: isoDateTime(new Date()) });
-        tempIds.push(temp.id);
+        const temp = sanitizeEntry({ ...p, id: newTempId('temp_tpl_'), created_at: isoDateTime(new Date()) });
+        temps.push({ id: temp.id, op: recordPendingEntry('add', temp.id, dateIso) });
         storeEntries([temp]);
       });
-      state.entries = getCachedEntriesForDate(dateIso);
-      renderDayCard();
+      repaintDay(dateIso);
       const res = await run('api_addEntriesBulk', { entries: payloads });
       // Drop the temps either way; the server's confirmed rows (if any) replace them below.
-      state.entryCache[dateIso] = getCachedEntriesForDate(dateIso).filter((e) => tempIds.indexOf(e.id) === -1);
+      temps.forEach((t) => { removeCachedEntry(t.id); dropPendingEntry(t.id, t.op); });
       if (res && res.success) {
-        (res.entries || []).forEach((raw) => storeEntries([sanitizeEntry(raw)]));
+        (res.entries || []).forEach((raw) => {
+          const confirmed = sanitizeEntry(raw);
+          // A settled add marker: a read already in flight (issued before this landed) can't drop the row.
+          settlePendingEntry(confirmed.id, recordPendingEntry('add', confirmed.id, confirmed.date || dateIso));
+          storeEntries([confirmed]);
+        });
         const added = res.added || 0;
         const dupes = res.duplicates || 0;
         if (added) {
@@ -1672,8 +1825,8 @@
         }
       } else {
         // No response — but GAS can return null on a transient hiccup even after persisting. Re-read the
-        // day authoritatively and only flag an error if the entries truly didn't land (saveEntry's pattern).
-        state.entryCache[dateIso] = [];
+        // day (merged, so other in-flight entries are untouched) and only flag an error if the template's
+        // entries truly didn't land.
         await fetchEntriesRange(dateIso, dateIso);
         const landed = payloads.every((p) => getCachedEntriesForDate(dateIso).some((e) => e
           && (e.hour_type_id || defaultHourTypeId()) === p.hour_type_id
@@ -1681,11 +1834,7 @@
         if (!landed) setStatus('Couldn’t apply “' + tpl.name + '”. Please try again.', 'error');
       }
       persistCache();
-      if (state.currentDate === dateIso) {
-        state.entries = getCachedEntriesForDate(dateIso);
-        renderDayCard();
-      }
-      setLoading(false);
+      repaintDay(dateIso);
     };
 
     // Stamp the template's comment onto the day (desktop parity: applying a template overwrites the day
@@ -1726,6 +1875,7 @@
     let padFresh = false; // a pre-filled value acts as "selected" — the first keypress replaces it
     const renderPad = () => { if (dom.padVal) dom.padVal.textContent = padBuffer || '0.0'; };
     const commitPad = () => {
+      markDraftEdited();
       if (dom.hours) dom.hours.value = padBuffer;
       state.draftHours = padBuffer;
       syncHoursDisplay();
@@ -1792,16 +1942,11 @@
       commitPad();
     };
 
-    const setLoading = (flag) => {
-      state.loading = flag;
-      [dom.punchToggle, dom.punchEditorDone].forEach((el) => {
-        if (!el) return;
-        el.disabled = flag;
-      });
-    };
-
+    // Adds and edits apply optimistically and write in the background: nothing is disabled while a save
+    // is in flight (the punch clock stays tappable), writes to one entry are queued in order, a pending
+    // marker keeps any refresh from reverting the optimistic copy, and a failure rolls back only this
+    // entry — never the whole day.
     const saveEntry = async (overridePayload) => {
-      if (state.loading) return;
       const payload = overridePayload || (state.mode === 'punch' ? getPunchPayload() : getManualPayload());
       if (!payload) return;
       const duplicate = findDuplicate(payload);
@@ -1810,87 +1955,86 @@
         hydrateDraftFromEntry(null, { preserveMode: true });
         return;
       }
-      setLoading(true);
+      const date = payload.date || state.currentDate;
       const isUpdate = !!payload.id;
-      const fn = isUpdate ? 'api_updateEntry' : 'api_addEntry';
-      const optimisticId = payload.id || ('temp_' + Date.now());
-      const optimistic = sanitizeEntry({ ...payload, id: optimisticId, created_at: isoDateTime(new Date()) });
+      const localId = isUpdate ? String(payload.id) : newTempId();
+      const previous = isUpdate ? findCachedEntry(localId) : null;
+      const op = recordPendingEntry(isUpdate ? 'update' : 'add', localId, date);
       // Optimistic: reflect the add OR update instantly (storeEntries upserts by id). Stay on a blank
       // add-form; the entry lives in the list below.
-      const savedDate = state.currentDate;
-      storeEntries([optimistic]);
-      state.entries = getCachedEntriesForDate(savedDate);
+      storeEntries([sanitizeEntry({ ...payload, id: localId, created_at: isoDateTime(new Date()) })]);
       hydrateDraftFromEntry(null, { preserveMode: true });
-      renderDayCard();
-      const res = await run(fn, payload);
-      if (res && res.success && res.entry) {
-        const confirmed = sanitizeEntry(res.entry);
+      repaintDay(date);
+      const outcome = await queueEntryWrite(localId, async () => {
+        const serverId = isUpdate ? serverIdFor(localId) : null;
+        // Editing a row whose add failed: that add already rolled the row back; nothing to update.
+        if (isUpdate && !serverId) { dropPendingEntry(localId, op); return 'skipped'; }
+        const res = await run(isUpdate ? 'api_updateEntry' : 'api_addEntry', isUpdate ? { ...payload, id: serverId } : payload);
+        const ok = res && res.success && res.entry;
+        const confirmed = ok ? sanitizeEntry(res.entry) : null;
         if (!isUpdate) {
-          // Drop the temp placeholder before storing the server id (temp id != real id → would double up).
-          state.entryCache[savedDate] = getCachedEntriesForDate(savedDate).filter((e) => e.id !== optimisticId);
+          // Everything queued behind this add (an edit, a delete) now targets the real id.
+          const realId = confirmed ? String(confirmed.id) : null;
+          tempIdAliases.set(localId, realId);
+          if (realId && writeQueues.has(localId)) writeQueues.set(realId, writeQueues.get(localId));
+          const marker = pendingOps.get(localId);
+          const local = findCachedEntry(localId);
+          removeCachedEntry(localId);
+          pendingOps.delete(localId);
+          if (!confirmed) return 'failed';
+          if (marker && marker.op !== op) {
+            // Touched since the add was sent: that later write's marker (and, for an edit, its local copy)
+            // carries over to the real id, and the queued write settles it.
+            pendingOps.set(realId, { ...marker, date: confirmed.date || marker.date });
+            if (local && marker.kind !== 'delete') storeEntries([{ ...local, id: confirmed.id }]);
+          } else {
+            settlePendingEntry(realId, recordPendingEntry('add', realId, confirmed.date || date));
+            storeEntries([confirmed]);
+          }
+          return 'saved';
         }
-        storeEntries([confirmed]);
-        setStatus('Saved.', 'success');
-      } else {
-        // No success response — but GAS can return null on a transient hiccup even after it persisted.
-        // Re-read this day authoritatively from the server rather than blindly rolling back (which could
-        // vanish a successfully-saved entry until reload). Only flag an error if the write truly didn't land.
-        state.entryCache[savedDate] = [];
-        await fetchEntriesRange(savedDate, savedDate);
-        const after = getCachedEntriesForDate(savedDate);
-        const landed = isUpdate
-          ? after.some((e) => e.id === payload.id)
-          : after.some((e) => (e.hour_type_id || defaultHourTypeId()) === payload.hour_type_id
-              && (e.contract_id || '') === (payload.contract_id || '')
-              && Math.abs((Number(e.duration_minutes) || 0) - payload.duration_minutes) < 1);
+        if (confirmed) {
+          if (isLatestPendingOp(serverId, op)) storeEntries([confirmed]);
+          settlePendingEntry(serverId, op);
+          return 'saved';
+        }
+        // Failed edit: put back what was there before — unless a newer edit has since replaced it.
+        if (isLatestPendingOp(serverId, op)) {
+          dropPendingEntry(serverId, op);
+          restoreCachedEntry(serverId, previous);
+        }
+        return 'failed';
+      });
+      if (outcome === 'saved') setStatus('Saved.', 'success');
+      if (outcome === 'failed') {
+        // GAS can return null on a transient hiccup even after the write persisted, so re-read the day
+        // before calling it a failure. The read merges — pending markers guard every other entry — so it
+        // can only bring this row back if it really landed, never rewind the rest of the day.
+        const readOk = await fetchEntriesRange(date, date);
+        const after = getCachedEntriesForDate(date);
+        const matchesPayload = (e) => (e.hour_type_id || defaultHourTypeId()) === (payload.hour_type_id || defaultHourTypeId())
+          && (e.contract_id || '') === (payload.contract_id || '')
+          && Math.abs((Number(e.duration_minutes) || 0) - (Number(payload.duration_minutes) || 0)) < 1;
+        const landed = readOk && after.some((e) => matchesPayload(e) && (!isUpdate || String(e.id) === serverIdFor(localId)));
         if (!landed) setStatus('Save failed. Please try again.', 'error');
       }
-      if (state.currentDate === savedDate) {
-        state.entries = getCachedEntriesForDate(savedDate);
-        hydrateDraftFromEntry(null, { preserveMode: true });
-        renderDayCard();
-      }
-      setLoading(false);
+      repaintDay(date);
     };
 
+    // Delete the entry loaded into the form. Optimistic, like swipe-to-delete: gone at once, restored with
+    // a message if the server delete fails.
     const deleteEntry = async () => {
-      if (state.loading) return;
       if (!state.currentEntry) {
         setStatus('Nothing to delete.', 'error');
         return;
       }
-      const id = state.currentEntry.id;
-      if (typeof id === 'string' && id.indexOf('temp_') === 0) {
-        // Never-persisted optimistic entry (e.g. left over from an earlier bug);
-        // just drop it locally — the backend has nothing to delete.
-        const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
-        state.entryCache[state.currentDate] = filtered;
-        state.entries = filtered;
-        state.currentEntry = null;
-        hydrateDraftFromEntry(null, { preserveMode: true });
-        renderDayCard();
-        persistCache();
-        setStatus('Removed.', 'success');
-        return;
-      }
-      setLoading(true);
-      setStatus('Deleting...', 'info');
-      const res = await run('api_deleteEntry', id);
-      if (res === null) {
-        setStatus('Delete failed. Please try again.', 'error');
-      } else {
-        const filtered = getCachedEntriesForDate(state.currentDate).filter((e) => e.id !== id);
-        state.entryCache[state.currentDate] = filtered;
-        state.entries = filtered;
-        state.currentEntry = null;
-        state.draftHours = '';
-        state.draftPunches = [{ in: '', out: '' }];
-        state.punchDirty = false;
-        hydrateDraftFromEntry(null, { preserveMode: true });
-        renderDayCard();
-        setStatus('Deleted.', 'success');
-      }
-      setLoading(false);
+      const entry = state.currentEntry;
+      state.currentEntry = null;
+      state.draftHours = '';
+      state.draftPunches = [{ in: '', out: '' }];
+      state.punchDirty = false;
+      hydrateDraftFromEntry(null, { preserveMode: true });
+      await deleteEntryOptimistic(entry);
     };
 
     // ----- Theme picker (tap the Tempus brand). Sets a device-local theme that doesn't touch the synced
@@ -1944,6 +2088,7 @@
 
     const bindEvents = () => {
       const selectMode = (mode) => {
+        markDraftEdited();
         if (entryModeSource() === 'hour_type') {
           const desired = mode === 'punch' ? 'detailed' : 'simple';
           const current = state.hourTypeMap[state.selectedHourTypeId || defaultHourTypeId()];
@@ -1997,8 +2142,8 @@
       }
       if (dom.manualHourType) dom.manualHourType.onchange = () => selectHourType(dom.manualHourType.value);
       if (dom.punchHourType) dom.punchHourType.onchange = () => selectHourType(dom.punchHourType.value);
-      if (dom.manualContract) dom.manualContract.onchange = () => { renderContracts({ manualPreferred: dom.manualContract.value }); syncHoursDisplay(); };
-      if (dom.punchContract) dom.punchContract.onchange = () => { renderContracts({ punchPreferred: dom.punchContract.value }); updatePunchClock(); };
+      if (dom.manualContract) dom.manualContract.onchange = () => { markDraftEdited(); renderContracts({ manualPreferred: dom.manualContract.value }); syncHoursDisplay(); };
+      if (dom.punchContract) dom.punchContract.onchange = () => { markDraftEdited(); renderContracts({ punchPreferred: dom.punchContract.value }); updatePunchClock(); };
       if (dom.hoursDisplay) dom.hoursDisplay.onclick = () => openKeypad(findEntryForSelection());
       if (dom.keypadDone) dom.keypadDone.onclick = saveFromKeypad;
       if (dom.keypad) dom.keypad.addEventListener('click', (event) => { if (event.target === dom.keypad) closeKeypad(); });
@@ -2038,6 +2183,12 @@
         mobileShell.applyTheme(liveSettings.theme);
       }
       applyDayModeChrome();
+    };
+
+    // Internal handle for the test harness (tests/mobile-sync.js) and console debugging — not an API.
+    window.mobileEntry = {
+      state, pendingOps, hydrateDate, refreshCurrentDayEntries, fetchEntriesRange,
+      saveEntry, swipeDelete, deleteEntry, applyDayTemplate, padPress
     };
 
     init();
