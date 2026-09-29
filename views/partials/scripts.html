@@ -24095,7 +24095,8 @@ function getCachedIncomeSummary(monthKey) {
   // api_saveDaySessions in the background. Jobs are serialised: each waits for the one before it, so a batch
   // that edits a session added by a still-unconfirmed Save is sent with the confirmed id — and with the
   // server's confirmed snapshot as `expected`. A failure rolls back that job and every later one built on
-  // it, re-opens the failed draft (same client_request_ids, so a retry stays idempotent) and says so.
+  // it and re-opens the failed draft plus every later queued one, re-based onto the restored day (same
+  // client_request_ids, so a retry stays idempotent), and says so.
   const daySessionsSaveQueue = [];        // jobs applied locally; the head is in flight
   const daySessionsTempIds = new Map();   // temp id -> confirmed id, while the queue is busy
   const daySessionsConfirmed = new Map(); // confirmed id -> server entry returned by an earlier job
@@ -24315,20 +24316,77 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
+  // The punch each (non-new) draft row was edited from, keyed like the draft: a failed Save uses it to
+  // re-base drafts built on its now rolled-back optimistic state (temps gone, punch indexes shifted).
+  function daySessionDraftOrigins(drafts) {
+    const origins = new Map();
+    drafts.forEach((draft, key) => {
+      if (draft.isNew) return;
+      const hash = key.lastIndexOf('#');
+      const entryId = key.slice(0, hash);
+      const entry = state.entries.find((e) => e && String(e.id) === entryId);
+      const punch = entry && entryPunches(entry)[Number(key.slice(hash + 1))];
+      if (punch) origins.set(key, { in: punch.in || '', out: punch.out || '',
+        htId: entry.hour_type_id || getDefaultHourTypeId(), contractId: entry.contract_id || '' });
+    });
+    return origins;
+  }
+
+  // Lay a draft built on rolled-back optimistic state onto the restored day in `restored`. A row on a
+  // surviving entry moves to the punch that still matches its original in/out; a row on a session the
+  // failed Save added (its temp is gone) folds into that session's re-opened draft_session_ draft, which
+  // keeps its client_request_id so a retry stays idempotent. Returns false when the row can't be placed.
+  function rebaseDaySessionDraft(restored, draft, key, origin, touchedByUndone) {
+    if (draft.isNew) { restored.set(key, Object.assign({}, restored.get(key), draft)); return true; }
+    const hash = key.lastIndexOf('#');
+    const entryId = daySessionsResolveId(key.slice(0, hash));
+    const punchIndex = Number(key.slice(hash + 1));
+    const entry = state.entries.find((e) => e && String(e.id) === entryId);
+    const punches = entry ? entryPunches(entry) : [];
+    const same = (p) => origin && (p.in || '') === origin.in && (p.out || '') === origin.out;
+    let index = punches[punchIndex] && same(punches[punchIndex]) ? punchIndex : punches.findIndex(same);
+    // No exact match (e.g. an earlier confirmed Save rounded it) but nothing undone touched this entry:
+    // its punches are as the draft saw them.
+    if (index === -1 && punches[punchIndex] && !touchedByUndone(entryId)) index = punchIndex;
+    if (index > -1) {
+      const nextKey = daySessionsPendingKey(entryId, index);
+      restored.set(nextKey, Object.assign({}, restored.get(nextKey), draft, { entryId, punchIndex: index }));
+      return true;
+    }
+    if (!origin) return false;
+    let target = null;
+    restored.forEach((other, otherKey) => {
+      if (target || !other.isNew || other.deleted) return;
+      if (other.inVal === origin.in && (other.outVal || '') === origin.out
+        && other.htId === origin.htId && (other.contractId || '') === origin.contractId) target = otherKey;
+    });
+    if (!target) return false;
+    const base = restored.get(target);
+    if (draft.deleted) { restored.delete(target); return true; }
+    restored.set(target, Object.assign({}, draft, { entryId: base.entryId || target.slice(0, target.lastIndexOf('#')),
+      punchIndex: 0, isNew: true, requestId: base.requestId }));
+    return true;
+  }
+
   function failDaySessionsJob(job, error) {
     const index = daySessionsSaveQueue.indexOf(job);
     if (index === -1) return;
     const date = job.payload.date;
+    // What's typed since was drafted against the current optimistic day: note its rows' punches first.
+    const liveOrigins = daySessionDraftOrigins(daySessionsPending);
     // This job and every later one (built on top of it, not yet sent) go back, newest first.
     const undone = daySessionsSaveQueue.splice(index);
     undone.slice().reverse().forEach(rollbackDaySessionsJob);
     state.entries.sort(entrySort);
     const exists = (entryId) => state.entries.some((e) => e && String(e.id) === entryId);
     const keep = (draft, key) => draft.isNew || exists(key.slice(0, key.lastIndexOf('#')));
+    const touchedByUndone = (entryId) => undone.some((other) => Array.from(other.touched)
+      .some((touched) => daySessionsResolveId(touched) === entryId));
     let reopened = false;
+    let lost = 0;
     if (isDayModalOpenFor(date)) {
-      // Re-open the failed draft (its request ids intact, so Save retries idempotently); anything typed
-      // since stays on top, minus rows whose session was just rolled away.
+      // Re-open the failed draft (its request ids intact, so Save retries idempotently), then every later
+      // queued draft and anything typed since, each re-based onto the restored day (newest on top).
       const restored = new Map();
       job.draft.forEach((draft, key) => {
         const hash = key.lastIndexOf('#');
@@ -24336,7 +24394,11 @@ function getCachedIncomeSummary(monthKey) {
         const nextKey = entryId + key.slice(hash);
         if (keep(draft, nextKey)) restored.set(nextKey, draft.isNew ? draft : Object.assign({}, draft, { entryId }));
       });
-      daySessionsPending.forEach((draft, key) => { if (keep(draft, key)) restored.set(key, draft); });
+      const rebase = (drafts, origins) => drafts.forEach((draft, key) => {
+        if (!rebaseDaySessionDraft(restored, draft, key, origins.get(key), touchedByUndone)) lost++;
+      });
+      undone.slice(1).forEach((later) => rebase(later.draft, later.origins || new Map()));
+      rebase(daySessionsPending, liveOrigins);
       daySessionsPending = restored;
       if (daySessionsEdit && daySessionsEdit.mode === 'edit' && !daySessionsEdit.isNew && !exists(String(daySessionsEdit.entryId))) daySessionsEdit = null;
       if (!daySessionsEdit && job.edit) daySessionsEdit = job.edit;
@@ -24350,8 +24412,11 @@ function getCachedIncomeSummary(monthKey) {
     if (isDayModalOpenFor(date)) renderDayEditor(date);
     scheduleBreakReconcile(date);
     const reason = (error && error.message) || 'Couldn’t save the sessions.';
-    setStatus(reason + (reopened ? ' Your changes were undone and are back in the editor — press Save to retry.' : ' Your changes were undone.')
-      + (undone.length > 1 ? ' Later session saves were undone too.' : ''), 'error');
+    const also = undone.length > 1 ? (undone.length === 2 ? ' The save queued after it was undone too.' : ' The saves queued after it were undone too.') : '';
+    setStatus(reason + also + (reopened
+      ? (undone.length > 1 ? ' All of those changes are back in the editor' : ' Your changes were undone and are back in the editor')
+        + (lost ? ' (' + lost + ' edit' + (lost === 1 ? '' : 's') + ' to a rolled-back session couldn’t be restored)' : '') + ' — press Save to retry.'
+      : ' Your changes were undone.'), 'error');
   }
 
   function saveDaySession() {
@@ -24361,7 +24426,8 @@ function getCachedIncomeSummary(monthKey) {
     catch (error) { setStatus(error.message, 'error'); return Promise.resolve(false); }
     if (!payload.changes.length) { cancelDaySessionEdit(); return Promise.resolve(true); }
     const job = { seq: ++daySessionsSaveSeq, payload, backups: new Map(), touched: new Set(), deleted: new Set(),
-      createdTemps: new Map(), draft: new Map(daySessionsPending), edit: daySessionsEdit, sent: false };
+      createdTemps: new Map(), draft: new Map(daySessionsPending), origins: daySessionDraftOrigins(daySessionsPending),
+      edit: daySessionsEdit, sent: false };
     applyDaySessionsJobLocally(job);
     daySessionsEdit = null;
     daySessionsPending = new Map();
