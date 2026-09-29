@@ -63,10 +63,24 @@
   <div class="ts-kicker">Bundled guide</div><h3 style="margin:2px 0 6px;">Help</h3><p class="ts-note" style="max-width:680px;">This guide ships with the same build as the app, so its workflows match the version you are using.</p>
   <div class="ts-help-grid">
     <details open><summary>Upgrade and backups</summary><p>Tempus disables financial pages until the one-time upgrade has created and verified a spreadsheet copy. Failed migrations show their error and resume from the unfinished step.</p></details>
-    <details><summary>Expenses and GST</summary><p>Record purchases as transactions and payments. A recurring rule is only a forecast. Taxable GST is included in BAS actuals only after reconciliation, claimable-GST confirmation and receipt attachment.</p></details>
+    <details><summary>Expenses: recurring bills</summary>
+      <ol>
+        <li>Open Expenses → <strong>Schedules</strong> and choose <strong>New schedule</strong>.</li>
+        <li>Enter the vendor, the amount each time (including GST), the frequency and the start date, which is the first payment. Add an end date only if the bill stops. For monthly bills, pick a day from 1 to 28.</li>
+        <li>Choose <strong>Save schedule</strong>. The next 12 months of payments appear under Transactions → <strong>Due and upcoming</strong>.</li>
+      </ol>
+      <p>Editing a schedule rebuilds its upcoming payments. Ones already recorded or paid are never changed. Turn off <strong>Active</strong> to pause a schedule, or use <strong>Stop schedule</strong> to end it today. Use <strong>Extend to 12 months ahead</strong> now and then so long-running schedules keep a year of payments listed.</p>
+    </details>
+    <details><summary>Expenses: recording and paying</summary>
+      <p><strong>A scheduled bill:</strong> choose <strong>Mark paid</strong> to record it and its payment in one step. Use <strong>Record as unpaid bill</strong> if it has arrived but isn't paid yet. Use <strong>Skip</strong> if it won't happen this time.</p>
+      <p><strong>A one-off purchase:</strong> choose <strong>Record expense</strong>. Leave <strong>Paid now</strong> on to record the payment at the same time. Turn it off for a bill you'll pay later.</p>
+      <p>Each expense shows Paid, Part-paid or Unpaid and the amount outstanding. Use <strong>Record payment</strong> to pay what's owing, including in instalments. Payments are listed under the expense with their reference.</p>
+      <p><strong>Fixing mistakes:</strong> <strong>Remove payment</strong> undoes a payment, and <strong>Edit</strong> corrects the details. <strong>Void</strong> keeps the expense for the record but leaves it out of every total. A reconciled expense is locked, so void it and record a correction instead.</p>
+    </details>
+    <details><summary>Expenses and GST</summary><p>On a cash basis an expense counts when it is paid, so an unpaid expense counts as $0. On an accrual basis it counts on its invoice or purchase date. A GST credit (BAS 1B) counts only after you add a receipt and <strong>Reconcile</strong> the expense with the GST credit claimed. Upcoming schedule payments are forecasts, never actuals. The dashboard, the BAS table and the BAS calculation all read company expenses from the Expenses page. The Deductions page is for salary sacrifice and extra super only.</p></details>
     <details><summary>Assessments</summary><p>Turn on Lil Assessments mode to open Assessments at the current month. Record the client, date of birth, contract, organisation and one of the five assessment types; the assessment date decides its billing month. Time you log against an assessment is tracked separately on a non-billable hour type and never changes the fee.</p></details>
     <details><summary>Monthly invoice</summary><p>Generate Invoice copies your Google Docs template once for every assessment in the selected month, across contracts and organisations. Generating again asks first, keeps the month’s invoice number, and only replaces the link after the new document is written. Logging time does not make an invoice out of date; adding, editing or deleting an assessment does.</p></details>
-    <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense rules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
+    <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense schedules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
     <details><summary>Tax estimates</summary><p id="help-tax-table-status">Checking the bundled PAYG table…</p><p class="ts-note">Estimates use ATO Scale 2 and are guidance only. Confirm payroll and tax obligations with the ATO or your adviser.</p></details>
     <details><summary>Keyboard access</summary><p>Use Tab to move through controls. Quick-action menus support the Menu key or Shift+F10, arrow keys, Enter and Escape. Focus remains visible in every theme.</p></details>
   </div>
@@ -105,5 +119,8 @@
   .ts-help-grid details { padding:18px 0; border-bottom:1px solid var(--border); }
   .ts-help-grid summary { cursor:pointer; font-weight:750; }
   .ts-help-grid p { color:var(--muted); margin:10px 0 0; }
+  .ts-help-grid ol { color:var(--muted); margin:10px 0 0; padding-left:20px; }
+  .ts-help-grid li + li { margin-top:4px; }
+  .ts-help-grid strong { color:var(--text); }
   @media (max-width:760px) { .ts-ledger-row { grid-template-columns:1fr auto; } .ts-ledger-row__meta { grid-column:1; } .ts-ledger-row__actions { grid-column:1 / -1; justify-content:flex-start; } .ts-help-grid { grid-template-columns:1fr; } .ts-expense-inline-field, .ts-expense-inline-field.is-grow { flex:1 1 100%; } }
 </style>
