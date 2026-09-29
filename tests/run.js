@@ -1792,6 +1792,7 @@ test('client timesheet is company-gated, contract-driven, and shares the print b
 
 require('./session-updates').run(test);
 require('./sync-guard').run(test);
+require('./expenses').run(test);
 
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');
 

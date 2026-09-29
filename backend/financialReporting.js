@@ -39,9 +39,10 @@ function invoiceAccrualAllocationForPeriod_(invoice, from, to) {
   return { sales: totals.totalWithGst, gst: totals.gstAmount };
 }
 
-function expenseActualForPeriod_(basis, from, to) {
-  var transactions = api_listExpenseTransactions({});
-  var payments = expenseReadSheet_('expense_payments').rows;
+/** `source` ({ transactions, payments }) lets a caller summing many periods read the sheets once. */
+function expenseActualForPeriod_(basis, from, to, source) {
+  var transactions = source ? source.transactions : api_listExpenseTransactions({});
+  var payments = source ? source.payments : expenseReadSheet_('expense_payments').rows;
   var totals = { purchases: 0, gst: 0 };
   transactions.forEach(function(transaction) {
     if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return;
@@ -61,6 +62,33 @@ function expenseActualForPeriod_(basis, from, to) {
     totals.gst += expenseClaimableGst_(transaction) * ratio;
   });
   return { purchases: roundMoney_(totals.purchases), gst: roundMoney_(totals.gst) };
+}
+
+/**
+ * Company expenses per calendar month ('YYYY-MM'), on both bases, for the client's dashboard income and
+ * BAS 1B. Each month is summed by expenseActualForPeriod_, the function the backend BAS uses, so the
+ * three figures come from one source and can't drift apart. Months with no activity are omitted (zero).
+ */
+function api_getCompanyExpenseMonthlyTotals() {
+  var source = { transactions: api_listExpenseTransactions({}), payments: expenseReadSheet_('expense_payments').rows };
+  var months = {};
+  source.transactions.forEach(function(transaction) {
+    var eventDate = String(transaction.supplier_invoice_date || transaction.purchase_date || '');
+    if (/^\d{4}-\d{2}/.test(eventDate)) months[eventDate.substring(0, 7)] = true;
+  });
+  source.payments.forEach(function(payment) { var date = String(payment.payment_date || ''); if (/^\d{4}-\d{2}/.test(date)) months[date.substring(0, 7)] = true; });
+  var result = { cash: {}, accrual: {} };
+  Object.keys(months).sort().forEach(function(key) {
+    var parts = key.split('-').map(Number);
+    var lastDay = new Date(Date.UTC(parts[0], parts[1], 0, 12)).getUTCDate();
+    var from = key + '-01';
+    var to = key + '-' + ('0' + lastDay).slice(-2);
+    ['cash', 'accrual'].forEach(function(basis) {
+      var totals = expenseActualForPeriod_(basis, from, to, source);
+      if (totals.purchases || totals.gst) result[basis][key] = totals;
+    });
+  });
+  return { success: true, months: result, hash: sha256Hex_(JSON.stringify(result)).substring(0, 16) };
 }
 
 function timesheetForecastForPeriod_(from, to) {
