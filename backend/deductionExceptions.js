@@ -391,3 +391,41 @@ function applyExceptionsToOccurrences(occurrences, exceptions, periodStart, peri
 
   return result;
 }
+
+/**
+ * A deduction's exceptions with any keyed to an occurrence's old drifted date re-keyed to its anchored date.
+ * The legacy Deductions page used to step each month from the previous occurrence, so a clamp in a short
+ * month carried forward (31 Jan, 28 Feb, 28 Mar) and it recorded exceptions against those drifted dates.
+ * Occurrences are anchored to the start date now (advanceDateByFrequency), so an exception is matched to its
+ * occurrence by index (migrationOccurrencePairs_). An exception already keyed to the anchored date wins.
+ * The client does the same in anchorDeductionExceptions (views/partials/scripts.html).
+ */
+function anchorDeductionExceptions_(exceptions, frequency, startDate) {
+  if (!Array.isArray(exceptions) || !exceptions.length) return exceptions;
+  var mode = String(frequency || '').toLowerCase();
+  if (mode !== 'monthly' && mode !== 'quarterly' && mode !== 'yearly') return exceptions;
+  var start = toIsoDate(startDate);
+  if (!/^\d{4}-\d{2}-(29|30|31)$/.test(start)) return exceptions;
+  var latest = '';
+  exceptions.forEach(function(ex) { if (ex && ex.original_date && ex.original_date > latest) latest = ex.original_date; });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(latest)) return exceptions;
+  // A drifted date shares its anchored date's month, so pairs through that month's end cover every exception.
+  var year = Number(latest.slice(0, 4));
+  var month = Number(latest.slice(5, 7));
+  var lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  var through = latest.slice(0, 8) + String(lastDay);
+  var anchoredByDrifted = {};
+  migrationOccurrencePairs_(start, through, mode).forEach(function(pair) {
+    if (pair.drifted !== pair.date) anchoredByDrifted[pair.drifted] = pair.date;
+  });
+  var keyed = {};
+  exceptions.forEach(function(ex) { if (ex && ex.original_date) keyed[ex.original_date] = true; });
+  return exceptions.map(function(ex) {
+    var anchored = ex && anchoredByDrifted[ex.original_date];
+    if (!anchored || keyed[anchored]) return ex;
+    var copy = {};
+    Object.keys(ex).forEach(function(key) { copy[key] = ex[key]; });
+    copy.original_date = anchored;
+    return copy;
+  });
+}
