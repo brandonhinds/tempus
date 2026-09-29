@@ -27,7 +27,7 @@ function client() {
   };
   ['parseSmartTime', 'stashDaySessionEdit', 'daySessionEntries', 'daySessionStartAnchor', 'buildDaySessionsBatch', 'saveDaySession', 'cancelDaySessionEdit', 'deleteTimelineSession',
     'daySessionExpected', 'daySessionsResolveId', 'daySessionsOwnsTemp', 'daySessionsLaterJobTouches', 'isDayModalOpenFor', 'rekeyDaySessionDraft',
-    'applyDaySessionsJobLocally', 'sendNextDaySessionsJob', 'finishDaySessionsJob', 'confirmDaySessionsJob', 'rollbackDaySessionsJob', 'failDaySessionsJob'].forEach(name => vm.runInNewContext(fn(name), c));
+    'applyDaySessionsJobLocally', 'sendNextDaySessionsJob', 'finishDaySessionsJob', 'confirmDaySessionsJob', 'rollbackDaySessionsJob', 'daySessionDraftOrigins', 'rebaseDaySessionDraft', 'failDaySessionsJob'].forEach(name => vm.runInNewContext(fn(name), c));
   c.daySessionsPendingKey = (id, index) => id + '#' + index;
   c.daySessionsPendingFor = (id, index) => c.daySessionsPending.get(c.daySessionsPendingKey(id,index));
   return c;
@@ -243,6 +243,50 @@ exports.run = test => {
     rpc.deliver(1);
     assert.equal(server.api_getEntries({}).length,2,'the retry does not duplicate the new session');
     assert.deepEqual(c.state.entries.map(e=>e.punches[0].in).sort(),['09:00','21:07']);
+  });
+  test('a failed Save with a later Save queued re-opens both drafts, re-based onto the restored day', () => {
+    const {context:server}=backend(), c=optimisticClient(), rpc=rpcRunner(c,server);
+    const date=c.state.selectedCalendarDate;
+    server.api_addEntry({date,contract_id:'a',entry_type:'advanced',punches:[{in:'09:00',out:'12:00'}]});
+    c.state.entries=roundTrip(server.api_getEntries({}));
+    const snapshot=roundTrip(c.state.entries), existing=snapshot[0].id, ht=snapshot[0].hour_type_id;
+    // Save 1: one addition groups into the existing entry (existing#1), the other becomes a temp entry.
+    c.daySessionsEdit={mode:'add',inRaw:'13:00',outRaw:'15:00',htId:ht,contractId:'a'};
+    c.stashDaySessionEdit();
+    c.daySessionsEdit={mode:'add',inRaw:'15:00',outRaw:'17:00',htId:ht,contractId:'b'};
+    c.saveDaySession();
+    const temp=c.state.entries.find(e=>String(e.id).startsWith('temp_'));
+    assert.equal(c.state.entries.find(e=>e.id===existing).punches.length,2);
+    // Save 2, queued behind Save 1: edits both of Save 1's sessions, an original row, and adds another.
+    const edit=(entryId,punchIndex,inVal,outVal,raw,contractId)=>{
+      c.daySessionsEdit=Object.assign({mode:'edit',entryId,punchIndex,inVal,outVal,htId:ht,contractId},raw);
+      assert.equal(c.stashDaySessionEdit(),true);
+    };
+    edit(existing,1,'13:00','15:00',{outRaw:'14:00'},'a');
+    edit(temp.id,0,'15:00','17:00',{outRaw:'17:30'},'b');
+    edit(existing,0,'09:00','12:00',{inRaw:'08:30'},'a');
+    c.daySessionsEdit={mode:'add',inRaw:'18:00',outRaw:'19:00',htId:ht,contractId:'b'};
+    c.saveDaySession();
+    assert.equal(rpc.calls.length,1,'Save 2 waits for Save 1');
+    const firstIds=rpc.calls[0].payload.changes.flatMap(x=>x.client_request_id?[x.client_request_id]:[]);
+    rpc.fail(0,new Error('Offline'));
+    assert.deepEqual(roundTrip(c.state.entries),snapshot,'both Saves are rolled back');
+    assert.equal(c.state.pendingEntryAdds.size+c.state.pendingEntryUpdates.size+c.state.pendingEntryDeletes.size,0);
+    assert.match(c.message,/Offline.*queued after it was undone too.*back in the editor.*Save to retry/);
+    assert.doesNotMatch(c.message,/couldn.t be restored/);
+    const drafts=[...c.daySessionsPending.values()].filter(d=>!d.deleted)
+      .map(d=>[d.isNew?'new':String(d.entryId),d.contractId,d.inVal+'-'+d.outVal]).sort();
+    assert.deepEqual(drafts,[[existing,'a','08:30-12:00'],['new','a','13:00-14:00'],['new','b','15:00-17:30'],['new','b','18:00-19:00']].sort(),
+      'Save 1 and Save 2 changes are both back, folded onto the restored day');
+    c.daySessionsEdit=null;
+    c.saveDaySession();
+    assert.equal(rpc.calls.length,2);
+    const retryIds=rpc.calls[1].payload.changes.flatMap(x=>x.client_request_id?[x.client_request_id]:[]);
+    firstIds.forEach(id=>assert.ok(retryIds.includes(id),'the retry reuses Save 1\'s request ids'));
+    server.api_saveDaySessions(rpc.calls[1].payload); // the retry's response is lost after it wrote
+    rpc.deliver(1);
+    const saved=server.api_getEntries({}).map(e=>[e.contract_id,e.punches.map(p=>p.in+'-'+p.out).join()]).sort();
+    assert.deepEqual(saved,[['a','08:30-12:00,13:00-14:00'],['b','15:00-17:30,18:00-19:00']],'no duplicates, every change lands');
   });
   test('rapid successive Saves, including edits to a just-added session, queue instead of refusing', () => {
     const {context:server}=backend(), c=optimisticClient(), rpc=rpcRunner(c,server);
