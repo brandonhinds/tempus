@@ -339,6 +339,59 @@ exports.run = test => {
       assert.match(c.message,/Failed to delete 1 entry/);
     }).catch(error=>{ process.stderr.write('not ok - Clear day background failure path\n'+error.stack+'\n'); process.exitCode=1; });
   });
+  test('deleting a schedule\'s future entries survives a mid-delete sync and a failure restores only its rows', () => {
+    const futureClient = () => {
+      const calls=[];
+      const c=syncLayer({state:{entries:[]}});
+      Object.assign(c,{isoDate:d=>d,todayIso:()=> '2026-09-10',markAllIncomeSummariesDirty:()=>{},renderEntries:()=>{},renderCalendar:()=>{},
+        saveCache:()=>{},renderRecurringEntriesList:()=>{},setStatus:m=>{c.message=m;},entrySort:(a,b)=>String(a.id).localeCompare(String(b.id)),
+        google:{script:{get run(){const call={};const b={withSuccessHandler:f=>{call.ok=f;return b;},withFailureHandler:f=>{call.fail=f;return b;},
+          api_deleteFutureRecurringEntries:p=>{call.payload=p;calls.push(call);}};return b;}}}});
+      vm.runInNewContext(fn('deleteFutureEntriesForSchedule'),c);
+      c.calls=calls;
+      return c;
+    };
+    const past={id:'r-past',recurrence_id:'R',date:'2026-09-01'};
+    const fut1={id:'r-f1',recurrence_id:'R',date:'2026-09-10'};
+    const fut2={id:'r-f2',recurrence_id:'R',date:'2026-09-17'};
+    const other={id:'x1',recurrence_id:'S',date:'2026-09-17'};
+    const ids=c=>c.state.entries.map(e=>e.id).sort();
+
+    // Failure: a sync lands mid-delete (bringing a new entry and an edit), then the delete fails.
+    let c=futureClient();
+    c.state.entries=[past,fut1,fut2,other];
+    let failed=null;
+    c.deleteFutureEntriesForSchedule('R').catch(e=>{failed=e;});
+    assert.deepEqual(ids(c),['r-past','x1']);
+    const editedOther=Object.assign({},other,{notes:'edited elsewhere'});
+    const added={id:'new-1',date:'2026-09-12'};
+    let seq=c.beginEntriesSync();
+    c.mergeEntriesWithServerEntries([past,fut1,fut2,editedOther,added]);
+    c.endEntriesSync(seq);
+    assert.deepEqual(ids(c),['new-1','r-past','x1'],'a mid-delete sync does not resurrect the deleted entries');
+    c.calls[0].fail(new Error('boom'));
+    return Promise.resolve().then(()=>{
+      assert.ok(failed,'the promise rejects');
+      assert.deepEqual(ids(c),['new-1','r-f1','r-f2','r-past','x1'],'only the removed entries come back; the synced entry survives');
+      assert.equal(c.state.entries.find(e=>e.id==='x1').notes,'edited elsewhere','a row changed meanwhile is not clobbered');
+      assert.equal(c.state.pendingEntryDeletes.size,0,'markers are released on failure');
+      assert.match(c.message,/Failed to delete future entries/);
+
+      // Success overlapping an in-flight sync: the markers hold through that sync, then clear.
+      c=futureClient();
+      c.state.entries=[past,fut1,fut2,other];
+      const done=c.deleteFutureEntriesForSchedule('R',{silent:true});
+      assert.deepEqual(c.calls[0].payload,{recurrenceId:'R',fromDate:'2026-09-10'});
+      seq=c.beginEntriesSync();
+      c.calls[0].ok({success:true,deleted:2});
+      assert.equal(c.state.pendingEntryDeletes.size,2,'resolution waits for the in-flight sync');
+      c.mergeEntriesWithServerEntries([past,fut1,fut2,other]);                  // stale: sent before the delete
+      c.endEntriesSync(seq);
+      assert.deepEqual(ids(c),['r-past','x1']);
+      assert.equal(c.state.pendingEntryDeletes.size,0);
+      return done;
+    }).catch(error=>{ process.stderr.write('not ok - future schedule delete\n'+error.stack+'\n'); process.exitCode=1; });
+  });
   test('pending entry markers survive overlapping syncs until the in-flight write resolves', () => {
     const c={state:{entries:[],breaks:[],comments:[],pendingEntryAdds:new Map(),pendingEntryUpdates:new Map(),pendingEntryDeletes:new Set()},
       entriesSyncInFlightCount:0,entriesSyncRequestSeq:0,deferredMarkerResolves:[],lastEntriesSyncSettledAt:0,
