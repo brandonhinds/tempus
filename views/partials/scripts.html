@@ -8161,9 +8161,20 @@ function updateDeductionFormVisibility() {
           google.script.run
             .withSuccessHandler((res2) => {
               if (res2 && res2.success) {
-                // Both writes are confirmed, so a reload sent from here on is truth for the split rows;
-                // the ticket still keeps any other deduction edited meanwhile.
-                splitWrite.settle();
+                // Both writes are confirmed: swap in the saved rows (the new half gets its real id) so a
+                // failed reload below leaves the split on screen rather than rolling it back. A reload sent
+                // from here on is truth for the split rows; the ticket still keeps any other deduction
+                // edited meanwhile.
+                const savedOriginal = res1.deduction ? sanitizeDeduction(res1.deduction) : optimisticOriginal;
+                const savedNew = res2.deduction ? sanitizeDeduction(res2.deduction) : null;
+                state.deductions = dedupeById(state.deductions.map((item) => {
+                  if (item && item.id === originalDeduction.id) return savedOriginal;
+                  if (item && item.id === optimisticNewId && savedNew) return savedNew;
+                  return item;
+                }));
+                splitWrite.touch(savedNew && savedNew.id).settle();
+                saveCache();
+                renderDeductionsList();
                 const reloadTicket = beginSliceFetch('deductions');
                 google.script.run
                   .withSuccessHandler((deductions) => {
@@ -8194,9 +8205,15 @@ function updateDeductionFormVisibility() {
                     setStatus('Deduction split successfully', 'success');
                   })
                   .withFailureHandler(() => {
+                    // The split is saved; only the refresh failed. Keep the confirmed rows and let the next
+                    // deductions fetch reconcile anything else.
                     endSliceFetch(reloadTicket);
-                    revertOptimisticSplit();
-                    setStatus('Failed to reload deductions', 'error');
+                    renderIncomeSummary();
+                    renderAnnualCategorySection();
+                    if (state.annualData) {
+                      loadAnnualData();
+                    }
+                    setStatus('Deduction split saved. The list could not refresh and will update on the next sync.', 'info');
                   })
                   .api_getDeductions();
               } else {
