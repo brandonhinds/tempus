@@ -410,6 +410,13 @@
     if(lilEl('preview-lines'))lilEl('preview-lines').textContent=lines.length?lines.map(l=>(l.description||l.label||'Fee line')+' '+lilMoney(l.amount)).join(' · '):'Excluding GST';
     return {fee,lines};
   }
+  function lilLive(a) {
+    // The object an operation should act on is the one on screen when it actually runs, not the one
+    // clicked: a queued operation waits behind an earlier save, whose settle replaces the assessment
+    // object and its time_entries. Rollbacks captured at click time would erase that confirmed work.
+    for(const m of Object.keys(lilState.months)){const found=(lilState.months[m]?.assessments||[]).find(item=>item.id===a.id);if(found)return found;}
+    return a;
+  }
   async function lilOperation(key,months,apply,save,settle,revert,retry) {
     // Queue behind an in-flight operation for the same assessment rather than dropping the action. This
     // is what lets the detail panel stay usable while a save is still going: logging time against a
@@ -485,18 +492,22 @@
     const month=lilState.month,newMonth=date.slice(0,7),old=draft.original,key=draft.id||draft.client_request_id,{fee,lines}=lilPreview(draft);
     const type=lilData().types.find(t=>t.id===draft.assessment_type_id),contract=state.contracts.find(c=>c.id===draft.contract_id);
     const optimistic={...draft,id:key,client_name:draft.client_name.trim(),percentage_adjustment:percent/100,fee,lines,contract_name:contract.name,assessment_type_name:type?.name||'',time_entries:old?.time_entries||[],actual_minutes:old?.actual_minutes||0};
-    const payload={id:draft.id||'',request_id:draft.request_id,client_request_id:draft.client_request_id,expected_revision:old?.revision||0,assessment_date:date,contract_id:draft.contract_id,assessment_type_id:draft.assessment_type_id,organisation:draft.organisation,percentage_adjustment:percent/100,client_name:draft.client_name.trim(),client_dob:draft.client_dob};
+    let current=old;
+    const payload=()=>({id:draft.id||'',request_id:draft.request_id,client_request_id:draft.client_request_id,expected_revision:current?.revision||0,assessment_date:date,contract_id:draft.contract_id,assessment_type_id:draft.assessment_type_id,organisation:draft.organisation,percentage_adjustment:percent/100,client_name:draft.client_name.trim(),client_dob:draft.client_dob});
     const remove=()=>[month,newMonth].forEach(m=>{if(lilState.months[m])lilState.months[m].assessments=lilState.months[m].assessments.filter(a=>a.id!==key);});
-    const apply=()=>{remove();if(lilState.months[newMonth])lilState.months[newMonth].assessments.push(optimistic);delete lilState.editors[month];lilState.selection[newMonth]=key;[month,newMonth].forEach(lilMarkInvoiceChanged);};
+    const apply=()=>{if(old){current=lilLive(old);optimistic.time_entries=current.time_entries||[];optimistic.actual_minutes=current.actual_minutes||0;}
+      remove();if(lilState.months[newMonth])lilState.months[newMonth].assessments.push(optimistic);delete lilState.editors[month];lilState.selection[newMonth]=key;[month,newMonth].forEach(lilMarkInvoiceChanged);};
     const settle=result=>{remove();if(lilState.months[newMonth])lilState.months[newMonth].assessments.push(result.assessment);lilState.selection[newMonth]=result.assessment.id;lilState.last={contract_id:draft.contract_id,assessment_type_id:draft.assessment_type_id,organisation:draft.organisation};lilSyncEntries([result.billable_entry].filter(Boolean));if(month!==newMonth){lilFeedback('Assessment moved to '+lilMonthLabel(newMonth)+'.');const link=document.createElement('button');link.className='ghost small';link.textContent='Open '+lilMonthLabel(newMonth);link.onclick=()=>lilChangeMonth(newMonth);lilEl('feedback').append(' ',link);}lilRefreshInvoice(month);if(month!==newMonth)lilRefreshInvoice(newMonth);};
-    const revert=()=>{remove();if(old)lilState.months[month].assessments.push(old);lilState.editors[month]=draft;};
-    const run=()=>lilOperation(key,[month,newMonth],apply,()=>lilApi('api_upsertAssessment',payload),settle,revert,run);run();
+    const revert=()=>{remove();if(current)lilState.months[month].assessments.push(current);lilState.editors[month]=draft;};
+    const run=()=>lilOperation(key,[month,newMonth],apply,()=>lilApi('api_upsertAssessment',payload()),settle,revert,run);run();
   }
   async function lilDelete(a) {
     if(!(await customConfirm(`Delete ${a.client_name||'this assessment'} and its ${a.time_entries.length} time ${a.time_entries.length===1?'entry':'entries'}? Its automatic billing entry will also be removed. Existing invoices remain available until you replace them.`,{title:'Delete assessment?',okText:'Delete assessment',danger:true})))return;
     const month=lilState.month,request=lilRequestId(),allEntries=state.entries.filter(e=>e.source_type==='assessment'&&e.source_id===a.id);
-    const apply=()=>{lilState.months[month].assessments=lilState.months[month].assessments.filter(item=>item.id!==a.id);lilMarkInvoiceChanged(month);};
-    const run=()=>lilOperation(a.id,[month],apply,()=>lilApi('api_deleteAssessment',{id:a.id,expected_revision:a.revision,request_id:request}),result=>{lilSyncEntries([],result.deleted_entry_ids||allEntries.map(e=>e.id));lilRefreshInvoice(month);},()=>lilState.months[month].assessments.push(a),run);run();
+    let current=a;
+    const apply=()=>{current=lilLive(a);lilState.months[month].assessments=lilState.months[month].assessments.filter(item=>item.id!==a.id);lilMarkInvoiceChanged(month);};
+    const revert=()=>{if(!lilState.months[month].assessments.some(item=>item.id===a.id))lilState.months[month].assessments.push(current);};
+    const run=()=>lilOperation(a.id,[month],apply,()=>lilApi('api_deleteAssessment',{id:a.id,expected_revision:current.revision,request_id:request}),result=>{lilSyncEntries([],result.deleted_entry_ids||allEntries.map(e=>e.id));lilRefreshInvoice(month);},revert,run);run();
   }
   function lilTimeRowsHtml(rows, types, removable) {
     // Labels sit in one header row so repeated rows stay aligned and uncluttered; each control carries
@@ -561,13 +572,16 @@
         if(!row.date){lilFeedback('Enter the date worked on every day.');return;}
         prepared.push({...row,duration_minutes:minutes});
       }
-      const month=lilState.month,old=a.time_entries.slice();
+      const month=lilState.month;
+      // Captured when the operation runs (see lilLive), so a queued failure rolls back only these rows.
+      let live=a,before=[];
       const total=list=>list.reduce((sum,item)=>sum+Number(item.duration_minutes||0),0);
       const optimistic=prepared.map(row=>({id:row.id||row.client_request_id,client_request_id:row.client_request_id,hour_type_id:row.hour_type_id,
         date:row.date,duration_minutes:row.duration_minutes,source_type:'assessment',source_id:a.id,assessment_id:a.id,
         source_occurrence_key:'',entry_type:'basic',contract_id:a.contract_id}));
       const replacing=new Set(optimistic.map(item=>item.id));
-      const apply=()=>{a.time_entries=a.time_entries.filter(e=>!replacing.has(e.id)).concat(optimistic);a.actual_minutes=total(a.time_entries);};
+      const apply=()=>{live=lilLive(a);before=live.time_entries.filter(e=>replacing.has(e.id));
+        live.time_entries=live.time_entries.filter(e=>!replacing.has(e.id)).concat(optimistic);live.actual_minutes=total(live.time_entries);};
       const save=async()=>{
         const saved=[];
         // One row at a time: each call takes the assessment lock, and a failure part-way must not hide
@@ -579,25 +593,30 @@
         }
         return saved;
       };
-      const settle=saved=>{a.time_entries=a.time_entries.filter(e=>!replacing.has(e.id)).concat(saved);a.actual_minutes=total(a.time_entries);lilSyncEntries(saved);};
+      const settle=saved=>{live.time_entries=live.time_entries.filter(e=>!replacing.has(e.id)).concat(saved);live.actual_minutes=total(live.time_entries);lilSyncEntries(saved);};
       const revert=error=>{
         // Keep whatever actually committed and re-open the form with only the days still unsaved.
         const saved=(error&&error.partial)||[];
         const savedRequests=new Set(saved.map(item=>String(item.client_request_id||'')));
         const savedIds=new Set(saved.map(item=>item.id));
-        a.time_entries=old.filter(e=>!savedIds.has(e.id)).concat(saved);
-        a.actual_minutes=total(a.time_entries);
+        live.time_entries=live.time_entries.filter(e=>!replacing.has(e.id)&&!savedIds.has(e.id))
+          .concat(before.filter(e=>!savedIds.has(e.id)),saved);
+        live.actual_minutes=total(live.time_entries);
         if(saved.length)lilSyncEntries(saved);
         const remaining=prepared.filter(row=>!savedRequests.has(String(row.client_request_id)));
-        setTimeout(()=>{if(lilSelected()?.id===a.id)lilTimeForm(a,entry,remaining.length?remaining:null);},0);
+        setTimeout(()=>{if(lilSelected()?.id===a.id)lilTimeForm(lilLive(a),entry,remaining.length?remaining:null);},0);
       };
       const run=()=>lilOperation(a.id,[month],apply,save,settle,revert,run);run();
     };
   }
   async function lilDeleteTime(a,entry) {
     if(!(await customConfirm(`Delete ${lilHours(entry.duration_minutes)} hours worked on ${lilDate(entry.date,true)}?`,{title:'Delete time entry?',okText:'Delete hours',danger:true})))return;
-    const month=lilState.month,old=a.time_entries.slice(),oldMinutes=a.actual_minutes;
-    const run=()=>lilOperation(a.id,[month],()=>{a.time_entries=a.time_entries.filter(e=>e.id!==entry.id);a.actual_minutes=a.time_entries.reduce((s,e)=>s+Number(e.duration_minutes),0);},()=>lilApi('api_deleteAssessmentTimeEntry',{id:entry.id,assessment_id:a.id}),()=>lilSyncEntries([],[entry.id]),()=>{a.time_entries=old;a.actual_minutes=oldMinutes;},run);run();
+    const month=lilState.month,total=list=>list.reduce((s,e)=>s+Number(e.duration_minutes||0),0);
+    // Resolved when the operation runs, and the rollback puts back only the row this delete removed.
+    let live=a,removed=[];
+    const apply=()=>{live=lilLive(a);removed=live.time_entries.filter(e=>e.id===entry.id);live.time_entries=live.time_entries.filter(e=>e.id!==entry.id);live.actual_minutes=total(live.time_entries);};
+    const revert=()=>{live.time_entries=live.time_entries.filter(e=>e.id!==entry.id).concat(removed);live.actual_minutes=total(live.time_entries);};
+    const run=()=>lilOperation(a.id,[month],apply,()=>lilApi('api_deleteAssessmentTimeEntry',{id:entry.id,assessment_id:a.id}),()=>lilSyncEntries([],[entry.id]),revert,run);run();
   }
   async function lilRefreshInvoice(month) {
     if(!lilState.months[month])return;
