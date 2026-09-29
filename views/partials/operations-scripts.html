@@ -315,26 +315,26 @@
   }
 
   // Mirrors migrationOccurrenceDates_ (backend/migrations.js): the schedule dates on or after `from`, at most `limit`.
-  // Month steps clamp to the month's last day, and the clamped day carries forward, exactly as the backend does.
+  // Occurrence n is start + n periods, clamped to the month's last day, exactly as the backend does, so a
+  // short month never pulls later payments earlier (31 Jan, 28 Feb, 31 Mar).
   function expenseScheduleDates(start, end, frequency, from, limit) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(start || ''))) return [];
     const mode = String(frequency || 'once').toLowerCase();
     const months = { quarterly:3, yearly:12, annually:12, annual:12 }[mode] || (['weekly', 'fortnightly', 'once', 'one_off'].includes(mode) ? 0 : 1);
-    let cursor = new Date(start + 'T12:00:00Z');
+    const origin = new Date(start + 'T12:00:00Z');
     const dates = [];
     for (let step = 0; step < 5000 && dates.length < limit; step++) {
+      let cursor;
+      if (months) {
+        cursor = new Date(Date.UTC(origin.getUTCFullYear(), origin.getUTCMonth() + step * months, 1, 12));
+        cursor.setUTCDate(Math.min(origin.getUTCDate(), new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0, 12)).getUTCDate()));
+      } else {
+        cursor = new Date(origin.getTime() + step * (mode === 'fortnightly' ? 14 : 7) * 86400000);
+      }
       const iso = cursor.toISOString().slice(0, 10);
       if (end && iso > end) break;
       if (iso >= from) dates.push(iso);
       if (mode === 'once' || mode === 'one_off') break;
-      if (months) {
-        const day = cursor.getUTCDate();
-        const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + months, 1, 12));
-        next.setUTCDate(Math.min(day, new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0, 12)).getUTCDate()));
-        cursor = next;
-      } else {
-        cursor = new Date(cursor.getTime() + (mode === 'fortnightly' ? 14 : 7) * 86400000);
-      }
     }
     return dates;
   }

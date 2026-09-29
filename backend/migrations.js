@@ -19,7 +19,9 @@ function listMigrations() {
     { id: '2026-08-reveal-migrated-expense-ledger', run: migrationRevealExpenseLedger_ },
     { id: '2026-08-usable-legacy-expenses', run: migrationUsableLegacyExpenses_ },
     { id: '2026-08-rebuild-missing-expense-rules', run: migrationRebuildMissingExpenseRules_ },
-    { id: '2026-09-lil-assessments-mode', run: migrationLilAssessments_ }
+    { id: '2026-09-lil-assessments-mode', run: migrationLilAssessments_ },
+    { id: '2026-09-anchored-expense-schedule-dates', run: migrationAnchorScheduledExpenseDates_ },
+    { id: '2026-09-late-company-expense-deductions', run: migrationLateCompanyExpenses_ }
   ];
 }
 
@@ -700,7 +702,24 @@ function migrationSheetBlock_(name) {
   };
 }
 
-function migrationCompanyExpenses_() {
+function migrationCompanyExpenses_() { migrationMoveCompanyExpenseDeductions_('2026-08-company-expense-ledger'); }
+
+/**
+ * Move company-expense deductions that are still in `deductions` into the expense ledger.
+ *
+ * The first ledger migration ran once, so a company expense entered after it, or left behind by it, sat in
+ * `deductions` where nothing counts it any more: dashboard income and both BAS views read the ledger. Same
+ * move as the original, and safe over anything it already moved: rule, transaction and payment ids are
+ * deterministic, and an occurrence is skipped when its rule already has a row for it under either its
+ * anchored or its drifted date. A row with no parseable start date stays, with the same review note.
+ */
+function migrationLateCompanyExpenses_() { migrationMoveCompanyExpenseDeductions_('2026-09-late-company-expense-deductions'); }
+
+/**
+ * A rule plus one paid, recorded transaction per past occurrence for every company-expense deduction, then
+ * archive and remove the deduction. A row with no parseable start date is annotated and left in place.
+ */
+function migrationMoveCompanyExpenseDeductions_(migrationId) {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   var deductions = spreadsheet.getSheetByName('deductions');
   if (!deductions || deductions.getLastRow() < 2) return;
@@ -715,6 +734,15 @@ function migrationCompanyExpenses_() {
   var transactionHeaders = transactionValues[0];
   var existingRules = migrationIdSet_('expense_rules');
   var existingTransactions = migrationIdSet_('expense_transactions');
+  // Occurrences each rule already has a row for, whatever its id or status.
+  var claimedOccurrences = {};
+  var claimRuleIndex = normalizeSheetHeaders_(transactionHeaders).indexOf('source_rule_id');
+  var claimKeyIndex = normalizeSheetHeaders_(transactionHeaders).indexOf('source_occurrence_key');
+  if (claimRuleIndex !== -1 && claimKeyIndex !== -1) {
+    transactionValues.slice(1).forEach(function(transactionRow) {
+      if (transactionRow[claimRuleIndex] && transactionRow[claimKeyIndex]) claimedOccurrences[String(transactionRow[claimRuleIndex]) + '|' + toIsoDate(transactionRow[claimKeyIndex])] = true;
+    });
+  }
   var exceptionSheet = spreadsheet.getSheetByName('deduction_occurrence_exceptions');
   var exceptionsByDeduction = {};
   if (exceptionSheet && exceptionSheet.getLastRow() > 1) {
@@ -751,12 +779,17 @@ function migrationCompanyExpenses_() {
     // The rule is the durable replacement for this deduction, but it can only generate occurrences from a
     // parseable start date. Without one it is inert, so nothing usable has replaced the source row.
     var ruleUsable = /^\d{4}-\d{2}-\d{2}$/.test(start);
-    migrationOccurrenceDates_(start, cutoff, deduction.frequency || 'once').forEach(function(date) {
-      var exception = (exceptionsByDeduction[String(deduction.id || '')] || {})[date];
+    // Anchored occurrence dates, the same ones the rule generates from here on. The Deductions page drifted
+    // after a short month, so an exception it recorded may be keyed to the drifted date of the occurrence.
+    migrationOccurrencePairs_(start, cutoff, deduction.frequency || 'once').forEach(function(pair) {
+      var date = pair.date;
+      var deductionExceptions = exceptionsByDeduction[String(deduction.id || '')] || {};
+      var exception = deductionExceptions[date] || deductionExceptions[pair.drifted];
       if (exception && String(exception.exception_type) === 'skip') return;
       var effectiveDate = exception && (String(exception.exception_type) === 'move' || String(exception.exception_type) === 'move_and_adjust') ? (toIsoDate(exception.new_date || '') || date) : date;
       var transactionId = 'legacy-expense-' + String(deduction.id || row) + '-' + date;
-      if (existingTransactions[transactionId]) return;
+      if (existingTransactions[transactionId] || existingTransactions['legacy-expense-' + String(deduction.id || row) + '-' + pair.drifted]) return;
+      if (claimedOccurrences[ruleId + '|' + date] || claimedOccurrences[ruleId + '|' + pair.drifted]) return;
       var amount = exception && (String(exception.exception_type) === 'adjust_amount' || String(exception.exception_type) === 'move_and_adjust') ? Number(exception.new_amount) || 0 : Number(deduction.amount_value) || 0;
       var gst = Number(deduction.gst_amount) || (migrationBoolean_(deduction.gst_inclusive) ? Math.round((amount / 11) * 100) / 100 : 0);
       transactionSheet.appendRow(rowValuesFromObject_(transactionHeaders, {
@@ -766,6 +799,7 @@ function migrationCompanyExpenses_() {
         source_rule_id: ruleId, source_occurrence_key: date, attachments_json: '[]', notes: note + (exception ? '\nLegacy exception applied: ' + String(exception.exception_type) + '.' : ''), created_at: migrationIsoNow_(), updated_at: migrationIsoNow_()
       }));
       existingTransactions[transactionId] = true;
+      claimedOccurrences[ruleId + '|' + date] = true;
       migrationEnsureLegacyExpensePayment_(transactionId, effectiveDate, amount);
     });
     // Only relinquish the source row once something usable stands in its place.
@@ -773,7 +807,7 @@ function migrationCompanyExpenses_() {
     else migrationAnnotateDeductionRow_(deductions, deductionHeaders, row + 1, 'Migration review: no parseable start date, so no expense rule could be generated. Left in place rather than removed.');
   }
   rowsToRemove.sort(function(a, b) { return b - a; }).forEach(function(rowNumber) {
-    archiveMigrationRow_('2026-08-company-expense-ledger', deductions, rowNumber, 'moved_to_expense_ledger');
+    archiveMigrationRow_(migrationId, deductions, rowNumber, 'moved_to_expense_ledger');
     deductions.deleteRow(rowNumber);
   });
   // These rows now live on a page that is hidden unless the expense ledger is switched on.
@@ -961,6 +995,79 @@ function migrationRebuildMissingExpenseRules_() {
   if (typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
 }
 
+/**
+ * Move scheduled expense occurrences onto their anchored dates.
+ *
+ * Schedules used to step from the previous occurrence, so a clamp in a short month carried forward (a
+ * 31 January rule generated 28 February, 28 March, ...). Occurrences are now start + n periods. Occurrence
+ * keys are dates, so each drifted *scheduled* row is regenerated in place as the same occurrence on its
+ * anchored date, or removed when that date is already taken or now falls after the rule's end date.
+ * Recorded, paid and void rows are history: their dates and keys are never touched, and the generator
+ * treats their drifted key as claiming the occurrence, so it is not scheduled a second time.
+ */
+function migrationAnchorScheduledExpenseDates_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var ruleSheet = spreadsheet.getSheetByName('expense_rules');
+  var transactionSheet = spreadsheet.getSheetByName('expense_transactions');
+  if (!ruleSheet || ruleSheet.getLastRow() < 2 || !transactionSheet || transactionSheet.getLastRow() < 2) return;
+  var ruleValues = ruleSheet.getDataRange().getValues();
+  var rules = {};
+  ruleValues.slice(1).forEach(function(row) {
+    var rule = rowObjectFromHeaders_(ruleValues[0], row);
+    var start = toIsoDate(rule.start_date || '');
+    if (rule.id && migrationFrequencyMonths_(rule.frequency) && /^\d{4}-\d{2}-\d{2}$/.test(start)) rules[String(rule.id)] = { start: start, end: toIsoDate(rule.end_date || ''), frequency: rule.frequency };
+  });
+  if (!Object.keys(rules).length) return;
+  var values = transactionSheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  var index = {};
+  ['id', 'purchase_date', 'status', 'source_rule_id', 'source_occurrence_key', 'updated_at'].forEach(function(name) { index[name] = headers.indexOf(name); });
+  if (index.id === -1 || index.status === -1 || index.source_rule_id === -1 || index.source_occurrence_key === -1) return;
+  var keyOf = function(row) { return toIsoDate(values[row][index.source_occurrence_key] || ''); };
+  var claimed = {};
+  var latest = {};
+  for (var row = 1; row < values.length; row++) {
+    var ruleId = String(values[row][index.source_rule_id] || '');
+    if (!rules[ruleId] || !keyOf(row)) continue;
+    claimed[ruleId + '|' + keyOf(row)] = true;
+    if (!latest[ruleId] || keyOf(row) > latest[ruleId]) latest[ruleId] = keyOf(row);
+  }
+  // Per rule, the anchored date of each occurrence whose drifted date differs from it.
+  var moves = {};
+  Object.keys(latest).forEach(function(ruleId) {
+    var rule = rules[ruleId];
+    var through = addDaysIso(latest[ruleId], 31);
+    var anchored = migrationOccurrenceDates_(rule.start, through, rule.frequency);
+    var drifted = migrationDriftedOccurrenceDates_(rule.start, through, rule.frequency);
+    moves[ruleId] = {};
+    drifted.forEach(function(date, n) { if (anchored[n] && anchored[n] !== date) moves[ruleId][date] = anchored[n]; });
+  });
+  var rowsToRemove = [];
+  var changed = false;
+  var now = migrationIsoNow_();
+  for (row = 1; row < values.length; row++) {
+    if (String(values[row][index.status]) !== 'scheduled') continue;
+    ruleId = String(values[row][index.source_rule_id] || '');
+    var target = moves[ruleId] && moves[ruleId][keyOf(row)];
+    if (!target) continue;
+    if (claimed[ruleId + '|' + target] || (rules[ruleId].end && target > rules[ruleId].end)) {
+      rowsToRemove.push(row + 1);
+      continue;
+    }
+    var from = keyOf(row);
+    claimed[ruleId + '|' + target] = true;
+    values[row][index.id] = 'expense-rule-' + sha256Hex_(ruleId + '|' + target).substring(0, 24);
+    values[row][index.source_occurrence_key] = target;
+    // A scheduled row the user moved by hand keeps its date; only the occurrence it stands for changes.
+    if (index.purchase_date !== -1 && toIsoDate(values[row][index.purchase_date] || '') === from) values[row][index.purchase_date] = target;
+    if (index.updated_at !== -1) values[row][index.updated_at] = now;
+    changed = true;
+  }
+  if (changed) transactionSheet.getRange(2, 1, values.length - 1, values[0].length).setValues(values.slice(1));
+  rowsToRemove.sort(function(a, b) { return b - a; }).forEach(function(rowNumber) { transactionSheet.deleteRow(rowNumber); });
+  if ((changed || rowsToRemove.length) && typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+}
+
 /** Archived company-expense deductions, keyed by the rule id the migration derived from them. */
 function migrationArchivedDeductionsByRuleId_() {
   var archive = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('migration_archive');
@@ -980,24 +1087,70 @@ function migrationArchivedDeductionsByRuleId_() {
   return result;
 }
 
+/** Months between occurrences for a month-based frequency, or 0 for day-based and one-off schedules. */
+function migrationFrequencyMonths_(frequency) {
+  var mode = String(frequency || 'once').toLowerCase();
+  if (mode === 'once' || mode === 'one_off' || mode === 'weekly' || mode === 'fortnightly') return 0;
+  if (mode === 'quarterly') return 3;
+  if (mode === 'annually' || mode === 'annual' || mode === 'yearly') return 12;
+  return 1;
+}
+
+/**
+ * The schedule dates from `start` through `end`. Occurrence n is always start + n periods, clamped to the
+ * target month's last day, so a clamp in a short month is never carried forward: a monthly schedule from
+ * 31 January gives 28 February, 31 March, 30 April.
+ */
 function migrationOccurrenceDates_(start, end, frequency) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return [];
   var dates = [];
-  var cursor = new Date(start + 'T12:00:00Z');
+  var startDate = new Date(start + 'T12:00:00Z');
   var endDate = new Date(end + 'T12:00:00Z');
   var mode = String(frequency || 'once').toLowerCase();
-  while (cursor <= endDate && dates.length < 5000) {
+  var months = migrationFrequencyMonths_(mode);
+  var days = mode === 'weekly' ? 7 : (mode === 'fortnightly' ? 14 : 0);
+  for (var n = 0; dates.length < 5000; n++) {
+    var cursor = months ? migrationAddMonths_(startDate, n * months) : new Date(startDate.getTime() + n * days * 86400000);
+    if (cursor > endDate) break;
     dates.push(Utilities.formatDate(cursor, 'UTC', 'yyyy-MM-dd'));
-    if (mode === 'once' || mode === 'one_off') break;
-    if (mode === 'weekly') cursor.setUTCDate(cursor.getUTCDate() + 7);
-    else if (mode === 'fortnightly') cursor.setUTCDate(cursor.getUTCDate() + 14);
-    else if (mode === 'quarterly') cursor = migrationAddMonths_(cursor, 3);
-    else if (mode === 'annually' || mode === 'annual' || mode === 'yearly') cursor = migrationAddMonths_(cursor, 12);
-    else cursor = migrationAddMonths_(cursor, 1);
+    if (!months && !days) break;
   }
   return dates;
 }
 
+/**
+ * The dates schedules produced before occurrences were anchored to the start date: each month step clamped
+ * and then carried the clamped day forward (31 Jan, 28 Feb, 28 Mar, ...). Kept only to recognise rows
+ * generated that way as the same occurrence as their anchored date. The legacy Deductions page drifted the
+ * same way, so its occurrence exceptions are keyed to these dates too. Index n here is occurrence n there,
+ * always in the same month.
+ */
+function migrationDriftedOccurrenceDates_(start, end, frequency) {
+  var months = migrationFrequencyMonths_(frequency);
+  if (!months) return migrationOccurrenceDates_(start, end, frequency);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return [];
+  var dates = [];
+  var cursor = new Date(start + 'T12:00:00Z');
+  var endDate = new Date(end + 'T12:00:00Z');
+  while (cursor <= endDate && dates.length < 5000) {
+    dates.push(Utilities.formatDate(cursor, 'UTC', 'yyyy-MM-dd'));
+    cursor = migrationAddMonths_(cursor, months);
+  }
+  return dates;
+}
+
+/**
+ * Each anchored occurrence date through `end`, paired with the drifted date the same occurrence had before
+ * the fix (equal unless the start day is past the 28th and a short month intervened).
+ */
+function migrationOccurrencePairs_(start, end, frequency) {
+  var anchored = migrationOccurrenceDates_(start, end, frequency);
+  // A drifted date is never later than its anchored one, so the drifted list covers every anchored index.
+  var drifted = migrationDriftedOccurrenceDates_(start, end, frequency);
+  return anchored.map(function(date, index) { return { date: date, drifted: drifted[index] || date }; });
+}
+
+/** `date` moved by `count` months, its day clamped to the target month's last day. */
 function migrationAddMonths_(date, count) {
   var day = date.getUTCDate();
   var result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + count, 1, 12));

@@ -17,7 +17,7 @@ Use a schedule for anything you pay on a regular cycle, such as insurance, rent 
 1. Open **Schedules** and choose **New schedule**.
 2. Enter the vendor and the amount you pay each time, including GST.
 3. Choose a **Frequency**: weekly, fortnightly, monthly, quarterly, yearly or once only.
-4. Set the **Start date**, which is the date of the first payment. Later payments repeat from it. For monthly, quarterly and yearly schedules, pick a day from 1 to 28. A later day moves earlier in a short month and stays on that earlier day afterwards.
+4. Set the **Start date**, which is the date of the first payment. Later payments repeat from it. Monthly, quarterly and yearly schedules keep the start date's day. When a month is too short for it, that payment falls on the month's last day, and the next one returns to the usual day. A schedule starting 31 January pays on 28 February, 31 March and 30 April.
 5. Leave **End date (optional)** blank to keep the schedule going, or set the date of the last payment.
 6. Check the category, GST treatment and business-use percentage, then choose **Save schedule**.
 
@@ -89,6 +89,6 @@ Upcoming payments from schedules appear as forecasts on the BAS page (**Schedule
 
 ## Older company expenses
 
-Company expenses entered on the Deductions page before the expense ledger existed were moved into the ledger when Tempus upgraded. They arrived as schedules and paid transactions. They still need reconciling before they give a GST credit.
+Company expenses entered on the Deductions page before the expense ledger existed were moved into the ledger when Tempus upgraded, including any added after the first move. They arrived as schedules and paid transactions. They still need reconciling before they give a GST credit.
 
-If any company-expense deductions are still listed on the Deductions page, they are read-only history, marked **Not used in calculations**. Record them on the Expenses page if they still apply.
+A company-expense deduction is left on the Deductions page only when it has no start date Tempus can read. It is read-only history, marked **Not used in calculations**, with a review note. Record it on the Expenses page if it still applies.

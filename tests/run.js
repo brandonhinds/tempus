@@ -1440,6 +1440,57 @@ test('a company expense with no parseable start date is kept, not deleted for an
   assert.ok(!deductions.rows.some((row) => row[deductions.headers.indexOf('id')] === 'd-move'));
 });
 
+test('a month-end company expense migrates on anchored dates and keeps an exception on its drifted date', () => {
+  const built = expenseMigrationContext({
+    deductions: [DEDUCTION_HEADERS, deductionRow('d-end', '2026-01-31'), deductionRow('d-skip', '2026-01-31')],
+    // The Deductions page drifted after February, so it keyed March's occurrence to the 28th.
+    deduction_occurrence_exceptions: [['id', 'deduction_id', 'original_date', 'exception_type', 'new_date', 'new_amount', 'notes'], ['x-1', 'd-skip', '2026-03-28', 'skip', '', '', '']]
+  });
+  built.context.migrationCompanyExpenses_();
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  const keysFor = (ruleId) => transactions.rows.filter((row) => row[transactions.headers.indexOf('source_rule_id')] === ruleId).map((row) => String(row[transactions.headers.indexOf('source_occurrence_key')]));
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-end')), ['2026-01-31', '2026-02-28', '2026-03-31']);
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-skip')), ['2026-01-31', '2026-02-28'], 'March was skipped on the Deductions page');
+});
+
+test('company expenses left in deductions after the ledger migration move on upgrade, exactly once', () => {
+  const TX = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
+  const RULES = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'frequency', 'start_date', 'end_date', 'active', 'notes', 'created_at', 'updated_at'];
+  // d-old was already moved by the original migration (on the dates it drifted to) but its source row survived.
+  const moved = (date) => ['legacy-expense-d-old-' + date, 'Insurance d-old', '', 'Insurance d-old', 'cat-1', date, date, 110, 'taxable', 10, 1, 'FALSE', '', 'recorded', 'legacy_unreconciled', 'legacy-rule-d-old', date, '[]', '', '', ''];
+  const built = expenseMigrationContext({
+    feature_flags: [['feature', 'enabled', 'name', 'description'], ['enable_expenses', 'FALSE', '', '']],
+    deductions: [DEDUCTION_HEADERS, deductionRow('d-old', '2026-01-31'), deductionRow('d-late', '2026-02-10'), deductionRow('d-none', '', { created_at: '', updated_at: '' }), deductionRow('d-personal', '2026-02-01', { company_expense: 'FALSE' })],
+    expense_rules: [RULES, ['legacy-rule-d-old', 'Insurance d-old', '', 'Insurance d-old', 'cat-1', 110, 'taxable', 10, 1, 'FALSE', 'monthly', '2026-01-31', '', 'TRUE', '', '', '']],
+    expense_transactions: [TX, moved('2026-01-31'), moved('2026-02-28'), moved('2026-03-28')]
+  });
+  assert.ok(Array.from(built.context.listMigrations().map((m) => m.id)).includes('2026-09-late-company-expense-deductions'));
+  const run = () => built.context.migrationLateCompanyExpenses_();
+  const counts = () => ['deductions', 'expense_rules', 'expense_transactions', 'expense_payments', 'migration_archive'].map((name) => sheetRows(built.spreadsheet, name).rows.length);
+  run();
+
+  const deductions = sheetRows(built.spreadsheet, 'deductions');
+  const ids = deductions.rows.map((row) => row[deductions.headers.indexOf('id')]);
+  assert.deepStrictEqual(Array.from(ids).sort(), ['d-none', 'd-personal'], 'dated company expenses leave; the undated one and personal deductions stay');
+  assert.match(String(deductions.rows.find((row) => row[0] === 'd-none')[deductions.headers.indexOf('notes')]), /no parseable start date/);
+
+  const transactions = sheetRows(built.spreadsheet, 'expense_transactions');
+  const keysFor = (ruleId) => transactions.rows.filter((row) => row[transactions.headers.indexOf('source_rule_id')] === ruleId).map((row) => String(row[transactions.headers.indexOf('source_occurrence_key')])).sort();
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-old')), ['2026-01-31', '2026-02-28', '2026-03-28'], 'nothing already moved is imported again');
+  assert.deepStrictEqual(Array.from(keysFor('legacy-rule-d-late')), ['2026-02-10', '2026-03-10']);
+  const rules = sheetRows(built.spreadsheet, 'expense_rules');
+  assert.deepStrictEqual(Array.from(rules.rows.map((row) => row[0])).sort(), ['legacy-rule-d-late', 'legacy-rule-d-none', 'legacy-rule-d-old'], 'the undated row gets the same inert rule the original migration wrote');
+  const payments = sheetRows(built.spreadsheet, 'expense_payments');
+  assert.deepStrictEqual(Array.from(payments.rows.map((row) => String(row[payments.headers.indexOf('expense_transaction_id')]))).sort(), ['legacy-expense-d-late-2026-02-10', 'legacy-expense-d-late-2026-03-10'], 'the new occurrences arrive paid');
+  const archive = sheetRows(built.spreadsheet, 'migration_archive');
+  assert.deepStrictEqual(Array.from(archive.rows.map((row) => String(row[archive.headers.indexOf('migration_id')]))), ['2026-09-late-company-expense-deductions', '2026-09-late-company-expense-deductions']);
+  assert.equal(flagState(built.spreadsheet, 'enable_expenses'), 'TRUE');
+
+  const after = counts();
+  run();
+  assert.deepStrictEqual(counts(), after, 'idempotent');
+});
+
 test('repair migration makes already-migrated expenses usable without double-paying', () => {
   const TX_HEADERS = ['id', 'vendor', 'vendor_abn', 'description', 'category', 'purchase_date', 'supplier_invoice_date', 'amount', 'gst_code', 'gst_amount', 'business_use_percentage', 'claimable_gst_confirmed', 'gst_override_amount', 'status', 'reconciliation_state', 'source_rule_id', 'source_occurrence_key', 'attachments_json', 'notes', 'created_at', 'updated_at'];
   const legacy = (id, date) => ['legacy-expense-' + id, 'Insurer', '', 'Insurance', 'cat-1', date, date, 110, 'taxable', 10, 1, 'FALSE', '', 'legacy_unreconciled', 'legacy_unreconciled', 'legacy-rule-1', date, '[]', '', '', ''];
