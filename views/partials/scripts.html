@@ -4095,11 +4095,17 @@ let ratePreviewInputSyncing = false;
       extraSuperFlat: 0,
       extraSuperPercentRate: 0
     };
+    // Company expenses come from the expense ledger, the same figures the backend BAS uses (see
+    // companyLedgerExpensesForMonth). Company-expense deductions are read-only history and count for nothing.
+    const ledger = typeof companyLedgerExpensesForMonth === 'function' ? companyLedgerExpensesForMonth(year, month) : { exGst: 0, gst: 0 };
+    result.companyStandardTotal = ledger.exGst;
+    result.companyGstTotal = ledger.gst;
+    result.standardTotal = ledger.exGst;
     if (!Array.isArray(state.deductions) || !state.deductions.length) return result;
     const monthStart = startOfDay(new Date(year, month, 1));
     const monthEnd = startOfDay(new Date(year, month + 1, 0));
     state.deductions.forEach((deduction) => {
-      if (!deduction || deduction.active === false) return;
+      if (!deduction || deduction.active === false || deduction.company_expense) return;
       const occurrences = getDeductionOccurrencesWithExceptions(deduction, monthStart, monthEnd);
       if (!occurrences.length) return;
       if (deduction.deduction_type === 'extra_super') {
@@ -4129,15 +4135,7 @@ let ratePreviewInputSyncing = false;
         }
 
         result.standardTotal += netAmount;
-        if (deduction.company_expense) {
-          result.companyStandardTotal += netAmount;
-          if (deduction.gst_inclusive) {
-            const gstComponent = Math.round((baseAmount - netAmount) * 100) / 100;
-            result.companyGstTotal += gstComponent;
-          }
-        } else {
-          result.personalStandardTotal += netAmount;
-        }
+        result.personalStandardTotal += netAmount;
       });
     });
     result.standardTotal = Math.round(result.standardTotal * 100) / 100;
@@ -4904,8 +4902,12 @@ function hideAnnualLoadingState() {
     const categoryTotals = {};
     const categoryDeductionMap = {};
     const activeDeductions = Array.isArray(state.deductions) ? state.deductions : [];
+    // As in computeMonthlyDeductionTotals: company expenses are the ledger's, not the (history-only) deductions'.
+    const ledgerExpenses = typeof companyLedgerExpensesForMonth === 'function' ? companyLedgerExpensesForMonth(year, month) : { exGst: 0, gst: 0 };
+    companyExpenses = ledgerExpenses.exGst;
+    companyExpensesGst = ledgerExpenses.gst;
     activeDeductions.forEach((deduction) => {
-      if (!deduction || deduction.active === false) return;
+      if (!deduction || deduction.active === false || deduction.company_expense) return;
       const occurrences = getDeductionOccurrencesWithExceptions(deduction, monthStart, monthEnd);
       if (!occurrences.length) return;
       if (deduction.deduction_type === 'extra_super') {
@@ -4943,15 +4945,7 @@ function hideAnnualLoadingState() {
           }
           categoryDeductionMap[categoryId][deductionId].amount += netAmount;
         }
-        if (deduction.company_expense) {
-          companyExpenses += netAmount;
-          if (deduction.gst_inclusive) {
-            const gstComponent = (Number(baseAmount) || 0) - netAmount;
-            companyExpensesGst += gstComponent;
-          }
-        } else {
-          otherDeductions += netAmount;
-        }
+        otherDeductions += netAmount;
       });
     });
 
@@ -7346,7 +7340,8 @@ function renderDeductionsList() {
     list.sort((a, b) => compareByDisplayOrder(a, b, { activeFirst: true }));
     const hasItems = list.length > 0;
 
-    const showReadonlyNote = !state.companyTrackingEnabled && list.some((item) => item.company_expense);
+    // Company expenses moved to the expense ledger (Expenses page); any left here are read-only history.
+    const showReadonlyNote = list.some((item) => item.company_expense);
     if (deductionCompanyDisabledNote) {
       deductionCompanyDisabledNote.style.display = showReadonlyNote ? 'inline-flex' : 'none';
     }
@@ -7508,7 +7503,7 @@ function renderDeductionsList() {
             saveCache();
             // Opening a category selects its first (editable) deduction so the right pane is never empty.
             // openDeductionForm resets + selects + re-renders, so it also clears any prior clean edit.
-            const firstEditable = group.items.find((d) => !(d.company_expense && !state.companyTrackingEnabled));
+            const firstEditable = group.items.find((d) => !d.company_expense);
             if (firstEditable) { openDeductionForm('edit', firstEditable); return; }
             if (editingElsewhere) { closeDeductionForm(); return; } // clears selection + re-renders (old category collapses)
           } else {
@@ -7534,7 +7529,7 @@ function renderDeductionsList() {
     const hideCategoryBadge = !!options.hideCategoryBadge;
     const wrapper = document.createElement('div');
     wrapper.className = 'ts-deduction-card' + (options.selected ? ' is-selected' : '');
-    if (!deduction.active || (deduction.company_expense && !state.companyTrackingEnabled)) {
+    if (!deduction.active || deduction.company_expense) {
       wrapper.classList.add('ts-deduction-readonly');
     }
 
@@ -7560,7 +7555,7 @@ function renderDeductionsList() {
 
     const expenseBadge = document.createElement('span');
     expenseBadge.className = 'ts-badge';
-    const isUnusedCompanyExpense = deduction.company_expense && !state.companyTrackingEnabled;
+    const isUnusedCompanyExpense = !!deduction.company_expense;
     expenseBadge.textContent = deduction.company_expense ? 'Company expense' : 'Salary sacrifice';
     header.appendChild(expenseBadge);
 
@@ -7570,7 +7565,7 @@ function renderDeductionsList() {
       warningBadge.className = 'ts-badge';
       warningBadge.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle;"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg> Not used in calculations';
       warningBadge.style.cssText = 'background:var(--warning)20; color:var(--warning); border:1px solid var(--warning); font-weight:600;';
-      warningBadge.title = 'Company expense tracking is disabled. This deduction is not included in any income calculations while the "Enable company income tracking" feature flag is disabled.';
+      warningBadge.title = 'Company expenses are recorded on the Expenses page now. This older entry is kept as history and is not included in income or BAS figures.';
       header.appendChild(warningBadge);
     }
 
@@ -7630,11 +7625,11 @@ function renderDeductionsList() {
     wrapper.appendChild(details);
 
     // Click-to-open the editor (no Edit button); delete lives inside the form (no on-card Delete).
-    // Matches the Hour Types pattern. Read-only deductions (inactive, or company expense while tracking is
-    // off) aren't editable, so they stay non-interactive.
-    const readOnly = (!deduction.active) || (deduction.company_expense && !state.companyTrackingEnabled);
+    // Matches the Hour Types pattern. Read-only deductions (inactive, or a company expense kept as history
+    // since those moved to the Expenses page) aren't editable, so they stay non-interactive.
+    const readOnly = (!deduction.active) || !!deduction.company_expense;
     if (readOnly) {
-      wrapper.title = 'Company tracking is disabled; this deduction is read-only.';
+      wrapper.title = deduction.company_expense ? 'Company expenses are recorded on the Expenses page. This entry is read-only history.' : 'This deduction is inactive and read-only.';
     } else {
       wrapper.setAttribute('role', 'button');
       wrapper.setAttribute('tabindex', '0');
@@ -7734,8 +7729,8 @@ function renderDeductionsList() {
 
   function openDeductionForm(mode, deduction, opts) {
     if (!deductionFormModal) return;
-    if (mode === 'edit' && deduction && deduction.company_expense && !state.companyTrackingEnabled) {
-      setStatus('Enable company tracking features to edit company deductions.', 'warn');
+    if (mode === 'edit' && deduction && deduction.company_expense) {
+      setStatus('Company expenses are recorded on the Expenses page. This entry is read-only history.', 'warn');
       return;
     }
     resetDeductionForm();
@@ -8300,8 +8295,8 @@ function updateDeductionFormVisibility() {
     if (!deduction || !deduction.id) return;
     const confirmed = await customConfirm("This permanently removes the deduction. This can't be undone.", { title: 'Delete deduction?', okText: 'Delete', danger: true });
     if (!confirmed) return;
-    if (deduction.company_expense && !state.companyTrackingEnabled) {
-      setStatus('Enable company tracking to modify company deductions.', 'warn');
+    if (deduction.company_expense) {
+      setStatus('Company expenses are recorded on the Expenses page. This entry is read-only history.', 'warn');
       return;
     }
     const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
@@ -16191,6 +16186,7 @@ function updateDeductionFormVisibility() {
       resetRatePreviewState();
     }
 
+    if (state.companyTrackingEnabled && typeof loadCompanyExpenseLedgerTotals === 'function') loadCompanyExpenseLedgerTotals();
     const expensesFlag = state.featureFlags.enable_expenses || DEFAULT_FEATURE_FLAGS.enable_expenses || { enabled: false };
     const expensesEnabled = state.companyTrackingEnabled && !!expensesFlag.enabled;
     if (navExpensesBtn) navExpensesBtn.style.display = expensesEnabled ? 'block' : 'none';
@@ -16560,6 +16556,8 @@ function calculateIncomeDependencyHash() {
     settings: incomeFingerprintRecord_(state.settings, [
       'lost_super_recovery_mode', 'superannuation_rate'
     ]),
+    // Company expenses come from the ledger on the current accounting basis, so both invalidate the cache.
+    companyExpenseLedger: [state.companyExpenseLedger ? state.companyExpenseLedger.hash || '' : '', typeof defaultAccountingBasis === 'function' ? defaultAccountingBasis() : ''],
     features: [
       !!getFeatureFlag('hour_types'),
       !!getFeatureFlag('no_lost_super_to_deductions'),

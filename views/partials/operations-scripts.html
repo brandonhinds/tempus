@@ -24,6 +24,52 @@
     return el;
   }
 
+  // Company expenses per month from the expense ledger (api_getCompanyExpenseMonthlyTotals), which the dashboard
+  // income, the client BAS table (1B) and the annual views read so they agree with the backend BAS. Kept in
+  // localStorage so a reload doesn't briefly show income with no expenses taken off.
+  const COMPANY_EXPENSE_LEDGER_CACHE_KEY = 'tempus_company_expense_ledger_v1';
+  let companyExpenseLedgerLoad = null;
+  try {
+    const cached = JSON.parse(localStorage.getItem(COMPANY_EXPENSE_LEDGER_CACHE_KEY) || 'null');
+    if (cached && cached.months && typeof state !== 'undefined' && !state.companyExpenseLedger) state.companyExpenseLedger = cached;
+  } catch (error) { /* storage unavailable: the first load fills it */ }
+
+  function loadCompanyExpenseLedgerTotals(options) {
+    if (companyExpenseLedgerLoad) return companyExpenseLedgerLoad;
+    if (state.companyExpenseLedgerLoaded && !(options && options.force)) return Promise.resolve(state.companyExpenseLedger);
+    companyExpenseLedgerLoad = operationsApi('api_getCompanyExpenseMonthlyTotals').then((result) => {
+      const changed = !state.companyExpenseLedger || state.companyExpenseLedger.hash !== result.hash;
+      state.companyExpenseLedger = { months:result.months || { cash:{}, accrual:{} }, hash:result.hash || '' };
+      state.companyExpenseLedgerLoaded = true;
+      try { localStorage.setItem(COMPANY_EXPENSE_LEDGER_CACHE_KEY, JSON.stringify(state.companyExpenseLedger)); } catch (error) { /* non-fatal */ }
+      if (changed) refreshCompanyExpenseViews();
+      return state.companyExpenseLedger;
+    }).catch((error) => {
+      operationsStatus('Could not load company expenses for income figures: ' + (error && error.message ? error.message : error), 'warn');
+    }).finally(() => { companyExpenseLedgerLoad = null; });
+    return companyExpenseLedgerLoad;
+  }
+
+  function refreshCompanyExpenseViews() {
+    if (typeof renderIncomeSummary === 'function') renderIncomeSummary();
+    if (state.currentPage === 'bas' && typeof renderBasReporting === 'function') renderBasReporting();
+    if (state.currentPage === 'annual-views' && typeof renderAnnualViews === 'function') renderAnnualViews();
+  }
+
+  /** { exGst, gst } of company expenses for a calendar month on the current accounting basis. */
+  function companyLedgerExpensesForMonth(year, month) {
+    const ledger = state.companyExpenseLedger;
+    const basis = typeof defaultAccountingBasis === 'function' ? defaultAccountingBasis() : 'cash';
+    const totals = ledger && ledger.months && ledger.months[basis] ? ledger.months[basis][`${year}-${String(month + 1).padStart(2, '0')}`] : null;
+    if (!totals) return { exGst:0, gst:0 };
+    const gst = Math.round((Number(totals.gst) || 0) * 100) / 100;
+    // GST-inclusive spend less the claimable GST credit, as the backend transfer split's expenses_ex_gst.
+    return { exGst:Math.round(((Number(totals.purchases) || 0) - gst) * 100) / 100, gst };
+  }
+
+  // Feature flags can be applied (from cache) before this script has loaded, so start the load here too.
+  if (typeof state !== 'undefined' && state.companyTrackingEnabled) loadCompanyExpenseLedgerTotals();
+
   async function renderExpensesPage() {
     const list = document.getElementById('expense-transactions');
     if (!list) return;
@@ -36,6 +82,8 @@
       operationsState.rules = rules || [];
       renderExpenseTransactions();
       renderExpenseRules();
+      // Any change made on this page re-renders it, so this keeps dashboard and BAS company expenses current.
+      loadCompanyExpenseLedgerTotals({ force:true });
       await renderExpenseReport();
     } catch (error) {
       list.textContent = error && error.message ? error.message : 'Could not load expenses.';
@@ -553,5 +601,5 @@
     URL.revokeObjectURL(link.href);
   });
 
-  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();renderTransferSplit();});
+  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();renderTransferSplit();refreshCompanyExpenseViews();});
 </script>

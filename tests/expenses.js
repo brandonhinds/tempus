@@ -209,6 +209,67 @@ exports.run = test => {
     assert.ok(!/\.disabled\s*=/.test(rows), 'transaction rows never render disabled buttons');
     ['Mark paid', 'Record payment', 'Remove payment', 'Add receipt', 'Reconcile', 'Void'].forEach((label) => assert.ok(rows.includes("'" + label + "'"), label));
   });
+
+  // A reconciled, GST-claimed expense paid across two months, plus an unpaid one: cash and accrual differ.
+  function ledgerWithExpenses(c) {
+    const paid = recordedExpense(c, { purchase_date: '2026-09-20', amount: 220 });
+    c.api_attachExpenseReceipt({ expense_transaction_id: paid.id, url: 'https://example.com/receipt.pdf' });
+    c.api_addExpensePayment({ expense_transaction_id: paid.id, amount: 110, payment_date: '2026-09-25' });
+    c.api_addExpensePayment({ expense_transaction_id: paid.id, amount: 110, payment_date: '2026-10-02' });
+    c.api_reconcileExpenseTransaction({ id: paid.id, claimable_gst_confirmed: true });
+    recordedExpense(c, { vendor: 'Unpaid', purchase_date: '2026-10-10', amount: 55 });
+  }
+
+  test('monthly company expense totals are the backend BAS figures, on both bases', () => {
+    const { context: c } = backend();
+    ledgerWithExpenses(c);
+    const totals = JSON.parse(JSON.stringify(c.api_getCompanyExpenseMonthlyTotals()));
+    assert.deepStrictEqual(totals.months.cash, { '2026-09': { purchases: 110, gst: 10 }, '2026-10': { purchases: 110, gst: 10 } });
+    assert.deepStrictEqual(totals.months.accrual, { '2026-09': { purchases: 220, gst: 20 }, '2026-10': { purchases: 55, gst: 0 } });
+    ['cash', 'accrual'].forEach((basis) => [8, 9].forEach((month) => {
+      const bas = c.api_calculateBasPeriod({ financial_year: 2026, period_type: 'monthly', month: month, accounting_basis: basis });
+      const key = '2026-' + String(month + 1).padStart(2, '0');
+      const ledger = totals.months[basis][key] || { purchases: 0, gst: 0 };
+      assert.equal(ledger.gst, bas.actual.gst_on_purchases, basis + ' 1B for ' + key);
+      assert.equal(ledger.purchases, bas.actual.purchases, basis + ' purchases for ' + key);
+    }));
+    assert.ok(totals.hash, 'a hash lets the client invalidate cached income summaries');
+  });
+
+  test('dashboard income and client BAS 1B read company expenses from the ledger, not deductions', () => {
+    const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+    const client = {
+      GST_RATE: 0.1, Math, Number, String,
+      state: {
+        companyExpenseLedger: { hash: 'h', months: { cash: { '2026-09': { purchases: 110, gst: 10 } }, accrual: { '2026-09': { purchases: 220, gst: 20 } } } },
+        deductions: [
+          { id: 'legacy', company_expense: true, active: true, deduction_type: 'standard', amount_type: 'flat', amount_value: 330, gst_inclusive: true },
+          { id: 'sacrifice', company_expense: false, active: true, deduction_type: 'standard', amount_type: 'flat', amount_value: 50, gst_inclusive: false }
+        ]
+      },
+      basis: 'cash',
+      startOfDay: (d) => d,
+      getDeductionOccurrencesWithExceptions: () => [{ amount: null }]
+    };
+    client.defaultAccountingBasis = () => client.basis;
+    vm.runInNewContext(extract(operationsScripts, 'companyLedgerExpensesForMonth') + '\n' + extract(scripts, 'computeMonthlyDeductionTotals'), client);
+    const cash = client.computeMonthlyDeductionTotals(2026, 8);
+    assert.equal(cash.companyStandardTotal, 100, 'ledger spend less its claimable GST');
+    assert.equal(cash.companyGstTotal, 10, 'BAS 1B is the claimable GST from the ledger');
+    assert.equal(cash.personalStandardTotal, 50, 'the history-only company deduction counts for nothing');
+    client.basis = 'accrual';
+    assert.equal(client.computeMonthlyDeductionTotals(2026, 8).companyGstTotal, 20);
+    assert.equal(client.computeMonthlyDeductionTotals(2026, 9).companyStandardTotal, 0);
+    // BAS 1B in the detail modal is fed by this same total.
+    assert.match(scripts, /const field1bGstOnPurchases = periodData\.companyExpensesGst;/);
+    assert.match(extract(scripts, 'buildAnnualMonthSummary'), /companyLedgerExpensesForMonth\(year, month\)/);
+  });
+
+  test('the Deductions page can no longer create company expenses', () => {
+    const deductions = fs.readFileSync(path.join(root, 'views/partials/deductions.html'), 'utf8');
+    assert.ok(!deductions.includes('id="deduction-company-expense"'), 'no Company expense toggle');
+    assert.match(deductions, /Record it on the Expenses page/);
+  });
 };
 
 function extract(source, name) {

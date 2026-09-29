@@ -2,14 +2,14 @@
   <div class="ts-toolbar" style="margin-bottom:12px;">
     <div class="ts-gap-md" style="display:flex; align-items:center;">
       <h3 style="margin:0;">Income Deductions</h3>
-      <span class="ts-note" id="deduction-company-disabled-note" style="display:none;">Company tracking disabled — company deductions read-only.</span>
+      <span class="ts-note" id="deduction-company-disabled-note" style="display:none;">Company expenses shown here are history only. Record new ones on the Expenses page.</span>
     </div>
     <div class="ts-gap-sm" style="display:flex; align-items:center;">
       <button class="ghost" id="btn-manage-deduction-categories" style="display:none;">Manage categories</button>
       <button id="btn-add-deduction">Add deduction</button>
     </div>
   </div>
-  <div class="ts-note" style="margin-bottom:12px;">Configure salary sacrifice items, company deductions, and extra super contributions. Recurring deductions display the next five run dates for confirmation.</div>
+  <div class="ts-note" style="margin-bottom:12px;">Configure salary sacrifice items and extra super contributions. Business costs are recorded on the Expenses page. Recurring deductions display the next five run dates for confirmation.</div>
   <div class="ts-toolbar" id="deduction-category-collapse-controls" style="display:none; margin-bottom:12px;">
     <div class="ts-note" style="margin:0;">Categories are collapsed by default. Expand to review individual deductions.</div>
     <div class="ts-gap-sm" style="display:flex;">
@@ -20,7 +20,7 @@
   <div id="deductions-empty" class="ts-empty-state" style="display:none;">
     <div class="ts-empty-state__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></div>
     <p class="ts-empty-state__title">No deductions yet</p>
-    <p class="ts-empty-state__text">Use <strong>Add deduction</strong> to configure salary sacrifice, company expenses, or extra super contributions.</p>
+    <p class="ts-empty-state__text">Use <strong>Add deduction</strong> to configure salary sacrifice or extra super contributions. Business costs go on the Expenses page.</p>
   </div>
   <!-- Master-detail (mirrors Manage Bulk / Reoccurring Entries): the deductions list on the left
        (grouped under category headers when categories are enabled, flat otherwise), and the selected
@@ -107,13 +107,9 @@
             </label>
             <label for="deduction-gst" class="ts-toggle-row-label">Amount includes GST</label>
           </div>
-          <div class="ts-toggle-row" id="deduction-company-wrapper" style="display:none;">
-            <label class="ts-toggle">
-              <input type="checkbox" id="deduction-company-expense" />
-              <span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span>
-            </label>
-            <label for="deduction-company-expense" class="ts-toggle-row-label">Company expense</label>
-          </div>
+          <!-- Company expenses are recorded on the Expenses page (expense ledger), so there is no toggle here.
+               The id is kept: the form shows this pointer whenever company tracking is on. -->
+          <div class="ts-note" id="deduction-company-wrapper" style="display:none;">A business cost? Record it on the Expenses page so it counts in income and BAS.</div>
         </div>
       </div>
       <div id="deduction-company-gst-note" class="ts-note" style="margin-top:4px; display:none;">GST component is tracked automatically when company expenses are enabled.</div>
