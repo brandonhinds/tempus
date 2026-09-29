@@ -20,7 +20,8 @@ function listMigrations() {
     { id: '2026-08-usable-legacy-expenses', run: migrationUsableLegacyExpenses_ },
     { id: '2026-08-rebuild-missing-expense-rules', run: migrationRebuildMissingExpenseRules_ },
     { id: '2026-09-lil-assessments-mode', run: migrationLilAssessments_ },
-    { id: '2026-09-anchored-expense-schedule-dates', run: migrationAnchorScheduledExpenseDates_ }
+    { id: '2026-09-anchored-expense-schedule-dates', run: migrationAnchorScheduledExpenseDates_ },
+    { id: '2026-09-late-company-expense-deductions', run: migrationLateCompanyExpenses_ }
   ];
 }
 
@@ -702,6 +703,17 @@ function migrationSheetBlock_(name) {
 }
 
 function migrationCompanyExpenses_() { migrationMoveCompanyExpenseDeductions_('2026-08-company-expense-ledger'); }
+
+/**
+ * Move company-expense deductions that are still in `deductions` into the expense ledger.
+ *
+ * The first ledger migration ran once, so a company expense entered after it, or left behind by it, sat in
+ * `deductions` where nothing counts it any more: dashboard income and both BAS views read the ledger. Same
+ * move as the original, and safe over anything it already moved: rule, transaction and payment ids are
+ * deterministic, and an occurrence is skipped when its rule already has a row for it under either its
+ * anchored or its drifted date. A row with no parseable start date stays, with the same review note.
+ */
+function migrationLateCompanyExpenses_() { migrationMoveCompanyExpenseDeductions_('2026-09-late-company-expense-deductions'); }
 
 /**
  * A rule plus one paid, recorded transaction per past occurrence for every company-expense deduction, then

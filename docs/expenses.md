@@ -89,6 +89,6 @@ Upcoming payments from schedules appear as forecasts on the BAS page (**Schedule
 
 ## Older company expenses
 
-Company expenses entered on the Deductions page before the expense ledger existed were moved into the ledger when Tempus upgraded. They arrived as schedules and paid transactions. They still need reconciling before they give a GST credit.
+Company expenses entered on the Deductions page before the expense ledger existed were moved into the ledger when Tempus upgraded, including any added after the first move. They arrived as schedules and paid transactions. They still need reconciling before they give a GST credit.
 
-If any company-expense deductions are still listed on the Deductions page, they are read-only history, marked **Not used in calculations**. Record them on the Expenses page if they still apply.
+A company-expense deduction is left on the Deductions page only when it has no start date Tempus can read. It is read-only history, marked **Not used in calculations**, with a review note. Record it on the Expenses page if it still applies.
