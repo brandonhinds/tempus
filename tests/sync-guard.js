@@ -225,6 +225,12 @@ exports.run = (test) => {
     const fresh = c.lilReferenceTickets();
     c.lilAdoptReferenceData({ contracts: [{ id: 'c1', name: 'Renamed elsewhere' }] }, fresh);
     assert.deepEqual(names(), ['c1:Renamed elsewhere']);
+
+    // A referenced contract's archive is refused through the success channel; it stays unarchived.
+    c.handleContractArchiveToggle('c1', true);
+    take(c.calls, 'api_setContractArchived').success({ success: false, error: 'referenced_contract', message: 'Referenced.' });
+    assert.deepEqual(names(), ['c1:Renamed elsewhere']);
+    assert.equal(c.syncSliceGuards.contracts.pending.size, 0);
   });
 
   test('recurring and bulk syncs reload an open form only while it is untouched', () => {
@@ -256,6 +262,41 @@ exports.run = (test) => {
       assert.equal(inputs.label, 'Mornings, typed', kind.sync + ': an edited form keeps the user input');
       assert.equal(c.state[kind.list].length, 1, 'the list still refreshes');
     }
+  });
+
+  test('a refused BAS save keeps the modal open and the submission unchanged', () => {
+    const submitted = { id: 'b1', financial_year: 2026, period_type: 'quarterly', quarter: 1, month: null, submission_state: 'submitted', g1_total_sales: 100 };
+    const ui = { alerts: [], hidden: 0, statuses: [] };
+    const saveBtn = { disabled: false, textContent: 'Save' };
+    const c = context({
+      state: { basSubmissions: [submitted], settings: {} },
+      currentBasPeriod: { fyYear: 2026, quarter: 1, month: null }, basDetailSaveBtn: saveBtn,
+      document: { getElementById: (id) => (id === 'bas-submitted-toggle' ? { checked: true } : {}) },
+      buildMonthlyBasRows: () => [], buildQuarterlyBasRows: () => [{ invoiceTotal: 200, invoiceGst: 20, companyExpensesGst: 5, companyIncome: 150 }],
+      getFeatureFlag: () => false, customAlert: (message) => ui.alerts.push(message), hideModal: () => { ui.hidden += 1; },
+      renderBasReporting: () => {}, setStatus: (message, kind) => ui.statuses.push(kind)
+    }, ['fetchBasSubmissionsFromServer', 'saveBasDetail']);
+
+    c.fetchBasSubmissionsFromServer();
+    c.saveBasDetail();
+    assert.equal(saveBtn.disabled, true);
+    take(c.calls, 'api_upsertBasSubmission').success({ success: false, error: 'immutable_bas_submission', message: 'A submitted BAS snapshot cannot be edited.' });
+    assert.deepEqual(c.state.basSubmissions, [submitted], 'the failure object does not replace the submission');
+    assert.equal(ui.hidden, 0, 'the modal stays open');
+    assert.match(ui.alerts[0], /submitted BAS snapshot cannot be edited/);
+    assert.equal(ui.statuses.pop(), 'error');
+    assert.equal(saveBtn.disabled, false);
+    assert.equal(c.syncSliceGuards.basSubmissions.pending.size, 0, 'the guard write is settled');
+    take(c.calls, 'api_getBasSubmissions').success([submitted]);
+    assert.deepEqual(c.state.basSubmissions, [submitted]);
+
+    // A real save still replaces the period's submission and closes the modal.
+    c.state.basSubmissions = [{ ...submitted, submission_state: 'draft' }];
+    c.saveBasDetail();
+    take(c.calls, 'api_upsertBasSubmission').success({ ...submitted, g1_total_sales: 200 });
+    assert.equal(c.state.basSubmissions.length, 1);
+    assert.equal(c.state.basSubmissions[0].g1_total_sales, 200);
+    assert.equal(ui.hidden, 1);
   });
 
   test('a failed deduction write is not re-applied by a stale GET', () => {

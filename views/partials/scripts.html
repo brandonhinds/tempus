@@ -16009,6 +16009,7 @@ function updateDeductionFormVisibility() {
       google.script.run
         .withSuccessHandler((res) => {
           contractWrite.settle();
+          if (res && res.success === false) { setStatus(res.message || 'Contract delete failed', 'error'); return; }
           state.entries = state.entries.filter((e) => e.contract_id !== id);
           state.breaks = (state.breaks || []).filter((e) => e.contract_id !== id);
           finishDelete();
@@ -16028,8 +16029,9 @@ function updateDeductionFormVisibility() {
     setStatus('Deleting contract...', 'warn');
     const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
-      .withSuccessHandler(() => {
+      .withSuccessHandler((res) => {
         contractWrite.settle();
+        if (res && res.success === false) { setStatus(res.message || 'Contract delete failed', 'error'); return; }
         finishDelete();
         setStatus('Contract deleted', 'success');
       })
@@ -16049,8 +16051,10 @@ function updateDeductionFormVisibility() {
     setStatus(archived ? 'Archiving contract…' : 'Restoring contract…', 'warn');
     const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
-      .withSuccessHandler(() => {
+      .withSuccessHandler((res) => {
         contractWrite.settle();
+        // A referenced contract can't be archived; the refusal comes back as { success: false, message }.
+        if (res && res.success === false) { setStatus(res.message || (archived ? 'Archive failed' : 'Restore failed'), 'error'); return; }
         const c = state.contracts.find((x) => x.id === id);
         if (c) c.archived = !!archived;
         // Archiving the contract you're viewing drops the selection so it doesn't linger as a surfaced
@@ -28318,91 +28322,105 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
-  if (basDetailSaveBtn) {
-    basDetailSaveBtn.addEventListener('click', async () => {
-      const submittedToggle = document.getElementById('bas-submitted-toggle');
-      const submitted = submittedToggle ? submittedToggle.checked : false;
+  // Saves the open BAS detail modal's period. A named function so tests can drive it.
+  function saveBasDetail() {
+    const submittedToggle = document.getElementById('bas-submitted-toggle');
+    const submitted = submittedToggle ? submittedToggle.checked : false;
 
-      const { fyYear, quarter, month } = currentBasPeriod;
-      if (!fyYear) return;
-      if (!quarter && (month === null || month === undefined)) return;
+    const { fyYear, quarter, month } = currentBasPeriod;
+    if (!fyYear) return;
+    if (!quarter && (month === null || month === undefined)) return;
 
-      // Calculate all fields
-      const monthRows = buildMonthlyBasRows(fyYear);
-      let periodData;
+    // Calculate all fields
+    const monthRows = buildMonthlyBasRows(fyYear);
+    let periodData;
 
-      if (quarter) {
-        const quarterlyRows = buildQuarterlyBasRows(monthRows);
-        periodData = quarterlyRows[quarter - 1];
-      } else {
-        periodData = monthRows.find(r => r.month === month);
-      }
+    if (quarter) {
+      const quarterlyRows = buildQuarterlyBasRows(monthRows);
+      periodData = quarterlyRows[quarter - 1];
+    } else {
+      periodData = monthRows.find(r => r.month === month);
+    }
 
-      if (!periodData) return;
+    if (!periodData) return;
 
-      const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
-      const isSoleTrader = getFeatureFlag('is_sole_trader');
+    const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
+    const isSoleTrader = getFeatureFlag('is_sole_trader');
 
-      const basData = {
-        financial_year: fyYear,
-        period_type: quarter ? 'quarterly' : 'monthly',
-        quarter: quarter || null,
-        month: month !== null && month !== undefined ? month : null,
-        g1_total_sales: periodData.invoiceTotal,
-        g1_includes_gst: true,
-        field_1a_gst_on_sales: periodData.invoiceGst,
-        field_1b_gst_on_purchases: periodData.companyExpensesGst,
-        t1_payg_income: isSoleTrader ? periodData.employeeGrossIncome : periodData.companyIncome,
-        t2_instalment_rate: paygRate,
-        submitted: submitted
-      };
+    const basData = {
+      financial_year: fyYear,
+      period_type: quarter ? 'quarterly' : 'monthly',
+      quarter: quarter || null,
+      month: month !== null && month !== undefined ? month : null,
+      g1_total_sales: periodData.invoiceTotal,
+      g1_includes_gst: true,
+      field_1a_gst_on_sales: periodData.invoiceGst,
+      field_1b_gst_on_purchases: periodData.companyExpensesGst,
+      t1_payg_income: isSoleTrader ? periodData.employeeGrossIncome : periodData.companyIncome,
+      t2_instalment_rate: paygRate,
+      submitted: submitted
+    };
 
-      // Save to backend
-      setStatus('Saving BAS submission...', 'warn');
-      basDetailSaveBtn.disabled = true;
-      basDetailSaveBtn.textContent = 'Saving...';
-      const samePeriod = (s) => s.financial_year === fyYear
-        && (quarter ? s.period_type === 'quarterly' && s.quarter === quarter : s.period_type === 'monthly' && s.month === month);
-      const existingSubmission = state.basSubmissions.find(samePeriod);
-      const basWrite = beginSliceWrite('basSubmissions', [existingSubmission ? existingSubmission.id : null], state.basSubmissions);
+    // Save to backend
+    setStatus('Saving BAS submission...', 'warn');
+    basDetailSaveBtn.disabled = true;
+    basDetailSaveBtn.textContent = 'Saving...';
+    const samePeriod = (s) => s.financial_year === fyYear
+      && (quarter ? s.period_type === 'quarterly' && s.quarter === quarter : s.period_type === 'monthly' && s.month === month);
+    const existingSubmission = state.basSubmissions.find(samePeriod);
+    const basWrite = beginSliceWrite('basSubmissions', [existingSubmission ? existingSubmission.id : null], state.basSubmissions);
 
-      google.script.run
-        .withSuccessHandler((savedSubmission) => {
-          basWrite.touch(savedSubmission && savedSubmission.id).settle();
-          // Update local state
-          const index = state.basSubmissions.findIndex(s => {
-            if (s.financial_year !== fyYear) return false;
-            if (quarter) {
-              return s.period_type === 'quarterly' && s.quarter === quarter;
-            } else {
-              return s.period_type === 'monthly' && s.month === month;
-            }
-          });
-          if (index >= 0) {
-            state.basSubmissions[index] = savedSubmission;
-          } else {
-            state.basSubmissions.push(savedSubmission);
-          }
-          saveCache();
-
-          // Close modal and refresh BAS report
-          const modal = document.getElementById('modal-bas-detail');
-          hideModal(modal);
-          renderBasReporting();
-          setStatus('BAS submission saved', 'success');
-          basDetailSaveBtn.disabled = false;
-          basDetailSaveBtn.textContent = 'Save';
-        })
-        .withFailureHandler((error) => {
+    google.script.run
+      .withSuccessHandler((savedSubmission) => {
+        // A recoverable refusal (e.g. immutable_bas_submission for a submitted snapshot) arrives through the
+        // success channel as { success: false, message }. Nothing was saved, so leave state and the modal alone.
+        if (!savedSubmission || savedSubmission.success === false || !savedSubmission.id) {
           basWrite.settle();
-          console.error('Failed to save BAS submission:', error);
-          customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
+          const message = (savedSubmission && savedSubmission.message) || 'The BAS submission was not saved.';
+          customAlert('Failed to save BAS submission: ' + message, { title: 'Error' });
           basDetailSaveBtn.disabled = false;
           basDetailSaveBtn.textContent = 'Save';
           setStatus('Failed to save', 'error');
-        })
-        .api_upsertBasSubmission(basData);
-    });
+          return;
+        }
+        basWrite.touch(savedSubmission.id).settle();
+        // Update local state
+        const index = state.basSubmissions.findIndex(s => {
+          if (s.financial_year !== fyYear) return false;
+          if (quarter) {
+            return s.period_type === 'quarterly' && s.quarter === quarter;
+          } else {
+            return s.period_type === 'monthly' && s.month === month;
+          }
+        });
+        if (index >= 0) {
+          state.basSubmissions[index] = savedSubmission;
+        } else {
+          state.basSubmissions.push(savedSubmission);
+        }
+        saveCache();
+
+        // Close modal and refresh BAS report
+        const modal = document.getElementById('modal-bas-detail');
+        hideModal(modal);
+        renderBasReporting();
+        setStatus('BAS submission saved', 'success');
+        basDetailSaveBtn.disabled = false;
+        basDetailSaveBtn.textContent = 'Save';
+      })
+      .withFailureHandler((error) => {
+        basWrite.settle();
+        console.error('Failed to save BAS submission:', error);
+        customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
+        basDetailSaveBtn.disabled = false;
+        basDetailSaveBtn.textContent = 'Save';
+        setStatus('Failed to save', 'error');
+      })
+      .api_upsertBasSubmission(basData);
+  }
+
+  if (basDetailSaveBtn) {
+    basDetailSaveBtn.addEventListener('click', saveBasDetail);
   }
 
   function getCurrentFormData(type) {
