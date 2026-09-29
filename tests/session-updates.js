@@ -13,7 +13,8 @@ function fn(name) {
 function client() {
   const c = {
     state: { selectedCalendarDate: '2026-09-08', entries: [], hourTypeMap: { work: { requires_contract: true } } },
-    daySessionsEdit: null, daySessionsPending: new Map(), daySessionsSaving: false, daySessionsNewId: 0,
+    daySessionsEdit: null, daySessionsPending: new Map(), daySessionsNewId: 0,
+    daySessionsSaveQueue: [], daySessionsTempIds: new Map(), daySessionsConfirmed: new Map(), daySessionsDiscardedTemps: new Set(), daySessionsSaveSeq: 0,
     getDefaultHourTypeId: () => 'work', getRoundInterval: () => 0,
     entryPunches: e => e.punches, resolveEntryType: e => e.entry_type,
     hourTypeNeedsContract: ht => !!ht.requires_contract,
@@ -24,10 +25,54 @@ function client() {
     flagDaySessionContractInvalid: () => {}, renderDayEditor: () => {}, renderDaySessionsTimeline: () => {},
     document: { querySelector: () => null }
   };
-  ['parseSmartTime', 'stashDaySessionEdit', 'daySessionEntries', 'daySessionStartAnchor', 'buildDaySessionsBatch', 'saveDaySession', 'cancelDaySessionEdit', 'deleteTimelineSession'].forEach(name => vm.runInNewContext(fn(name), c));
+  ['parseSmartTime', 'stashDaySessionEdit', 'daySessionEntries', 'daySessionStartAnchor', 'buildDaySessionsBatch', 'saveDaySession', 'cancelDaySessionEdit', 'deleteTimelineSession',
+    'daySessionExpected', 'daySessionsResolveId', 'daySessionsOwnsTemp', 'daySessionsLaterJobTouches', 'isDayModalOpenFor', 'rekeyDaySessionDraft',
+    'applyDaySessionsJobLocally', 'sendNextDaySessionsJob', 'finishDaySessionsJob', 'confirmDaySessionsJob', 'rollbackDaySessionsJob', 'failDaySessionsJob'].forEach(name => vm.runInNewContext(fn(name), c));
   c.daySessionsPendingKey = (id, index) => id + '#' + index;
   c.daySessionsPendingFor = (id, index) => c.daySessionsPending.get(c.daySessionsPendingKey(id,index));
   return c;
+}
+const SYNC_LAYER = ['resolveMarkerAfterSync','beginEntriesSync','endEntriesSync','recordPendingEntryAdd','updatePendingEntryAddId','resolvePendingEntryAdd',
+  'recordPendingEntryUpdate','resolvePendingEntryUpdate','recordPendingEntryDelete','resolvePendingEntryDelete','livePendingMarker','mergeEntriesWithServerEntries'];
+// The browser's pending-marker/sync layer, for tests that race writes against background syncs.
+function syncLayer(c) {
+  Object.assign(c.state, {breaks:[],comments:[],pendingEntryAdds:new Map(),pendingEntryUpdates:new Map(),pendingEntryDeletes:new Set()});
+  Object.assign(c, {entriesSyncInFlightCount:0,entriesSyncRequestSeq:0,deferredMarkerResolves:[],lastEntriesSyncSettledAt:0,
+    STALE_PENDING_MS:45000,pendingDeleteRecordedAt:new Map(),entriesDivergenceHealed:false,
+    allEntryRecords:()=>c.state.entries.slice(),setEntriesAndBreaks:list=>{c.state.entries=list;},
+    reconcileIncomeMetadataWithEntries:()=>{},scheduleBreakReconcile:()=>{},entrySort:()=>0,Date});
+  SYNC_LAYER.forEach(name=>vm.runInNewContext(fn(name),c));
+  return c;
+}
+const roundTrip = value => JSON.parse(JSON.stringify(value));
+// Optimistic Sessions Save with the day modal open and a no-op rendering surface.
+function optimisticClient() {
+  const c = syncLayer(client());
+  c.state.hourTypeMap = new Proxy({}, { get: () => ({ requires_contract: true }) });
+  Object.assign(c, {
+    sanitizeEntry: e => Object.assign({}, e, { punches: e.punches || JSON.parse(e.punches_json || '[]') }),
+    deferredTempEntryUpdates: new Map(), commitEntryPunches: (id, punches) => { c.replayed = { id, punches }; },
+    saveCache: () => {}, renderEntries: () => {}, markIncomeSummaryDirtyForEntry: () => {},
+    markIncomeDirtyForEntryChange: () => {}, markIncomeDirtyIfChanged: () => {},
+    document: { querySelector: () => null, getElementById: id => id === 'modal-day-entry' ? { style: { display: 'flex' } } : null }
+  });
+  return c;
+}
+// Captures google.script.run calls so a test decides when (and whether) each one answers.
+function rpcRunner(c, server) {
+  const calls = [];
+  c.google = { script: {} };
+  Object.defineProperty(c.google.script, 'run', { get() {
+    const call = {};
+    const builder = { withSuccessHandler(cb) { call.ok = cb; return builder; }, withFailureHandler(cb) { call.fail = cb; return builder; } };
+    ['api_saveDaySessions', 'api_deleteEntry'].forEach(name => { builder[name] = payload => { call.name = name; call.payload = roundTrip(payload); calls.push(call); }; });
+    return builder;
+  } });
+  return {
+    calls,
+    deliver(i) { const call = calls[i]; let result; try { result = roundTrip(server[call.name](call.payload)); } catch (error) { call.fail(error); return; } call.ok(result); },
+    fail(i, error) { calls[i].fail(error); }
+  };
 }
 function backend() {
   const env = createAppsScriptContext({}), c = env.context;
@@ -138,19 +183,117 @@ exports.run = test => {
     c.daySessionsEdit.inRaw='';
     assert.equal(c.stashDaySessionEdit(),false);
   });
-  test('failed saves preserve the entire draft and repeated Save sends only one request', () => {
-    const c=client(); let calls=0, failure;
-    const runner={withSuccessHandler(){return this;},withFailureHandler(cb){failure=cb;return this;},api_saveDaySessions(){calls++;}};
-    c.google={script:{run:runner}};
-    c.daySessionsEdit={mode:'add',inRaw:'9:07',outRaw:'17:05',htId:'work',contractId:'a'};
-    c.saveDaySession(); c.saveDaySession();
-    assert.equal(calls,1);
-    assert.equal(c.daySessionsSaving,true);
-    failure(new Error('Offline'));
-    assert.equal(c.daySessionsSaving,false);
-    assert.equal(c.daySessionsPending.size,1);
-    assert.equal(c.daySessionsEdit.inRaw,'9:07');
-    c.saveDaySession(); assert.equal(calls,2);
+  test('Save applies the session batch at once, keeps it through in-flight syncs and swaps in confirmed ids', () => {
+    const {context:server}=backend(), c=optimisticClient(), rpc=rpcRunner(c,server);
+    const date=c.state.selectedCalendarDate;
+    server.api_addEntry({date,contract_id:'a',entry_type:'advanced',punches:[{in:'09:00',out:'12:00'}]});
+    c.state.entries=roundTrip(server.api_getEntries({}));
+    const existing=c.state.entries[0], ht=existing.hour_type_id;
+    c.daySessionsEdit={mode:'edit',entryId:existing.id,punchIndex:0,inVal:'09:00',outVal:'12:00',outRaw:'12:30',htId:ht,contractId:'a'};
+    assert.equal(c.stashDaySessionEdit(),true);
+    c.daySessionsEdit={mode:'add',inRaw:'13:00',outRaw:'17:00',htId:ht,contractId:'b'};
+    assert.equal(c.state.entries[0].punches[0].out,'12:00','no mutation before Save');
+    c.saveDaySession();
+    assert.equal(rpc.calls.length,1,'one batch request in the background');
+    assert.equal(c.daySessionsEdit,null,'the editor is released while the request is in flight');
+    assert.equal(c.daySessionsPending.size,0);
+    assert.equal(c.message,'Sessions saved');
+    const shown=()=>c.state.entries.map(e=>[String(e.id).startsWith('temp_')?'temp':e.id,e.contract_id,e.punches.map(p=>p.in+'-'+p.out).join()]).sort();
+    const optimistic=[[existing.id,'a','09:00-12:30'],['temp','b','13:00-17:00']].sort();
+    assert.deepEqual(shown(),optimistic,'the day reflects Save before the server answers');
+    for (let i=0;i<2;i++) {
+      const seq=c.beginEntriesSync(); c.mergeEntriesWithServerEntries(roundTrip(server.api_getEntries({}))); c.endEntriesSync(seq);
+      assert.deepEqual(shown(),optimistic,'a sync that lands mid-save does not revert it');
+    }
+    // The modal is not locked: a new draft can start while the save is in flight.
+    c.daySessionsEdit={mode:'add',inRaw:'18:00',outRaw:'19:00',htId:ht,contractId:'a'};
+    assert.equal(c.stashDaySessionEdit(),true);
+    c.cancelDaySessionEdit();
+    const tempId=c.state.entries.find(e=>String(e.id).startsWith('temp_')).id;
+    c.deferredTempEntryUpdates.set(tempId,{punches:[{in:'13:00',out:'17:00'}]}); // e.g. a Clock out parked on the temp
+    rpc.deliver(0);
+    assert.ok(c.replayed && !String(c.replayed.id).startsWith('temp_'),'a punch change parked on the temp replays against the confirmed id');
+    assert.ok(c.state.entries.every(e=>!String(e.id).startsWith('temp_')),'temp ids are swapped for confirmed ones');
+    assert.deepEqual(shown(),server.api_getEntries({}).map(e=>[e.id,e.contract_id,e.punches.map(p=>p.in+'-'+p.out).join()]).sort());
+    assert.equal(c.state.pendingEntryAdds.size+c.state.pendingEntryUpdates.size+c.state.pendingEntryDeletes.size,0,'markers resolve with the write');
+    assert.equal(c.daySessionsSaveQueue.length,0);
+  });
+  test('a failed session save rolls back to the pre-save day and re-opens the draft for an idempotent retry', () => {
+    const {context:server}=backend(), c=optimisticClient(), rpc=rpcRunner(c,server);
+    const date=c.state.selectedCalendarDate;
+    server.api_addEntry({date,contract_id:'a',entry_type:'advanced',punches:[{in:'09:00',out:'12:00'}]});
+    c.state.entries=roundTrip(server.api_getEntries({}));
+    const snapshot=roundTrip(c.state.entries), ht=snapshot[0].hour_type_id;
+    c.daySessionsEdit={mode:'edit',entryId:snapshot[0].id,punchIndex:0,inVal:'09:00',outVal:'12:00',outRaw:'12:30',htId:ht,contractId:'a'};
+    c.stashDaySessionEdit();
+    c.daySessionsEdit={mode:'add',inRaw:'9:07pm',outRaw:'22:00',htId:ht,contractId:'b'};
+    c.saveDaySession();
+    assert.notDeepEqual(roundTrip(c.state.entries),snapshot);
+    rpc.fail(0,new Error('Offline'));
+    assert.deepEqual(roundTrip(c.state.entries),snapshot,'state is back to the pre-save snapshot');
+    assert.equal(c.state.pendingEntryAdds.size+c.state.pendingEntryUpdates.size+c.state.pendingEntryDeletes.size,0);
+    assert.match(c.message,/Offline.*undone.*Save to retry/);
+    assert.equal(c.daySessionsPending.size,2,'the whole draft is back');
+    assert.equal(c.daySessionsEdit.inRaw,'9:07pm','the open row keeps what was typed');
+    const requestId=rpc.calls[0].payload.changes.find(x=>x.client_request_id).client_request_id;
+    c.saveDaySession();
+    assert.equal(rpc.calls.length,2);
+    assert.equal(rpc.calls[1].payload.changes.find(x=>x.client_request_id).client_request_id,requestId,'retry keeps its identity');
+    server.api_saveDaySessions(rpc.calls[1].payload); // the first retry's response is lost after it wrote
+    rpc.deliver(1);
+    assert.equal(server.api_getEntries({}).length,2,'the retry does not duplicate the new session');
+    assert.deepEqual(c.state.entries.map(e=>e.punches[0].in).sort(),['09:00','21:07']);
+  });
+  test('rapid successive Saves, including edits to a just-added session, queue instead of refusing', () => {
+    const {context:server}=backend(), c=optimisticClient(), rpc=rpcRunner(c,server);
+    const ht='work';
+    c.daySessionsEdit={mode:'add',inRaw:'13:00',outRaw:'17:00',htId:ht,contractId:'b'};
+    c.saveDaySession();
+    const temp=c.state.entries[0];
+    assert.ok(String(temp.id).startsWith('temp_'));
+    c.daySessionsEdit={mode:'edit',entryId:temp.id,punchIndex:0,inVal:'13:00',outVal:'17:00',outRaw:'18:00',htId:ht,contractId:'b'};
+    c.saveDaySession();
+    assert.doesNotMatch(c.message||'',/Wait for the previous save/);
+    assert.equal(rpc.calls.length,1,'the second batch waits for the first');
+    assert.equal(c.state.entries[0].punches[0].out,'18:00','both Saves show immediately');
+    c.deleteTimelineSession(temp.id,0);                     // a third draft opened on the temp row
+    rpc.deliver(0);
+    const real=server.api_getEntries({})[0].id;
+    assert.equal(c.state.entries.length,1);
+    assert.equal(c.state.entries[0].id,real,'the visible session is re-keyed to its confirmed id');
+    assert.equal(c.state.entries[0].punches[0].out,'18:00','the later Save still owns the visible value');
+    assert.ok(c.daySessionsPending.has(real+'#0'),'the open draft follows the confirmed id');
+    const seq=c.beginEntriesSync(); c.mergeEntriesWithServerEntries(roundTrip(server.api_getEntries({}))); c.endEntriesSync(seq);
+    assert.equal(c.state.entries[0].punches[0].out,'18:00','a sync between the two writes does not revert the second');
+    assert.equal(rpc.calls.length,2,'the queued batch is sent with the confirmed id');
+    assert.equal(rpc.calls[1].payload.changes[0].id,real);
+    rpc.deliver(1);
+    assert.equal(server.api_getEntries({})[0].punches[0].out,'18:00');
+    c.saveDaySession();                                      // commit the deletion drafted mid-flight
+    rpc.deliver(2);
+    assert.equal(server.api_getEntries({}).length,0);
+    assert.equal(c.state.entries.length,0);
+    assert.equal(c.state.pendingEntryAdds.size+c.state.pendingEntryUpdates.size+c.state.pendingEntryDeletes.size,0);
+  });
+  test('Clear day reports its result at once and deletes in the background', () => {
+    let release;
+    const c={state:{entries:[{id:'e1',date:'2026-09-08'},{id:'e2',date:'2026-09-08'},{id:'e3',date:'2026-09-09'}],breaks:[],comments:[],punchDraft:null,
+        pendingEntryDeletes:new Set()},
+      calendarContextMenuDate:'2026-09-08',hideCalendarContextMenu:()=>{},isBreakEntry:()=>false,isCommentEntry:()=>false,
+      markIncomeSummaryDirtyForEntry:()=>{},recordPendingEntryDelete:id=>c.state.pendingEntryDeletes.add(id),
+      resolvePendingEntryDelete:id=>c.state.pendingEntryDeletes.delete(id),resolveMarkerAfterSync:f=>f(),
+      daySessionsOwnsTemp:()=>false,daySessionsDiscardedTemps:new Set(),saveCache:()=>{},renderEntries:()=>{},refreshRestingStatus:()=>{},
+      setStatus:(m)=>{c.message=m;},entrySort:()=>0,
+      deleteEntriesByIdServerOnly:ids=>new Promise(r=>{release=()=>r(ids.map(id=>({id,success:id!=='e2'})));})};
+    vm.runInNewContext(source.match(/  async function handleCalendarClearDay\([\s\S]*?\n  \}/)[0],c);
+    const done=c.handleCalendarClearDay();
+    assert.equal(c.message,'Cleared 2 entries','the result shows before any delete returns');
+    assert.deepEqual(c.state.entries.map(e=>e.id),['e3']);
+    release();
+    done.then(()=>{
+      assert.deepEqual(c.state.entries.map(e=>e.id).sort(),['e2','e3'],'a failed delete comes back');
+      assert.match(c.message,/Failed to delete 1 entry/);
+    }).catch(error=>{ process.stderr.write('not ok - Clear day background failure path\n'+error.stack+'\n'); process.exitCode=1; });
   });
   test('pending entry markers survive overlapping syncs until the in-flight write resolves', () => {
     const c={state:{entries:[],breaks:[],comments:[],pendingEntryAdds:new Map(),pendingEntryUpdates:new Map(),pendingEntryDeletes:new Set()},

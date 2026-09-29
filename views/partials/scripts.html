@@ -23246,14 +23246,13 @@ function getCachedIncomeSummary(monthKey) {
       const input = host.querySelector('.ts-day-sessions-timeinput[data-field="' + caret.field + '"]');
       if (input) { input.focus(); input.setSelectionRange(caret.start, caret.end); }
     }
-    host.querySelectorAll('input, select, button').forEach((el) => { if (daySessionsSaving) el.disabled = true; });
     // Keep the countdown honest while the modal sits open; no suggestion on screen means no timer.
     if (suggestion) startDaySessionsSuggestTicker(dateIso); else stopDaySessionsSuggestTicker();
   }
 
   // Buffer deletion without changing stored punch indices until the batch is saved.
   function deleteTimelineSession(entryId, punchIndex) {
-    if (daySessionsSaving || !stashDaySessionEdit()) return;
+    if (!stashDaySessionEdit()) return;
     daySessionsPending.set(daySessionsPendingKey(entryId, punchIndex), { deleted: true });
     daySessionsEdit = null;
     renderDayEditor(state.selectedCalendarDate);
@@ -23345,9 +23344,8 @@ function getCachedIncomeSummary(monthKey) {
   // anchorMin feeds parseSmartTime's am/pm inference for the start box (previous session's boundary).
   let daySessionsEdit = null; // edit: { mode, entryId, punchIndex, inVal, outVal, open, anchorMin }; add: { mode, inVal, outVal, htId, contractId, anchorMin }
   // All session additions, edits, moves and deletions stay local until Save or Enter.
-  // Cancel / closing the day modal discards the entire buffer.
+  // Cancel / closing the day modal discards the entire buffer. Save itself is optimistic (see saveDaySession).
   let daySessionsPending = new Map(); // entryId#punchIndex -> draft (including metadata/deletion)
-  let daySessionsSaving = false;
   let daySessionsNewId = 0;
 
   // The left-click day modal owns one clock action outside both entry panes. It remains available whether
@@ -23658,7 +23656,6 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function stashDaySessionEdit() {
-    if (daySessionsSaving) return false;
     if (!daySessionsEdit) return true;
     const e = daySessionsEdit;
     for (const field of ['in', 'out']) {
@@ -23705,7 +23702,6 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function enterDaySessionEdit(entryId, punchIndex) {
-    if (daySessionsSaving) return;
     const entry = daySessionEntries(state.selectedCalendarDate).find((e) => String(e.id) === String(entryId));
     if (!entry) return;
     const p = entryPunches(entry)[punchIndex];
@@ -23777,7 +23773,6 @@ function getCachedIncomeSummary(monthKey) {
 
   // Cancel = discard EVERYTHING held this session (the open row + every buffered edit).
   function cancelDaySessionEdit() {
-    if (daySessionsSaving) return;
     if (!daySessionsEdit && !daySessionsPending.size) return;
     daySessionsEdit = null;
     daySessionsPending = new Map();
@@ -23789,8 +23784,7 @@ function getCachedIncomeSummary(monthKey) {
   function buildDaySessionsBatch() {
     const date = state.selectedCalendarDate;
     const changes = [];
-    const expected = (entry) => ({ punches_json: JSON.stringify(entryPunches(entry)),
-      contract_id: entry.contract_id || '', hour_type_id: entry.hour_type_id || getDefaultHourTypeId() });
+    const expected = daySessionExpected;
     const add = (draft, key, source) => {
       changes.push({ client_request_id: draft.requestId || (draft.requestId = 'session_' + Date.now() + '_' + Math.random().toString(36).slice(2)),
         date, entry_type: 'advanced', hour_type_id: draft.htId, contract_id: draft.contractId || '',
@@ -23840,50 +23834,295 @@ function getCachedIncomeSummary(monthKey) {
         const error = validatePunches(change.punches, {});
         if (error) throw new Error(error);
       }
-      if (change.id && String(change.id).startsWith('temp_')) throw new Error('Wait for the previous save to finish, then save these sessions.');
+      // A session added by an earlier, still-unconfirmed Save is fine: the save queue sends this batch after
+      // that one and swaps in the confirmed id. Only a temp from another flow (e.g. a clock-in) must wait.
+      if (change.id && String(change.id).startsWith('temp_') && !daySessionsOwnsTemp(change.id)) throw new Error('Wait for the previous save to finish, then save these sessions.');
     }
     return { date, changes };
   }
 
+  // --- Optimistic batch Save ------------------------------------------------------------------------
+  // Save applies the whole batch to state.entries at once (temp ids for new sessions), records pending
+  // markers so a background sync can't revert it, clears the draft and re-renders, then sends the atomic
+  // api_saveDaySessions in the background. Jobs are serialised: each waits for the one before it, so a batch
+  // that edits a session added by a still-unconfirmed Save is sent with the confirmed id — and with the
+  // server's confirmed snapshot as `expected`. A failure rolls back that job and every later one built on
+  // it, re-opens the failed draft (same client_request_ids, so a retry stays idempotent) and says so.
+  const daySessionsSaveQueue = [];        // jobs applied locally; the head is in flight
+  const daySessionsTempIds = new Map();   // temp id -> confirmed id, while the queue is busy
+  const daySessionsConfirmed = new Map(); // confirmed id -> server entry returned by an earlier job
+  const daySessionsDiscardedTemps = new Set(); // queued temps deleted locally (Clear day, row delete) before confirmation
+  let daySessionsSaveSeq = 0;
+
+  function daySessionExpected(entry) {
+    return { punches_json: JSON.stringify(entryPunches(entry)),
+      contract_id: entry.contract_id || '', hour_type_id: entry.hour_type_id || getDefaultHourTypeId() };
+  }
+  function daySessionsResolveId(id) { const key = String(id); return daySessionsTempIds.get(key) || key; }
+  function daySessionsOwnsTemp(id) {
+    const key = String(id);
+    return daySessionsTempIds.has(key) || daySessionsSaveQueue.some((job) => job.createdTemps.has(key));
+  }
+  // A job queued after `job` also changed this entry (by temp or confirmed id): that later job owns the
+  // entry's visible value and pending marker until it resolves.
+  function daySessionsLaterJobTouches(job, id) {
+    const target = daySessionsResolveId(id);
+    return daySessionsSaveQueue.some((other) => other.seq > job.seq
+      && Array.from(other.touched).some((touched) => daySessionsResolveId(touched) === target));
+  }
+  function isDayModalOpenFor(dateIso) {
+    const m = document.getElementById('modal-day-entry');
+    return !!(m && m.style.display === 'flex' && state.selectedCalendarDate === dateIso);
+  }
+  // A draft opened on a just-added session keeps pointing at it once its temp id is confirmed.
+  function rekeyDaySessionDraft(tempId, realId) {
+    if (daySessionsEdit && String(daySessionsEdit.entryId) === tempId) daySessionsEdit.entryId = realId;
+    if (!daySessionsPending.size) return;
+    const next = new Map();
+    daySessionsPending.forEach((draft, key) => {
+      const hash = key.lastIndexOf('#');
+      if (key.slice(0, hash) !== tempId) { next.set(key, draft); return; }
+      next.set(realId + key.slice(hash), Object.assign({}, draft, { entryId: realId }));
+    });
+    daySessionsPending = next;
+  }
+
+  function applyDaySessionsJobLocally(job) {
+    job.payload.changes.forEach((change, n) => {
+      const punches = change.punches.map((p) => ({ in: p.in, out: p.out || '' }));
+      if (change.id) {
+        const id = String(change.id);
+        const idx = state.entries.findIndex((e) => e && String(e.id) === id);
+        if (idx === -1) return;
+        const before = state.entries[idx];
+        job.backups.set(id, before);
+        job.touched.add(id);
+        if (!punches.length) {
+          state.entries.splice(idx, 1);
+          markIncomeSummaryDirtyForEntry(before);
+          job.deleted.add(id);
+          recordPendingEntryDelete(id);
+          return;
+        }
+        const updated = sanitizeEntry(Object.assign({}, before, {
+          punches, punches_json: JSON.stringify(punches), duration_minutes: null
+        }));
+        state.entries[idx] = updated;
+        markIncomeDirtyForEntryChange(before, updated);
+        recordPendingEntryUpdate(id, updated);
+        return;
+      }
+      const tempId = 'temp_' + Date.now() + '_' + job.seq + '_' + n;
+      const optimistic = sanitizeEntry({
+        id: tempId, date: job.payload.date, entry_type: 'advanced',
+        contract_id: change.contract_id || '', hour_type_id: change.hour_type_id || getDefaultHourTypeId(),
+        assessment_id: change.assessment_id || '', client_request_id: change.client_request_id,
+        punches, punches_json: JSON.stringify(punches),
+        created_at: (typeof isoDateTime === 'function' ? isoDateTime(new Date()) : new Date().toISOString())
+      });
+      state.entries.push(optimistic);
+      markIncomeSummaryDirtyForEntry(optimistic);
+      recordPendingEntryAdd(optimistic);
+      job.createdTemps.set(tempId, String(change.client_request_id));
+      job.touched.add(tempId);
+    });
+    state.entries.sort(entrySort);
+  }
+
+  function sendNextDaySessionsJob() {
+    const job = daySessionsSaveQueue[0];
+    if (!job || job.sent) return;
+    job.sent = true;
+    const payload = { date: job.payload.date, changes: job.payload.changes.map((change) => {
+      if (!change.id) return change;
+      const id = daySessionsResolveId(change.id);
+      const confirmed = daySessionsConfirmed.get(id);
+      return Object.assign({}, change, { id, expected: confirmed ? daySessionExpected(confirmed) : change.expected });
+    }) };
+    google.script.run
+      .withSuccessHandler((result) => {
+        if (!result || !result.success) failDaySessionsJob(job, result);
+        else confirmDaySessionsJob(job, result);
+      })
+      .withFailureHandler((error) => failDaySessionsJob(job, error))
+      .api_saveDaySessions(payload);
+  }
+
+  function finishDaySessionsJob(job) {
+    const index = daySessionsSaveQueue.indexOf(job);
+    if (index > -1) daySessionsSaveQueue.splice(index, 1);
+    if (daySessionsSaveQueue.length) { sendNextDaySessionsJob(); return; }
+    daySessionsTempIds.clear();
+    daySessionsConfirmed.clear();
+    daySessionsDiscardedTemps.clear();
+  }
+
+  function confirmDaySessionsJob(job, result) {
+    const date = job.payload.date;
+    const byRequest = new Map();
+    (result.entries || []).forEach((raw) => { if (raw && raw.client_request_id) byRequest.set(String(raw.client_request_id), raw); });
+    const tempFor = new Map(); // confirmed id -> this job's temp id
+    job.createdTemps.forEach((requestId, tempId) => {
+      const raw = byRequest.get(requestId);
+      if (!raw || !raw.id) return;
+      daySessionsTempIds.set(tempId, String(raw.id));
+      tempFor.set(String(raw.id), tempId);
+    });
+    (result.entries || []).map(sanitizeEntry).forEach((confirmed) => {
+      const id = String(confirmed.id);
+      daySessionsConfirmed.set(id, confirmed);
+      const tempId = tempFor.get(id);
+      const later = daySessionsLaterJobTouches(job, id);
+      const idx = state.entries.findIndex((e) => e && String(e.id) === (tempId || id));
+      if (tempId) {
+        rekeyDaySessionDraft(tempId, id);
+        if (later) {
+          // A later queued Save edited or deleted this new session: keep its optimistic value, re-keyed,
+          // and move its marker onto the confirmed id so syncs keep honouring it until it resolves.
+          resolvePendingEntryAdd(tempId);
+          if (idx > -1) {
+            state.entries[idx] = Object.assign({}, state.entries[idx], { id });
+            const pendingUpdate = state.pendingEntryUpdates.get(tempId);
+            resolvePendingEntryUpdate(tempId);
+            recordPendingEntryUpdate(id, Object.assign({}, (pendingUpdate && pendingUpdate.entry) || state.entries[idx], { id }));
+          } else {
+            resolvePendingEntryDelete(tempId);
+            recordPendingEntryDelete(id);
+          }
+          return;
+        }
+        if (idx > -1) {
+          markIncomeDirtyIfChanged(state.entries[idx], confirmed);
+          state.entries[idx] = confirmed;
+          updatePendingEntryAddId(tempId, confirmed);
+          resolveMarkerAfterSync(() => resolvePendingEntryAdd(id));
+          // A punch change parked against the temp id (e.g. Clock out on the new open session) replays now.
+          const deferred = deferredTempEntryUpdates.get(tempId);
+          if (deferred) {
+            deferredTempEntryUpdates.delete(tempId);
+            resolvePendingEntryUpdate(tempId);
+            commitEntryPunches(id, deferred.punches, {});
+          }
+        } else if (daySessionsDiscardedTemps.has(tempId)) {
+          // Cleared locally while the save was in flight — delete the now-real row before a sync resurrects it.
+          resolvePendingEntryAdd(tempId);
+          recordPendingEntryDelete(id);
+          google.script.run
+            .withSuccessHandler(() => resolveMarkerAfterSync(() => resolvePendingEntryDelete(id)))
+            .withFailureHandler(() => resolvePendingEntryDelete(id))
+            .api_deleteEntry(id);
+        } else {
+          state.entries.push(confirmed);
+          markIncomeSummaryDirtyForEntry(confirmed);
+          updatePendingEntryAddId(tempId, confirmed);
+          resolveMarkerAfterSync(() => resolvePendingEntryAdd(id));
+        }
+        return;
+      }
+      if (later) return;
+      if (idx > -1) {
+        markIncomeDirtyIfChanged(state.entries[idx], confirmed);
+        state.entries[idx] = confirmed;
+      } else if (!state.pendingEntryDeletes.has(id)) {
+        state.entries.push(confirmed);
+        markIncomeSummaryDirtyForEntry(confirmed);
+      }
+      recordPendingEntryUpdate(id, confirmed);
+      resolveMarkerAfterSync(() => resolvePendingEntryUpdate(id));
+    });
+    (result.deletedIds || []).map(String).forEach((id) => {
+      const idx = state.entries.findIndex((e) => e && String(e.id) === id);
+      if (idx > -1) { markIncomeSummaryDirtyForEntry(state.entries[idx]); state.entries.splice(idx, 1); }
+      resolveMarkerAfterSync(() => resolvePendingEntryDelete(id));
+    });
+    state.entries.sort(entrySort);
+    finishDaySessionsJob(job);
+    saveCache();
+    renderEntries();
+    if (isDayModalOpenFor(date)) renderDayEditor(date);
+    scheduleBreakReconcile(date);
+  }
+
+  function rollbackDaySessionsJob(job) {
+    job.createdTemps.forEach((requestId, tempId) => {
+      const idx = state.entries.findIndex((e) => e && String(e.id) === tempId);
+      if (idx > -1) { markIncomeSummaryDirtyForEntry(state.entries[idx]); state.entries.splice(idx, 1); }
+      deferredTempEntryUpdates.delete(tempId);
+      resolvePendingEntryAdd(tempId);
+      resolvePendingEntryUpdate(tempId);
+      resolvePendingEntryDelete(tempId);
+    });
+    job.backups.forEach((before, id) => {
+      const rid = daySessionsResolveId(id);
+      const restored = daySessionsConfirmed.get(rid) || (rid === String(before.id) ? before : Object.assign({}, before, { id: rid }));
+      const idx = state.entries.findIndex((e) => e && (String(e.id) === rid || String(e.id) === id));
+      if (idx > -1) {
+        markIncomeDirtyForEntryChange(state.entries[idx], restored);
+        state.entries[idx] = restored;
+      } else if (job.deleted.has(id)) {
+        state.entries.push(restored);
+        markIncomeSummaryDirtyForEntry(restored);
+      } // else: removed since by something else (e.g. Clear day) — leave it gone
+      [rid, id].forEach((key) => { resolvePendingEntryUpdate(key); resolvePendingEntryDelete(key); });
+    });
+  }
+
+  function failDaySessionsJob(job, error) {
+    const index = daySessionsSaveQueue.indexOf(job);
+    if (index === -1) return;
+    const date = job.payload.date;
+    // This job and every later one (built on top of it, not yet sent) go back, newest first.
+    const undone = daySessionsSaveQueue.splice(index);
+    undone.slice().reverse().forEach(rollbackDaySessionsJob);
+    state.entries.sort(entrySort);
+    const exists = (entryId) => state.entries.some((e) => e && String(e.id) === entryId);
+    const keep = (draft, key) => draft.isNew || exists(key.slice(0, key.lastIndexOf('#')));
+    let reopened = false;
+    if (isDayModalOpenFor(date)) {
+      // Re-open the failed draft (its request ids intact, so Save retries idempotently); anything typed
+      // since stays on top, minus rows whose session was just rolled away.
+      const restored = new Map();
+      job.draft.forEach((draft, key) => {
+        const hash = key.lastIndexOf('#');
+        const entryId = draft.isNew ? key.slice(0, hash) : daySessionsResolveId(key.slice(0, hash));
+        const nextKey = entryId + key.slice(hash);
+        if (keep(draft, nextKey)) restored.set(nextKey, draft.isNew ? draft : Object.assign({}, draft, { entryId }));
+      });
+      daySessionsPending.forEach((draft, key) => { if (keep(draft, key)) restored.set(key, draft); });
+      daySessionsPending = restored;
+      if (daySessionsEdit && daySessionsEdit.mode === 'edit' && !daySessionsEdit.isNew && !exists(String(daySessionsEdit.entryId))) daySessionsEdit = null;
+      if (!daySessionsEdit && job.edit) daySessionsEdit = job.edit;
+      reopened = daySessionsPending.size > 0;
+    }
+    daySessionsTempIds.clear();
+    daySessionsConfirmed.clear();
+    daySessionsDiscardedTemps.clear();
+    saveCache();
+    renderEntries();
+    if (isDayModalOpenFor(date)) renderDayEditor(date);
+    scheduleBreakReconcile(date);
+    const reason = (error && error.message) || 'Couldn’t save the sessions.';
+    setStatus(reason + (reopened ? ' Your changes were undone and are back in the editor — press Save to retry.' : ' Your changes were undone.')
+      + (undone.length > 1 ? ' Later session saves were undone too.' : ''), 'error');
+  }
+
   function saveDaySession() {
-    if (daySessionsSaving || !stashDaySessionEdit()) return Promise.resolve(false);
+    if (!stashDaySessionEdit()) return Promise.resolve(false);
     let payload;
     try { payload = buildDaySessionsBatch(); }
     catch (error) { setStatus(error.message, 'error'); return Promise.resolve(false); }
     if (!payload.changes.length) { cancelDaySessionEdit(); return Promise.resolve(true); }
-    daySessionsSaving = true;
-    renderDaySessionsTimeline(payload.date);
-    const saveButton = document.querySelector('.ts-day-sessions-editsave');
-    if (saveButton) saveButton.textContent = 'Saving…';
-    return new Promise((resolve) => {
-      const fail = (error) => {
-        daySessionsSaving = false;
-        renderDaySessionsTimeline(payload.date);
-        setStatus((error && error.message) || 'Couldn’t save the sessions. Your changes are still here; try Save again.', 'error');
-        resolve(false);
-      };
-      google.script.run.withSuccessHandler((result) => {
-        if (!result || !result.success) { fail(result); return; }
-        const removed = new Set(result.deletedIds || []);
-        const confirmed = (result.entries || []).map(sanitizeEntry);
-        const replaced = new Set(confirmed.map((entry) => entry.id));
-        state.entries.forEach((entry) => { if (removed.has(entry.id) || replaced.has(entry.id)) markIncomeSummaryDirtyForEntry(entry); });
-        state.entries = state.entries.filter((entry) => !removed.has(entry.id) && !replaced.has(entry.id));
-        removed.forEach((id) => { recordPendingEntryDelete(id); resolveMarkerAfterSync(() => resolvePendingEntryDelete(id)); });
-        confirmed.forEach((entry) => {
-          state.entries.push(entry); markIncomeSummaryDirtyForEntry(entry);
-          recordPendingEntryUpdate(entry.id, entry);
-          resolveMarkerAfterSync(() => resolvePendingEntryUpdate(entry.id));
-        });
-        state.entries.sort(entrySort);
-        daySessionsSaving = false;
-        daySessionsEdit = null;
-        daySessionsPending = new Map();
-        saveCache(); renderEntries(); renderDayEditor(payload.date);
-        scheduleBreakReconcile(payload.date);
-        setStatus('Sessions saved', 'success'); resolve(true);
-      }).withFailureHandler(fail).api_saveDaySessions(payload);
-    });
+    const job = { seq: ++daySessionsSaveSeq, payload, backups: new Map(), touched: new Set(), deleted: new Set(),
+      createdTemps: new Map(), draft: new Map(daySessionsPending), edit: daySessionsEdit, sent: false };
+    applyDaySessionsJobLocally(job);
+    daySessionsEdit = null;
+    daySessionsPending = new Map();
+    daySessionsSaveQueue.push(job);
+    saveCache(); renderEntries(); renderDayEditor(payload.date);
+    scheduleBreakReconcile(payload.date);
+    setStatus('Sessions saved', 'success');
+    sendNextDaySessionsJob();
+    return Promise.resolve(true);
   }
 
   // Red-ring the timeline editor's contract select (mirrors the form-wide flagRequiredFields look);
@@ -23985,6 +24224,8 @@ function getCachedIncomeSummary(monthKey) {
     state.entries.splice(idx, 1);
     markIncomeSummaryDirtyForEntry(backup);
     recordPendingEntryDelete(entryId);
+    // A session from a still-in-flight Sessions Save: the save queue deletes its real row once confirmed.
+    if (String(entryId).indexOf('temp_') === 0 && daySessionsOwnsTemp(entryId)) daySessionsDiscardedTemps.add(String(entryId));
     // If the deleted entry was loaded in the bottom editor, drop that editing state so it doesn't point at
     // a now-gone entry.
     if (state.editingEntryId === entryId && typeof clearManualEditing === 'function') clearManualEditing();
@@ -24752,7 +24993,6 @@ function getCachedIncomeSummary(monthKey) {
     if (panel) { panel.tabIndex = -1; panel.focus(); }
   }
   async function closeDayModal(forceDiscard) {
-    if (daySessionsSaving) return false;
     const m = document.getElementById('modal-day-entry');
     if (!m || m.style.display !== 'flex') return true;
     const commentDirty = !!(daySessionsCommentEdit
@@ -28837,12 +29077,21 @@ function getCachedIncomeSummary(monthKey) {
     // hasOpenPunch() keeps seeing it and the on-the-clock pill stays stuck until you open the day again.
     if (state.punchDraft && state.punchDraft.date === targetDate) state.punchDraft = null;
 
+    // A session added by a still-in-flight Save has no server row yet: the save queue deletes it once it is
+    // confirmed, instead of this sending a delete for a temp id.
+    const queuedTemps = ids.filter((id) => String(id).startsWith('temp_') && daySessionsOwnsTemp(id));
+    queuedTemps.forEach((id) => { daySessionsDiscardedTemps.add(String(id)); resolvePendingEntryDelete(id); });
+    const serverIds = ids.filter((id) => queuedTemps.indexOf(id) === -1);
+
     saveCache();
     renderEntries();
     refreshRestingStatus();
-    setStatus('Deleting entries...', 'warn');
+    // Optimistic: report the result now and delete in the background; only a failure speaks up again
+    // (restoring the entries it couldn't delete). The count is only meaningful when clearing several at
+    // once — a single day's lone entry just reads "Cleared entry".
+    setStatus(ids.length === 1 ? 'Cleared entry' : `Cleared ${ids.length} entries`, 'success');
 
-    const results = await deleteEntriesByIdServerOnly(ids);
+    const results = await deleteEntriesByIdServerOnly(serverIds);
     results.forEach((result) => {
       if (result.success) {
         resolveMarkerAfterSync(() => resolvePendingEntryDelete(result.id));
@@ -28864,12 +29113,7 @@ function getCachedIncomeSummary(monthKey) {
       saveCache();
       renderEntries();
       setStatus(`Failed to delete ${failedIds.size} entr${failedIds.size === 1 ? 'y' : 'ies'}`, 'error');
-      return;
     }
-
-    // The count is only meaningful when clearing several at once — a single day's lone entry just reads
-    // "Cleared entry" (the running number was noise for the everyday one-entry case).
-    setStatus(ids.length === 1 ? 'Cleared entry' : `Cleared ${ids.length} entries`, 'success');
   }
 
   function insertDefaultEntryForDate(dateIso, defaultData, type) {
