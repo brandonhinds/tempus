@@ -6,7 +6,7 @@ The desktop day editor brings every record for one date into a single reconcilia
 
 ## Accessing the Day Editor
 
-Open **Time Entry**, choose Calendar or Agenda, then select a day. An ordinary day selection opens the complete day. Selecting a specific Calendar entry marker may also expand that unique record automatically. The dedicated mobile entry flow is unchanged.
+Open **Time Entry**, choose Calendar or Agenda, then select a day. An ordinary day selection opens the complete day. Selecting a specific Calendar entry marker may also expand that unique record automatically. On mobile, tap a Punch entry and use **Add session** to enter another start and end time without clocking in again.
 
 ## Timed Sessions
 

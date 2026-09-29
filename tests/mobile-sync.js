@@ -12,11 +12,17 @@ const flush = async () => { for (let i = 0; i < 30; i += 1) await new Promise((r
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 
 function element() {
-  return {
-    value: '', textContent: '', innerHTML: '', disabled: false, hidden: false, style: {}, dataset: {},
+  const node = {
+    value: '', textContent: '', disabled: false, hidden: false, style: {}, dataset: {}, children: [], focused: false,
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    appendChild() {}, append() {}, addEventListener() {}, querySelectorAll: () => [], setAttribute() {}
+    appendChild(child) { this.children.push(child); },
+    append(...children) { this.children.push(...children); },
+    addEventListener() {}, setAttribute() {}, focus() { this.focused = true; },
+    querySelector(selector) { return this.children.find((child) => child.className === selector.slice(1)) || null; },
+    querySelectorAll(selector) { return this.children.filter((child) => child.className === selector.slice(1)); }
   };
+  Object.defineProperty(node, 'innerHTML', { get() { return this._html || ''; }, set(value) { this._html = value; this.children = []; } });
+  return node;
 }
 
 function storage(initial) {
@@ -57,12 +63,13 @@ async function bootMobile(serverEntries, opts = {}) {
   const server = fakeServer(serverEntries.map((e) => ({ date: today, ...e })));
   if (opts.beforeBoot) opts.beforeBoot(server);
   const elements = {};
-  ['mobile-hours', 'mobile-status', 'mobile-punch-toggle'].forEach((id) => { elements[id] = element(); });
+  ['mobile-hours', 'mobile-status', 'mobile-punch-toggle', 'mobile-punch-editor',
+    'mobile-punch-editor-list', 'mobile-punch-editor-add', 'mobile-punch-editor-done'].forEach((id) => { elements[id] = element(); });
   const context = {
     console: { log() {} }, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, setImmediate,
     localStorage: storage(),
     document: {
-      getElementById: (id) => elements[id] || null, querySelector: () => null, addEventListener() {},
+      getElementById: (id) => elements[id] || null, createElement: () => element(), querySelector: () => null, addEventListener() {},
       visibilityState: 'visible', documentElement: null, body: null, scrollingElement: null
     },
     mobileShell: { run: server.run, loadBaseState: async () => ({ settings: {}, featureFlags: {} }), state: { settings: {} } }
@@ -80,6 +87,40 @@ async function bootMobile(serverEntries, opts = {}) {
 
 const asyncTests = [];
 const asyncTest = (name, fn) => asyncTests.push([name, fn]);
+
+asyncTest('mobile session editor adds a timed session without clocking in', async () => {
+  const { app, server, elements, byId } = await bootMobile([{
+    id: 'e1', entry_type: 'advanced', hour_type_id: 'work',
+    punches: [{ in: '09:00', out: '12:00' }], duration_minutes: 180
+  }]);
+  app.openPunchEditor(byId('e1'));
+  const list = elements['mobile-punch-editor-list'];
+  assert.equal(list.children.length, 1);
+  elements['mobile-punch-editor-add'].onclick();
+  assert.equal(list.children.length, 2, 'Add session creates another time row');
+  assert.equal(elements['mobile-punch-editor-done'].dataset.mode, 'done', 'the new row does not clock out');
+  const newRow = list.children[1];
+  assert.equal(newRow.children[0].focused, true, 'start time receives focus');
+  elements['mobile-punch-editor-done'].onclick();
+  await flush();
+  assert.match(elements['mobile-status'].textContent, /Set both times/);
+  assert.equal(server.calls.filter(([fn]) => fn === 'api_updateEntry').length, 0, 'blank session is not saved');
+  newRow.children[0].value = '13:00'; newRow.children[0].onchange();
+  newRow.children[2].value = '12:00'; newRow.children[2].onchange();
+  elements['mobile-punch-editor-done'].onclick();
+  await flush();
+  assert.match(elements['mobile-status'].textContent, /end must be after/);
+  assert.equal(server.calls.filter(([fn]) => fn === 'api_updateEntry').length, 0, 'invalid session is not saved');
+  newRow.children[2].value = '17:00'; newRow.children[2].onchange();
+  elements['mobile-punch-editor-done'].onclick();
+  await flush();
+  const update = server.calls.find(([fn]) => fn === 'api_updateEntry');
+  assert.ok(update, 'the existing entry is updated');
+  assert.deepEqual(JSON.parse(JSON.stringify(update[1].punches)), [
+    { in: '09:00', out: '12:00' }, { in: '13:00', out: '17:00' }
+  ]);
+  assert.equal(server.calls.filter(([fn]) => fn === 'api_addEntry').length, 0, 'no new clock entry is created');
+});
 
 asyncTest('mobile cold load keeps hours typed while the day is still loading', async () => {
   const { app, server, elements } = await bootMobile([], {

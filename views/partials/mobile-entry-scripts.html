@@ -71,6 +71,7 @@
       punchEditor: document.getElementById('mobile-punch-editor'),
       punchEditorSub: document.getElementById('mobile-punch-editor-sub'),
       punchEditorList: document.getElementById('mobile-punch-editor-list'),
+      punchEditorAdd: document.getElementById('mobile-punch-editor-add'),
       punchEditorDone: document.getElementById('mobile-punch-editor-done'),
       themeTrigger: document.getElementById('mobile-theme-trigger'),
       themeSheet: document.getElementById('mobile-theme-sheet'),
@@ -914,23 +915,41 @@
         row.className = 'ts-m-sess';
         const start = document.createElement('input');
         start.type = 'time'; start.value = sess.in || ''; start.className = 'ts-m-sess-time';
+        start.setAttribute('aria-label', 'Session ' + (index + 1) + ' start time');
         start.onchange = () => { punchEditorSessions[index].in = start.value; punchEditorEdited = true; updatePunchEditorButton(); };
         const arrow = document.createElement('span');
         arrow.className = 'ts-m-sess-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→';
         const end = document.createElement('input');
         end.type = 'time'; end.value = sess.out || ''; end.className = 'ts-m-sess-time';
+        end.setAttribute('aria-label', 'Session ' + (index + 1) + ' end time');
         end.onchange = () => { punchEditorSessions[index].out = end.value; punchEditorEdited = true; updatePunchEditorButton(); };
         const del = document.createElement('button');
         del.type = 'button'; del.className = 'ts-m-sess-x'; del.setAttribute('aria-label', 'Remove session'); del.textContent = '×';
         del.onclick = () => {
           punchEditorSessions.splice(index, 1);
           if (!punchEditorSessions.length) punchEditorSessions = [{ in: '', out: '' }];
+          punchEditorEdited = true;
           renderPunchEditorSessions();
           updatePunchEditorButton();
         };
         row.append(start, arrow, end, del);
         dom.punchEditorList.appendChild(row);
       });
+    };
+    const addPunchEditorSession = () => {
+      if (!punchEditorEntry) return;
+      // Reuse the empty row left after removing the last session.
+      if (punchEditorSessions.length !== 1 || punchEditorSessions[0].in || punchEditorSessions[0].out) {
+        punchEditorSessions.push({ in: '', out: '', isNew: true });
+      } else {
+        punchEditorSessions[0].isNew = true;
+      }
+      punchEditorEdited = true;
+      renderPunchEditorSessions();
+      updatePunchEditorButton();
+      const rows = dom.punchEditorList && dom.punchEditorList.querySelectorAll('.ts-m-sess');
+      const start = rows && rows[rows.length - 1] && rows[rows.length - 1].querySelector('.ts-m-sess-time');
+      if (start) start.focus();
     };
     const openPunchEditor = (entry) => {
       if (!entry) return;
@@ -970,6 +989,14 @@
     const savePunchEditor = async () => {
       const entry = punchEditorEntry;
       if (!entry) { closePunchEditor(); return; }
+      if (punchEditorSessions.some((s) => s.isNew && (!s.in || !s.out))) {
+        setStatus('Set both times for the new session, or remove it.', 'error');
+        return;
+      }
+      if (punchEditorSessions.some((s) => s.isNew && timeToMinutes(s.out) <= timeToMinutes(s.in))) {
+        setStatus('Session end must be after its start.', 'error');
+        return;
+      }
       const cleaned = normalizePunchList(punchEditorSessions);
       // All sessions removed via × → nothing left to keep, so Done deletes the whole entry (a user who didn't
       // know about swipe-to-delete shouldn't get stuck). swipeDelete handles both unsaved and server entries.
@@ -989,6 +1016,7 @@
         if (startMinutes === null) return 'Each punch needs a start time.';
         const endMinutes = timeToMinutes(punch.out);
         if (endMinutes !== null && endMinutes <= startMinutes) return 'Punch end must be after start.';
+        if (endMinutes === null && i < sorted.length - 1) return 'Finish the open punch before adding another session.';
         if (lastEnd !== null && startMinutes < lastEnd) return 'Punches cannot overlap.';
         if (endMinutes !== null) lastEnd = endMinutes;
       }
@@ -2106,6 +2134,7 @@
       if (dom.tabManual) dom.tabManual.onclick = () => selectMode('manual');
       if (dom.tabPunch) dom.tabPunch.onclick = () => selectMode('punch');
       if (dom.punchToggle) dom.punchToggle.onclick = togglePunch;
+      if (dom.punchEditorAdd) dom.punchEditorAdd.onclick = addPunchEditorSession;
       if (dom.punchEditorDone) dom.punchEditorDone.onclick = () => {
         if (dom.punchEditorDone.dataset.mode === 'punchout') punchOutFromEditor();
         else savePunchEditor();
@@ -2188,7 +2217,7 @@
     // Internal handle for the test harness (tests/mobile-sync.js) and console debugging — not an API.
     window.mobileEntry = {
       state, pendingOps, hydrateDate, refreshCurrentDayEntries, fetchEntriesRange,
-      saveEntry, swipeDelete, deleteEntry, applyDayTemplate, padPress
+      saveEntry, swipeDelete, deleteEntry, applyDayTemplate, padPress, openPunchEditor
     };
 
     init();
