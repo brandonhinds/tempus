@@ -10520,19 +10520,10 @@ function updateDeductionFormVisibility() {
     return merged;
   }
 
+  // True while a key has a write the server has not answered yet.
   function sliceKeyIsPending(name, key) {
     const slice = syncSliceGuards[name];
     return !!slice && (slice.pending.has(key) || slice.pending.has('*'));
-  }
-
-  // True while a key has an unconfirmed write, or a settled one that a request still in flight predates.
-  function sliceKeyIsGuarded(name, key) {
-    const slice = syncSliceGuards[name];
-    if (!slice) return false;
-    if (sliceKeyIsPending(name, key)) return true;
-    let oldest = null;
-    slice.inflight.forEach((epoch) => { if (oldest === null || epoch < oldest) oldest = epoch; });
-    return oldest !== null && (slice.touched.get(key) || 0) > oldest;
   }
 
   function confirmedSliceList(name, list) {
@@ -30044,6 +30035,7 @@ function getCachedIncomeSummary(monthKey) {
     toggleBulkDeleteConfirm(false);
     setBulkFormError('');
     markActiveBulkCard();
+    state.bulkEntryForm.loadedValues = scheduleFormSnapshot(getBulkFormValues);
   }
 
   function getBulkFormValues() {
@@ -30193,7 +30185,7 @@ function getCachedIncomeSummary(monthKey) {
         renderBulkEntriesList();
         if (state.bulkEntryForm.editingId) {
           const match = entries.find((item) => item.id === state.bulkEntryForm.editingId);
-          if (match) {
+          if (match && !scheduleFormIsEdited(state.bulkEntryForm, getBulkFormValues)) {
             setBulkFormDraft(match);
           }
         }
@@ -30489,6 +30481,18 @@ function getCachedIncomeSummary(monthKey) {
     updateRecurringFormFromInputs();
     setRecurringFormError('');
     markActiveRecurringCard();
+    state.recurringEntryForm.loadedValues = scheduleFormSnapshot(getRecurringFormValues);
+  }
+
+  // Open schedule forms (recurring and bulk) remember the values they were loaded with. A background sync
+  // reloads the form being edited only while it still shows exactly those values, so an untouched form
+  // picks up server changes and an edited one keeps the user's input.
+  function scheduleFormSnapshot(readValues) {
+    try { return JSON.stringify(readValues()); } catch (e) { return ''; }
+  }
+
+  function scheduleFormIsEdited(form, readValues) {
+    return !!form.loadedValues && scheduleFormSnapshot(readValues) !== form.loadedValues;
   }
 
   function getRecurringFormValues() {
@@ -30778,7 +30782,7 @@ function getCachedIncomeSummary(monthKey) {
         renderRecurringEntriesList();
         if (state.recurringEntryForm.editingId) {
           const match = entries.find((item) => item.id === state.recurringEntryForm.editingId);
-          if (match) {
+          if (match && !scheduleFormIsEdited(state.recurringEntryForm, getRecurringFormValues)) {
             setRecurringFormDraft(match);
           }
         }

@@ -12,7 +12,7 @@ function fn(name) {
   assert.ok(match, name); return match[0];
 }
 const GUARD = ['syncSlice', 'sliceSnapshot_', 'sliceKeyIsPending', 'beginSliceWrite', 'beginSliceFetch', 'endSliceFetch', 'mergeSliceList',
-  'mergeSliceFields', 'sliceKeyIsGuarded', 'confirmedSliceList', 'confirmedSliceFields'];
+  'mergeSliceFields', 'confirmedSliceList', 'confirmedSliceFields'];
 
 // google.script.run whose calls are queued so a test can answer them in any order.
 function scriptRun(calls) {
@@ -57,10 +57,9 @@ exports.run = (test) => {
     const local = [{ id: 'a', v: 2 }];
     assert.deepEqual(c.mergeSliceList(after, [{ id: 'a', v: 3 }], local), [{ id: 'a', v: 3 }], 'a request sent after the write settled is truth');
     assert.deepEqual(c.mergeSliceList(during, [{ id: 'a', v: 1 }], local), [{ id: 'a', v: 2 }], 'sent before the write confirmed');
-    assert.equal(c.sliceKeyIsGuarded('things', 'a'), true, 'the early request is still in flight');
+    assert.equal(c.syncSliceGuards.things.touched.size, 1, 'the early request is still in flight');
     assert.deepEqual(c.mergeSliceList(early, [{ id: 'a', v: 1 }, { id: 'b' }], local), [{ id: 'a', v: 2 }, { id: 'b' }]);
     assert.equal(c.syncSliceGuards.things.touched.size, 0, 'nothing in flight predates the write any more');
-    assert.equal(c.sliceKeyIsGuarded('things', 'a'), false);
 
     const whole = c.beginSliceWrite('flags', ['*'], { x: true });
     const stale = c.beginSliceFetch('flags');
@@ -226,6 +225,37 @@ exports.run = (test) => {
     const fresh = c.lilReferenceTickets();
     c.lilAdoptReferenceData({ contracts: [{ id: 'c1', name: 'Renamed elsewhere' }] }, fresh);
     assert.deepEqual(names(), ['c1:Renamed elsewhere']);
+  });
+
+  test('recurring and bulk syncs reload an open form only while it is untouched', () => {
+    for (const kind of [
+      { sync: 'syncRecurringEntries', setDraft: 'setRecurringFormDraft', read: 'getRecurringFormValues', flag: 'recurring_time_entries', form: 'recurringEntryForm', list: 'recurringTimeEntries', method: 'api_syncRecurringTimeEntries' },
+      { sync: 'syncBulkEntries', setDraft: 'setBulkFormDraft', read: 'getBulkFormValues', flag: 'bulk_time_entries', form: 'bulkEntryForm', list: 'bulkEntries', method: null }
+    ]) {
+      // Both loaders record what they loaded as their last step.
+      assert.match(fn(kind.setDraft), new RegExp('state\\.' + kind.form + '\\.loadedValues = scheduleFormSnapshot\\(' + kind.read + '\\);\\n  \\}$'));
+      const inputs = { label: '' };
+      const c = context({
+        state: { featureFlags: { [kind.flag]: { enabled: true } }, [kind.form]: { editingId: 's1' } },
+        sanitizeRecurringEntry: (x) => x, sanitizeBulkEntry: (x) => x, showWorkingToast: () => () => {},
+        updateRecurringSyncStatus: () => {}, updateBulkSyncStatus: () => {}, renderRecurringEntriesList: () => {}, renderBulkEntriesList: () => {},
+        refreshEntriesFromServer: (done) => done()
+      }, ['scheduleFormSnapshot', 'scheduleFormIsEdited', kind.sync]);
+      c[kind.read] = () => ({ id: 's1', label: inputs.label });
+      c[kind.setDraft] = (draft) => { inputs.label = draft.label; c.state[kind.form].loadedValues = c.scheduleFormSnapshot(c[kind.read]); };
+      c[kind.setDraft]({ id: 's1', label: 'Mornings' });
+      const answer = (label) => { const call = c.calls.pop(); assert.ok(!kind.method || call.method === kind.method, call.method); call.success({ entries: [{ id: 's1', label }] }); };
+
+      c[kind.sync]({ silent: true });
+      answer('Mornings (renamed elsewhere)');
+      assert.equal(inputs.label, 'Mornings (renamed elsewhere)', kind.sync + ': an untouched form picks up the server change');
+
+      c[kind.sync]({ silent: true });
+      inputs.label = 'Mornings, typed';
+      answer('Mornings (renamed elsewhere)');
+      assert.equal(inputs.label, 'Mornings, typed', kind.sync + ': an edited form keeps the user input');
+      assert.equal(c.state[kind.list].length, 1, 'the list still refreshes');
+    }
   });
 
   test('a failed deduction write is not re-applied by a stale GET', () => {
