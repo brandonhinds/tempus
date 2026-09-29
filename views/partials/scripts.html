@@ -3420,15 +3420,16 @@ let ratePreviewInputSyncing = false;
     if (!recurrenceId) return Promise.resolve();
     const cutoff = options.fromDate ? isoDate(options.fromDate) : todayIso();
     const silent = !!options.silent;
-    const previousEntries = state.entries.slice();
-    const filtered = previousEntries.filter((entry) => {
-      if (!entry || entry.recurrence_id !== recurrenceId) return true;
-      if (!entry.date) return false;
-      return entry.date < cutoff;
-    });
-    const changed = filtered.length !== previousEntries.length;
+    const isDoomed = (entry) => !!entry && entry.recurrence_id === recurrenceId && (!entry.date || entry.date >= cutoff);
+    // Remember only the entries this delete takes out, and mark each as a pending delete: a background
+    // sync landing mid-delete must not bring them back, and a failure must restore just these (not a
+    // whole-list snapshot that would drop entries added or merged while the delete was in flight).
+    const removed = state.entries.filter(isDoomed);
+    const removedIds = removed.map((entry) => entry.id).filter((id) => id != null).map(String);
+    const changed = removed.length > 0;
     if (changed) {
-      state.entries = filtered;
+      state.entries = state.entries.filter((entry) => !isDoomed(entry));
+      removedIds.forEach((id) => recordPendingEntryDelete(id));
       markAllIncomeSummariesDirty();
       renderEntries();
       renderCalendar();
@@ -3438,13 +3439,20 @@ let ratePreviewInputSyncing = false;
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler(() => {
+          removedIds.forEach((id) => resolveMarkerAfterSync(() => resolvePendingEntryDelete(id)));
           if (!silent) setStatus('Future entries deleted', 'success');
           renderRecurringEntriesList();
           resolve();
         })
         .withFailureHandler((error) => {
           if (changed) {
-            state.entries = previousEntries;
+            removedIds.forEach((id) => resolvePendingEntryDelete(id));
+            const present = new Set(state.entries.map((entry) => entry && String(entry.id)));
+            const restored = removed.filter((entry) => !present.has(String(entry.id)));
+            if (restored.length) {
+              state.entries = state.entries.concat(restored);
+              state.entries.sort(entrySort);
+            }
             markAllIncomeSummariesDirty();
             renderEntries();
             renderCalendar();
