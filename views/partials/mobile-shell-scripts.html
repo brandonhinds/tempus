@@ -291,8 +291,9 @@
       THEME_KEYS.forEach((key) => body.classList.remove('ts-theme-' + key));
       body.classList.add('ts-theme-' + finalKey);
 
-      // Keep the saved ref intact (don't clobber 'custom:<id>' down to 'custom').
-      state.settings = { ...state.settings, theme: ref || 'dark' };
+      // Keep the saved ref intact (don't clobber 'custom:<id>' down to 'custom'). Updated in place so the
+      // entry module's reference to the settings object stays live.
+      state.settings.theme = ref || 'dark';
       if (!isCustom) state.settings.last_non_custom_theme = builtin;
 
       if (isCustom) applyCustomTheme(customConfig);
@@ -376,22 +377,51 @@
       }
     };
 
+    // Settings keys changed on this device, stamped with the refresh generation they were changed in. A
+    // background refresh issued before the change must not overwrite it with the server's older value.
+    const localSettingEdits = new Map(); // key -> refreshSeq at the time of the edit
+    let refreshSeq = 0;
+    const setLocalSettings = (patch) => {
+      if (!patch || typeof patch !== 'object') return;
+      Object.keys(patch).forEach((key) => {
+        state.settings[key] = patch[key];
+        localSettingEdits.set(key, refreshSeq);
+      });
+      persistBaseCache();
+    };
+
+    // Swap `target`'s contents for `source`'s without replacing the object: the entry module holds the
+    // settings/flags objects it got from loadBaseState, so an in-place update reaches it too.
+    const replaceInPlace = (target, source, keep) => {
+      Object.keys(target).forEach((key) => { if (!keep || !keep(key)) delete target[key]; });
+      Object.keys(source).forEach((key) => { if (!keep || !keep(key)) target[key] = source[key]; });
+      return target;
+    };
+
     const refreshBaseFromServer = async () => {
+      const seq = (refreshSeq += 1);
       const [settings, flags, defaults] = await Promise.all([
         run('api_getSettings'),
         run('api_getFeatureFlags'),
         run('api_getEntryDefaults')
       ]);
-      state.settings = settings || {};
-      if (state.settings && typeof state.settings.custom_theme_config === 'string') {
-        try {
-          state.settings.custom_theme_config = JSON.parse(state.settings.custom_theme_config);
-        } catch (e) {
-          state.settings.custom_theme_config = null;
+      // A null reply is a transient GAS hiccup, never "no settings" — keep what we have rather than
+      // blanking to {}. Keys edited locally while this refresh was in flight keep their local value.
+      if (settings && typeof settings === 'object') {
+        const fresh = { ...settings };
+        if (typeof fresh.custom_theme_config === 'string') {
+          try {
+            fresh.custom_theme_config = JSON.parse(fresh.custom_theme_config);
+          } catch (e) {
+            fresh.custom_theme_config = null;
+          }
         }
+        const editedSinceIssue = (key) => localSettingEdits.has(key) && localSettingEdits.get(key) >= seq;
+        replaceInPlace(state.settings, fresh, editedSinceIssue);
+        localSettingEdits.forEach((editSeq, key) => { if (editSeq < seq) localSettingEdits.delete(key); });
       }
-      state.featureFlags = normalizeFeatureFlags(flags);
-      state.entryDefaults = defaults || { basic: [], advanced: [] };
+      if (flags && typeof flags === 'object') replaceInPlace(state.featureFlags, normalizeFeatureFlags(flags));
+      if (defaults && typeof defaults === 'object') state.entryDefaults = defaults;
       applyTheme(bootTheme());
       persistBaseCache();
       console.log('[mobile-shell] base loaded', {
@@ -433,6 +463,8 @@
       generateCustomTheme,
       normalizeFeatureFlags,
       loadBaseState,
+      refreshBaseFromServer,
+      setLocalSettings,
       run
     };
   })();

@@ -1795,3 +1795,6 @@ require('./session-updates').run(test);
 if (!process.exitCode) process.stdout.write('\n' + passed + ' tests passed.\n');
 
 require('./lil-assessments').run(test);
+
+// Async (promise-driven) mobile sync tests report through the same test() helper once they settle.
+require('./mobile-sync').run(test);
