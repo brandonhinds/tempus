@@ -921,4 +921,76 @@ module.exports={lilContext,mockDrive,run(test){
     c.api_getSettings=()=>({payg_instalment_rate:30});
     assert.equal(c.resolvePaygInstalmentRate_(),0.3,'and a saved 30 still reads as 30%');
   });
+  // Queued operations run the real client code against a stub DOM, so they settle asynchronously.
+  (async()=>{
+    for(const [name,fn] of lilQueueTests){let error=null;try{await fn();}catch(e){error=e;}test(name,()=>{if(error)throw error;});}
+  })();
 }};
+
+// A harness for the assessments panel's queued operations: lilOperation, lilLive and the real
+// save/delete handlers, with the server calls held until the test settles them.
+function lilQueueHarness(assessment){
+  const partial=fs.readFileSync(path.join(__dirname,'../views/partials/assessments-scripts.html'),'utf8');
+  const grab=name=>{const m=new RegExp('\\n  (async )?function '+name+'\\(').exec(partial);assert.ok(m,name);
+    const rest=partial.slice(m.index+1),next=rest.search(/\n  (async )?function /);return next===-1?rest:rest.slice(0,next);};
+  const held=[],calls=[];let counter=0;
+  const node=()=>({innerHTML:'',hidden:false,className:'',onclick:null,onsubmit:null,querySelectorAll:()=>[],querySelector:()=>null,focus(){},reportValidity:()=>true});
+  const nodes={};
+  const sandbox={console,setTimeout,Promise,Map,Set,Object,Number,String,Array,
+    lilState:{month:'2026-09',months:{'2026-09':{assessments:[assessment]}},selection:{},editors:{},pending:new Map(),failures:new Map(),chains:{},epoch:0},
+    state:{hourTypes:[],entries:[]},lilData:()=>({}),todayIso:()=>'2026-09-08',lilRequestId:()=>'req-'+(++counter),
+    lilEl:id=>nodes[id]||(nodes[id]=node()),lilTimeRowsHtml:()=>'',lilRender(){},lilPersist(){},lilFeedback(){},lilRefreshInvoice(){},
+    lilSyncEntries(){},lilMarkInvoiceChanged(){},lilRenderDetail(){},lilSelected:()=>null,customConfirm:async()=>true,lilHours:m=>String(m/60),lilDate:d=>String(d),
+    lilApi:(fn,payload)=>{calls.push([fn,payload]);return new Promise((resolve,reject)=>held.push({fn,payload,resolve,reject}));}};
+  vm.runInNewContext(['lilLive','lilOperation','lilTimeForm','lilDeleteTime','lilDelete'].map(grab).join('\n'),sandbox);
+  const flush=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
+  const next=async fn=>{await flush();const at=held.findIndex(h=>h.fn===fn);assert.notEqual(at,-1,'expected a held '+fn);return held.splice(at,1)[0];};
+  const logHours=(a,row)=>{sandbox.lilTimeForm(a,null,[row]);nodes['time-form'].onsubmit({preventDefault(){}});};
+  const live=()=>sandbox.lilState.months['2026-09'].assessments.find(x=>x.id===assessment.id);
+  return {sandbox,calls,next,flush,logHours,live};
+}
+const lilQueueTests=[];
+const lilEntry=(id,minutes,extra)=>Object.assign({id,client_request_id:'',hour_type_id:'report',date:'2026-09-02',duration_minutes:minutes,source_type:'assessment',source_id:'a1'},extra);
+const lilRow=(request,hours)=>({id:'',hour_type_id:'report',date:'2026-09-03',hours,client_request_id:request});
+lilQueueTests.push(['a queued time save that fails keeps the rows an earlier save confirmed',async()=>{
+  const a={id:'a1',revision:1,time_entries:[lilEntry('e0',60)],actual_minutes:60};
+  const h=lilQueueHarness(a);
+  h.logHours(a,lilRow('first',2));
+  h.logHours(a,lilRow('second',3));
+  (await h.next('api_upsertAssessmentTimeEntry')).resolve({entry:lilEntry('e1',120,{client_request_id:'first'})});
+  (await h.next('api_upsertAssessmentTimeEntry')).reject(new Error('Network down'));
+  await h.flush();
+  assert.deepEqual(h.live().time_entries.map(e=>e.id).sort(),['e0','e1'],'the confirmed first save survives; only the failed row rolls back');
+  assert.equal(h.live().actual_minutes,180);
+}]);
+lilQueueTests.push(['a queued time delete that fails restores only the deleted row',async()=>{
+  const a={id:'a1',revision:1,time_entries:[lilEntry('e0',60)],actual_minutes:60};
+  const h=lilQueueHarness(a);
+  h.logHours(a,lilRow('first',2));
+  await h.sandbox.lilDeleteTime(a,a.time_entries[0]);
+  (await h.next('api_upsertAssessmentTimeEntry')).resolve({entry:lilEntry('e1',120,{client_request_id:'first'})});
+  (await h.next('api_deleteAssessmentTimeEntry')).reject(new Error('Network down'));
+  await h.flush();
+  assert.deepEqual(h.live().time_entries.map(e=>e.id).sort(),['e0','e1'],'the earlier save stays and the undeleted row returns');
+  assert.equal(h.live().actual_minutes,180);
+}]);
+lilQueueTests.push(['queued operations act on the assessment an earlier save put on screen',async()=>{
+  // An assessment save replaces the object in the month list; later queued operations must use it.
+  const a={id:'a1',revision:1,time_entries:[lilEntry('e0',60)],actual_minutes:60};
+  const h=lilQueueHarness(a),s=h.sandbox;
+  const replaced={...a,revision:2,time_entries:[lilEntry('e0',60),lilEntry('e9',30)],actual_minutes:90};
+  const list=()=>s.lilState.months['2026-09'].assessments;
+  s.lilOperation('a1',['2026-09'],()=>{},()=>s.lilApi('api_upsertAssessment',{}),()=>{s.lilState.months['2026-09'].assessments=list().filter(x=>x.id!=='a1').concat(replaced);},()=>{},()=>{});
+  h.logHours(a,lilRow('first',2));
+  (await h.next('api_upsertAssessment')).resolve({});
+  (await h.next('api_upsertAssessmentTimeEntry')).resolve({entry:lilEntry('e1',120,{client_request_id:'first'})});
+  await h.flush();
+  assert.deepEqual(h.live().time_entries.map(e=>e.id).sort(),['e0','e1','e9'],'time logged while the save ran lands on the saved assessment');
+  await s.lilDelete(a);
+  const del=await h.next('api_deleteAssessment');
+  assert.equal(del.payload.expected_revision,2,'the delete expects the revision the earlier save confirmed');
+  del.reject(new Error('Network down'));
+  await h.flush();
+  assert.equal(list().length,1);
+  assert.equal(list()[0],replaced,'the failed delete restores the saved assessment, not the clicked copy');
+}]);
