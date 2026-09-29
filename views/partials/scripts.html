@@ -8527,6 +8527,7 @@ function updateDeductionFormVisibility() {
       created_at: nowIso,
       updated_at: nowIso
     });
+    const categoryWrite = beginSliceWrite('deductionCategories', [tempId], state.deductionCategories);
 
     if (isEdit) {
       const index = state.deductionCategories.findIndex((item) => item.id === payload.id);
@@ -8558,6 +8559,7 @@ function updateDeductionFormVisibility() {
         }
         if (res && res.success && res.category) {
           const updated = sanitizeDeductionCategory(res.category);
+          categoryWrite.touch(updated.id).settle();
           const tempIndex = state.deductionCategories.findIndex((item) => item.id === optimisticCategory.id);
           if (tempIndex !== -1) {
             state.deductionCategories.splice(tempIndex, 1, updated);
@@ -8581,6 +8583,7 @@ function updateDeductionFormVisibility() {
           hideDeductionCategoryForm();
           deductionCategoryDeleteId = null;
         } else {
+          categoryWrite.settle();
           state.deductionCategories = previousCategories;
           state.deductionCategoryMap = previousMap;
           state.annualCategoryFilters = previousFilters;
@@ -8600,6 +8603,7 @@ function updateDeductionFormVisibility() {
           btnSaveDeductionCategory.disabled = false;
           btnSaveDeductionCategory.textContent = 'Save category';
         }
+        categoryWrite.settle();
         state.deductionCategories = previousCategories;
         state.deductionCategoryMap = previousMap;
         state.annualCategoryFilters = previousFilters;
@@ -8625,6 +8629,7 @@ function updateDeductionFormVisibility() {
     const previousDeductions = state.deductions.map((item) => ({ ...item }));
     const deductionWrite = beginSliceWrite('deductions',
       state.deductions.filter((item) => item.category_id === category.id).map((item) => item.id), state.deductions);
+    const categoryWrite = beginSliceWrite('deductionCategories', [category.id], state.deductionCategories);
 
     state.deductionCategories = state.deductionCategories.filter((item) => item.id !== category.id);
     state.deductions.forEach((deduction) => {
@@ -8649,11 +8654,13 @@ function updateDeductionFormVisibility() {
     google.script.run
       .withSuccessHandler(() => {
         deductionWrite.settle();
+        categoryWrite.settle();
         setStatus('Category deleted', 'success');
         renderAnnualCategorySection();
       })
       .withFailureHandler(() => {
         deductionWrite.settle();
+        categoryWrite.settle();
         state.deductionCategories = previousCategories;
         state.deductionCategoryMap = previousMap;
         state.annualCategoryFilters = previousFilters;
@@ -8690,11 +8697,13 @@ function updateDeductionFormVisibility() {
     renderDeductionCategoryOptions(deductionCategorySelect ? deductionCategorySelect.value : '');
     if (loadingDeductionCategories) return;
     loadingDeductionCategories = true;
+    const ticket = beginSliceFetch('deductionCategories');
     google.script.run
       .withSuccessHandler((categories) => {
         loadingDeductionCategories = false;
         deductionCategoryDeleteId = null;
-        state.deductionCategories = Array.isArray(categories) ? categories.map(sanitizeDeductionCategory) : [];
+        const serverCategories = Array.isArray(categories) ? categories.map(sanitizeDeductionCategory) : [];
+        state.deductionCategories = dedupeById(mergeSliceList(ticket, serverCategories, state.deductionCategories));
         updateDeductionCategoryMap();
         ensureDeductionCategoryCollapseState();
         const currentSelection = deductionCategorySelect ? deductionCategorySelect.value : '';
@@ -8706,6 +8715,7 @@ function updateDeductionFormVisibility() {
       })
       .withFailureHandler(() => {
         loadingDeductionCategories = false;
+        endSliceFetch(ticket);
         setStatus('Failed to load categories', 'error');
       })
       .api_getDeductionCategories();
@@ -10731,10 +10741,10 @@ function updateDeductionFormVisibility() {
         settings: confirmedSliceFields('settings', state.settings),
         contracts: confirmedSliceList('contracts', state.contracts).map(sanitizeContract),
         hourTypes: confirmedSliceList('hourTypes', state.hourTypes).map(sanitizeHourType),
-        recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
-        bulkEntries: state.bulkEntries.map((item) => sanitizeBulkEntry(item)),
+        recurringTimeEntries: confirmedSliceList('recurringTimeEntries', state.recurringTimeEntries).map((item) => sanitizeRecurringEntry(item)),
+        bulkEntries: confirmedSliceList('bulkEntries', state.bulkEntries).map((item) => sanitizeBulkEntry(item)),
         deductions: confirmedSliceList('deductions', state.deductions).map(sanitizeDeduction),
-        deductionCategories: state.deductionCategories.map(sanitizeDeductionCategory),
+        deductionCategories: confirmedSliceList('deductionCategories', state.deductionCategories).map(sanitizeDeductionCategory),
         deductionCategoryCollapse: state.deductionCategoryCollapse,
         settingsSectionCollapse: state.settingsSectionCollapse,
         featureFlagCollapse: state.featureFlagCollapse,
@@ -16009,6 +16019,7 @@ function updateDeductionFormVisibility() {
       google.script.run
         .withSuccessHandler((res) => {
           contractWrite.settle();
+          if (res && res.success === false) { setStatus(res.message || 'Contract delete failed', 'error'); return; }
           state.entries = state.entries.filter((e) => e.contract_id !== id);
           state.breaks = (state.breaks || []).filter((e) => e.contract_id !== id);
           finishDelete();
@@ -16028,8 +16039,9 @@ function updateDeductionFormVisibility() {
     setStatus('Deleting contract...', 'warn');
     const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
-      .withSuccessHandler(() => {
+      .withSuccessHandler((res) => {
         contractWrite.settle();
+        if (res && res.success === false) { setStatus(res.message || 'Contract delete failed', 'error'); return; }
         finishDelete();
         setStatus('Contract deleted', 'success');
       })
@@ -16049,8 +16061,10 @@ function updateDeductionFormVisibility() {
     setStatus(archived ? 'Archiving contract…' : 'Restoring contract…', 'warn');
     const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
-      .withSuccessHandler(() => {
+      .withSuccessHandler((res) => {
         contractWrite.settle();
+        // A referenced contract can't be archived; the refusal comes back as { success: false, message }.
+        if (res && res.success === false) { setStatus(res.message || (archived ? 'Archive failed' : 'Restore failed'), 'error'); return; }
         const c = state.contracts.find((x) => x.id === id);
         if (c) c.archived = !!archived;
         // Archiving the contract you're viewing drops the selection so it doesn't linger as a surfaced
@@ -27126,10 +27140,12 @@ function getCachedIncomeSummary(monthKey) {
 
   function fetchDeductionCategoriesFromServer() {
     if (!isDeductionCategoriesEnabled()) return Promise.resolve(false);
+    const ticket = beginSliceFetch('deductionCategories');
     return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler((categories) => {
-          state.deductionCategories = (categories || []).map(sanitizeDeductionCategory);
+          const serverCategories = (categories || []).map(sanitizeDeductionCategory);
+          state.deductionCategories = dedupeById(mergeSliceList(ticket, serverCategories, state.deductionCategories));
           updateDeductionCategoryMap();
           ensureDeductionCategoryCollapseState();
           saveCache();
@@ -27139,6 +27155,7 @@ function getCachedIncomeSummary(monthKey) {
           resolve(true);
         })
         .withFailureHandler(() => {
+          endSliceFetch(ticket);
           console.error('Failed to load deduction categories');
           resolve(false);
         })
@@ -28384,91 +28401,105 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
-  if (basDetailSaveBtn) {
-    basDetailSaveBtn.addEventListener('click', async () => {
-      const submittedToggle = document.getElementById('bas-submitted-toggle');
-      const submitted = submittedToggle ? submittedToggle.checked : false;
+  // Saves the open BAS detail modal's period. A named function so tests can drive it.
+  function saveBasDetail() {
+    const submittedToggle = document.getElementById('bas-submitted-toggle');
+    const submitted = submittedToggle ? submittedToggle.checked : false;
 
-      const { fyYear, quarter, month } = currentBasPeriod;
-      if (!fyYear) return;
-      if (!quarter && (month === null || month === undefined)) return;
+    const { fyYear, quarter, month } = currentBasPeriod;
+    if (!fyYear) return;
+    if (!quarter && (month === null || month === undefined)) return;
 
-      // Calculate all fields
-      const monthRows = buildMonthlyBasRows(fyYear);
-      let periodData;
+    // Calculate all fields
+    const monthRows = buildMonthlyBasRows(fyYear);
+    let periodData;
 
-      if (quarter) {
-        const quarterlyRows = buildQuarterlyBasRows(monthRows);
-        periodData = quarterlyRows[quarter - 1];
-      } else {
-        periodData = monthRows.find(r => r.month === month);
-      }
+    if (quarter) {
+      const quarterlyRows = buildQuarterlyBasRows(monthRows);
+      periodData = quarterlyRows[quarter - 1];
+    } else {
+      periodData = monthRows.find(r => r.month === month);
+    }
 
-      if (!periodData) return;
+    if (!periodData) return;
 
-      const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
-      const isSoleTrader = getFeatureFlag('is_sole_trader');
+    const paygRate = Number(state.settings.payg_instalment_rate || 2) / 100;
+    const isSoleTrader = getFeatureFlag('is_sole_trader');
 
-      const basData = {
-        financial_year: fyYear,
-        period_type: quarter ? 'quarterly' : 'monthly',
-        quarter: quarter || null,
-        month: month !== null && month !== undefined ? month : null,
-        g1_total_sales: periodData.invoiceTotal,
-        g1_includes_gst: true,
-        field_1a_gst_on_sales: periodData.invoiceGst,
-        field_1b_gst_on_purchases: periodData.companyExpensesGst,
-        t1_payg_income: isSoleTrader ? periodData.employeeGrossIncome : periodData.companyIncome,
-        t2_instalment_rate: paygRate,
-        submitted: submitted
-      };
+    const basData = {
+      financial_year: fyYear,
+      period_type: quarter ? 'quarterly' : 'monthly',
+      quarter: quarter || null,
+      month: month !== null && month !== undefined ? month : null,
+      g1_total_sales: periodData.invoiceTotal,
+      g1_includes_gst: true,
+      field_1a_gst_on_sales: periodData.invoiceGst,
+      field_1b_gst_on_purchases: periodData.companyExpensesGst,
+      t1_payg_income: isSoleTrader ? periodData.employeeGrossIncome : periodData.companyIncome,
+      t2_instalment_rate: paygRate,
+      submitted: submitted
+    };
 
-      // Save to backend
-      setStatus('Saving BAS submission...', 'warn');
-      basDetailSaveBtn.disabled = true;
-      basDetailSaveBtn.textContent = 'Saving...';
-      const samePeriod = (s) => s.financial_year === fyYear
-        && (quarter ? s.period_type === 'quarterly' && s.quarter === quarter : s.period_type === 'monthly' && s.month === month);
-      const existingSubmission = state.basSubmissions.find(samePeriod);
-      const basWrite = beginSliceWrite('basSubmissions', [existingSubmission ? existingSubmission.id : null], state.basSubmissions);
+    // Save to backend
+    setStatus('Saving BAS submission...', 'warn');
+    basDetailSaveBtn.disabled = true;
+    basDetailSaveBtn.textContent = 'Saving...';
+    const samePeriod = (s) => s.financial_year === fyYear
+      && (quarter ? s.period_type === 'quarterly' && s.quarter === quarter : s.period_type === 'monthly' && s.month === month);
+    const existingSubmission = state.basSubmissions.find(samePeriod);
+    const basWrite = beginSliceWrite('basSubmissions', [existingSubmission ? existingSubmission.id : null], state.basSubmissions);
 
-      google.script.run
-        .withSuccessHandler((savedSubmission) => {
-          basWrite.touch(savedSubmission && savedSubmission.id).settle();
-          // Update local state
-          const index = state.basSubmissions.findIndex(s => {
-            if (s.financial_year !== fyYear) return false;
-            if (quarter) {
-              return s.period_type === 'quarterly' && s.quarter === quarter;
-            } else {
-              return s.period_type === 'monthly' && s.month === month;
-            }
-          });
-          if (index >= 0) {
-            state.basSubmissions[index] = savedSubmission;
-          } else {
-            state.basSubmissions.push(savedSubmission);
-          }
-          saveCache();
-
-          // Close modal and refresh BAS report
-          const modal = document.getElementById('modal-bas-detail');
-          hideModal(modal);
-          renderBasReporting();
-          setStatus('BAS submission saved', 'success');
-          basDetailSaveBtn.disabled = false;
-          basDetailSaveBtn.textContent = 'Save';
-        })
-        .withFailureHandler((error) => {
+    google.script.run
+      .withSuccessHandler((savedSubmission) => {
+        // A recoverable refusal (e.g. immutable_bas_submission for a submitted snapshot) arrives through the
+        // success channel as { success: false, message }. Nothing was saved, so leave state and the modal alone.
+        if (!savedSubmission || savedSubmission.success === false || !savedSubmission.id) {
           basWrite.settle();
-          console.error('Failed to save BAS submission:', error);
-          customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
+          const message = (savedSubmission && savedSubmission.message) || 'The BAS submission was not saved.';
+          customAlert('Failed to save BAS submission: ' + message, { title: 'Error' });
           basDetailSaveBtn.disabled = false;
           basDetailSaveBtn.textContent = 'Save';
           setStatus('Failed to save', 'error');
-        })
-        .api_upsertBasSubmission(basData);
-    });
+          return;
+        }
+        basWrite.touch(savedSubmission.id).settle();
+        // Update local state
+        const index = state.basSubmissions.findIndex(s => {
+          if (s.financial_year !== fyYear) return false;
+          if (quarter) {
+            return s.period_type === 'quarterly' && s.quarter === quarter;
+          } else {
+            return s.period_type === 'monthly' && s.month === month;
+          }
+        });
+        if (index >= 0) {
+          state.basSubmissions[index] = savedSubmission;
+        } else {
+          state.basSubmissions.push(savedSubmission);
+        }
+        saveCache();
+
+        // Close modal and refresh BAS report
+        const modal = document.getElementById('modal-bas-detail');
+        hideModal(modal);
+        renderBasReporting();
+        setStatus('BAS submission saved', 'success');
+        basDetailSaveBtn.disabled = false;
+        basDetailSaveBtn.textContent = 'Save';
+      })
+      .withFailureHandler((error) => {
+        basWrite.settle();
+        console.error('Failed to save BAS submission:', error);
+        customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
+        basDetailSaveBtn.disabled = false;
+        basDetailSaveBtn.textContent = 'Save';
+        setStatus('Failed to save', 'error');
+      })
+      .api_upsertBasSubmission(basData);
+  }
+
+  if (basDetailSaveBtn) {
+    basDetailSaveBtn.addEventListener('click', saveBasDetail);
   }
 
   function getCurrentFormData(type) {
@@ -30501,6 +30532,8 @@ function getCachedIncomeSummary(monthKey) {
     if (!state.featureFlags.bulk_time_entries || !state.featureFlags.bulk_time_entries.enabled) return;
     if (state.bulkEntriesSyncing) return;
     state.bulkEntriesSyncing = true;
+    // Sent now, so a schedule saved or deleted while this sync is in flight keeps its local value.
+    const listTicket = beginSliceFetch('bulkEntries');
     // Set the scoped entry id BEFORE updating status, otherwise updateBulkSyncStatus reads an empty id
     // and falls back to showing "Syncing…" on every card instead of just the one being synced/saved.
     const payload = opts.entryId ? { entryId: opts.entryId } : {};
@@ -30513,7 +30546,8 @@ function getCachedIncomeSummary(monthKey) {
         state.bulkEntriesSyncingEntryId = '';
         updateBulkSyncStatus();
         if (stopWorking) stopWorking();
-        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+        const serverEntries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+        const entries = mergeSliceList(listTicket, serverEntries, state.bulkEntries);
         state.bulkEntries = entries;
         state.bulkEntriesInitialized = true;
         saveCache();
@@ -30542,6 +30576,7 @@ function getCachedIncomeSummary(monthKey) {
         state.bulkEntriesSyncingEntryId = '';
         updateBulkSyncStatus();
         if (stopWorking) stopWorking();
+        endSliceFetch(listTicket);
         const message = error && error.message ? error.message : 'Failed to sync bulk entries.';
         if (typeof opts.onError === 'function') {
           opts.onError(message);
@@ -30613,6 +30648,10 @@ function getCachedIncomeSummary(monthKey) {
       optimisticId = `temp_bulk_${Date.now()}`;
     }
     const optimisticEntry = { ...draft, id: optimisticId };
+    // The reply carries the whole list; the ticket keeps any other range still saving, and this one
+    // keeps its confirmed value.
+    const listTicket = beginSliceFetch('bulkEntries');
+    const rangeWrite = beginSliceWrite('bulkEntries', [optimisticId], state.bulkEntries);
     upsertBulkEntryLocal(optimisticEntry);
     state.bulkEntriesInitialized = true;
     renderBulkEntriesList();
@@ -30625,8 +30664,14 @@ function getCachedIncomeSummary(monthKey) {
       .withSuccessHandler(async (res) => {
         handleBulkFormBusy(false, baseLabel);
         if (res && res.success) {
+          const confirmed = res.entry ? sanitizeBulkEntry(res.entry) : null;
+          rangeWrite.touch(confirmed && confirmed.id).settle();
+          if (confirmed && confirmed.id) {
+            removeBulkEntryLocal(optimisticId);
+            upsertBulkEntryLocal(confirmed);
+          }
           const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
-          state.bulkEntries = entries;
+          state.bulkEntries = mergeSliceList(listTicket, entries, state.bulkEntries);
           state.bulkEntriesInitialized = true;
           saveCache();
           renderBulkEntriesList();
@@ -30645,6 +30690,8 @@ function getCachedIncomeSummary(monthKey) {
           clearBulkBusy();
         } else {
           clearBulkBusy();
+          rangeWrite.settle();
+          endSliceFetch(listTicket);
           const message = res && res.error ? res.error : 'Failed to save bulk range.';
           state.bulkEntries = previousEntries;
           renderBulkEntriesList();
@@ -30659,6 +30706,8 @@ function getCachedIncomeSummary(monthKey) {
       .withFailureHandler((error) => {
         handleBulkFormBusy(false, baseLabel);
         clearBulkBusy();
+        rangeWrite.settle();
+        endSliceFetch(listTicket);
         state.bulkEntries = previousEntries;
         renderBulkEntriesList();
         if (previousDraft) {
@@ -30684,6 +30733,8 @@ function getCachedIncomeSummary(monthKey) {
     const previousEntries = cloneBulkEntries(state.bulkEntries);
     const previousDraft = state.bulkEntryForm.draft ? { ...state.bulkEntryForm.draft } : null;
     const previousEditingId = state.bulkEntryForm.editingId;
+    const listTicket = beginSliceFetch('bulkEntries');
+    const rangeWrite = beginSliceWrite('bulkEntries', [id], state.bulkEntries);
     removeBulkEntryLocal(id);
     renderBulkEntriesList();
     showBulkInitialState();
@@ -30691,8 +30742,9 @@ function getCachedIncomeSummary(monthKey) {
     setStatus('Removing bulk range...', 'warn');
     google.script.run
       .withSuccessHandler((res) => {
-        const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
-        state.bulkEntries = entries;
+        rangeWrite.settle();
+        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeBulkEntry).filter((item) => item) : [];
+        state.bulkEntries = mergeSliceList(listTicket, entries, state.bulkEntries);
         saveCache();
         renderBulkEntriesList();
         showBulkInitialState();
@@ -30703,6 +30755,8 @@ function getCachedIncomeSummary(monthKey) {
       })
       .withFailureHandler((error) => {
         clearBulkBusy();
+        rangeWrite.settle();
+        endSliceFetch(listTicket);
         state.bulkEntries = previousEntries;
         renderBulkEntriesList();
         if (previousDraft) {
@@ -31103,6 +31157,8 @@ function getCachedIncomeSummary(monthKey) {
     if (!state.featureFlags.recurring_time_entries || !state.featureFlags.recurring_time_entries.enabled) return;
     if (state.recurringEntriesSyncing) return;
     state.recurringEntriesSyncing = true;
+    // Sent now, so a schedule saved or deleted while this sync is in flight keeps its local value.
+    const listTicket = beginSliceFetch('recurringTimeEntries');
     updateRecurringSyncStatus();
     const stopWorking = !opts.silent ? showWorkingToast('Syncing reoccurring entries…') : null;
     google.script.run
@@ -31110,7 +31166,8 @@ function getCachedIncomeSummary(monthKey) {
         state.recurringEntriesSyncing = false;
         updateRecurringSyncStatus();
         if (stopWorking) stopWorking();
-        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        const serverEntries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        const entries = mergeSliceList(listTicket, serverEntries, state.recurringTimeEntries);
         state.recurringTimeEntries = entries;
         state.recurringEntriesInitialized = true;
         saveCache();
@@ -31138,6 +31195,7 @@ function getCachedIncomeSummary(monthKey) {
         state.recurringEntriesSyncing = false;
         updateRecurringSyncStatus();
         if (stopWorking) stopWorking();
+        endSliceFetch(listTicket);
         const message = error && error.message ? error.message : 'Failed to sync reoccurring entries.';
         if (typeof opts.onError === 'function') {
           opts.onError(message);
@@ -31246,6 +31304,10 @@ function getCachedIncomeSummary(monthKey) {
       optimisticId = `temp_schedule_${Date.now()}`;
     }
     const optimisticEntry = { ...draft, id: optimisticId };
+    // The reply carries the whole list; the ticket keeps any other schedule still saving, and this one
+    // keeps its confirmed value.
+    const listTicket = beginSliceFetch('recurringTimeEntries');
+    const scheduleWrite = beginSliceWrite('recurringTimeEntries', [optimisticId], state.recurringTimeEntries);
     upsertRecurringEntryLocal(optimisticEntry);
     state.recurringEntriesInitialized = true;
     renderRecurringEntriesList();
@@ -31259,8 +31321,14 @@ function getCachedIncomeSummary(monthKey) {
       .withSuccessHandler(async (res) => {
         handleRecurringFormBusy(false, baseLabel);
         if (res && res.success) {
+          const confirmed = res.entry ? sanitizeRecurringEntry(res.entry) : null;
+          scheduleWrite.touch(confirmed && confirmed.id).settle();
+          if (confirmed && confirmed.id) {
+            removeRecurringEntryLocal(optimisticId);
+            upsertRecurringEntryLocal(confirmed);
+          }
           const entries = Array.isArray(res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
-          state.recurringTimeEntries = entries;
+          state.recurringTimeEntries = mergeSliceList(listTicket, entries, state.recurringTimeEntries);
           state.recurringEntriesInitialized = true;
           saveCache();
           renderRecurringEntriesList();
@@ -31282,6 +31350,8 @@ function getCachedIncomeSummary(monthKey) {
           clearRecurringBusy();
         } else {
           clearRecurringBusy();
+          scheduleWrite.settle();
+          endSliceFetch(listTicket);
           const message = res && res.error ? res.error : 'Failed to save schedule.';
           state.recurringTimeEntries = previousEntries;
           renderRecurringEntriesList();
@@ -31296,6 +31366,8 @@ function getCachedIncomeSummary(monthKey) {
       .withFailureHandler((error) => {
         handleRecurringFormBusy(false, baseLabel);
         clearRecurringBusy();
+        scheduleWrite.settle();
+        endSliceFetch(listTicket);
         state.recurringTimeEntries = previousEntries;
         renderRecurringEntriesList();
         if (previousDraft) {
@@ -31330,6 +31402,8 @@ function getCachedIncomeSummary(monthKey) {
     const previousEntries = cloneRecurringEntries(state.recurringTimeEntries);
     const previousDraft = state.recurringEntryForm.draft ? { ...state.recurringEntryForm.draft } : null;
     const previousEditingId = state.recurringEntryForm.editingId;
+    const listTicket = beginSliceFetch('recurringTimeEntries');
+    const scheduleWrite = beginSliceWrite('recurringTimeEntries', [id], state.recurringTimeEntries);
     removeRecurringEntryLocal(id);
     renderRecurringEntriesList();
     // Return to the neutral state after deleting (placeholder, or a fresh New form if that was the last one).
@@ -31340,7 +31414,9 @@ function getCachedIncomeSummary(monthKey) {
     google.script.run
       .withSuccessHandler(async (res) => {
         if (recurringDeleteBtn) recurringDeleteBtn.disabled = false;
-        state.recurringTimeEntries = Array.isArray(res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        scheduleWrite.settle();
+        const entries = Array.isArray(res && res.entries) ? res.entries.map(sanitizeRecurringEntry).filter((item) => item) : [];
+        state.recurringTimeEntries = mergeSliceList(listTicket, entries, state.recurringTimeEntries);
         saveCache();
         renderRecurringEntriesList();
         showRecurringInitialState();
@@ -31354,6 +31430,8 @@ function getCachedIncomeSummary(monthKey) {
       .withFailureHandler((error) => {
         if (recurringDeleteBtn) recurringDeleteBtn.disabled = false;
         clearRecurringBusy();
+        scheduleWrite.settle();
+        endSliceFetch(listTicket);
         state.recurringTimeEntries = previousEntries;
         renderRecurringEntriesList();
         if (previousDraft) {
