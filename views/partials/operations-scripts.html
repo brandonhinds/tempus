@@ -1,5 +1,5 @@
 <script>
-  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], expenseMode:'transaction', expenseEditId:'' };
+  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], expenseEditId:'', expenseRuleEditId:'' };
 
   function operationsApi(name, ...args) {
     return new Promise((resolve, reject) => {
@@ -61,7 +61,7 @@
       const actions = document.createElement('div');
       actions.className = 'ts-ledger-row__actions';
       if (transaction.status === 'scheduled') { const record=document.createElement('button'); record.type='button'; record.className='ghost small'; record.textContent='Record purchase'; record.addEventListener('click',async()=>{ const result=await operationsApi('api_upsertExpenseTransaction',{...transaction,status:'recorded',reconciliation_state:'unreconciled'}); if(result.success===false)operationsStatus(result.message,'warn'); else renderExpensesPage(); }); actions.appendChild(record); }
-      if (transaction.reconciliation_state !== 'reconciled' && transaction.status !== 'void') { const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit'; edit.addEventListener('click',()=>openExpenseForm('transaction',transaction)); actions.appendChild(edit); }
+      if (transaction.reconciliation_state !== 'reconciled' && transaction.status !== 'void') { const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit'; edit.addEventListener('click',()=>openExpenseForm(transaction)); actions.appendChild(edit); }
       const receipt = document.createElement('button');
       receipt.type = 'button'; receipt.className = 'ghost small'; receipt.textContent = transaction.attachments && transaction.attachments.length ? 'Receipt ✓' : 'Add receipt';
       receipt.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'receipt'));
@@ -111,18 +111,88 @@
     if (mode !== 'reconcile') input.focus(); else submit.focus();
   }
 
+  const EXPENSE_FREQUENCY_LABELS = { weekly:'Weekly', fortnightly:'Fortnightly', monthly:'Monthly', quarterly:'Quarterly', yearly:'Yearly', annually:'Yearly', annual:'Yearly', once:'Once only', one_off:'Once only' };
+
+  function expenseIsActive(rule) {
+    return rule.active === true || /^(true|1|yes|y)$/i.test(String(rule.active == null ? '' : rule.active).trim());
+  }
+
+  function expenseToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+
+  function expenseDateLabel(iso) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return String(iso || '');
+    return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric', timeZone:'UTC' });
+  }
+
+  // Mirrors migrationOccurrenceDates_ (backend/migrations.js): the schedule dates on or after `from`, at most `limit`.
+  // Month steps clamp to the month's last day, and the clamped day carries forward, exactly as the backend does.
+  function expenseScheduleDates(start, end, frequency, from, limit) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(start || ''))) return [];
+    const mode = String(frequency || 'once').toLowerCase();
+    const months = { quarterly:3, yearly:12, annually:12, annual:12 }[mode] || (['weekly', 'fortnightly', 'once', 'one_off'].includes(mode) ? 0 : 1);
+    let cursor = new Date(start + 'T12:00:00Z');
+    const dates = [];
+    for (let step = 0; step < 5000 && dates.length < limit; step++) {
+      const iso = cursor.toISOString().slice(0, 10);
+      if (end && iso > end) break;
+      if (iso >= from) dates.push(iso);
+      if (mode === 'once' || mode === 'one_off') break;
+      if (months) {
+        const day = cursor.getUTCDate();
+        const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + months, 1, 12));
+        next.setUTCDate(Math.min(day, new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0, 12)).getUTCDate()));
+        cursor = next;
+      } else {
+        cursor = new Date(cursor.getTime() + (mode === 'fortnightly' ? 14 : 7) * 86400000);
+      }
+    }
+    return dates;
+  }
+
+  function expenseRuleSummary(rule) {
+    if (!expenseIsActive(rule)) return 'Paused. No upcoming payments are listed.';
+    const upcoming = expenseScheduleDates(rule.start_date, rule.end_date, rule.frequency, expenseToday(), 5);
+    if (!upcoming.length) return rule.end_date ? 'Finished. No payments due after the end date.' : 'No upcoming payments.';
+    return 'Next: ' + upcoming.map(expenseDateLabel).join(', ');
+  }
+
   function renderExpenseRules() {
     const list = document.getElementById('expense-rules');
     list.replaceChildren();
-    if (!operationsState.rules.length) { ledgerText(list, 'ts-empty', 'No scheduled expense rules.'); return; }
+    if (!operationsState.rules.length) { ledgerText(list, 'ts-empty', 'No schedules yet. Add one for bills that repeat, such as insurance, rent or subscriptions.'); return; }
     operationsState.rules.forEach((rule) => {
+      const active = expenseIsActive(rule);
       const row = document.createElement('div'); row.className = 'ts-ledger-row';
-      const identity = document.createElement('div'); ledgerText(identity, 'ts-ledger-row__title', rule.vendor || rule.description || 'Untitled rule'); ledgerText(identity, 'ts-ledger-row__meta', [rule.frequency, rule.start_date, rule.active === true || String(rule.active).toLowerCase() === 'true' ? 'active' : 'archived'].join(' · ')); row.appendChild(identity);
-      ledgerText(row, 'ts-ledger-row__meta', rule.category || 'Uncategorised'); ledgerText(row, 'ts-ledger-row__amount', operationsMoney(rule.amount));
+      const identity = document.createElement('div');
+      ledgerText(identity, 'ts-ledger-row__title', rule.vendor || rule.description || 'Untitled schedule');
+      ledgerText(identity, 'ts-ledger-row__meta', [EXPENSE_FREQUENCY_LABELS[String(rule.frequency).toLowerCase()] || rule.frequency, 'from ' + expenseDateLabel(rule.start_date), rule.end_date ? 'until ' + expenseDateLabel(rule.end_date) : 'no end date', rule.category].filter(Boolean).join(' · '));
+      row.appendChild(identity);
+      const stateCell = document.createElement('div');
+      const badge = document.createElement('span'); badge.className = 'ts-badge' + (active ? ' success' : ''); badge.textContent = active ? 'Active' : 'Paused';
+      stateCell.appendChild(badge);
+      const next = active ? expenseScheduleDates(rule.start_date, rule.end_date, rule.frequency, expenseToday(), 1)[0] : '';
+      if (next) ledgerText(stateCell, 'ts-ledger-row__meta', 'Next due ' + expenseDateLabel(next));
+      row.appendChild(stateCell);
+      ledgerText(row, 'ts-ledger-row__amount', operationsMoney(rule.amount));
       const actions = document.createElement('div'); actions.className = 'ts-ledger-row__actions';
-      const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit future rule'; edit.addEventListener('click',()=>openExpenseForm('rule',rule)); actions.appendChild(edit);
-      if (rule.active === true || String(rule.active).toLowerCase() === 'true') { const archive = document.createElement('button'); archive.type='button'; archive.className='ghost small'; archive.textContent='Archive'; archive.addEventListener('click', async () => { const result = await operationsApi('api_archiveExpenseRule', rule.id); if (result.success === false) operationsStatus(result.message, 'warn'); else renderExpensesPage(); }); actions.appendChild(archive); }
-      row.appendChild(actions); list.appendChild(row);
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'ghost small'; edit.textContent = 'Edit schedule'; edit.addEventListener('click', () => openExpenseRuleForm(rule)); actions.appendChild(edit);
+      if (active) {
+        const archive = document.createElement('button'); archive.type = 'button'; archive.className = 'ghost small'; archive.textContent = 'Stop schedule';
+        archive.addEventListener('click', async () => {
+          // Stopping ends the schedule today and removes its upcoming payments, so it asks first.
+          if (!archive.dataset.confirm) { archive.dataset.confirm = '1'; archive.textContent = 'Confirm: stop and remove upcoming'; return; }
+          archive.disabled = true;
+          const result = await operationsApi('api_archiveExpenseRule', rule.id);
+          if (result.success === false) { operationsStatus(result.message, 'warn'); archive.disabled = false; } else { operationsStatus('Schedule stopped'); renderExpensesPage(); }
+        });
+        actions.appendChild(archive);
+      }
+      row.appendChild(actions);
+      ledgerText(row, 'ts-ledger-row__detail', expenseRuleSummary(rule));
+      list.appendChild(row);
     });
   }
 
@@ -136,25 +206,85 @@
     [['Actual', report.totals.actual], ['Scheduled', report.totals.scheduled], ['Unreconciled', report.totals.unreconciled], ['GST creditable', report.totals.gst_creditable], ['Non-creditable GST', report.totals.non_creditable_gst]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
   }
 
-  function openExpenseForm(mode, item) {
-    operationsState.expenseMode = mode;
-    operationsState.expenseEditId=item&&item.id?item.id:'';
-    const form = document.getElementById('expense-form'); form.style.display='block'; form.reset();
-    document.getElementById('expense-vendor').value=item?.vendor||''; document.getElementById('expense-abn').value=item?.vendor_abn||''; document.getElementById('expense-description').value=item?.description||''; document.getElementById('expense-category').value=item?.category||''; document.getElementById('expense-amount').value=item?.amount??''; document.getElementById('expense-gst-code').value=item?.gst_code||'taxable'; document.getElementById('expense-notes').value=item?.notes||'';
-    document.getElementById('expense-business-use').value=item?Math.round((Number(item.business_use_percentage)||0)*10000)/100:100;
-    document.getElementById('expense-date').value=(mode==='rule'?item?.start_date:item?.purchase_date)||new Date().toISOString().slice(0,10); document.getElementById('expense-supplier-date').value=item?.supplier_invoice_date||''; document.getElementById('expense-frequency').value=item?.frequency||'monthly';
-    document.getElementById('expense-frequency-wrap').style.display=mode === 'rule' ? 'block' : 'none';
-    document.getElementById('expense-supplier-date-wrap').style.display=mode === 'rule' ? 'none' : 'block';
-    form.querySelector('h4').textContent=(item?'Edit ':'New ')+(mode === 'rule' ? 'scheduled expense rule' : 'expense transaction');
+  function openExpenseForm(item) {
+    operationsState.expenseEditId = item && item.id ? item.id : '';
+    document.getElementById('expense-rule-form').style.display = 'none';
+    const form = document.getElementById('expense-form'); form.style.display = 'block'; form.reset();
+    document.getElementById('expense-vendor').value = item?.vendor || ''; document.getElementById('expense-abn').value = item?.vendor_abn || ''; document.getElementById('expense-description').value = item?.description || ''; document.getElementById('expense-category').value = item?.category || ''; document.getElementById('expense-amount').value = item?.amount ?? ''; document.getElementById('expense-gst-code').value = item?.gst_code || 'taxable'; document.getElementById('expense-notes').value = item?.notes || '';
+    document.getElementById('expense-business-use').value = item ? Math.round((Number(item.business_use_percentage) || 0) * 10000) / 100 : 100;
+    document.getElementById('expense-date').value = item?.purchase_date || expenseToday(); document.getElementById('expense-supplier-date').value = item?.supplier_invoice_date || '';
+    form.querySelector('h4').textContent = item ? 'Edit expense' : 'Record expense';
     document.getElementById('expense-vendor').focus();
   }
 
-  document.getElementById('expense-add')?.addEventListener('click',()=>openExpenseForm('transaction'));
-  document.getElementById('expense-rule-add')?.addEventListener('click',()=>openExpenseForm('rule'));
-  document.getElementById('expense-form-cancel')?.addEventListener('click',()=>document.getElementById('expense-form').style.display='none');
-  document.getElementById('expense-form')?.addEventListener('submit',async(event)=>{ event.preventDefault(); const payload={ id:operationsState.expenseEditId||'', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, supplier_invoice_date:document.getElementById('expense-supplier-date').value, start_date:document.getElementById('expense-date').value, frequency:document.getElementById('expense-frequency').value, notes:document.getElementById('expense-notes').value, active:true }; const api=operationsState.expenseMode==='rule'?'api_upsertExpenseRule':'api_upsertExpenseTransaction'; const result=await operationsApi(api,payload); if(result.success===false){operationsStatus(result.message,'warn');return;} event.currentTarget.style.display='none'; operationsState.expenseEditId=''; operationsStatus(operationsState.expenseMode==='rule'?'Expense rule saved':'Expense recorded'); renderExpensesPage(); });
+  function openExpenseRuleForm(rule) {
+    operationsState.expenseRuleEditId = rule && rule.id ? rule.id : '';
+    document.getElementById('expense-form').style.display = 'none';
+    const form = document.getElementById('expense-rule-form'); form.style.display = 'block'; form.reset();
+    const set = (id, value) => { document.getElementById(id).value = value; };
+    set('expense-rule-vendor', rule?.vendor || ''); set('expense-rule-abn', rule?.vendor_abn || ''); set('expense-rule-amount', rule?.amount ?? '');
+    const frequency = String(rule?.frequency || 'monthly').toLowerCase();
+    set('expense-rule-frequency', { annually:'yearly', annual:'yearly', one_off:'once' }[frequency] || frequency);
+    set('expense-rule-start', rule?.start_date || expenseToday()); set('expense-rule-end', rule?.end_date || '');
+    set('expense-rule-category', rule?.category || ''); set('expense-rule-gst-code', rule?.gst_code || 'taxable');
+    set('expense-rule-business-use', rule ? Math.round((Number(rule.business_use_percentage) || 0) * 10000) / 100 : 100);
+    set('expense-rule-description', rule?.description || ''); set('expense-rule-notes', rule?.notes || '');
+    // The toggle shows the saved value, so editing a paused schedule never quietly restarts it.
+    document.getElementById('expense-rule-active').checked = rule ? expenseIsActive(rule) : true;
+    document.getElementById('expense-rule-form-title').textContent = rule ? 'Edit schedule' : 'New schedule';
+    renderExpenseRulePreview();
+    document.getElementById('expense-rule-vendor').focus();
+  }
+
+  function renderExpenseRulePreview() {
+    const target = document.getElementById('expense-rule-preview');
+    if (!target) return;
+    const start = document.getElementById('expense-rule-start').value;
+    const end = document.getElementById('expense-rule-end').value;
+    if (!start) { target.textContent = 'Enter a start date to see upcoming payments.'; return; }
+    if (end && end < start) { target.textContent = 'The end date is before the start date.'; return; }
+    if (!document.getElementById('expense-rule-active').checked) { target.textContent = 'Paused. No upcoming payments will be listed.'; return; }
+    const dates = expenseScheduleDates(start, end, document.getElementById('expense-rule-frequency').value, expenseToday(), 5);
+    const amount = Number(document.getElementById('expense-rule-amount').value);
+    target.textContent = dates.length ? dates.map(expenseDateLabel).join(' · ') + (amount > 0 ? ` — ${operationsMoney(amount)} each` : '') : 'No payments fall on or after today.';
+  }
+
+  document.getElementById('expense-add')?.addEventListener('click', () => openExpenseForm());
+  document.getElementById('expense-rule-add')?.addEventListener('click', () => openExpenseRuleForm());
+  document.getElementById('expense-form-cancel')?.addEventListener('click', () => { document.getElementById('expense-form').style.display = 'none'; });
+  document.getElementById('expense-rule-form-cancel')?.addEventListener('click', () => { document.getElementById('expense-rule-form').style.display = 'none'; });
+  ['expense-rule-start', 'expense-rule-end', 'expense-rule-frequency', 'expense-rule-amount', 'expense-rule-active'].forEach((id) => { const el = document.getElementById(id); el?.addEventListener('input', renderExpenseRulePreview); el?.addEventListener('change', renderExpenseRulePreview); });
+  document.getElementById('expense-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = { id:operationsState.expenseEditId || '', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, supplier_invoice_date:document.getElementById('expense-supplier-date').value, notes:document.getElementById('expense-notes').value };
+    const result = await operationsApi('api_upsertExpenseTransaction', payload);
+    if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
+    form.style.display = 'none'; operationsState.expenseEditId = '';
+    operationsStatus('Expense saved');
+    renderExpensesPage();
+  });
+  document.getElementById('expense-rule-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
+    const value = (id) => document.getElementById(id).value;
+    const payload = { id:operationsState.expenseRuleEditId || '', vendor:value('expense-rule-vendor'), vendor_abn:value('expense-rule-abn'), description:value('expense-rule-description'), category:value('expense-rule-category'), amount:Number(value('expense-rule-amount')), gst_code:value('expense-rule-gst-code'), business_use_percentage:Number(value('expense-rule-business-use')), frequency:value('expense-rule-frequency'), start_date:value('expense-rule-start'), end_date:value('expense-rule-end'), notes:value('expense-rule-notes'), active:document.getElementById('expense-rule-active').checked };
+    submit.disabled = true;
+    try {
+      const result = await operationsApi('api_upsertExpenseRule', payload);
+      if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
+      form.style.display = 'none'; operationsState.expenseRuleEditId = '';
+      operationsStatus(result.created_count ? `Schedule saved · ${result.created_count} upcoming payment${result.created_count === 1 ? '' : 's'} listed` : 'Schedule saved');
+      renderExpensesPage();
+    } catch (error) {
+      operationsStatus(error && error.message ? error.message : 'Could not save the schedule.', 'warn');
+    } finally {
+      submit.disabled = false;
+    }
+  });
   document.getElementById('expense-filter-apply')?.addEventListener('click',renderExpensesPage);
-  document.getElementById('expense-rule-generate')?.addEventListener('click',async()=>{const end=new Date();end.setFullYear(end.getFullYear()+1);const result=await operationsApi('api_generateExpenseRuleOccurrences',{through_date:end.toISOString().slice(0,10)});if(result.success===false)operationsStatus(result.message,'warn');else{operationsStatus(`${result.created_count} scheduled expense${result.created_count===1?'':'s'} created`);renderExpensesPage();}});
+  document.getElementById('expense-rule-generate')?.addEventListener('click',async()=>{const end=new Date();end.setFullYear(end.getFullYear()+1);const result=await operationsApi('api_generateExpenseRuleOccurrences',{through_date:end.toISOString().slice(0,10)});if(result.success===false)operationsStatus(result.message,'warn');else{operationsStatus(result.created_count?`${result.created_count} more upcoming payment${result.created_count===1?'':'s'} listed`:'Schedules already list 12 months ahead');renderExpensesPage();}});
   document.querySelectorAll('[data-expense-tab]').forEach((button)=>button.addEventListener('click',()=>{ operationsState.expenseTab=button.dataset.expenseTab; document.querySelectorAll('[data-expense-tab]').forEach((item)=>{ const active=item===button; item.classList.toggle('is-active',active); item.setAttribute('aria-selected',String(active)); }); ['transactions','rules','report'].forEach((name)=>{ document.getElementById(`expense-${name}-panel`).style.display=name===operationsState.expenseTab?'block':'none'; }); }));
   document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
   document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });

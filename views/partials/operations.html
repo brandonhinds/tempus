@@ -1,32 +1,51 @@
 <section class="ts-card ts-card--wide" id="page-expenses" style="display:none;">
   <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
-    <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Actual purchases and their evidence live here. Recurring rules are forecasts until they create a transaction.</p></div>
+    <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Record what the business buys and pays for. Bills that repeat go on a schedule, which lists each upcoming payment so you can mark it paid when it happens.</p></div>
     <div style="display:flex; gap:8px;"><button type="button" class="ghost" id="expense-export">Export FY CSV</button><button type="button" id="expense-add">Record expense</button></div>
   </div>
   <div class="ts-view-toggle" role="tablist" aria-label="Expense view" style="margin-bottom:18px;">
     <button type="button" role="tab" class="ts-view-toggle-btn is-active" aria-selected="true" data-expense-tab="transactions">Transactions</button>
-    <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="rules">Rules</button>
+    <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="rules">Schedules</button>
     <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="report">FY report</button>
   </div>
   <form id="expense-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
-    <div class="ts-toolbar"><h4 style="margin:0;">New expense transaction</h4><button type="button" class="ghost" id="expense-form-cancel">Cancel</button></div>
+    <div class="ts-toolbar"><h4 style="margin:0;">Record expense</h4><button type="button" class="ghost" id="expense-form-cancel">Cancel</button></div>
     <div class="ts-grid ts-grid--gap-md">
       <div class="ts-col-span-4"><label for="expense-vendor">Vendor</label><input id="expense-vendor" required maxlength="160"></div>
       <div class="ts-col-span-4"><label for="expense-abn">Vendor ABN (optional)</label><input id="expense-abn" maxlength="20"></div>
       <div class="ts-col-span-4"><label for="expense-date">Purchase date</label><input id="expense-date" type="date" required></div>
-      <div class="ts-col-span-4" id="expense-supplier-date-wrap"><label for="expense-supplier-date">Supplier invoice date</label><input id="expense-supplier-date" type="date"></div>
+      <div class="ts-col-span-4"><label for="expense-supplier-date">Supplier invoice date</label><input id="expense-supplier-date" type="date"></div>
       <div class="ts-col-span-4"><label for="expense-amount">Amount including GST</label><input id="expense-amount" type="number" min="0" step="0.01" required></div>
       <div class="ts-col-span-4"><label for="expense-category">Category</label><input id="expense-category" maxlength="100"></div>
       <div class="ts-col-span-4"><label for="expense-gst-code">GST treatment</label><select id="expense-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
       <div class="ts-col-span-4"><label for="expense-business-use">Business use (%)</label><input id="expense-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
-      <div class="ts-col-span-4" id="expense-frequency-wrap" style="display:none;"><label for="expense-frequency">Frequency</label><select id="expense-frequency"><option value="once">Once</option><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div>
       <div class="ts-col-span-12"><label for="expense-description">Description</label><input id="expense-description" maxlength="500"></div>
       <div class="ts-col-span-12"><label for="expense-notes">Notes</label><textarea id="expense-notes" rows="3" maxlength="2000"></textarea></div>
     </div>
-    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save transaction</button></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save expense</button></div>
+  </form>
+  <form id="expense-rule-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off" aria-labelledby="expense-rule-form-title">
+    <div class="ts-toolbar"><h4 id="expense-rule-form-title" style="margin:0;">New schedule</h4><button type="button" class="ghost" id="expense-rule-form-cancel">Cancel</button></div>
+    <p class="ts-note" style="margin:0 0 12px; max-width:620px;">A schedule is a bill that repeats. Saving it lists every payment due in the next 12 months under Transactions, where you mark each one paid. Changing a schedule rebuilds its upcoming payments but never changes ones already recorded or paid.</p>
+    <div class="ts-grid ts-grid--gap-md">
+      <div class="ts-col-span-4"><label for="expense-rule-vendor">Vendor</label><input id="expense-rule-vendor" required maxlength="160"></div>
+      <div class="ts-col-span-4"><label for="expense-rule-abn">Vendor ABN (optional)</label><input id="expense-rule-abn" maxlength="20"></div>
+      <div class="ts-col-span-4"><label for="expense-rule-amount">Amount each time, including GST</label><input id="expense-rule-amount" type="number" min="0" step="0.01" required></div>
+      <div class="ts-col-span-4"><label for="expense-rule-frequency">Frequency</label><select id="expense-rule-frequency"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option><option value="once">Once only</option></select></div>
+      <div class="ts-col-span-4"><label for="expense-rule-start">Start date</label><input id="expense-rule-start" type="date" required aria-describedby="expense-rule-start-hint"><div class="ts-note" id="expense-rule-start-hint">The first payment. Later ones repeat from this date.</div></div>
+      <div class="ts-col-span-4"><label for="expense-rule-end">End date (optional)</label><input id="expense-rule-end" type="date" aria-describedby="expense-rule-end-hint"><div class="ts-note" id="expense-rule-end-hint">Leave blank to keep going.</div></div>
+      <div class="ts-col-span-4"><label for="expense-rule-category">Category</label><input id="expense-rule-category" maxlength="100"></div>
+      <div class="ts-col-span-4"><label for="expense-rule-gst-code">GST treatment</label><select id="expense-rule-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
+      <div class="ts-col-span-4"><label for="expense-rule-business-use">Business use (%)</label><input id="expense-rule-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
+      <div class="ts-col-span-12"><label for="expense-rule-description">Description</label><input id="expense-rule-description" maxlength="500"></div>
+      <div class="ts-col-span-12"><label for="expense-rule-notes">Notes</label><textarea id="expense-rule-notes" rows="2" maxlength="2000"></textarea></div>
+      <div class="ts-col-span-12"><div class="ts-toggle-row"><label class="ts-toggle"><input type="checkbox" id="expense-rule-active" checked aria-describedby="expense-rule-active-hint"><span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span></label><label for="expense-rule-active" class="ts-toggle-row-label">Active</label></div><div class="ts-note" id="expense-rule-active-hint">Turn off to pause the schedule. Upcoming payments are removed; ones already recorded stay.</div></div>
+    </div>
+    <div class="ts-expense-preview" aria-live="polite"><div class="ts-ledger-row__meta">Next payments</div><div id="expense-rule-preview">Enter a start date to see upcoming payments.</div></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save schedule</button></div>
   </form>
   <div id="expense-transactions-panel"><div class="ts-toolbar" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;"><div><label for="expense-filter-from">From</label><input id="expense-filter-from" type="date"></div><div><label for="expense-filter-to">To</label><input id="expense-filter-to" type="date"></div><div><label for="expense-filter-state">Reconciliation</label><select id="expense-filter-state"><option value="">All</option><option value="unreconciled">Unreconciled</option><option value="legacy_unreconciled">Legacy unreconciled</option><option value="reconciled">Reconciled</option><option value="scheduled">Scheduled</option></select></div><button type="button" class="ghost" id="expense-filter-apply">Apply filters</button></div><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
-  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar"><p class="ts-note">Changing a rule never rewrites recorded transactions.</p><div style="display:flex;gap:8px;"><button type="button" id="expense-rule-generate" class="ghost">Generate next 12 months</button><button type="button" id="expense-rule-add" class="ghost">Add rule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
+  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar" style="align-items:flex-start; flex-wrap:wrap; gap:10px;"><p class="ts-note" style="margin:0; max-width:520px;">Each schedule keeps its payments listed 12 months ahead. Saving a schedule does this automatically; use “Extend to 12 months ahead” now and then so long-running schedules keep a year of payments listed.</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" id="expense-rule-generate" class="ghost">Extend to 12 months ahead</button><button type="button" id="expense-rule-add">New schedule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
   <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year starting</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
 </section>
 
@@ -52,7 +71,10 @@
   .ts-ledger-row__title { font-weight:700; overflow-wrap:anywhere; }
   .ts-ledger-row__meta { color:var(--muted); font-size:var(--font-size-xs); }
   .ts-ledger-row__amount { font-variant-numeric:tabular-nums; font-weight:750; text-align:right; }
-  .ts-ledger-row__actions { display:flex; gap:6px; justify-content:flex-end; }
+  .ts-ledger-row__actions { display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
+  .ts-ledger-row__detail { grid-column:1 / -1; color:var(--muted); font-size:var(--font-size-xs); font-variant-numeric:tabular-nums; }
+  .ts-expense-preview { margin-top:14px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface-subtle); font-variant-numeric:tabular-nums; }
+  .ts-expense-preview #expense-rule-preview { margin-top:4px; }
   .ts-ledger-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); }
   .ts-ledger-summary > div { padding:18px; background:var(--panel); }
   .ts-ledger-summary strong { display:block; margin-top:5px; font-size:22px; font-variant-numeric:tabular-nums; }
