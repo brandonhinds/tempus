@@ -260,5 +260,5 @@
     URL.revokeObjectURL(link.href);
   });
 
-  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{state.settings.accounting_basis=event.target.value;await operationsApi('api_updateSettings',{accounting_basis:event.target.value});renderBasLedgerSummary();renderTransferSplit();});
+  document.getElementById('bas-accounting-basis')?.addEventListener('change',async(event)=>{const write=beginSettingsWrite(['accounting_basis']);state.settings.accounting_basis=event.target.value;try{await operationsApi('api_updateSettings',{accounting_basis:event.target.value});}finally{write.settle();saveCache();}renderBasLedgerSummary();renderTransferSplit();});
 </script>

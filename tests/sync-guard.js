@@ -26,8 +26,8 @@ function scriptRun(calls) {
     return builder[prop];
   } });
 }
-function take(calls, method) {
-  const index = calls.findIndex((call) => call.method === method);
+function take(calls, method, match) {
+  const index = calls.findIndex((call) => call.method === method && (!match || match(...call.args)));
   assert.ok(index !== -1, 'expected a call to ' + method);
   return calls.splice(index, 1)[0];
 }
@@ -108,6 +108,50 @@ exports.run = (test) => {
     assert.deepEqual(byId(), { d1: 'Renamed elsewhere', 'real-1': 'Added' });
     assert.equal(c.syncSliceGuards.deductions.pending.size, 0);
     assert.equal(c.syncSliceGuards.deductions.touched.size, 0);
+  });
+
+  test('settings arrival keeps typed inputs and per-field saves, and updates untouched fields', () => {
+    const input = (value) => ({ value });
+    const inputs = { round_to_nearest: input('0'), target_hours_per_day: input('8'), theme: input('dark') };
+    const savebar = { style: {} };
+    const plain = (key, event) => ({ element: () => inputs[key], getValue: (el) => el.value, setValue: (el, v) => { el.value = String(v); }, defaultValue: '', event });
+    const c = context({
+      state: { settings: { round_to_nearest: '0', target_hours_per_day: '8', theme: 'dark', display_name: 'Old', default_time_view: 'calendar' } },
+      SETTINGS_CONFIG: {
+        round_to_nearest: plain('round_to_nearest', 'input'),
+        target_hours_per_day: plain('target_hours_per_day', 'input'),
+        theme: { element: () => inputs.theme, getValue: (el) => c.state.settings.theme || el.value, setValue: (el, v) => { el.value = v; }, defaultValue: 'dark' }
+      },
+      settingsInitialState: { round_to_nearest: '0', target_hours_per_day: '8', theme: 'dark' },
+      settingsServerSynced: false, saveSettingsBtn: {}, discardSettingsBtn: { style: {} },
+      document: { getElementById: (id) => (id === 'settings-savebar' ? savebar : null) },
+      migrateCustomThemes: () => {}, applyTheme: (theme) => { c.state.settings = { ...c.state.settings, theme: theme || 'dark' }; },
+      renderThemeGallery: () => {}, applyStatusDisplay: () => {}, applyDisplayName: () => {}, renderCalendar: () => {},
+      setTimeout: () => {}
+    }, ['readSettingsInput', 'editedSettingsKeys', 'applyServerSettingsToForm', 'rebaseSettingsBaseline', 'beginSettingsWrite',
+      'persistSettingsFields', 'checkSettingsDirty', 'fetchSettingsWithRetry']);
+
+    c.fetchSettingsWithRetry();
+    inputs.round_to_nearest.value = '15';                         // typed while the GET is in flight
+    const write = c.beginSettingsWrite(['display_name']);           // saveDisplayName
+    c.state.settings.display_name = 'New';
+    c.persistSettingsFields({ display_name: 'New' }, write);
+    c.persistSettingsFields({ default_time_view: 'agenda' });      // setTimeViewPreference
+    c.state.settings.default_time_view = 'agenda';
+    take(c.calls, 'api_updateSettings', (fields) => 'default_time_view' in fields).success({ success: true });
+    assert.equal(c.confirmedSliceFields('settings', c.state.settings).display_name, 'Old', 'the cache keeps the confirmed name while pending');
+
+    take(c.calls, 'api_getSettings').success({ round_to_nearest: '0', target_hours_per_day: '7.5', theme: 'dark', display_name: 'Old', default_time_view: 'calendar' });
+    assert.equal(inputs.round_to_nearest.value, '15', 'the typed value remains');
+    assert.equal(c.settingsInitialState.round_to_nearest, '0');
+    assert.equal(savebar.style.display, 'flex', 'and the save bar offers it');
+    assert.equal(inputs.target_hours_per_day.value, '7.5', 'untouched fields take the server value');
+    assert.equal(c.settingsInitialState.target_hours_per_day, '7.5');
+    assert.equal(c.state.settings.display_name, 'New', 'a pending per-field save is not reverted');
+    assert.equal(c.state.settings.default_time_view, 'agenda', 'nor one that confirmed after the GET was sent');
+    assert.equal(c.settingsServerSynced, true);
+    take(c.calls, 'api_updateSettings').success({ success: true });
+    assert.equal(c.syncSliceGuards.settings.pending.size, 0);
   });
 
   test('a failed deduction write is not re-applied by a stale GET', () => {

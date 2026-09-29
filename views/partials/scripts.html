@@ -1788,12 +1788,14 @@ let ratePreviewInputSyncing = false;
     // Persist to the Google Sheet (user_settings) so it follows the user across browsers/devices.
     if (!state.settings) state.settings = {};
     if (state.settings.display_name === clean) return;
+    const write = beginSettingsWrite(['display_name']);
     state.settings.display_name = clean;
     if (typeof google !== 'undefined' && google.script && google.script.run) {
-      google.script.run
-        .withSuccessHandler(() => { setStatus('Name saved', 'success'); })
-        .withFailureHandler((err) => { console.error('Failed to save name:', err); })
-        .api_updateSettings({ display_name: clean });
+      persistSettingsFields({ display_name: clean }, write,
+        () => { setStatus('Name saved', 'success'); },
+        (err) => { console.error('Failed to save name:', err); });
+    } else {
+      write.settle();
     }
   }
 
@@ -8961,15 +8963,17 @@ function updateDeductionFormVisibility() {
     return false;
   }
   function setLogoThemed(themeKey, on) {
-    const map = getLogoThemedMap();
+    const write = state.settings ? beginSettingsWrite(['logo_themed_map']) : null;
+    const map = { ...getLogoThemedMap() };
     map[themeKey] = !!on;
     if (state.settings) state.settings.logo_themed_map = map;
     try { localStorage.setItem(LOGO_THEMED_KEY, JSON.stringify(map)); } catch (e) {}
-    try {
-      if (typeof google !== 'undefined' && google.script && google.script.run) {
-        google.script.run.api_updateSettings({ logo_themed_map: JSON.stringify(map) });
-      }
-    } catch (e) {}
+    if (!write) return;
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      persistSettingsFields({ logo_themed_map: JSON.stringify(map) }, write);
+    } else {
+      write.settle();
+    }
   }
   function applyBrandThemedClass(themeKey) {
     const on = isLogoThemed(themeKey);
@@ -9414,20 +9418,19 @@ function updateDeductionFormVisibility() {
   function persistThemeState() {
     saveCache();
     // No "Saving theme…/Theme saved" status — the theme change is visible instantly, so the toast is redundant.
-    google.script.run
-      .withSuccessHandler(function () {
-        if (typeof captureSettingsState === 'function') captureSettingsState();
-        if (typeof checkSettingsDirty === 'function') checkSettingsDirty();
-      })
-      .withFailureHandler(function (e) {
-        setStatus('Failed to save theme: ' + ((e && e.message) || e), 'error');
-      })
-      .api_updateSettings({
-        theme: state.settings.theme,
-        custom_themes: JSON.stringify(getCustomThemes()),
-        favourites: JSON.stringify(getFavourites()),
-        custom_themes_migrated: isTruthyFlag(state.settings.custom_themes_migrated)
-      });
+    // The theme has already been applied to state.settings, so the guard has no earlier value to cache;
+    // it still stops a settings GET already in flight from reverting the pick.
+    persistSettingsFields({
+      theme: state.settings.theme,
+      custom_themes: JSON.stringify(getCustomThemes()),
+      favourites: JSON.stringify(getFavourites()),
+      custom_themes_migrated: isTruthyFlag(state.settings.custom_themes_migrated)
+    }, beginSliceWrite('settings', ['theme', 'custom_themes', 'favourites', 'custom_themes_migrated', 'custom_theme_config', 'last_non_custom_theme']), function () {
+      rebaseSettingsBaseline({ theme: undefined });
+      checkSettingsDirty();
+    }, function (e) {
+      setStatus('Failed to save theme: ' + ((e && e.message) || e), 'error');
+    });
   }
 
   // Read a built-in theme's full 8-colour config from its computed CSS vars (avoids hardcoding).
@@ -10718,7 +10721,7 @@ function updateDeductionFormVisibility() {
       const invoicesForCache = Array.isArray(state.invoices) ? state.invoices.map((invoice) => ({ ...invoice })) : [];
       const payload = {
         entries: allEntryRecords().map(sanitizeEntry), // breaks cached in the same list, split on load
-        settings: state.settings,
+        settings: confirmedSliceFields('settings', state.settings),
         contracts: state.contracts.map(sanitizeContract),
         hourTypes: state.hourTypes.map(sanitizeHourType),
         recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
@@ -16277,16 +16280,14 @@ function updateDeductionFormVisibility() {
           // If no_lost_super_to_deductions was just enabled and the setting doesn't exist, save default
           if (featureKey === 'no_lost_super_to_deductions' && enabled && !state.settings.lost_super_recovery_mode) {
             const defaultMode = 'extra_contribution';
+            const write = beginSettingsWrite(['lost_super_recovery_mode']);
             state.settings.lost_super_recovery_mode = defaultMode;
             saveCache();
-            google.script.run
-              .withSuccessHandler(() => {
-                if (lostSuperRecoveryModeSelect) lostSuperRecoveryModeSelect.value = defaultMode;
-                captureSettingsState();
-                renderIncomeSummary();
-              })
-              .withFailureHandler(() => {})
-              .api_updateSettings({ lost_super_recovery_mode: defaultMode });
+            persistSettingsFields({ lost_super_recovery_mode: defaultMode }, write, () => {
+              if (lostSuperRecoveryModeSelect) lostSuperRecoveryModeSelect.value = defaultMode;
+              rebaseSettingsBaseline({ lost_super_recovery_mode: undefined });
+              renderIncomeSummary();
+            });
           } else if (featureKey === 'no_lost_super_to_deductions') {
             // Recalculate income summary when this flag changes (and we didn't already queue it above)
             renderIncomeSummary();
@@ -22018,13 +22019,17 @@ function getCachedIncomeSummary(monthKey) {
   function setProjectionsVarianceMode(value) {
     const valid = ['monthly_capacity', 'contract_pace', 'projected_vs_contract', 'projected_vs_standard'];
     if (!valid.includes(value)) return;
+    const write = beginSettingsWrite(['projections_variance_value']);
     if (state.settings) state.settings.projections_variance_value = value;
     if (projectionsVarianceValueSelect) projectionsVarianceValueSelect.value = value;
-    try {
-      if (typeof google !== 'undefined' && google.script && google.script.run) {
-        google.script.run.api_updateSettings({ projections_variance_value: value });
-      }
-    } catch (e) { /* offline — local state still drives the badge this session */ }
+    // Offline, local state still drives the badge this session. The select moved with the setting, so
+    // its baseline moves too rather than raising the save bar.
+    rebaseSettingsBaseline({ projections_variance_value: undefined });
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      persistSettingsFields({ projections_variance_value: value }, write);
+    } else {
+      write.settle();
+    }
     if (typeof renderExpectedHoursSummary === 'function') renderExpectedHoursSummary();
     if (typeof setStatus === 'function') setStatus('Projected variance now tracks ' + (VARIANCE_BASELINES[value] || value), 'success');
   }
@@ -25231,12 +25236,14 @@ function getCachedIncomeSummary(monthKey) {
     const changed = state.timeView !== view;
     applyTimeView(view);
     if (changed) {
-      try {
-        if (typeof google !== 'undefined' && google.script && google.script.run) {
-          google.script.run.api_updateSettings({ default_time_view: view });
-        }
-      } catch (e) { /* offline / no backend — localStorage hint still carries it on this browser */ }
+      const write = beginSettingsWrite(['default_time_view']);
       if (state.settings) state.settings.default_time_view = view;
+      // Offline / no backend: the localStorage hint still carries it on this browser.
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        persistSettingsFields({ default_time_view: view }, write);
+      } else {
+        write.settle();
+      }
     }
   }
 
@@ -26211,6 +26218,76 @@ function getCachedIncomeSummary(monthKey) {
     });
   }
 
+  function readSettingsInput(key) {
+    const config = SETTINGS_CONFIG[key];
+    const element = config.element();
+    if (element) return config.getValue(element);
+    return typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue;
+  }
+
+  // Settings inputs whose value differs from the baseline, i.e. what the save bar is offering to save.
+  function editedSettingsKeys() {
+    const edited = new Set();
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      if (SETTINGS_CONFIG[key].element() && readSettingsInput(key) !== settingsInitialState[key]) edited.add(key);
+    });
+    return edited;
+  }
+
+  // Settings arrival. Inputs the user has not touched take the server value and rebase their baseline
+  // onto it. Inputs edited while the GET was in flight keep what was typed and their old baseline, so
+  // the save bar still shows them as unsaved. Keys with a pending per-field save were already kept local
+  // by mergeSliceFields, so writing those back is a no-op.
+  function applyServerSettingsToForm(editedKeys) {
+    Object.keys(SETTINGS_CONFIG).forEach((key) => {
+      const config = SETTINGS_CONFIG[key];
+      const element = config.element();
+      const value = state.settings[key] !== undefined ? state.settings[key]
+        : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
+      if (!element) {
+        console.warn('[Settings] Element not found for key:', key);
+        settingsInitialState[key] = value;
+        return;
+      }
+      if (editedKeys && editedKeys.has(key)) return;
+      config.setValue(element, value);
+      settingsInitialState[key] = config.getValue(element);
+    });
+  }
+
+  // After a save, move only the saved keys' baseline, so other fields edited meanwhile stay unsaved.
+  // `values` maps key -> the saved value; a key mapped to undefined takes its input's current value.
+  function rebaseSettingsBaseline(values) {
+    Object.keys(values || {}).forEach((key) => {
+      if (!SETTINGS_CONFIG[key]) return;
+      settingsInitialState[key] = values[key] !== undefined ? values[key] : readSettingsInput(key);
+    });
+  }
+
+  // Every settings write goes through the stale-response guard (above loadCache), so a settings GET sent
+  // before it cannot put the old value back when it lands. Call beginSettingsWrite before changing
+  // state.settings, so the browser cache keeps the confirmed value until the server answers.
+  function beginSettingsWrite(keys) {
+    return beginSliceWrite('settings', keys, state.settings);
+  }
+
+  function persistSettingsFields(fields, write, onSuccess, onFailure) {
+    const guard = write || beginSettingsWrite(Object.keys(fields));
+    const done = (callback, value) => {
+      guard.settle();
+      saveCache();
+      if (callback) callback(value);
+    };
+    try {
+      google.script.run
+        .withSuccessHandler((result) => done(onSuccess, result))
+        .withFailureHandler((error) => done(onFailure, error))
+        .api_updateSettings(fields);
+    } catch (e) {
+      done(onFailure, e);
+    }
+  }
+
   function checkSettingsDirty() {
     const current = {};
     Object.keys(SETTINGS_CONFIG).forEach((key) => {
@@ -26297,6 +26374,7 @@ function getCachedIncomeSummary(monthKey) {
         }
       });
 
+      const settingsWrite = beginSettingsWrite(Object.keys(changedSettings));
       // Apply all settings locally for immediate UI update
       applyTheme(next.theme);
       if (paygRateInput) paygRateInput.value = String(next.payg_instalment_rate);
@@ -26316,18 +26394,15 @@ function getCachedIncomeSummary(monthKey) {
       }
       renderCalendar();
       setStatus('Saving settings...', 'warn');
-      google.script.run
-        .withSuccessHandler(() => {
-          setStatus('Settings saved', 'success');
-          captureSettingsState();
-          checkSettingsDirty();
-          renderIncomeSummary();
-        })
-        .withFailureHandler((error) => {
-          console.error('[Settings] Save failed:', error);
-          setStatus('Settings failed', 'error');
-        })
-        .api_updateSettings(changedSettings);
+      persistSettingsFields(changedSettings, settingsWrite, () => {
+        setStatus('Settings saved', 'success');
+        rebaseSettingsBaseline(changedSettings);
+        checkSettingsDirty();
+        renderIncomeSummary();
+      }, (error) => {
+        console.error('[Settings] Save failed:', error);
+        setStatus('Settings failed', 'error');
+      });
     };
   }
 
@@ -26461,6 +26536,8 @@ function getCachedIncomeSummary(monthKey) {
   function fetchSettingsWithRetry() {
     const MAX_SETTINGS_RETRIES = 3;
     let settingsRetryCount = 0;
+    // One ticket across the retries: the earliest send is the one a local write can predate.
+    const ticket = beginSliceFetch('settings');
 
     return new Promise((resolve) => {
       const attempt = () => {
@@ -26475,6 +26552,7 @@ function getCachedIncomeSummary(monthKey) {
                 return;
               }
               console.error('[Settings] Received null/empty after retries, using cached settings');
+              endSliceFetch(ticket);
               if (!state.settings || Object.keys(state.settings).length === 0) {
                 state.settings = {};
               }
@@ -26487,7 +26565,13 @@ function getCachedIncomeSummary(monthKey) {
             const previousLastNonCustomTheme = state.settings && state.settings.last_non_custom_theme
               ? state.settings.last_non_custom_theme
               : '';
-            state.settings = settings;
+            // Read before the merge: the theme input reads its value from state.settings.theme.
+            const editedKeys = editedSettingsKeys();
+            const localTheme = state.settings ? state.settings.theme : undefined;
+            // Keys with a per-field save the GET predates (display name, theme, logo map, ...) stay local.
+            state.settings = mergeSliceFields(ticket, settings, state.settings);
+            // A theme picked in the form but not saved yet stays applied, like any other edited input.
+            if (editedKeys.has('theme') && localTheme !== undefined) state.settings.theme = localTheme;
             markIncomeDependencyReady('settings');
 
             if (state.settings.custom_theme_config && typeof state.settings.custom_theme_config === 'string') {
@@ -26508,21 +26592,10 @@ function getCachedIncomeSummary(monthKey) {
 
             migrateCustomThemes();
             saveCache();
-            Object.keys(SETTINGS_CONFIG).forEach((key) => {
-              const config = SETTINGS_CONFIG[key];
-              const element = config.element();
-              if (element) {
-                const value = state.settings[key] !== undefined ? state.settings[key]
-                  : (typeof config.defaultValue === 'function' ? config.defaultValue() : config.defaultValue);
-                config.setValue(element, value);
-              } else {
-                console.warn('[Settings] Element not found for key:', key);
-              }
-            });
+            applyServerSettingsToForm(editedKeys);
             applyTheme(state.settings.theme || 'dark');
             renderThemeGallery();
 
-            captureSettingsState();
             settingsServerSynced = true;
             checkSettingsDirty();
             applyStatusDisplay();
@@ -26539,6 +26612,7 @@ function getCachedIncomeSummary(monthKey) {
               setTimeout(attempt, delay);
               return;
             }
+            endSliceFetch(ticket);
             settingsServerSynced = true;
             checkSettingsDirty();
             resolve(false);
@@ -32223,23 +32297,20 @@ function getCachedIncomeSummary(monthKey) {
     var saveLabel = 'Save Theme';
     if (btnSaveCustomTheme) { btnSaveCustomTheme.disabled = true; btnSaveCustomTheme.textContent = 'Saving…'; }
 
-    google.script.run
-      .withSuccessHandler(function() {
-        if (btnSaveCustomTheme) { btnSaveCustomTheme.disabled = false; btnSaveCustomTheme.textContent = saveLabel; }
-        setStatus('Theme saved', 'success');
-        if (typeof captureSettingsState === 'function') captureSettingsState();
-        renderThemeGallery();
-        hideCustomThemeModal();
-      })
-      .withFailureHandler(function(error) {
-        if (btnSaveCustomTheme) { btnSaveCustomTheme.disabled = false; btnSaveCustomTheme.textContent = saveLabel; }
-        setStatus('Failed to save theme: ' + ((error && error.message) || error), 'error');
-      })
-      .api_updateSettings({
-        theme: state.settings.theme,
-        custom_themes: JSON.stringify(themes),
-        favourites: JSON.stringify(getFavourites())
-      });
+    persistSettingsFields({
+      theme: state.settings.theme,
+      custom_themes: JSON.stringify(themes),
+      favourites: JSON.stringify(getFavourites())
+    }, beginSliceWrite('settings', ['theme', 'custom_themes', 'favourites', 'custom_theme_config', 'last_non_custom_theme']), function() {
+      if (btnSaveCustomTheme) { btnSaveCustomTheme.disabled = false; btnSaveCustomTheme.textContent = saveLabel; }
+      setStatus('Theme saved', 'success');
+      rebaseSettingsBaseline({ theme: undefined });
+      renderThemeGallery();
+      hideCustomThemeModal();
+    }, function(error) {
+      if (btnSaveCustomTheme) { btnSaveCustomTheme.disabled = false; btnSaveCustomTheme.textContent = saveLabel; }
+      setStatus('Failed to save theme: ' + ((error && error.message) || error), 'error');
+    });
   }
 
   if (btnConfigureTheme) {
