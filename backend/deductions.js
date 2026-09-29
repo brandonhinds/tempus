@@ -433,3 +433,170 @@ function deleteDeductionUnlocked_(id) {
   }
   return { success: true };
 }
+
+/**
+ * A deduction schedule's occurrence dates (ISO) from `startIso` through `throughIso`, computed on calendar
+ * dates so no timezone can shift them. Month-based steps land on `anchorDay` (or the start date's day),
+ * clamped to the target month's last day, like advanceDateByFrequency and the client's deductionOccurrenceDate.
+ */
+function deductionOccurrenceIsoDates_(startIso, frequency, anchorDay, throughIso) {
+  var dates = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startIso || '') || !throughIso || startIso > throughIso) return dates;
+  var y = Number(startIso.slice(0, 4)), m = Number(startIso.slice(5, 7)) - 1, d = Number(startIso.slice(8, 10));
+  var iso = function(date) { return date.toISOString().slice(0, 10); };
+  var mode = String(frequency || '').toLowerCase();
+  var months = mode === 'monthly' ? 1 : mode === 'quarterly' ? 3 : mode === 'yearly' ? 12 : 0;
+  var days = mode === 'weekly' ? 7 : mode === 'fortnightly' ? 14 : 0;
+  for (var index = 0; index < 5000; index++) {
+    var current;
+    if (index === 0) current = startIso;
+    else if (days) current = iso(new Date(Date.UTC(y, m, d + days * index, 12)));
+    else if (months) {
+      var lastDay = new Date(Date.UTC(y, m + months * index + 1, 0, 12)).getUTCDate();
+      current = iso(new Date(Date.UTC(y, m + months * index, Math.min(anchorDay || d, lastDay), 12)));
+    } else break;
+    if (current > throughIso) break;
+    dates.push(current);
+  }
+  return dates;
+}
+
+/**
+ * Which of the original deduction's exceptions a split carries over to its new half: every one on an
+ * occurrence after `endIso` (the original's new end date) that is also an occurrence of the new half. An
+ * exception the legacy page recorded against a drifted date is re-keyed to its anchored date first (the new
+ * half has an anchor_day, so it would never re-anchor it). Exceptions on or before the split point stay with
+ * the original, and so do later ones the new schedule has no occurrence for (its frequency changed); those
+ * stay inert past the original's end date, as before. Returns [{ id, original_date }].
+ * Mirrors splitDeductionExceptionMoves in views/partials/scripts.html.
+ */
+function splitDeductionExceptionMoves_(original, exceptions, endIso, newHalf) {
+  var list = (exceptions || []).filter(function(ex) { return ex && ex.id && ex.original_date; });
+  if (!list.length) return [];
+  var anchored = original.anchor_day ? list : anchorDeductionExceptions_(list, original.frequency, original.start_date);
+  var latest = '';
+  anchored.forEach(function(ex) { if (ex.original_date > latest) latest = ex.original_date; });
+  var through = newHalf.end_date && newHalf.end_date < latest ? newHalf.end_date : latest;
+  var occurrences = {};
+  deductionOccurrenceIsoDates_(newHalf.start_date, newHalf.frequency, newHalf.anchor_day, through).forEach(function(iso) { occurrences[iso] = true; });
+  var moves = [];
+  anchored.forEach(function(ex, index) {
+    if (list[index].original_date <= endIso || ex.original_date <= endIso || !occurrences[ex.original_date]) return;
+    moves.push({ id: ex.id, original_date: ex.original_date });
+  });
+  return moves;
+}
+
+/**
+ * Split a deduction that has past occurrences in one locked, idempotent write: end the original on its last
+ * past occurrence (`end_date`), create the new half from `deduction` (starting on the next occurrence), and
+ * carry the original's exceptions on later occurrences over to the new half. The new half's id is the
+ * payload's client_request_id, so a retry after a lost response finds the split already saved and returns
+ * it instead of splitting again. If a write fails, the ones before it are undone before the error is
+ * rethrown, so the original is never left ended without its continuation.
+ * payload: { client_request_id, original_id, expected: { start_date, end_date, frequency, anchor_day },
+ *            end_date, deduction }
+ */
+function api_splitDeduction(payload) {
+  return withScriptLock_('deduction split', function() { return splitDeductionUnlocked_(payload); });
+}
+
+function splitDeductionUnlocked_(payload) {
+  if (!payload || !payload.deduction) throw new Error('Split payload is required.');
+  var requestId = String(payload.client_request_id || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestId)) throw new Error('A stable split request ID is required.');
+  var list = listDeductionsInternal();
+  var original = list.find(function(item) { return item.id === String(payload.original_id || ''); });
+  if (!original) return apiRecoverableFailure_('not_found', 'This deduction was removed elsewhere. Reload before saving.');
+  var endIso = toIsoDate(payload.end_date || '');
+
+  var replay = list.find(function(item) { return item.id === requestId; });
+  if (replay) {
+    // A retry of a split that already committed (its response was lost): return what it saved.
+    if (original.end_date !== endIso) return apiRecoverableFailure_('conflict', 'This split request was already used. Reload before saving.');
+    return { success: true, replayed: true, original: original, deduction: replay, exceptions: listDeductionExceptionsInternal(replay.id) };
+  }
+
+  var expected = payload.expected || {};
+  var same = function(a, b) { return String(a == null ? '' : a) === String(b == null ? '' : b); };
+  if (!same(original.start_date, toIsoDate(expected.start_date || '')) || !same(original.end_date, toIsoDate(expected.end_date || ''))
+    || !same(original.frequency, expected.frequency) || !same(original.anchor_day, expected.anchor_day)) {
+    return apiRecoverableFailure_('stale', 'This deduction changed elsewhere. Reload before saving.');
+  }
+  if (!endIso || endIso < original.start_date || (original.end_date && endIso > original.end_date)) {
+    return apiRecoverableFailure_('invalid_request', 'The split date is outside this deduction.');
+  }
+
+  // Validate both halves before writing anything.
+  var newPayload = {};
+  Object.keys(payload.deduction).forEach(function(key) { newPayload[key] = payload.deduction[key]; });
+  newPayload.id = requestId;
+  var newHalf = normalizeDeductionPayload(newPayload, null);
+  if (newHalf.start_date <= endIso) return apiRecoverableFailure_('invalid_request', 'The new deduction must start after the split date.');
+  var endedOriginal = {};
+  Object.keys(original).forEach(function(key) { endedOriginal[key] = original[key]; });
+  endedOriginal.end_date = endIso;
+  normalizeDeductionPayload(endedOriginal, original);
+
+  var moves = splitDeductionExceptionMoves_(original, listDeductionExceptionsInternal(original.id), endIso, newHalf);
+
+  var dsh = getDeductionsSheet();
+  var dValues = dsh.getDataRange().getValues();
+  var dIdIndex = dValues[0].indexOf('id');
+  var originalRow = null;
+  for (var r = 1; r < dValues.length; r++) {
+    if (String(dValues[r][dIdIndex]) === original.id) { originalRow = { number: r + 1, values: dValues[r].slice() }; break; }
+  }
+  if (!originalRow) throw new Error('Deduction row not found.');
+
+  var created = false, movedCells = [];
+  var esh = null, eIdx = null;
+  try {
+    // The new half first, then its exceptions, and the original is ended last.
+    var createdResult = upsertDeductionUnlocked_(newPayload);
+    created = true;
+    if (moves.length) {
+      esh = getDeductionExceptionsSheet();
+      var eValues = esh.getDataRange().getValues();
+      var eHeaders = eValues[0];
+      eIdx = { id: eHeaders.indexOf('id'), deduction: eHeaders.indexOf('deduction_id'), date: eHeaders.indexOf('original_date'), updated: eHeaders.indexOf('updated_at') };
+      var byId = {};
+      moves.forEach(function(move) { byId[move.id] = move; });
+      var nowIso = toIsoDateTime(new Date());
+      for (var e = 1; e < eValues.length; e++) {
+        var move = byId[String(eValues[e][eIdx.id])];
+        if (!move) continue;
+        movedCells.push({ row: e + 1, deduction: eValues[e][eIdx.deduction], date: eValues[e][eIdx.date], updated: eIdx.updated === -1 ? null : eValues[e][eIdx.updated] });
+        esh.getRange(e + 1, eIdx.deduction + 1).setValue(requestId);
+        esh.getRange(e + 1, eIdx.date + 1).setValue(move.original_date);
+        if (eIdx.updated !== -1) esh.getRange(e + 1, eIdx.updated + 1).setValue(nowIso);
+      }
+      cacheClearPrefix(DEDUCTION_EXCEPTIONS_CACHE_KEY);
+    }
+    var endedResult = upsertDeductionUnlocked_(endedOriginal);
+    return {
+      success: true,
+      original: endedResult.deduction,
+      deduction: createdResult.deduction,
+      exceptions: listDeductionExceptionsInternal(requestId),
+      moved_exception_ids: moves.map(function(move) { return move.id; })
+    };
+  } catch (err) {
+    // Undo what was written, newest first, so the sheets are as they were before the split.
+    try {
+      // The new half was appended below the original, so the original's row number still holds.
+      if (created) dsh.getRange(originalRow.number, 1, 1, originalRow.values.length).setValues([originalRow.values]);
+      for (var u = movedCells.length - 1; u >= 0; u--) {
+        var cell = movedCells[u];
+        esh.getRange(cell.row, eIdx.deduction + 1).setValue(cell.deduction);
+        esh.getRange(cell.row, eIdx.date + 1).setValue(cell.date);
+        if (cell.updated !== null) esh.getRange(cell.row, eIdx.updated + 1).setValue(cell.updated);
+      }
+      if (created) deleteDeductionUnlocked_(requestId);
+    } finally {
+      cacheClearPrefix(DEDUCTIONS_CACHE_KEY);
+      cacheClearPrefix(DEDUCTION_EXCEPTIONS_CACHE_KEY);
+    }
+    throw err;
+  }
+}

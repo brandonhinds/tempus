@@ -459,32 +459,86 @@ exports.run = (test) => {
     assert.equal(c.syncSliceGuards.deductions.pending.size, 0);
   });
 
-  test('a split whose writes both succeed stays split when the reload after them fails', () => {
-    const statuses = [];
-    const c = context({
-      state: { deductions: [{ id: 'd1', name: 'Rent', amount_value: 10, start_date: '2026-01-31', end_date: '' }, { id: 'd2', name: 'Other' }], deductionExceptions: [] },
-      sanitizeDeduction: (d) => ({ ...d }), monthKeyFromDateIso: () => null, markIncomeMonthsDirtyForDeductionChange: () => {},
+  function splitContext(statuses, reloads) {
+    return context({
+      state: {
+        deductions: [{ id: 'd1', name: 'Rent', amount_value: 10, frequency: 'monthly', start_date: '2026-01-31', end_date: '', anchor_day: null }, { id: 'd2', name: 'Other' }],
+        deductionExceptions: [{ id: 'x-past', deduction_id: 'd1', original_date: '2026-03-31', exception_type: 'skip' },
+          { id: 'x-future', deduction_id: 'd1', original_date: '2026-10-31', exception_type: 'skip' }]
+      },
+      sanitizeDeduction: (d) => ({ ...d }), sanitizeDeductionException: (x) => ({ ...x }), monthKeyFromDateIso: () => null, markIncomeMonthsDirtyForDeductionChange: () => {},
       renderDeductionsList: () => {}, renderAnnualCategorySection: () => {}, saveDeductionDirectly: () => assert.fail('a split was needed'),
       findLastPastOccurrence: () => '2026-08-31', findNextFutureOccurrence: () => '2026-09-30', deductionAnchorDay: () => 31,
+      splitDeductionExceptionMoves: (original, exceptions, endIso) => exceptions.filter((x) => x.deduction_id === original.id && x.original_date > endIso)
+        .map((x) => ({ id: x.id, original_date: x.original_date })),
+      fetchDeductionsFromServer: () => reloads.push('deductions'), fetchDeductionExceptionsFromServer: () => reloads.push('exceptions'),
       setStatus: (message, type) => statuses.push([message, type])
     }, ['dedupeById', 'performSplitDeduction']);
-    c.performSplitDeduction(c.state.deductions[0], { id: 'd1', name: 'Rent', amount_value: 20, frequency: 'monthly', start_date: '2026-01-31' });
-    const upOriginal = take(c.calls, 'api_upsertDeduction', (p) => p.id === 'd1');
-    upOriginal.success({ success: true, deduction: { id: 'd1', name: 'Rent', amount_value: 10, start_date: '2026-01-31', end_date: '2026-08-31' } });
-    const upNew = take(c.calls, 'api_upsertDeduction');
-    assert.equal(upNew.args[0].id, undefined, 'the new half is created, not updated');
-    upNew.success({ success: true, deduction: { id: 'real-new', name: 'Rent', amount_value: 20, start_date: '2026-09-30', end_date: '' } });
+  }
+  const splitPayload = { id: 'd1', name: 'Rent', amount_value: 20, frequency: 'monthly', start_date: '2026-01-31' };
+
+  test('a split is one atomic call that stays split when the reload after it fails', () => {
+    const statuses = [], reloads = [];
+    const c = splitContext(statuses, reloads);
+    c.performSplitDeduction(c.state.deductions[0], splitPayload);
+    assert.equal(c.calls.filter((call) => call.method === 'api_upsertDeduction').length, 0, 'no separate writes');
+    const split = take(c.calls, 'api_splitDeduction');
+    const request = split.args[0];
+    assert.equal(request.original_id, 'd1');
+    assert.equal(request.end_date, '2026-08-31');
+    assert.equal(request.deduction.id, undefined, 'the new half is created, not updated');
+    assert.equal(request.deduction.start_date, '2026-09-30');
+    assert.deepEqual(request.expected, { start_date: '2026-01-31', end_date: '', frequency: 'monthly', anchor_day: '' });
+    assert.ok(request.client_request_id, 'a stable request id');
+    const tempId = c.state.deductions.find((d) => String(d.id).startsWith('temp_split_')).id;
+    assert.deepEqual(c.state.deductionExceptions.map((x) => [x.id, x.deduction_id]), [['x-past', 'd1'], ['x-future', tempId]],
+      'the future exception moves to the new half on screen straight away; the past one stays');
+    split.success({ success: true,
+      original: { id: 'd1', name: 'Rent', amount_value: 10, start_date: '2026-01-31', end_date: '2026-08-31' },
+      deduction: { id: 'real-new', name: 'Rent', amount_value: 20, start_date: '2026-09-30', end_date: '' },
+      exceptions: [{ id: 'x-future', deduction_id: 'real-new', original_date: '2026-10-31', exception_type: 'skip' }] });
     take(c.calls, 'api_getDeductions').failure(new Error('offline'));
     assert.deepEqual(c.state.deductions.map((d) => [d.id, d.end_date || '', d.amount_value]),
       [['d1', '2026-08-31', 10], ['d2', '', undefined], ['real-new', '', 20]], 'both confirmed halves stay, the new one under its real id');
+    assert.deepEqual(c.state.deductionExceptions.map((x) => [x.id, x.deduction_id]), [['x-past', 'd1'], ['x-future', 'real-new']]);
     assert.deepEqual(statuses[statuses.length - 1][1], 'info', 'a failed refresh is not reported as a failed split');
     assert.equal(c.syncSliceGuards.deductions.pending.size, 0, 'the split writes are settled');
+    assert.equal(c.syncSliceGuards.deductionExceptions.pending.size, 0);
     assert.deepEqual(c.confirmedSliceList('deductions', c.state.deductions).map((d) => d.id), ['d1', 'd2', 'real-new'], 'the cache stores the split');
+    assert.deepEqual(reloads, []);
 
     // The next fetch is truth for the split rows.
     c.state.deductions.push({ id: 'd9' });
     const ticket = c.beginSliceFetch('deductions');
     assert.deepEqual(c.mergeSliceList(ticket, [{ id: 'd1' }, { id: 'real-new' }], c.state.deductions).map((d) => d.id), ['d1', 'real-new']);
+  });
+
+  test('a split whose call fails retries once with the same request id, then reverts both halves and reloads', () => {
+    const statuses = [], reloads = [];
+    const c = splitContext(statuses, reloads);
+    const before = JSON.stringify([c.state.deductions, c.state.deductionExceptions]);
+    c.performSplitDeduction(c.state.deductions[0], splitPayload);
+    const first = take(c.calls, 'api_splitDeduction');
+    first.failure(new Error('network'));
+    const retry = take(c.calls, 'api_splitDeduction');
+    assert.equal(retry.args[0].client_request_id, first.args[0].client_request_id, 'the retry is idempotent on the server');
+    assert.ok(c.state.deductions.some((d) => String(d.id).startsWith('temp_split_')), 'still optimistic while retrying');
+    retry.failure(new Error('network'));
+    assert.equal(c.calls.filter((call) => call.method === 'api_splitDeduction').length, 0, 'only one retry');
+    assert.equal(JSON.stringify([c.state.deductions, c.state.deductionExceptions]), before, 'the original and its exceptions are back as they were');
+    assert.equal(statuses[statuses.length - 1][1], 'error');
+    assert.deepEqual(reloads, ['deductions', 'exceptions'], 'a lost response is reconciled from the server');
+    assert.equal(c.syncSliceGuards.deductions.pending.size, 0);
+    assert.equal(c.syncSliceGuards.deductionExceptions.pending.size, 0);
+
+    // A refusal (nothing written) reverts without retrying.
+    const refused = splitContext(statuses, reloads);
+    refused.performSplitDeduction(refused.state.deductions[0], splitPayload);
+    take(refused.calls, 'api_splitDeduction').success({ success: false, error: 'stale', message: 'This deduction changed elsewhere. Reload before saving.' });
+    assert.equal(refused.calls.filter((call) => call.method === 'api_splitDeduction').length, 0);
+    assert.deepEqual(refused.state.deductions.map((d) => [d.id, d.end_date || '']), [['d1', ''], ['d2', '']]);
+    assert.deepEqual(refused.state.deductionExceptions.map((x) => x.deduction_id), ['d1', 'd1']);
+    assert.deepEqual(statuses[statuses.length - 1], ['This deduction changed elsewhere. Reload before saving.', 'error']);
   });
 
   test('a failed category delete restores the category and its deductions, not rows fetched meanwhile', () => {

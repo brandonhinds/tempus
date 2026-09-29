@@ -8139,6 +8139,31 @@ function updateDeductionFormVisibility() {
     return null;
   }
 
+  /**
+   * The original deduction's exceptions a split carries over to its new half, as [{ id, original_date }]:
+   * every one on an occurrence after `endIso` (the original's new end date) that is also an occurrence of
+   * the new half. One recorded against a legacy drifted date is re-keyed to its anchored date (the new half
+   * has an anchor_day, so it never re-anchors it). Exceptions on or before the split point stay with the
+   * original, as do later ones the new schedule has no occurrence for (its frequency changed).
+   * Mirrors splitDeductionExceptionMoves_ in backend/deductions.js.
+   */
+  function splitDeductionExceptionMoves(original, exceptions, endIso, newHalf) {
+    const list = (Array.isArray(exceptions) ? exceptions : [])
+      .filter((ex) => ex && ex.id && ex.original_date && ex.deduction_id === original.id);
+    if (!list.length) return [];
+    const anchored = original.anchor_day ? list : anchorDeductionExceptions(original, list);
+    const latest = anchored.reduce((max, ex) => (ex.original_date > max ? ex.original_date : max), '');
+    const latestDate = parseIsoDate(latest);
+    if (!latestDate || Number.isNaN(latestDate.getTime())) return [];
+    const occurrences = new Set(getDeductionOccurrencesBetween(newHalf, null, latestDate).map((date) => isoDate(date)));
+    const moves = [];
+    anchored.forEach((ex, index) => {
+      if (list[index].original_date <= endIso || ex.original_date <= endIso || !occurrences.has(ex.original_date)) return;
+      moves.push({ id: ex.id, original_date: ex.original_date });
+    });
+    return moves;
+  }
+
   function performSplitDeduction(originalDeduction, newPayload) {
     const lastPastDate = findLastPastOccurrence(originalDeduction);
     const nextFutureDate = findNextFutureOccurrence(originalDeduction);
@@ -8149,36 +8174,43 @@ function updateDeductionFormVisibility() {
       return;
     }
 
-    // Step 1: Update original deduction with end date = last past occurrence
+    // The original ends on its last past occurrence.
     const updatedOriginal = {
       ...originalDeduction,
       end_date: lastPastDate
     };
 
-    // Step 2: Create new deduction with new settings starting from next future occurrence. That occurrence
-    // may be clamped (28 Feb for a schedule on the 31st); anchor_day keeps the new half on the original day.
+    // A new deduction with the new settings starts on the next occurrence. That occurrence may be clamped
+    // (28 Feb for a schedule on the 31st); anchor_day keeps the new half on the original day.
     const newDeduction = {
       ...newPayload,
-      id: undefined, // New UUID will be generated
+      id: undefined, // The server uses client_request_id as the new half's id
       start_date: nextFutureDate,
       anchor_day: deductionAnchorDay(originalDeduction)
     };
 
-    // Save both deductions
+    // One atomic call ends the original, creates the new half and carries later exceptions over, so a
+    // failure can never leave the original ended without its continuation. client_request_id becomes the
+    // new half's id: a retry after a lost response gets the saved split back instead of splitting twice.
+    const requestId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `split_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const request = {
+      client_request_id: requestId,
+      original_id: originalDeduction.id,
+      expected: {
+        start_date: originalDeduction.start_date || '',
+        end_date: originalDeduction.end_date || '',
+        frequency: originalDeduction.frequency || '',
+        anchor_day: originalDeduction.anchor_day == null ? '' : originalDeduction.anchor_day
+      },
+      end_date: lastPastDate,
+      deduction: newDeduction
+    };
+
     setStatus('Splitting deduction...', 'warn');
 
     const previousList = state.deductions.slice();
-    let splitWrite = null;
-    const revertOptimisticSplit = () => {
-      if (!splitWrite) return;
-      splitWrite.settle();
-      state.deductions = dedupeById(splitWrite.rollback(state.deductions));
-      saveCache();
-      renderDeductionsList();
-      renderIncomeSummary();
-      renderAnnualCategorySection();
-    };
-
     const optimisticOriginal = sanitizeDeduction({ ...updatedOriginal });
     const optimisticNewId = `temp_split_${Date.now()}`;
     const optimisticNew = sanitizeDeduction({
@@ -8186,6 +8218,8 @@ function updateDeductionFormVisibility() {
       id: optimisticNewId
     });
     const exceptionsSnapshot = Array.isArray(state.deductionExceptions) ? state.deductionExceptions.slice() : [];
+    const moves = splitDeductionExceptionMoves(originalDeduction, exceptionsSnapshot, lastPastDate, optimisticNew);
+    const moveById = new Map(moves.map((move) => [move.id, move]));
     const extraMonthKeys = [
       monthKeyFromDateIso(originalDeduction.start_date),
       monthKeyFromDateIso(originalDeduction.end_date),
@@ -8194,8 +8228,13 @@ function updateDeductionFormVisibility() {
       monthKeyFromDateIso(newDeduction.start_date),
       monthKeyFromDateIso(newDeduction.end_date)
     ];
+    exceptionsSnapshot.forEach((ex) => {
+      if (!ex || !moveById.has(ex.id)) return;
+      extraMonthKeys.push(monthKeyFromDateIso(ex.original_date), monthKeyFromDateIso(ex.new_date || null));
+    });
 
-    splitWrite = beginSliceWrite('deductions', [originalDeduction.id, optimisticNewId], state.deductions);
+    const splitWrite = beginSliceWrite('deductions', [originalDeduction.id, optimisticNewId], state.deductions);
+    const exceptionWrite = beginSliceWrite('deductionExceptions', moves.map((move) => move.id), state.deductionExceptions);
     const originalIndex = state.deductions.findIndex((item) => item.id === originalDeduction.id);
     if (originalIndex !== -1) {
       state.deductions.splice(originalIndex, 1, optimisticOriginal);
@@ -8204,96 +8243,129 @@ function updateDeductionFormVisibility() {
     }
     state.deductions.push(optimisticNew);
     state.deductions = dedupeById(state.deductions);
-    markIncomeMonthsDirtyForDeductionChange(originalDeduction, optimisticOriginal, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
-    markIncomeMonthsDirtyForDeductionChange(null, optimisticNew, exceptionsSnapshot, exceptionsSnapshot, extraMonthKeys);
+    state.deductionExceptions = exceptionsSnapshot.map((ex) => {
+      const move = ex && moveById.get(ex.id);
+      return move ? { ...ex, deduction_id: optimisticNewId, original_date: move.original_date } : ex;
+    });
+    const splitExceptions = state.deductionExceptions.slice();
+    markIncomeMonthsDirtyForDeductionChange(originalDeduction, optimisticOriginal, exceptionsSnapshot, splitExceptions, extraMonthKeys);
+    markIncomeMonthsDirtyForDeductionChange(null, optimisticNew, exceptionsSnapshot, splitExceptions, extraMonthKeys);
     saveCache();
     renderDeductionsList();
     renderIncomeSummary();
     renderAnnualCategorySection();
 
-    // First, update the original
-    google.script.run
-      .withSuccessHandler((res1) => {
-        if (res1 && res1.success) {
-          // Then create the new one
-          google.script.run
-            .withSuccessHandler((res2) => {
-              if (res2 && res2.success) {
-                // Both writes are confirmed: swap in the saved rows (the new half gets its real id) so a
-                // failed reload below leaves the split on screen rather than rolling it back. A reload sent
-                // from here on is truth for the split rows; the ticket still keeps any other deduction
-                // edited meanwhile.
-                const savedOriginal = res1.deduction ? sanitizeDeduction(res1.deduction) : optimisticOriginal;
-                const savedNew = res2.deduction ? sanitizeDeduction(res2.deduction) : null;
-                state.deductions = dedupeById(state.deductions.map((item) => {
-                  if (item && item.id === originalDeduction.id) return savedOriginal;
-                  if (item && item.id === optimisticNewId && savedNew) return savedNew;
-                  return item;
-                }));
-                splitWrite.touch(savedNew && savedNew.id).settle();
-                saveCache();
-                renderDeductionsList();
-                const reloadTicket = beginSliceFetch('deductions');
-                google.script.run
-                  .withSuccessHandler((deductions) => {
-                    const nextList = dedupeById(mergeSliceList(reloadTicket, (deductions || []).map(sanitizeDeduction), state.deductions));
-                    const prevMap = new Map(previousList.map((d) => [d.id, d]));
-                    const nextMap = new Map(nextList.map((d) => [d.id, d]));
-                    const changedIds = new Set([originalDeduction.id]);
-                    nextMap.forEach((val, id) => {
-                      if (!prevMap.has(id)) changedIds.add(id);
-                    });
-                    changedIds.forEach((id) => {
-                      markIncomeMonthsDirtyForDeductionChange(
-                        prevMap.get(id),
-                        nextMap.get(id),
-                        exceptionsSnapshot,
-                        exceptionsSnapshot,
-                        extraMonthKeys
-                      );
-                    });
-                    state.deductions = nextList;
-                    saveCache();
-                    renderDeductionsList();
-                    renderIncomeSummary();
-                    renderAnnualCategorySection();
-                    if (state.annualData) {
-                      loadAnnualData();
-                    }
-                    setStatus('Deduction split successfully', 'success');
-                  })
-                  .withFailureHandler(() => {
-                    // The split is saved; only the refresh failed. Keep the confirmed rows and let the next
-                    // deductions fetch reconcile anything else.
-                    endSliceFetch(reloadTicket);
-                    renderIncomeSummary();
-                    renderAnnualCategorySection();
-                    if (state.annualData) {
-                      loadAnnualData();
-                    }
-                    setStatus('Deduction split saved. The list could not refresh and will update on the next sync.', 'info');
-                  })
-                  .api_getDeductions();
-              } else {
-                revertOptimisticSplit();
-                setStatus('Failed to create future deduction', 'error');
-              }
-            })
-            .withFailureHandler(() => {
-              revertOptimisticSplit();
-              setStatus('Failed to create future deduction', 'error');
-            })
-            .api_upsertDeduction(newDeduction);
-        } else {
+    let done = false;
+    const revertOptimisticSplit = () => {
+      if (done) return;
+      done = true;
+      splitWrite.settle();
+      exceptionWrite.settle();
+      state.deductions = dedupeById(splitWrite.rollback(state.deductions));
+      state.deductionExceptions = exceptionWrite.rollback(state.deductionExceptions);
+      saveCache();
+      renderDeductionsList();
+      renderIncomeSummary();
+      renderAnnualCategorySection();
+    };
+
+    const confirmSplit = (res) => {
+      if (done) return;
+      done = true;
+      // The split is confirmed: swap in the saved rows (the new half gets its real id) so a failed reload
+      // below leaves the split on screen rather than rolling it back. A reload sent from here on is truth
+      // for the split rows; the ticket still keeps any other deduction edited meanwhile.
+      const savedOriginal = res.original ? sanitizeDeduction(res.original) : optimisticOriginal;
+      const savedNew = res.deduction ? sanitizeDeduction(res.deduction) : null;
+      state.deductions = dedupeById(state.deductions.map((item) => {
+        if (item && item.id === originalDeduction.id) return savedOriginal;
+        if (item && item.id === optimisticNewId && savedNew) return savedNew;
+        return item;
+      }));
+      // The server's exceptions for the new half replace the optimistic re-keys.
+      const savedExceptions = (Array.isArray(res.exceptions) ? res.exceptions : []).map(sanitizeDeductionException);
+      const savedExceptionIds = new Set(savedExceptions.map((ex) => ex.id));
+      state.deductionExceptions = exceptionWrite.rollback(state.deductionExceptions)
+        .filter((ex) => !(ex && savedExceptionIds.has(ex.id)))
+        .concat(savedExceptions);
+      splitWrite.touch(savedNew && savedNew.id).settle();
+      exceptionWrite.touch(...savedExceptionIds).settle();
+      const confirmedExceptions = state.deductionExceptions.slice();
+      saveCache();
+      renderDeductionsList();
+      const reloadTicket = beginSliceFetch('deductions');
+      google.script.run
+        .withSuccessHandler((deductions) => {
+          const nextList = dedupeById(mergeSliceList(reloadTicket, (deductions || []).map(sanitizeDeduction), state.deductions));
+          const prevMap = new Map(previousList.map((d) => [d.id, d]));
+          const nextMap = new Map(nextList.map((d) => [d.id, d]));
+          const changedIds = new Set([originalDeduction.id]);
+          nextMap.forEach((val, id) => {
+            if (!prevMap.has(id)) changedIds.add(id);
+          });
+          changedIds.forEach((id) => {
+            markIncomeMonthsDirtyForDeductionChange(
+              prevMap.get(id),
+              nextMap.get(id),
+              exceptionsSnapshot,
+              confirmedExceptions,
+              extraMonthKeys
+            );
+          });
+          state.deductions = nextList;
+          saveCache();
+          renderDeductionsList();
+          renderIncomeSummary();
+          renderAnnualCategorySection();
+          if (state.annualData) {
+            loadAnnualData();
+          }
+          setStatus('Deduction split successfully', 'success');
+        })
+        .withFailureHandler(() => {
+          // The split is saved; only the refresh failed. Keep the confirmed rows and let the next
+          // deductions fetch reconcile anything else.
+          endSliceFetch(reloadTicket);
+          renderIncomeSummary();
+          renderAnnualCategorySection();
+          if (state.annualData) {
+            loadAnnualData();
+          }
+          setStatus('Deduction split saved. The list could not refresh and will update on the next sync.', 'info');
+        })
+        .api_getDeductions();
+    };
+
+    let attempts = 0;
+    const send = () => {
+      attempts += 1;
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (res && res.success) {
+            confirmSplit(res);
+            return;
+          }
+          // Refused before anything was written.
           revertOptimisticSplit();
-          setStatus('Failed to update past deduction', 'error');
-        }
-      })
-      .withFailureHandler(() => {
-        revertOptimisticSplit();
-        setStatus('Failed to update past deduction', 'error');
-      })
-      .api_upsertDeduction(updatedOriginal);
+          setStatus((res && res.message) || 'Failed to split deduction', 'error');
+        })
+        .withFailureHandler(() => {
+          // The response may have been lost after the split saved. The same request id is safe to resend:
+          // the server returns the saved split instead of splitting again.
+          if (attempts < 2) {
+            send();
+            return;
+          }
+          // Nothing was left half-written (the server undoes a failed split), but whether it saved is
+          // unknown, so reload both lists after reverting.
+          revertOptimisticSplit();
+          setStatus('Failed to split deduction', 'error');
+          fetchDeductionsFromServer();
+          fetchDeductionExceptionsFromServer();
+        })
+        .api_splitDeduction(request);
+    };
+    send();
   }
 
   function performOverrideDeduction(payload, originalDeduction) {
