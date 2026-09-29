@@ -11,7 +11,7 @@ function fn(name) {
   const match = source.match(new RegExp('\\n  (?:async )?function ' + name + '\\([\\s\\S]*?\\n  \\}'));
   assert.ok(match, name); return match[0];
 }
-const GUARD = ['syncSlice', 'sliceSnapshot_', 'beginSliceWrite', 'beginSliceFetch', 'endSliceFetch', 'mergeSliceList',
+const GUARD = ['syncSlice', 'sliceSnapshot_', 'sliceKeyIsPending', 'beginSliceWrite', 'beginSliceFetch', 'endSliceFetch', 'mergeSliceList',
   'mergeSliceFields', 'sliceKeyIsGuarded', 'confirmedSliceList', 'confirmedSliceFields'];
 
 // google.script.run whose calls are queued so a test can answer them in any order.
@@ -152,6 +152,80 @@ exports.run = (test) => {
     assert.equal(c.settingsServerSynced, true);
     take(c.calls, 'api_updateSettings').success({ success: true });
     assert.equal(c.syncSliceGuards.settings.pending.size, 0);
+  });
+
+  test('a feature flag toggled while a flags GET is in flight stays toggled', () => {
+    const normalizeFeatureFlags = (raw) => Object.fromEntries(Object.entries(raw || {})
+      .map(([key, value]) => [key, { enabled: !!(value && typeof value === 'object' ? value.enabled : value), name: key, description: '' }]));
+    const rendered = [];
+    const c = context({
+      state: { featureFlags: normalizeFeatureFlags({ a: false, b: true }), settings: {} },
+      normalizeFeatureFlags, DEFAULT_FEATURE_FLAGS: {}, featureFlagsListEl: null, document: { querySelector: () => null },
+      renderFeatureFlags: () => rendered.push(Object.fromEntries(Object.entries(c.state.featureFlags).map(([k, v]) => [k, v.enabled]))),
+      applyFeatureFlagsLazy: () => {}, syncMobileViewToolVisibility: () => {}, handleFeatureFlagDataLoad: () => {},
+      isUpgradeInProgressError: () => false, UPGRADE_RETRY_DELAYS_MS: []
+    }, ['fetchFeatureFlagsFromServer', 'updateFeatureFlag']);
+    const enabled = () => Object.fromEntries(Object.entries(c.state.featureFlags).map(([k, v]) => [k, v.enabled]));
+
+    c.fetchFeatureFlagsFromServer();
+    c.updateFeatureFlag('a', true);
+    assert.equal(c.sliceKeyIsPending('featureFlags', 'a'), true, 'the toggle renders disabled while saving');
+    assert.equal(c.confirmedSliceFields('featureFlags', c.state.featureFlags).a.enabled, false, 'the cache keeps the confirmed value');
+    take(c.calls, 'api_getFeatureFlags').success({ a: false, b: false });
+    assert.deepEqual(enabled(), { a: true, b: false }, 'the pending toggle survives; the other flag takes the server value');
+    assert.deepEqual(rendered.pop(), { a: true, b: false }, 'and the re-render shows it');
+
+    // The write's own reply is truth for its flag, but not for a toggle still saving next to it.
+    c.updateFeatureFlag('b', true);
+    take(c.calls, 'api_setFeatureFlag', (p) => p.feature === 'a').success({ success: true, flags: { a: true, b: false } });
+    assert.deepEqual(enabled(), { a: true, b: true });
+    c.fetchFeatureFlagsFromServer();
+    take(c.calls, 'api_setFeatureFlag').success({ success: true, flags: { a: true, b: true } });
+    take(c.calls, 'api_getFeatureFlags').success({ a: true, b: false });
+    assert.deepEqual(enabled(), { a: true, b: true }, 'a toggle confirmed after the GET was sent is not reverted by it');
+
+    c.updateFeatureFlag('a', false);
+    take(c.calls, 'api_setFeatureFlag').failure(new Error('offline'));
+    assert.deepEqual(enabled(), { a: true, b: true }, 'a failed toggle reverts');
+  });
+
+  test('contracts edited during an in-flight contracts GET or Lil month GET keep the edit', () => {
+    const assessments = fs.readFileSync(path.join(root, 'views/partials/assessments-scripts.html'), 'utf8');
+    const lil = (name) => { const at = assessments.indexOf('  function ' + name + '('); assert.notEqual(at, -1, name); return assessments.slice(at, assessments.indexOf('\n  }', at) + 4); };
+    const sanitizeContract = (x) => ({ ...x });
+    const form = { payload: null };
+    const c = context({
+      state: { contracts: [{ id: 'c1', name: 'Old' }, { id: 'c2', name: 'Second', archived: false }], hourTypes: [], settings: {},
+        editingContractId: null, recurringEntryForm: {}, calendarFilteredContracts: [] },
+      sanitizeContract, sanitizeHourType: (x) => ({ ...x }), updateContractMap: () => {}, updateHourTypeMap: () => {},
+      contractSaveBtn: {}, getContractFormPayload: () => form.payload, getFeatureFlag: () => false, generateTempId: (p) => p + '-tmp',
+      refreshContractBindings: () => {}, hideContractForm: () => {}, renderContractDetail: () => {},
+      populateRecurringContractOptions: () => {}, renderCalendar: () => {}, customConfirm: () => true,
+      isUpgradeInProgressError: () => false, UPGRADE_RETRY_DELAYS_MS: []
+    }, ['fetchContractsFromServer', 'handleContractSave', 'handleContractArchiveToggle']);
+    ['lilReferenceTickets', 'lilEndReferenceTickets', 'lilAdoptReferenceData'].forEach((name) => vm.runInNewContext(lil(name), c));
+    const names = () => c.state.contracts.map((x) => x.id + ':' + x.name + (x.archived ? ':archived' : ''));
+
+    c.fetchContractsFromServer();
+    c.state.editingContractId = 'c1';
+    form.payload = { name: 'New' };
+    c.handleContractSave();
+    take(c.calls, 'api_updateContract').success({ success: true, contract: { id: 'c1', name: 'New' } });
+    take(c.calls, 'api_getContracts').success([{ id: 'c1', name: 'Old' }, { id: 'c2', name: 'Second' }, { id: 'c3', name: 'Third' }]);
+    assert.deepEqual(names(), ['c1:New', 'c2:Second', 'c3:Third']);
+
+    // lilAdoptReferenceData replaces contracts from any month payload; a month sent before an archive lands after it.
+    const refs = c.lilReferenceTickets();
+    c.handleContractArchiveToggle('c2', true);
+    take(c.calls, 'api_setContractArchived').success({ success: true });
+    c.lilAdoptReferenceData({ contracts: [{ id: 'c1', name: 'New' }, { id: 'c2', name: 'Second', archived: false }, { id: 'c3', name: 'Third' }] }, refs);
+    c.lilEndReferenceTickets(refs);
+    assert.deepEqual(names(), ['c1:New', 'c2:Second:archived', 'c3:Third']);
+
+    // A month fetched after both writes is truth again.
+    const fresh = c.lilReferenceTickets();
+    c.lilAdoptReferenceData({ contracts: [{ id: 'c1', name: 'Renamed elsewhere' }] }, fresh);
+    assert.deepEqual(names(), ['c1:Renamed elsewhere']);
   });
 
   test('a failed deduction write is not re-applied by a stale GET', () => {

@@ -36,10 +36,14 @@
   }
   // Contracts and hour types arrive with the month payload but belong to the whole app, so they are
   // adopted into `state` rather than kept per month. A cached month carries neither (the main browser
-  // cache already holds them), hence the presence checks.
-  function lilAdoptReferenceData(data) {
-    if(Array.isArray(data.contracts)){state.contracts=data.contracts.map(sanitizeContract);updateContractMap();}
-    if(Array.isArray(data.hour_types)){state.hourTypes=data.hour_types.map(sanitizeHourType);updateHourTypeMap();}
+  // cache already holds them), hence the presence checks. Each month GET takes stale-response tickets for
+  // both when it is sent (lilReferenceTickets; the guard sits above loadCache in scripts.html), so a
+  // contract or hour type edited while the month was loading keeps the edit when the month lands.
+  function lilReferenceTickets() { return {contracts:beginSliceFetch('contracts'),hourTypes:beginSliceFetch('hourTypes')}; }
+  function lilEndReferenceTickets(tickets) { endSliceFetch(tickets.contracts);endSliceFetch(tickets.hourTypes); }
+  function lilAdoptReferenceData(data, tickets) {
+    if(Array.isArray(data.contracts)){state.contracts=mergeSliceList(tickets?.contracts,data.contracts.map(sanitizeContract),state.contracts);updateContractMap();}
+    if(Array.isArray(data.hour_types)){state.hourTypes=mergeSliceList(tickets?.hourTypes,data.hour_types.map(sanitizeHourType),state.hourTypes);updateHourTypeMap();}
     if(data.saved_default_hour_type_id!==undefined)state.settings.assessment_time_hour_type_id=data.saved_default_hour_type_id||'';
   }
   // Lil works in this month and the one she is invoicing, so those two ride along in the app's browser
@@ -69,15 +73,15 @@
   async function lilRevalidate(month) {
     if(!lilState.hydrated.has(month))return;
     lilState.hydrated.delete(month);
-    const epoch=lilState.epoch;
+    const epoch=lilState.epoch,refs=lilReferenceTickets();
     try{
       const data=await lilApi('api_getAssessmentsForMonth',Number(month.slice(0,4)),Number(month.slice(5,7)));
       if(epoch!==lilState.epoch || lilMonthPending(month))return;
-      lilState.months[month]=data;lilAdoptReferenceData(data);lilPersist();
+      lilState.months[month]=data;lilAdoptReferenceData(data,refs);lilPersist();
       if(month===lilState.month)lilRender();
     }catch(error){
       console.warn('[Tempus assessments] Background refresh of '+month+' failed; the cached month stands:',error);
-    }
+    }finally{lilEndReferenceTickets(refs);}
   }
   // lilState.month is the source of truth; the toolbar shows it as the label on the month button, which
   // opens the same picker the calendar's month label does.
@@ -126,7 +130,7 @@
     if(!getFeatureFlag('enable_lil_assessments_mode') && !window.__TEMPUS_LIL_MODE__) return;
     const month=lilState.month;
     if(lilData() && !options?.force){lilRender();lilRevalidate(month);return;}
-    const epoch=lilState.epoch, ticket=lilRequestId();
+    const epoch=lilState.epoch, ticket=lilRequestId(), refs=lilReferenceTickets();
     lilState.fetchTicket=ticket;
     // Cached months repaint instantly above; only a month we have never read shows loading state.
     if(!lilData())lilRenderLoading(); else lilSetMonthControl(month);
@@ -134,7 +138,7 @@
       const data=await lilApi('api_getAssessmentsForMonth',Number(month.slice(0,4)),Number(month.slice(5,7)));
       if(epoch!==lilState.epoch || lilMonthPending(month)) return;
       lilState.months[month]=data;lilState.hydrated.delete(month);
-      lilAdoptReferenceData(data);lilPersist();
+      lilAdoptReferenceData(data,refs);lilPersist();
       if(month===lilState.month && ticket===lilState.fetchTicket) lilRender();
     } catch(error){if(month===lilState.month){
         lilEl('add').disabled=false;
@@ -143,6 +147,7 @@
         lilEl('invoice-status').hidden=true;lilEl('invoice-meta').textContent='';
         lilFeedback(error.message||'Could not load this month.',()=>renderAssessmentsPage({force:true}));
       }}
+    finally{lilEndReferenceTickets(refs);}
   }
   // Rows are the agenda's day rows — a div[role=button], as there, so nothing has to undo the global
   // button pill. Status rides on a badge rather than a third line of appended grey text.

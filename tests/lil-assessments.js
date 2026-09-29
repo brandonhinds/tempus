@@ -591,7 +591,7 @@ module.exports={lilContext,mockDrive,run(test){
     // Contracts and hour types are already in the main payload; a second per-month copy would give the
     // same records two sources of truth.
     assert.match(ui,/delete copy\.contracts;delete copy\.hour_types;/);
-    assert.match(ui,/function lilAdoptReferenceData\(data\)[\s\S]*?if\(Array\.isArray\(data\.contracts\)\)/);
+    assert.match(ui,/function lilAdoptReferenceData\(data, tickets\)[\s\S]*?if\(Array\.isArray\(data\.contracts\)\)/);
 
     // A cached month paints first, then confirms itself once, and a failed background check leaves the
     // cached view alone rather than raising an error over data that is already on screen.
@@ -603,8 +603,8 @@ module.exports={lilContext,mockDrive,run(test){
       'a background refresh must not show loading state');
 
     // Persisted where the month's data actually moves, never merely on paint.
-    ['lilState.months[month]=data;lilState.hydrated.delete(month);\n      lilAdoptReferenceData(data);lilPersist();',
-     'lilState.months[month]=data;lilAdoptReferenceData(data);lilPersist();',
+    ['lilState.months[month]=data;lilState.hydrated.delete(month);\n      lilAdoptReferenceData(data,refs);lilPersist();',
+     'lilState.months[month]=data;lilAdoptReferenceData(data,refs);lilPersist();',
      'lilState.epoch++;lilRender();lilPersist();']
       .forEach(snippet=>assert.ok(ui.includes(snippet),'missing persist point: '+snippet));
     assert.ok(!/function lilRender\(listOnly\)[\s\S]*?lilPersist\(\)[\s\S]*?function lilRenderInvoice/.test(ui),

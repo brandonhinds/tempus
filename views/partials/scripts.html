@@ -8176,8 +8176,11 @@ function updateDeductionFormVisibility() {
   function performOverrideDeduction(payload, originalDeduction) {
     // Delete all exceptions for this deduction
     if (originalDeduction && originalDeduction.id) {
+      const exceptionWrite = beginSliceWrite('deductionExceptions',
+        state.deductionExceptions.filter(ex => ex.deduction_id === originalDeduction.id).map(ex => ex.id), state.deductionExceptions);
       google.script.run
         .withSuccessHandler(() => {
+          exceptionWrite.settle();
           // Remove exceptions from local state
           state.deductionExceptions = state.deductionExceptions.filter(
             ex => ex.deduction_id !== originalDeduction.id
@@ -8188,6 +8191,7 @@ function updateDeductionFormVisibility() {
           saveDeductionDirectly(payload, originalDeduction);
         })
         .withFailureHandler(() => {
+          exceptionWrite.settle();
           setStatus('Failed to delete exceptions', 'error');
         })
         .api_deleteExceptionsByDeductionId(originalDeduction.id);
@@ -10516,11 +10520,16 @@ function updateDeductionFormVisibility() {
     return merged;
   }
 
+  function sliceKeyIsPending(name, key) {
+    const slice = syncSliceGuards[name];
+    return !!slice && (slice.pending.has(key) || slice.pending.has('*'));
+  }
+
   // True while a key has an unconfirmed write, or a settled one that a request still in flight predates.
   function sliceKeyIsGuarded(name, key) {
     const slice = syncSliceGuards[name];
     if (!slice) return false;
-    if (slice.pending.has(key) || slice.pending.has('*')) return true;
+    if (sliceKeyIsPending(name, key)) return true;
     let oldest = null;
     slice.inflight.forEach((epoch) => { if (oldest === null || epoch < oldest) oldest = epoch; });
     return oldest !== null && (slice.touched.get(key) || 0) > oldest;
@@ -10722,8 +10731,8 @@ function updateDeductionFormVisibility() {
       const payload = {
         entries: allEntryRecords().map(sanitizeEntry), // breaks cached in the same list, split on load
         settings: confirmedSliceFields('settings', state.settings),
-        contracts: state.contracts.map(sanitizeContract),
-        hourTypes: state.hourTypes.map(sanitizeHourType),
+        contracts: confirmedSliceList('contracts', state.contracts).map(sanitizeContract),
+        hourTypes: confirmedSliceList('hourTypes', state.hourTypes).map(sanitizeHourType),
         recurringTimeEntries: state.recurringTimeEntries.map((item) => sanitizeRecurringEntry(item)),
         bulkEntries: state.bulkEntries.map((item) => sanitizeBulkEntry(item)),
         deductions: confirmedSliceList('deductions', state.deductions).map(sanitizeDeduction),
@@ -10731,17 +10740,17 @@ function updateDeductionFormVisibility() {
         deductionCategoryCollapse: state.deductionCategoryCollapse,
         settingsSectionCollapse: state.settingsSectionCollapse,
         featureFlagCollapse: state.featureFlagCollapse,
-        deductionExceptions: state.deductionExceptions.map(sanitizeDeductionException),
+        deductionExceptions: confirmedSliceList('deductionExceptions', state.deductionExceptions).map(sanitizeDeductionException),
         annualCategoryFilters: state.annualCategoryFilters,
         annualCategoryExpansion: state.annualCategoryExpansion,
         annualContractsExpanded: state.annualContractsExpanded,
         annualYearType: state.annualYearType,
         annualCurrentYear: state.annualCurrentYear,
         annualAllTime: state.annualAllTime,
-        featureFlags: normalizeFeatureFlags(state.featureFlags),
+        featureFlags: normalizeFeatureFlags(confirmedSliceFields('featureFlags', state.featureFlags)),
         basCurrentFy: state.basCurrentFy,
         publicHolidays: state.publicHolidays,
-        actualIncome: state.actualIncome,
+        actualIncome: confirmedSliceList('actualIncome', state.actualIncome),
         invoices: invoicesForCache,
         assessmentMonths: typeof serializeAssessmentMonths === 'function' ? serializeAssessmentMonths() : (state.assessmentMonths || {}),
         incomeSummaryCache: serializeIncomeSummaryCache(),
@@ -15912,11 +15921,13 @@ function updateDeductionFormVisibility() {
     setStatus(isEdit ? 'Updating contract...' : 'Saving contract...', 'warn');
     const previousContract = isEdit ? state.contracts.find(c => c.id === state.editingContractId) : null;
     const optimisticContract = getFeatureFlag('enable_lil_assessments_mode') ? sanitizeContract({ ...previousContract, ...payload, id: previousContract?.id || generateTempId('contract') }) : null;
+    const contractWrite = beginSliceWrite('contracts', [previousContract ? previousContract.id : null, optimisticContract ? optimisticContract.id : null], state.contracts);
     if (optimisticContract) { state.contracts = state.contracts.filter(c => c.id !== optimisticContract.id).concat(optimisticContract); updateContractMap(); }
     const handler = (res) => {
       contractSaveBtn.disabled = false;
       if (res && res.success && res.contract) {
         const normalized = sanitizeContract(res.contract);
+        contractWrite.touch(normalized.id).settle();
         if (optimisticContract) state.contracts = state.contracts.filter(c => c.id !== optimisticContract.id);
         state.contracts = [...state.contracts.filter((c) => c.id !== normalized.id), normalized];
         // A freshly created contract defaults to visible in the calendar filter (mirrors hour types).
@@ -15934,6 +15945,7 @@ function updateDeductionFormVisibility() {
       }
     };
     const failure = () => {
+      contractWrite.settle();
       if (optimisticContract) { state.contracts = state.contracts.filter(c => c.id !== optimisticContract.id); if (previousContract) state.contracts.push(previousContract); updateContractMap(); }
       contractSaveBtn.disabled = false;
       setStatus('Contract save failed', 'error');
@@ -15980,8 +15992,10 @@ function updateDeductionFormVisibility() {
       );
       if (!confirmed) return;
       setStatus('Deleting contract and entries...', 'warn');
+      const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
       google.script.run
         .withSuccessHandler((res) => {
+          contractWrite.settle();
           state.entries = state.entries.filter((e) => e.contract_id !== id);
           state.breaks = (state.breaks || []).filter((e) => e.contract_id !== id);
           finishDelete();
@@ -15990,7 +16004,7 @@ function updateDeductionFormVisibility() {
           const removed = (res && res.deletedEntries != null) ? res.deletedEntries : entryCount;
           setStatus(`Contract and ${removed} ${removed === 1 ? 'entry' : 'entries'} deleted`, 'success');
         })
-        .withFailureHandler(() => setStatus('Contract delete failed', 'error'))
+        .withFailureHandler(() => { contractWrite.settle(); setStatus('Contract delete failed', 'error'); })
         .api_deleteContractWithEntries(id);
       return;
     }
@@ -15999,12 +16013,14 @@ function updateDeductionFormVisibility() {
     const confirmed = await customConfirm("This permanently removes the contract. This can't be undone.", { title: 'Delete contract?', okText: 'Delete contract', danger: true });
     if (!confirmed) return;
     setStatus('Deleting contract...', 'warn');
+    const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
       .withSuccessHandler(() => {
+        contractWrite.settle();
         finishDelete();
         setStatus('Contract deleted', 'success');
       })
-      .withFailureHandler(() => setStatus('Contract delete failed', 'error'))
+      .withFailureHandler(() => { contractWrite.settle(); setStatus('Contract delete failed', 'error'); })
       .api_deleteContract(id);
   }
 
@@ -16018,8 +16034,10 @@ function updateDeductionFormVisibility() {
       if (!ok) return;
     }
     setStatus(archived ? 'Archiving contract…' : 'Restoring contract…', 'warn');
+    const contractWrite = beginSliceWrite('contracts', [id], state.contracts);
     google.script.run
       .withSuccessHandler(() => {
+        contractWrite.settle();
         const c = state.contracts.find((x) => x.id === id);
         if (c) c.archived = !!archived;
         // Archiving the contract you're viewing drops the selection so it doesn't linger as a surfaced
@@ -16037,7 +16055,7 @@ function updateDeductionFormVisibility() {
         saveCache();
         setStatus(archived ? 'Contract archived' : 'Contract restored', 'success');
       })
-      .withFailureHandler(() => setStatus(archived ? 'Archive failed' : 'Restore failed', 'error'))
+      .withFailureHandler(() => { contractWrite.settle(); setStatus(archived ? 'Archive failed' : 'Restore failed', 'error'); })
       .api_setContractArchived({ id: id, archived: archived });
   }
 
@@ -16223,6 +16241,7 @@ function updateDeductionFormVisibility() {
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = flag.enabled;
+        input.disabled = sliceKeyIsPending('featureFlags', flag.key);
         input.dataset.flag = flag.key;
         input.setAttribute('aria-label', flag.name);
         const track = document.createElement('span');
@@ -16257,13 +16276,19 @@ function updateDeductionFormVisibility() {
       description: defaultMeta ? defaultMeta.description : '',
       enabled: false
     };
-    if (featureKey === 'enable_lil_assessments_mode') state.featureFlags[featureKey] = { ...currentMeta, enabled: !!enabled };
+    // The reply carries every flag; the ticket keeps any other toggle that is still saving (or confirmed
+    // after this one was sent), and this flag keeps the value just written.
+    const flagsTicket = beginSliceFetch('featureFlags');
+    const flagWrite = beginSliceWrite('featureFlags', [featureKey], state.featureFlags);
+    // Optimistic, so a re-render while the save is in flight (a background flags GET) shows the new value.
+    state.featureFlags[featureKey] = { ...currentMeta, enabled: !!enabled };
     setStatus('Updating feature flags...', 'warn');
     google.script.run
       .withSuccessHandler((res) => {
+        flagWrite.settle();
         if (toggleInput) toggleInput.disabled = false;
         if (res && res.success && res.flags) {
-          state.featureFlags = normalizeFeatureFlags(res.flags);
+          state.featureFlags = normalizeFeatureFlags(mergeSliceFields(flagsTicket, res.flags, state.featureFlags));
           if (featureKey === 'hour_types') {
             if (!state.incomeDependencies || typeof state.incomeDependencies !== 'object') state.incomeDependencies = {};
             state.incomeDependencies.hourTypes = !enabled;
@@ -16295,18 +16320,23 @@ function updateDeductionFormVisibility() {
 
           setStatus('Feature flags updated', 'success');
         } else {
+          endSliceFetch(flagsTicket);
           if (toggleInput) toggleInput.checked = !!currentMeta.enabled;
           state.featureFlags[featureKey] = currentMeta;
+          renderFeatureFlags();
           setStatus('Feature flag update failed', 'error');
         }
       })
       .withFailureHandler(() => {
+        flagWrite.settle();
+        endSliceFetch(flagsTicket);
         if (toggleInput) {
           toggleInput.disabled = false;
           toggleInput.checked = !!currentMeta.enabled;
         }
         state.featureFlags[featureKey] = currentMeta;
-          setStatus('Feature flag update failed', 'error');
+        renderFeatureFlags();
+        setStatus('Feature flag update failed', 'error');
       })
       .api_setFeatureFlag({
         feature: featureKey,
@@ -18130,14 +18160,15 @@ function getCachedIncomeSummary(monthKey) {
 
     // Optimistic update
     const previousList = state.actualIncome.slice();
+    const optimisticId = state.editingActualIncomeId || ('temp_' + Date.now());
+    const incomeWrite = beginSliceWrite('actualIncome', [optimisticId], state.actualIncome);
     if (state.editingActualIncomeId) {
       const index = state.actualIncome.findIndex(item => item.id === state.editingActualIncomeId);
       if (index !== -1) {
         state.actualIncome[index] = { ...state.actualIncome[index], ...payload };
       }
     } else {
-      const tempId = 'temp_' + Date.now();
-      state.actualIncome.push({ ...payload, id: tempId, created_at: '', updated_at: '' });
+      state.actualIncome.push({ ...payload, id: optimisticId, created_at: '', updated_at: '' });
     }
     refreshActualIncomeMap();
     saveCache();
@@ -18149,6 +18180,7 @@ function getCachedIncomeSummary(monthKey) {
       .withSuccessHandler((response) => {
         if (response && response.success && response.actualIncome) {
           const updated = response.actualIncome;
+          incomeWrite.touch(updated.id).settle();
           const index = state.actualIncome.findIndex(item =>
             item.id === state.editingActualIncomeId || item.id === updated.id || item.id.startsWith('temp_')
           );
@@ -18162,6 +18194,7 @@ function getCachedIncomeSummary(monthKey) {
           renderIncomeSummary();
           setStatus('Actual income saved', 'success');
         } else {
+          incomeWrite.settle();
           state.actualIncome = previousList;
           refreshActualIncomeMap();
           saveCache();
@@ -18170,6 +18203,7 @@ function getCachedIncomeSummary(monthKey) {
         }
       })
       .withFailureHandler(() => {
+        incomeWrite.settle();
         state.actualIncome = previousList;
         refreshActualIncomeMap();
         saveCache();
@@ -18185,6 +18219,7 @@ function getCachedIncomeSummary(monthKey) {
     if (!confirmed) return;
 
     const previousList = state.actualIncome.slice();
+    const incomeWrite = beginSliceWrite('actualIncome', [state.editingActualIncomeId], state.actualIncome);
     state.actualIncome = state.actualIncome.filter(item => item.id !== state.editingActualIncomeId);
     refreshActualIncomeMap();
     saveCache();
@@ -18194,9 +18229,11 @@ function getCachedIncomeSummary(monthKey) {
 
     google.script.run
       .withSuccessHandler(() => {
+        incomeWrite.settle();
         setStatus('Actual income deleted', 'success');
       })
       .withFailureHandler(() => {
+        incomeWrite.settle();
         state.actualIncome = previousList;
         refreshActualIncomeMap();
         saveCache();
@@ -26624,11 +26661,12 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchContractsFromServer() {
+    const ticket = beginSliceFetch('contracts');
     return new Promise((resolve) => {
       const attempt = (upgradeRetryCount) => {
       google.script.run
         .withSuccessHandler((contracts) => {
-          state.contracts = (contracts || []).map(sanitizeContract);
+          state.contracts = mergeSliceList(ticket, (contracts || []).map(sanitizeContract), state.contracts);
           markIncomeDependencyReady('contracts');
           refreshContractBindings();
           populateRecurringContractOptions(state.recurringEntryForm.draft ? state.recurringEntryForm.draft.contract_id : '');
@@ -26641,6 +26679,7 @@ function getCachedIncomeSummary(monthKey) {
             setTimeout(() => attempt(upgradeRetryCount + 1), UPGRADE_RETRY_DELAYS_MS[upgradeRetryCount]);
             return;
           }
+          endSliceFetch(ticket);
           setStatus('Contracts sync failed', 'error');
           resolve(false);
         })
@@ -26651,11 +26690,12 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchFeatureFlagsFromServer() {
+    const ticket = beginSliceFetch('featureFlags');
     return new Promise((resolve) => {
       const attempt = (upgradeRetryCount) => {
       google.script.run
         .withSuccessHandler((flags) => {
-          state.featureFlags = normalizeFeatureFlags(flags);
+          state.featureFlags = normalizeFeatureFlags(mergeSliceFields(ticket, flags, state.featureFlags));
           markIncomeDependencyReady('featureFlags');
           saveCache();
           renderFeatureFlags();
@@ -26667,6 +26707,7 @@ function getCachedIncomeSummary(monthKey) {
             setTimeout(() => attempt(upgradeRetryCount + 1), UPGRADE_RETRY_DELAYS_MS[upgradeRetryCount]);
             return;
           }
+          endSliceFetch(ticket);
           resolve(false);
         })
         .api_getFeatureFlags();
@@ -26701,10 +26742,11 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchActualIncomeFromServer() {
+    const ticket = beginSliceFetch('actualIncome');
     return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler((actualIncome) => {
-          state.actualIncome = actualIncome || [];
+          state.actualIncome = mergeSliceList(ticket, actualIncome || [], state.actualIncome);
           refreshActualIncomeMap();
           saveCache();
           renderIncomeSummary();
@@ -26715,6 +26757,7 @@ function getCachedIncomeSummary(monthKey) {
           resolve(true);
         })
         .withFailureHandler((error) => {
+          endSliceFetch(ticket);
           console.error('[ActualIncome] Failed to load:', error);
           resolve(false);
         })
@@ -26742,15 +26785,17 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchBasSubmissionsFromServer() {
+    const ticket = beginSliceFetch('basSubmissions');
     return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler((submissions) => {
-          state.basSubmissions = submissions || [];
+          state.basSubmissions = mergeSliceList(ticket, submissions || [], state.basSubmissions);
           saveCache();
           renderBasReporting();
           resolve(true);
         })
         .withFailureHandler(() => {
+          endSliceFetch(ticket);
           resolve(false);
         })
         .api_getBasSubmissions();
@@ -26780,10 +26825,11 @@ function getCachedIncomeSummary(monthKey) {
   }
 
   function fetchDeductionExceptionsFromServer() {
+    const ticket = beginSliceFetch('deductionExceptions');
     return new Promise((resolve) => {
       google.script.run
         .withSuccessHandler((exceptions) => {
-          state.deductionExceptions = (exceptions || []).map(sanitizeDeductionException);
+          state.deductionExceptions = mergeSliceList(ticket, (exceptions || []).map(sanitizeDeductionException), state.deductionExceptions);
           markIncomeDependencyReady('deductionExceptions');
           saveCache();
           renderIncomeSummary();
@@ -26791,6 +26837,7 @@ function getCachedIncomeSummary(monthKey) {
           resolve(true);
         })
         .withFailureHandler(() => {
+          endSliceFetch(ticket);
           console.error('Failed to load deduction exceptions');
           resolve(false);
         })
@@ -27561,6 +27608,7 @@ function getCachedIncomeSummary(monthKey) {
       updated_at: new Date().toISOString()
     });
 
+    const exceptionWrite = beginSliceWrite('deductionExceptions', [optimisticId], state.deductionExceptions);
     const optimisticIndex = state.deductionExceptions.findIndex(ex => ex.id === optimisticException.id);
     if (optimisticIndex !== -1) {
       state.deductionExceptions.splice(optimisticIndex, 1, optimisticException);
@@ -27590,6 +27638,7 @@ function getCachedIncomeSummary(monthKey) {
     setStatus('Saving adjustment...', 'info');
 
     const revertOptimistic = () => {
+      exceptionWrite.settle();
       state.deductionExceptions = previousExceptions;
       saveCache();
       renderIncomeSummary();
@@ -27603,6 +27652,7 @@ function getCachedIncomeSummary(monthKey) {
         if (res && res.success && res.exception) {
           // Update local state with real data
           const exception = sanitizeDeductionException(res.exception);
+          exceptionWrite.touch(exception.id).settle();
           const existingIndex = state.deductionExceptions.findIndex(ex => ex.id === optimisticId || ex.id === exception.id);
           if (existingIndex !== -1) {
             state.deductionExceptions.splice(existingIndex, 1, exception);
@@ -27644,6 +27694,7 @@ function getCachedIncomeSummary(monthKey) {
     }
 
     const previousExceptions = state.deductionExceptions.slice();
+    const exceptionWrite = beginSliceWrite('deductionExceptions', [existingException.id], state.deductionExceptions);
     state.deductionExceptions = state.deductionExceptions.filter(ex => ex.id !== existingException.id);
 
     const extraMonthKeys = [
@@ -27668,6 +27719,7 @@ function getCachedIncomeSummary(monthKey) {
     setStatus('Removing adjustment...', 'info');
 
     const revertDeleteOptimistic = () => {
+      exceptionWrite.settle();
       state.deductionExceptions = previousExceptions;
       saveCache();
       renderIncomeSummary();
@@ -27678,6 +27730,7 @@ function getCachedIncomeSummary(monthKey) {
     google.script.run
       .withSuccessHandler((res) => {
         if (res && res.success) {
+          exceptionWrite.settle();
           setStatus('Adjustment removed', 'success');
 
           // Refresh the monthly deductions modal only if it's still open
@@ -28052,9 +28105,14 @@ function getCachedIncomeSummary(monthKey) {
       setStatus('Saving BAS submission...', 'warn');
       basDetailSaveBtn.disabled = true;
       basDetailSaveBtn.textContent = 'Saving...';
+      const samePeriod = (s) => s.financial_year === fyYear
+        && (quarter ? s.period_type === 'quarterly' && s.quarter === quarter : s.period_type === 'monthly' && s.month === month);
+      const existingSubmission = state.basSubmissions.find(samePeriod);
+      const basWrite = beginSliceWrite('basSubmissions', [existingSubmission ? existingSubmission.id : null], state.basSubmissions);
 
       google.script.run
         .withSuccessHandler((savedSubmission) => {
+          basWrite.touch(savedSubmission && savedSubmission.id).settle();
           // Update local state
           const index = state.basSubmissions.findIndex(s => {
             if (s.financial_year !== fyYear) return false;
@@ -28080,6 +28138,7 @@ function getCachedIncomeSummary(monthKey) {
           basDetailSaveBtn.textContent = 'Save';
         })
         .withFailureHandler((error) => {
+          basWrite.settle();
           console.error('Failed to save BAS submission:', error);
           customAlert('Failed to save BAS submission: ' + error.message, { title: 'Error' });
           basDetailSaveBtn.disabled = false;
@@ -31014,11 +31073,12 @@ function getCachedIncomeSummary(monthKey) {
     if (hourTypesLoadPromise) return hourTypesLoadPromise;
 
     // No "Loading hour types…" message — it's a passive background load, not a user action worth announcing.
+    const ticket = beginSliceFetch('hourTypes');
     hourTypesLoadPromise = new Promise((resolve) => {
       const attempt = (upgradeRetryCount, transientRetryCount) => {
       google.script.run
         .withSuccessHandler((hourTypes) => {
-          state.hourTypes = Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [];
+          state.hourTypes = mergeSliceList(ticket, Array.isArray(hourTypes) ? hourTypes.map(sanitizeHourType) : [], state.hourTypes);
           updateHourTypeMap();
           markIncomeDependencyReady('hourTypes');
           markAllIncomeSummariesDirty();
@@ -31053,6 +31113,7 @@ function getCachedIncomeSummary(monthKey) {
             setTimeout(() => attempt(upgradeRetryCount, transientRetryCount + 1), ENTRY_SYNC_RETRY_DELAYS_MS[transientRetryCount]);
             return;
           }
+          endSliceFetch(ticket);
           console.error('Failed to load hour types:', error);
           setStatus('Error loading hour types', 'error');
           resolve(false);
@@ -31225,8 +31286,11 @@ function getCachedIncomeSummary(monthKey) {
     hourTypeOrderInFlight = true;
     setStatus('Saving hour type order...', 'warn');
     const previousCopy = previousOrder.slice();
+    // Every row's display_order moved. The list is already reordered, so there is no earlier order to cache.
+    const orderWrite = beginSliceWrite('hourTypes', ['*']);
     google.script.run
       .withSuccessHandler(() => {
+        orderWrite.settle();
         hourTypeOrderInFlight = false;
         setStatus('Hour type order saved', 'success');
         saveCache();
@@ -31239,6 +31303,7 @@ function getCachedIncomeSummary(monthKey) {
         if (recurringHourTypeSelect) populateRecurringHourTypeOptions();
       })
       .withFailureHandler(() => {
+        orderWrite.settle();
         hourTypeOrderInFlight = false;
         state.hourTypes = reorderByIds(state.hourTypes, previousCopy);
         state.hourTypes.forEach((item, idx) => {
@@ -31858,6 +31923,8 @@ function getCachedIncomeSummary(monthKey) {
       icon: icon
     };
 
+    // A new default clears the flag on every other type, so it guards the whole list.
+    const hourTypeWrite = beginSliceWrite('hourTypes', isDefault ? ['*'] : [state.editingHourTypeId], state.hourTypes);
     if (state.editingHourTypeId) {
       // Optimistically update the UI if setting as default
       if (isDefault) {
@@ -31894,6 +31961,7 @@ function getCachedIncomeSummary(monthKey) {
       // Update existing
       google.script.run
         .withSuccessHandler((result) => {
+          hourTypeWrite.settle();
           const index = state.hourTypes.findIndex(ht => ht.id === state.editingHourTypeId);
           if (index !== -1) {
             state.hourTypes[index] = sanitizeHourType(result);
@@ -31911,6 +31979,7 @@ function getCachedIncomeSummary(monthKey) {
           saveBtn.disabled = false;
         })
         .withFailureHandler((error) => {
+          hourTypeWrite.settle();
           console.error('Failed to update hour type:', error);
           customAlert('Failed to update hour type: ' + error.message, { title: 'Error' });
           saveBtn.textContent = 'Save Hour Type';
@@ -31924,6 +31993,7 @@ function getCachedIncomeSummary(monthKey) {
       google.script.run
         .withSuccessHandler((result) => {
           const newHourType = sanitizeHourType(result);
+          hourTypeWrite.touch(newHourType.id).settle();
           // The backend clears any previous default when a new default is created — mirror that in local
           // state, otherwise we'd keep two "defaults" and getDefaultHourTypeId() would return the old one.
           if (newHourType.is_default) {
@@ -31949,6 +32019,7 @@ function getCachedIncomeSummary(monthKey) {
           saveBtn.disabled = false;
         })
         .withFailureHandler((error) => {
+          hourTypeWrite.settle();
           console.error('Failed to create hour type:', error);
           customAlert('Failed to create hour type: ' + error.message, { title: 'Error' });
           saveBtn.textContent = 'Save Hour Type';
@@ -32004,9 +32075,11 @@ function getCachedIncomeSummary(monthKey) {
 
     confirmBtn.textContent = 'Deleting...';
     confirmBtn.disabled = true;
+    const hourTypeWrite = beginSliceWrite('hourTypes', [id], state.hourTypes);
 
     google.script.run
       .withSuccessHandler(() => {
+        hourTypeWrite.settle();
         state.hourTypes = state.hourTypes.filter(ht => ht.id !== id);
 
         // Remove from calendar filter
@@ -32026,6 +32099,7 @@ function getCachedIncomeSummary(monthKey) {
         confirmBtn.disabled = false;
       })
       .withFailureHandler((error) => {
+        hourTypeWrite.settle();
         console.error('Failed to delete hour type:', error);
         // Close the confirm modal first so the alert isn't stranded behind it. The alert sits at a higher
         // z-index (1100), so it paints above the confirm even while the confirm animates out.
