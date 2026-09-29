@@ -3823,6 +3823,7 @@ let ratePreviewInputSyncing = false;
     clone.updated_at = clone.updated_at || '';
     const orderValue = Number(clone.display_order);
     clone.display_order = Number.isFinite(orderValue) ? orderValue : null;
+    clone.anchor_day = sanitizeDeductionAnchorDay(clone.anchor_day, clone.start_date, clone.frequency);
     return clone;
   };
 
@@ -3849,23 +3850,49 @@ let ratePreviewInputSyncing = false;
    * and then 31 March, matching the backend (annualviews.js advanceDateByFrequency). Null for an unknown
    * frequency past the first occurrence.
    */
-  function deductionOccurrenceDate(startDate, frequency, index) {
+  function deductionOccurrenceDate(startDate, frequency, index, anchorDay) {
     if (!startDate) return null;
     if (index === 0) return startOfDay(startDate);
+    // A split's new half can start on a clamped month end (28 Feb) yet recur on its anchor_day (31st).
+    const addMonths = (months) => {
+      if (!anchorDay) return addMonthsClamped(startDate, months);
+      const target = new Date(startDate.getFullYear(), startDate.getMonth() + months + 1, 0);
+      target.setDate(Math.min(anchorDay, target.getDate()));
+      return startOfDay(target);
+    };
     switch (frequency) {
       case 'weekly':
         return startOfDay(addDays(startDate, 7 * index));
       case 'fortnightly':
         return startOfDay(addDays(startDate, 14 * index));
       case 'monthly':
-        return addMonthsClamped(startDate, index);
+        return addMonths(index);
       case 'quarterly':
-        return addMonthsClamped(startDate, 3 * index);
+        return addMonths(3 * index);
       case 'yearly':
-        return addMonthsClamped(startDate, 12 * index);
+        return addMonths(12 * index);
       default:
         return null;
     }
+  }
+
+  /**
+   * The day of month a month-based schedule recurs on when later than its start date's day, or null. Only a
+   * start date on its month's last day can carry one (a split of a 31st deduction whose next occurrence is
+   * 28 Feb or 30 Apr); anything else is dropped, so moving the start date clears a stale anchor.
+   * Mirrors normalizeDeductionAnchorDay_ in backend/deductions.js.
+   */
+  function sanitizeDeductionAnchorDay(value, startIso, frequency) {
+    if (frequency !== 'monthly' && frequency !== 'quarterly' && frequency !== 'yearly') return null;
+    if (value === '' || value === null || value === undefined) return null;
+    const day = Number(value);
+    if (!Number.isInteger(day) || day > 31) return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startIso || ''));
+    if (!match) return null;
+    const startDay = Number(match[3]);
+    const lastDay = new Date(Number(match[1]), Number(match[2]), 0).getDate();
+    if (startDay !== lastDay || day <= startDay) return null;
+    return day;
   }
 
   const DEDUCTION_OCCURRENCE_LIMIT = 5000;
@@ -3883,7 +3910,7 @@ let ratePreviewInputSyncing = false;
     const rangeEndDate = rangeEnd ? startOfDay(rangeEnd) : null;
 
     for (let index = 0; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
-      const current = deductionOccurrenceDate(startDate, frequency, index);
+      const current = deductionOccurrenceDate(startDate, frequency, index, deduction.anchor_day);
       if (!current) break;
       // The end date bounds later occurrences only; the start date itself always counts (as it always has).
       if (index > 0 && endDate && current > endDate) break;
@@ -3908,7 +3935,8 @@ let ratePreviewInputSyncing = false;
     if (!deduction || !deduction.start_date || !throughDate) return map;
     const frequency = deduction.frequency || 'once';
     const months = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : frequency === 'yearly' ? 12 : 0;
-    if (!months) return map;
+    // A schedule with an anchor_day was made by a split after anchoring, so nothing drifted.
+    if (!months || deduction.anchor_day) return map;
     const startSource = parseIsoDate(deduction.start_date);
     if (!startSource || Number.isNaN(startSource.getTime())) return map;
     const startDate = startOfDay(startSource);
@@ -7915,10 +7943,17 @@ function updateDeductionFormVisibility() {
       deductionOccurrencePreview.textContent = 'Select a start date to preview the schedule.';
       return;
     }
+    // Editing a split's anchored half without moving its start date keeps its anchor day (see buildOptimisticDeduction).
+    const editing = deductionFormState.mode === 'edit'
+      ? state.deductions.find((item) => item && item.id === deductionFormState.editingId)
+      : null;
     const preview = {
       start_date: startDateValue,
       end_date: frequency === 'once' ? '' : endDateValue,
-      frequency: frequency
+      frequency: frequency,
+      anchor_day: editing && editing.start_date === startDateValue
+        ? sanitizeDeductionAnchorDay(editing.anchor_day, startDateValue, frequency)
+        : null
     };
     const previewDates = getDeductionPreviewDates(preview, 5);
     if (!previewDates.length) {
@@ -8019,6 +8054,10 @@ function updateDeductionFormVisibility() {
       end_date: payload.frequency === 'once' ? '' : payload.end_date,
       notes: payload.notes || '',
       active: true,
+      // The form sends no anchor_day; an edit that keeps the start date keeps it (as the backend does).
+      anchor_day: payload.anchor_day !== undefined
+        ? payload.anchor_day
+        : (existing && existing.start_date === payload.start_date ? existing.anchor_day : null),
       created_at: existing && existing.created_at ? existing.created_at : nowIso,
       updated_at: nowIso
     };
@@ -8050,13 +8089,22 @@ function updateDeductionFormVisibility() {
     let lastPast = null;
 
     for (let index = 0; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
-      const current = deductionOccurrenceDate(anchor, deduction.frequency, index);
+      const current = deductionOccurrenceDate(anchor, deduction.frequency, index, deduction.anchor_day);
       if (!current || current > upperBound) break;
       if (index > 0 && endDate && current > endDate) break;
       lastPast = isoDate(current);
     }
 
     return lastPast;
+  }
+
+  /** The day of month a month-based deduction recurs on: its anchor_day, else its start date's day. */
+  function deductionAnchorDay(deduction) {
+    if (!deduction || !['monthly', 'quarterly', 'yearly'].includes(deduction.frequency)) return null;
+    const anchor = sanitizeDeductionAnchorDay(deduction.anchor_day, deduction.start_date, deduction.frequency);
+    if (anchor) return anchor;
+    const start = parseIsoDate(deduction.start_date);
+    return start && !Number.isNaN(start.getTime()) ? start.getDate() : null;
   }
 
   function findNextFutureOccurrence(deduction) {
@@ -8074,7 +8122,7 @@ function updateDeductionFormVisibility() {
     const anchor = startOfDay(startDate);
 
     for (let index = 1; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
-      const current = deductionOccurrenceDate(anchor, deduction.frequency, index);
+      const current = deductionOccurrenceDate(anchor, deduction.frequency, index, deduction.anchor_day);
       if (!current) return null;
       if (endDate && current > endDate) return null;
       if (current >= today) return isoDate(current);
@@ -8099,11 +8147,13 @@ function updateDeductionFormVisibility() {
       end_date: lastPastDate
     };
 
-    // Step 2: Create new deduction with new settings starting from next future occurrence
+    // Step 2: Create new deduction with new settings starting from next future occurrence. That occurrence
+    // may be clamped (28 Feb for a schedule on the 31st); anchor_day keeps the new half on the original day.
     const newDeduction = {
       ...newPayload,
       id: undefined, // New UUID will be generated
-      start_date: nextFutureDate
+      start_date: nextFutureDate,
+      anchor_day: deductionAnchorDay(originalDeduction)
     };
 
     // Save both deductions

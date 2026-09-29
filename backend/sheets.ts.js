@@ -30,7 +30,7 @@ var TEMPUS_SHEET_SCHEMAS = {
     text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at', 'quick_fill_enabled', 'icon', 'quick_fill_mode']
   },
   deductions: {
-    headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order'],
+    headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order', 'anchor_day'],
     text: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'gst_inclusive', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at']
   },
   deduction_categories: { headers: ['id', 'name', 'color', 'created_at', 'updated_at'], text: ['id', 'name', 'color', 'created_at', 'updated_at'] },

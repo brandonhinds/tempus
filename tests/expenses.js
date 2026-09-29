@@ -397,6 +397,96 @@ exports.run = test => {
     assert.equal(client.api.findDeductionOccurrenceException(deduction, '2026-03-31').id, 'anchored');
   });
 
+  test('splitting a month-end deduction keeps the new half on the original day, client and backend', () => {
+    const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+    const constant = (name) => {
+      const match = scripts.match(new RegExp('  const ' + name + ' = [\\s\\S]*?\\n  \\};'));
+      assert.ok(match, 'Expected client helper ' + name);
+      return match[0];
+    };
+    // "Today" is 10 February 2026: the 31 January occurrence is past and the next one is clamped to 28 February.
+    const RealDate = Date;
+    class FixedDate extends RealDate { constructor(...args) { if (args.length) super(...args); else super(2026, 1, 10, 9); } }
+    const calls = [];
+    const run = new Proxy({}, { get(_, prop) {
+      const call = { success: () => {}, failure: () => {} };
+      const builder = new Proxy({}, { get(__, name) {
+        if (name === 'withSuccessHandler') return (cb) => { call.success = cb; return builder; };
+        if (name === 'withFailureHandler') return (cb) => { call.failure = cb; return builder; };
+        return (...args) => { call.method = name; call.args = args; calls.push(call); };
+      } });
+      return builder[prop];
+    } });
+    const noop = () => {};
+    const client = {
+      Date: FixedDate, state: { deductions: [], deductionExceptions: [] }, google: { script: { run } },
+      saveCache: noop, setStatus: noop, renderDeductionsList: noop, renderIncomeSummary: noop, renderAnnualCategorySection: noop, loadAnnualData: noop,
+      monthKeyFromDateIso: () => null, markIncomeMonthsDirtyForDeductionChange: noop, saveDeductionDirectly: () => assert.fail('a split was needed'),
+      dedupeById: (list) => list, beginSliceFetch: () => ({}), endSliceFetch: noop, mergeSliceList: (t, server) => server,
+      beginSliceWrite: () => ({ settle: noop, rollback: (list) => list, touch() { return this; } })
+    };
+    vm.runInNewContext([
+      'const ISO_DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;',
+      extract(scripts, 'normalizeDateInput'),
+      'const isoDate = (value) => normalizeDateInput(value);',
+      constant('parseIsoDate'),
+      scripts.match(/  const startOfDay = .*\n/)[0],
+      constant('addDays'),
+      constant('addMonthsClamped'),
+      scripts.match(/  const DEDUCTION_FREQUENCIES = .*\n/)[0],
+      constant('sanitizeDeduction'),
+      scripts.match(/  const DEDUCTION_OCCURRENCE_LIMIT = .*\n/)[0],
+      ...['deductionOccurrenceDate', 'sanitizeDeductionAnchorDay', 'getDeductionOccurrencesBetween', 'deductionDriftedOccurrenceDates',
+        'deductionAnchorDay', 'findLastPastOccurrence', 'findNextFutureOccurrence', 'performSplitDeduction'].map((name) => extract(scripts, name)),
+      'this.api = { getDeductionOccurrencesBetween, sanitizeDeduction, performSplitDeduction, isoDate };'
+    ].join('\n'), client);
+    const { context: c } = backend();
+    const utc = (iso) => new Date(iso + 'T12:00:00Z');
+    const dates = (ded, through) => Array.from(client.api.getDeductionOccurrencesBetween(ded, null, new RealDate(2026, 11, 31)).map(client.api.isoDate))
+      .filter((iso) => !through || iso <= through);
+
+    const original = c.api_upsertDeduction({ name: 'Rent', amount_value: 100, frequency: 'monthly', start_date: '2026-01-31' }).deduction;
+    assert.equal(original.anchor_day, null, 'an ordinary deduction has no anchor day');
+    client.state.deductions = [client.api.sanitizeDeduction(original)];
+    client.api.performSplitDeduction(client.state.deductions[0], { id: original.id, name: 'Rent', amount_value: 120, frequency: 'monthly', start_date: '2026-01-31' });
+    const first = calls.shift();
+    assert.equal(first.args[0].end_date, '2026-01-31', 'the first half ends on its last past occurrence');
+    const saved = c.api_upsertDeduction(first.args[0]).deduction;
+    first.success({ success: true, deduction: saved });
+    const second = calls.shift();
+    assert.equal(second.args[0].start_date, '2026-02-28');
+    assert.equal(second.args[0].anchor_day, 31, 'the new half is anchored to the 31st');
+    const optimisticNew = client.state.deductions.find((d) => d.id !== original.id);
+    const expected = ['2026-02-28', '2026-03-31', '2026-04-30', '2026-05-31', '2026-06-30', '2026-07-31', '2026-08-31', '2026-09-30', '2026-10-31', '2026-11-30', '2026-12-31'];
+    assert.deepStrictEqual(dates(optimisticNew), expected, 'the optimistic new half recurs on the month end');
+    assert.deepStrictEqual(dates(client.state.deductions[0]), ['2026-01-31']);
+    // Together the halves reproduce the original schedule exactly, with no gap or overlap.
+    assert.deepStrictEqual(dates(client.state.deductions[0]).concat(dates(optimisticNew)), dates(client.api.sanitizeDeduction(original)));
+
+    // The backend stores the anchor and generates the same dates.
+    const created = c.api_upsertDeduction(second.args[0]).deduction;
+    assert.equal(created.anchor_day, 31);
+    assert.equal(created.start_date, '2026-02-28');
+    assert.deepStrictEqual(dates(client.api.sanitizeDeduction(created)), expected, 'the reloaded row recurs the same way');
+    assert.deepStrictEqual(Array.from(c.generateDeductionOccurrenceDates('monthly', utc('2026-02-28'), null, utc('2026-02-28'), utc('2026-12-31'), created.anchor_day)), expected);
+    // An exception on an anchored date of the new half applies on the backend.
+    assert.equal(c.api_upsertDeductionException({ deduction_id: created.id, original_date: '2026-03-31', exception_type: 'adjust_amount', new_amount: 5 }).success, true);
+    const march = Array.from(c.getDeductionOccurrencesWithExceptions(created.id, 'monthly', utc('2026-02-28'), null, new Date(Date.UTC(2026, 2, 1)), new Date(Date.UTC(2026, 2, 31, 23, 59, 59)), created.anchor_day));
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(march.map((o) => [o.date, o.amount]))), [['2026-03-31', 5]]);
+
+    // Editing it without moving the start date keeps the anchor; moving the start date drops it.
+    assert.equal(c.api_upsertDeduction({ id: created.id, name: 'Rent', amount_value: 130, frequency: 'monthly', start_date: '2026-02-28' }).deduction.anchor_day, 31);
+    assert.equal(c.api_upsertDeduction({ id: created.id, name: 'Rent', amount_value: 130, frequency: 'monthly', start_date: '2026-02-15' }).deduction.anchor_day, null);
+    // An anchor only means something on a clamped month-end start of a month-based schedule.
+    assert.equal(c.normalizeDeductionAnchorDay_(31, '2026-03-31', 'monthly'), null);
+    assert.equal(c.normalizeDeductionAnchorDay_(31, '2026-04-30', 'weekly'), null);
+    assert.equal(c.normalizeDeductionAnchorDay_(29, '2026-02-28', 'yearly'), 29);
+    assert.equal(client.api.sanitizeDeduction({ frequency: 'quarterly', start_date: '2026-04-30', anchor_day: '31' }).anchor_day, 31);
+    assert.deepStrictEqual(dates(client.api.sanitizeDeduction({ frequency: 'yearly', start_date: '2025-02-28', anchor_day: 29 })).slice(0, 1), ['2025-02-28']);
+    assert.deepStrictEqual(Array.from(client.api.getDeductionOccurrencesBetween(client.api.sanitizeDeduction({ frequency: 'yearly', start_date: '2025-02-28', anchor_day: 29 }), null, new RealDate(2028, 11, 31)).map(client.api.isoDate)),
+      ['2025-02-28', '2026-02-28', '2027-02-28', '2028-02-29']);
+  });
+
   test('the Deductions page can no longer create company expenses', () => {
     const deductions = fs.readFileSync(path.join(root, 'views/partials/deductions.html'), 'utf8');
     assert.ok(!deductions.includes('id="deduction-company-expense"'), 'no Company expense toggle');

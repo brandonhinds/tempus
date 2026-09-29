@@ -16,11 +16,36 @@ var DEDUCTIONS_HEADERS = [
   'active',
   'created_at',
   'updated_at',
-  'display_order'
+  'display_order',
+  'anchor_day'
 ];
 var DEDUCTIONS_CACHE_KEY = 'deductions_v2';
 var GST_RATE = 0.1;
 var DEDUCTION_FREQUENCIES = ['once', 'weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'];
+
+/**
+ * The day of month a month-based schedule recurs on when it is later than its start date's day, or null.
+ * Only a start date clamped to its month's last day can carry one: splitting a deduction anchored to the
+ * 31st starts the new half on its next occurrence, which may be 28 February or 30 April, and anchor_day
+ * keeps that half recurring on the 31st (month's last day) like the original. Any other combination is
+ * ignored, so editing the start date away from a clamped month end drops a stale anchor.
+ * Mirrors sanitizeDeductionAnchorDay in views/partials/scripts.html.
+ */
+function normalizeDeductionAnchorDay_(value, startDate, frequency) {
+  var mode = String(frequency || '').toLowerCase();
+  if (mode !== 'monthly' && mode !== 'quarterly' && mode !== 'yearly') return null;
+  if (value === '' || value === null || value === undefined) return null;
+  var day = Number(value);
+  if (!Number.isInteger(day) || day > 31) return null;
+  var start = toIsoDate(startDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return null;
+  var year = Number(start.slice(0, 4));
+  var month = Number(start.slice(5, 7));
+  var startDay = Number(start.slice(8, 10));
+  var lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (startDay !== lastDay || day <= startDay) return null;
+  return day;
+}
 
 function getDeductionsSheet() {
   var sh = getOrCreateSheet(DEDUCTIONS_SHEET_NAME);
@@ -136,6 +161,8 @@ function normalizeDeductionRow(row, headers) {
   var updatedAt = toIsoDateTime(map.updated_at || '');
   var displayOrderRaw = Number(map.display_order);
   var displayOrder = Number.isFinite(displayOrderRaw) ? displayOrderRaw : null;
+  var frequency = map.frequency ? String(map.frequency) : 'once';
+  var startDate = toIsoDate(map.start_date || '');
   return {
     id: id,
     name: map.name ? String(map.name) : '',
@@ -146,14 +173,15 @@ function normalizeDeductionRow(row, headers) {
     amount_value: amount,
     gst_inclusive: gstInclusive,
     gst_amount: gstAmount,
-    frequency: map.frequency ? String(map.frequency) : 'once',
-    start_date: toIsoDate(map.start_date || ''),
+    frequency: frequency,
+    start_date: startDate,
     end_date: toIsoDate(map.end_date || ''),
     notes: map.notes ? String(map.notes) : '',
     active: map.active === '' ? true : parseBoolean(map.active),
     created_at: createdAt,
     updated_at: updatedAt,
-    display_order: displayOrder
+    display_order: displayOrder,
+    anchor_day: normalizeDeductionAnchorDay_(map.anchor_day, startDate, frequency)
   };
 }
 
@@ -262,6 +290,11 @@ function normalizeDeductionPayload(payload, existing) {
     displayOrderValue = existing.display_order;
   }
 
+  // The edit form does not send anchor_day, so an edit that keeps the start date keeps the anchor.
+  var anchorSource = payload.anchor_day !== undefined
+    ? payload.anchor_day
+    : (existing && existing.start_date === startDateIso ? existing.anchor_day : null);
+
   return {
     id: existing && existing.id ? existing.id : (payload.id ? String(payload.id) : ''),
     name: name,
@@ -276,7 +309,8 @@ function normalizeDeductionPayload(payload, existing) {
     end_date: endDateIso,
     notes: notes,
     active: active,
-    display_order: displayOrderValue
+    display_order: displayOrderValue,
+    anchor_day: normalizeDeductionAnchorDay_(anchorSource, startDateIso, frequency)
   };
 }
 
@@ -313,7 +347,8 @@ function buildDeductionRow(payload, timestamps) {
     payload.active ? 'TRUE' : 'FALSE',
     timestamps.created_at,
     timestamps.updated_at,
-    payload.display_order != null ? payload.display_order : ''
+    payload.display_order != null ? payload.display_order : '',
+    payload.anchor_day != null ? payload.anchor_day : ''
   ];
 }
 

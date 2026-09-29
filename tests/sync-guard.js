@@ -465,7 +465,7 @@ exports.run = (test) => {
       state: { deductions: [{ id: 'd1', name: 'Rent', amount_value: 10, start_date: '2026-01-31', end_date: '' }, { id: 'd2', name: 'Other' }], deductionExceptions: [] },
       sanitizeDeduction: (d) => ({ ...d }), monthKeyFromDateIso: () => null, markIncomeMonthsDirtyForDeductionChange: () => {},
       renderDeductionsList: () => {}, renderAnnualCategorySection: () => {}, saveDeductionDirectly: () => assert.fail('a split was needed'),
-      findLastPastOccurrence: () => '2026-08-31', findNextFutureOccurrence: () => '2026-09-30',
+      findLastPastOccurrence: () => '2026-08-31', findNextFutureOccurrence: () => '2026-09-30', deductionAnchorDay: () => 31,
       setStatus: (message, type) => statuses.push([message, type])
     }, ['dedupeById', 'performSplitDeduction']);
     c.performSplitDeduction(c.state.deductions[0], { id: 'd1', name: 'Rent', amount_value: 20, frequency: 'monthly', start_date: '2026-01-31' });
