@@ -42,73 +42,212 @@
     }
   }
 
+  // Paid / part-paid / unpaid is what a person asks about an expense; scheduled and void rows aren't bills yet (or any more).
+  function expensePaymentStatus(transaction) {
+    if (transaction.status === 'void') return { key:'void', label:'Void', tone:'' };
+    if (transaction.status === 'scheduled') return String(transaction.purchase_date) <= expenseToday() ? { key:'scheduled', label:'Due', tone:'warn' } : { key:'scheduled', label:'Upcoming', tone:'' };
+    const amount = Number(transaction.amount) || 0;
+    const paid = Number(transaction.paid_amount) || 0;
+    const outstanding = Math.max(0, Math.round((amount - paid) * 100) / 100);
+    if (outstanding <= 0.005) return { key:'paid', label:'Paid', tone:'success', outstanding:0, paid };
+    if (paid > 0.005) return { key:'part', label:'Part-paid', tone:'warn', outstanding, paid };
+    return { key:'unpaid', label:'Unpaid', tone:'warn', outstanding, paid };
+  }
+
+  function expenseActionButton(label, onClick, primary) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = primary ? 'small' : 'ghost small'; button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  // Two-click confirmation for removals: the first click restates the consequence, the second acts.
+  function expenseConfirmButton(label, confirmLabel, action, message) {
+    const button = expenseActionButton(label, async () => {
+      if (!button.dataset.confirm) { button.dataset.confirm = '1'; button.textContent = confirmLabel; return; }
+      button.disabled = true;
+      const result = await action();
+      if (result && result.success === false) { operationsStatus(result.message, 'warn'); button.disabled = false; return; }
+      operationsStatus(message || 'Saved');
+      renderExpensesPage();
+    });
+    return button;
+  }
+
+  async function expenseSave(api, payload, message) {
+    const result = await operationsApi(api, payload);
+    if (result && result.success === false) { operationsStatus(result.message, 'warn'); return result; }
+    operationsStatus(message);
+    await renderExpensesPage();
+    return result;
+  }
+
+  // Upcoming schedule payments this far ahead are listed straight away; the rest sit behind "Show all".
+  const EXPENSE_UPCOMING_WINDOW_DAYS = 45;
+
   function renderExpenseTransactions() {
     const list = document.getElementById('expense-transactions');
     list.replaceChildren();
     if (!operationsState.transactions.length) {
-      ledgerText(list, 'ts-empty', 'No expense transactions yet. Record a purchase to start the ledger.');
+      ledgerText(list, 'ts-empty', 'No expenses yet. Use Record expense for a one-off purchase, or add a schedule for bills that repeat.');
       return;
     }
-    operationsState.transactions.forEach((transaction) => {
-      const row = document.createElement('div');
-      row.className = 'ts-ledger-row';
-      const identity = document.createElement('div');
-      ledgerText(identity, 'ts-ledger-row__title', transaction.vendor || transaction.description || 'Untitled expense');
-      ledgerText(identity, 'ts-ledger-row__meta', [transaction.purchase_date, transaction.category, transaction.gst_code].filter(Boolean).join(' · '));
-      row.appendChild(identity);
-      ledgerText(row, 'ts-ledger-row__meta', String(transaction.reconciliation_state || 'unreconciled').replace(/_/g, ' '));
-      ledgerText(row, 'ts-ledger-row__amount', operationsMoney(transaction.amount));
-      const actions = document.createElement('div');
-      actions.className = 'ts-ledger-row__actions';
-      if (transaction.status === 'scheduled') { const record=document.createElement('button'); record.type='button'; record.className='ghost small'; record.textContent='Record purchase'; record.addEventListener('click',async()=>{ const result=await operationsApi('api_upsertExpenseTransaction',{...transaction,status:'recorded',reconciliation_state:'unreconciled'}); if(result.success===false)operationsStatus(result.message,'warn'); else renderExpensesPage(); }); actions.appendChild(record); }
-      if (transaction.reconciliation_state !== 'reconciled' && transaction.status !== 'void') { const edit=document.createElement('button'); edit.type='button'; edit.className='ghost small'; edit.textContent='Edit'; edit.addEventListener('click',()=>openExpenseForm(transaction)); actions.appendChild(edit); }
-      const receipt = document.createElement('button');
-      receipt.type = 'button'; receipt.className = 'ghost small'; receipt.textContent = transaction.attachments && transaction.attachments.length ? 'Receipt ✓' : 'Add receipt';
-      receipt.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'receipt'));
-      const payment = document.createElement('button');
-      payment.type = 'button'; payment.className = 'ghost small'; payment.textContent = 'Payment';
-      payment.disabled = transaction.status === 'scheduled' || transaction.status === 'void';
-      payment.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'payment'));
-      const reconcile = document.createElement('button');
-      reconcile.type = 'button'; reconcile.className = 'ghost small'; reconcile.textContent = transaction.reconciliation_state === 'reconciled' ? 'Reconciled' : 'Reconcile';
-      reconcile.disabled = transaction.reconciliation_state === 'reconciled' || transaction.status === 'scheduled' || transaction.status === 'void';
-      reconcile.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'reconcile'));
-      actions.append(receipt, payment, reconcile);
-      if (transaction.status !== 'void' && transaction.status !== 'scheduled') { const voidButton=document.createElement('button'); voidButton.type='button'; voidButton.className='ghost small'; voidButton.textContent='Void'; voidButton.addEventListener('click',async()=>{ if(!voidButton.dataset.confirm){voidButton.dataset.confirm='1';voidButton.textContent='Confirm void';return;} const result=await operationsApi('api_voidExpenseTransaction',{id:transaction.id,reason:'Voided from expense ledger'}); if(result.success===false)operationsStatus(result.message,'warn'); else renderExpensesPage(); }); actions.appendChild(voidButton); }
-      row.appendChild(actions);
-      list.appendChild(row);
+    // Forecasts and real spending are kept apart: due and upcoming schedule payments first (soonest first),
+    // then everything recorded (newest first), so a year of forecasts never buries what was actually bought.
+    const upcoming = operationsState.transactions.filter((item) => item.status === 'scheduled').sort((a, b) => String(a.purchase_date).localeCompare(String(b.purchase_date)));
+    const recorded = operationsState.transactions.filter((item) => item.status !== 'scheduled');
+    if (upcoming.length) {
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + EXPENSE_UPCOMING_WINDOW_DAYS);
+      const cutoffIso = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+      const soon = operationsState.showAllUpcoming ? upcoming : upcoming.filter((item) => String(item.purchase_date) <= cutoffIso);
+      ledgerText(list, 'ts-ledger-group', 'Due and upcoming');
+      soon.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
+      if (!soon.length) ledgerText(list, 'ts-ledger-row__detail ts-ledger-group__empty', `Nothing due in the next ${EXPENSE_UPCOMING_WINDOW_DAYS} days.`);
+      if (upcoming.length > soon.length || operationsState.showAllUpcoming) {
+        const more = expenseActionButton(operationsState.showAllUpcoming ? 'Show only the next ' + EXPENSE_UPCOMING_WINDOW_DAYS + ' days' : `Show all ${upcoming.length} upcoming`, () => { operationsState.showAllUpcoming = !operationsState.showAllUpcoming; renderExpenseTransactions(); });
+        more.classList.add('ts-ledger-group__more');
+        list.appendChild(more);
+      }
+    }
+    if (upcoming.length || recorded.length) ledgerText(list, 'ts-ledger-group', 'Recorded');
+    if (!recorded.length) ledgerText(list, 'ts-ledger-row__detail ts-ledger-group__empty', 'Nothing recorded yet. Mark an upcoming payment paid, or use Record expense.');
+    recorded.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
+  }
+
+  function renderExpenseTransactionRow(list, transaction) {
+    const status = expensePaymentStatus(transaction);
+    const locked = transaction.reconciliation_state === 'reconciled';
+    const row = document.createElement('div');
+    row.className = 'ts-ledger-row';
+    const identity = document.createElement('div');
+    ledgerText(identity, 'ts-ledger-row__title', transaction.vendor || transaction.description || 'Untitled expense');
+    ledgerText(identity, 'ts-ledger-row__meta', [expenseDateLabel(transaction.purchase_date), transaction.category, transaction.description && transaction.vendor ? transaction.description : ''].filter(Boolean).join(' · '));
+    row.appendChild(identity);
+
+    const stateCell = document.createElement('div');
+    const badge = document.createElement('span'); badge.className = 'ts-badge' + (status.tone ? ' ' + status.tone : ''); badge.textContent = status.label;
+    stateCell.appendChild(badge);
+    if (status.key === 'unpaid') ledgerText(stateCell, 'ts-ledger-row__meta', operationsMoney(status.outstanding) + ' outstanding');
+    if (status.key === 'part') ledgerText(stateCell, 'ts-ledger-row__meta', `${operationsMoney(status.paid)} paid · ${operationsMoney(status.outstanding)} outstanding`);
+    if (status.key === 'paid') ledgerText(stateCell, 'ts-ledger-row__meta', operationsMoney(status.paid) + ' paid');
+    if (transaction.status !== 'scheduled' && transaction.status !== 'void') ledgerText(stateCell, 'ts-ledger-row__meta', locked ? 'Reconciled' : 'Not reconciled');
+    row.appendChild(stateCell);
+    ledgerText(row, 'ts-ledger-row__amount', operationsMoney(transaction.amount));
+
+    const actions = document.createElement('div');
+    actions.className = 'ts-ledger-row__actions';
+    if (transaction.status === 'scheduled') {
+      actions.append(
+        expenseActionButton('Mark paid', () => showExpenseInlineAction(row, transaction, 'markpaid'), true),
+        expenseActionButton('Record as unpaid bill', () => expenseSave('api_upsertExpenseTransaction', { ...transaction, status:'recorded', reconciliation_state:'unreconciled' }, 'Recorded as an unpaid bill')),
+        expenseActionButton('Edit', () => openExpenseForm(transaction)),
+        expenseConfirmButton('Skip', 'Confirm skip', () => operationsApi('api_voidExpenseTransaction', { id:transaction.id, reason:'Skipped scheduled payment' }), 'Payment skipped')
+      );
+    } else if (transaction.status !== 'void') {
+      if (status.outstanding > 0.005) actions.appendChild(expenseActionButton('Record payment', () => showExpenseInlineAction(row, transaction, 'payment'), true));
+      actions.appendChild(expenseActionButton(transaction.attachments && transaction.attachments.length ? 'Add another receipt' : 'Add receipt', () => showExpenseInlineAction(row, transaction, 'receipt')));
+      if (!locked) {
+        actions.append(
+          expenseActionButton('Edit', () => openExpenseForm(transaction)),
+          expenseActionButton('Reconcile', () => showExpenseInlineAction(row, transaction, 'reconcile')),
+          expenseConfirmButton('Void', 'Confirm void', () => operationsApi('api_voidExpenseTransaction', { id:transaction.id, reason:'Voided from expense ledger' }), 'Expense voided')
+        );
+      }
+    }
+    row.appendChild(actions);
+
+    // Explanations stand in for disabled buttons, so every missing action says why it's missing.
+    if (transaction.status === 'scheduled') ledgerText(row, 'ts-ledger-row__detail', 'Upcoming payment from a schedule. It doesn’t count as spent until you mark it paid.');
+    else if (transaction.status === 'void') ledgerText(row, 'ts-ledger-row__detail', 'Void. Kept for the record and excluded from every total.');
+    else if (locked) ledgerText(row, 'ts-ledger-row__detail', 'Reconciled, so it can’t be edited or have payments removed. Void it and record a correction if something is wrong.');
+    (transaction.payments || []).forEach((payment) => {
+      const line = document.createElement('div'); line.className = 'ts-ledger-row__detail ts-expense-subline';
+      const text = document.createElement('span');
+      text.textContent = `Paid ${operationsMoney(payment.amount)} on ${expenseDateLabel(payment.payment_date)}` + (payment.reference ? ` · ref ${payment.reference}` : '') + (payment.notes ? ` · ${payment.notes}` : '');
+      line.appendChild(text);
+      if (!locked) line.appendChild(expenseConfirmButton('Remove payment', 'Confirm remove', () => operationsApi('api_deleteExpensePayment', payment.id), 'Payment removed'));
+      row.appendChild(line);
     });
+    (transaction.attachments || []).forEach((attachment) => {
+      const line = document.createElement('div'); line.className = 'ts-ledger-row__detail ts-expense-subline';
+      const link = document.createElement('a'); link.href = attachment.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Receipt: ' + (attachment.name || 'link');
+      line.appendChild(link);
+      if (!locked) line.appendChild(expenseConfirmButton('Remove receipt', 'Confirm remove', () => operationsApi('api_detachExpenseReceipt', { expense_transaction_id:transaction.id, attachment_id:attachment.id }), 'Receipt removed'));
+      row.appendChild(line);
+    });
+    list.appendChild(row);
+  }
+
+  function expenseInlineField(panel, labelText, input, grow) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ts-expense-inline-field' + (grow ? ' is-grow' : '');
+    const id = 'expense-inline-' + Math.random().toString(36).slice(2, 9);
+    input.id = id;
+    const label = document.createElement('label'); label.htmlFor = id; label.textContent = labelText;
+    wrap.append(label, input);
+    panel.appendChild(wrap);
+    return input;
+  }
+
+  function expenseInput(type, attrs) {
+    const input = document.createElement('input');
+    input.type = type;
+    Object.entries(attrs || {}).forEach(([key, value]) => { input[key] = value; });
+    return input;
   }
 
   function showExpenseInlineAction(row, transaction, mode) {
     row.parentElement.querySelectorAll('.ts-ledger-inline').forEach((el) => el.remove());
     const panel = document.createElement('form');
     panel.className = 'ts-ledger-inline';
-    panel.style.gridColumn = '1 / -1';
-    panel.style.display = 'flex'; panel.style.gap = '8px'; panel.style.alignItems = 'end'; panel.style.flexWrap = 'wrap';
-    const input = document.createElement('input');
-    input.required = true;
-    if (mode === 'receipt') { input.type = 'url'; input.placeholder = 'https://… receipt link'; input.setAttribute('aria-label', 'Receipt URL'); }
-    if (mode === 'payment') { input.type = 'number'; input.min = '0.01'; input.step = '0.01'; input.placeholder = 'Amount paid'; input.setAttribute('aria-label', 'Payment amount'); }
-    const date = document.createElement('input');
-    date.type = 'date'; date.value = transaction.purchase_date || ''; date.required = true; date.setAttribute('aria-label', 'Payment date');
-    if (mode !== 'payment') date.hidden = true;
-    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = mode === 'reconcile' ? 'Confirm reconciliation' : 'Save';
+    const status = expensePaymentStatus(transaction);
+    const heading = { markpaid:`Mark paid · ${operationsMoney(transaction.amount)}`, payment:`Record payment · ${operationsMoney(status.outstanding)} outstanding`, receipt:'Add receipt', reconcile:'Reconcile' }[mode];
+    ledgerText(panel, 'ts-ledger-inline__title', heading);
+    let amount, date, reference, notes, url, claim, override;
+    if (mode === 'payment') amount = expenseInlineField(panel, 'Amount paid', expenseInput('number', { min:'0.01', step:'0.01', required:true, value:String(status.outstanding) }));
+    if (mode === 'payment' || mode === 'markpaid') {
+      date = expenseInlineField(panel, 'Payment date', expenseInput('date', { required:true, value:expenseToday() }));
+      reference = expenseInlineField(panel, 'Reference (optional)', expenseInput('text', { maxLength:160, placeholder:'Bank or card ref' }));
+      notes = expenseInlineField(panel, 'Notes (optional)', expenseInput('text', { maxLength:500 }), true);
+    }
+    if (mode === 'receipt') url = expenseInlineField(panel, 'Link to the receipt or tax invoice', expenseInput('url', { required:true, placeholder:'https://drive.google.com/…' }), true);
+    if (mode === 'reconcile') {
+      if (transaction.gst_code === 'taxable') {
+        const toggle = document.createElement('label'); toggle.className = 'ts-expense-inline-check';
+        claim = expenseInput('checkbox', { checked:!!(transaction.attachments && transaction.attachments.length) });
+        toggle.append(claim, document.createTextNode(' Claim the GST credit'));
+        panel.appendChild(toggle);
+        override = expenseInlineField(panel, 'GST amount, if the invoice differs (optional)', expenseInput('number', { min:'0', step:'0.01', placeholder:operationsMoney(transaction.gst_amount) }));
+        ledgerText(panel, 'ts-ledger-inline__note', transaction.attachments && transaction.attachments.length ? 'Reconciling locks this expense. Check it matches your bank statement and tax invoice.' : 'A GST credit needs a tax invoice. Add a receipt first, or reconcile without claiming GST.');
+      } else {
+        ledgerText(panel, 'ts-ledger-inline__note', 'Reconciling locks this expense. Check it matches your bank statement. No GST credit applies to this GST treatment.');
+      }
+    }
+    const buttons = document.createElement('div'); buttons.className = 'ts-ledger-inline__buttons';
+    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = { markpaid:'Mark paid', payment:'Save payment', receipt:'Save receipt', reconcile:'Confirm reconciliation' }[mode];
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => panel.remove());
-    if (mode !== 'reconcile') panel.append(input);
-    panel.append(date, submit, cancel);
+    buttons.append(submit, cancel);
+    panel.appendChild(buttons);
     panel.addEventListener('submit', async (event) => {
       event.preventDefault(); submit.disabled = true;
-      let result;
-      if (mode === 'receipt') result = await operationsApi('api_attachExpenseReceipt', { expense_transaction_id:transaction.id, url:input.value, name:'Receipt' });
-      else if (mode === 'payment') result = await operationsApi('api_addExpensePayment', { expense_transaction_id:transaction.id, payment_date:date.value, amount:Number(input.value) });
-      else result = await operationsApi('api_reconcileExpenseTransaction', { id:transaction.id, claimable_gst_confirmed:transaction.gst_code === 'taxable' });
-      if (result && result.success === false) { operationsStatus(result.message, 'warn'); submit.disabled = false; return; }
-      operationsStatus(mode === 'reconcile' ? 'Expense reconciled' : 'Expense evidence updated');
-      await renderExpensesPage();
+      try {
+        let result;
+        if (mode === 'markpaid') result = await expenseSave('api_upsertExpenseTransaction', { ...transaction, status:'recorded', reconciliation_state:'unreconciled', payment:{ payment_date:date.value, reference:reference.value, notes:notes.value } }, 'Marked paid');
+        else if (mode === 'payment') result = await expenseSave('api_addExpensePayment', { expense_transaction_id:transaction.id, payment_date:date.value, amount:Number(amount.value), reference:reference.value, notes:notes.value }, 'Payment recorded');
+        else if (mode === 'receipt') result = await expenseSave('api_attachExpenseReceipt', { expense_transaction_id:transaction.id, url:url.value, name:'Receipt' }, 'Receipt added');
+        else {
+          const payload = { id:transaction.id, claimable_gst_confirmed:!!(claim && claim.checked) };
+          if (override && override.value !== '') payload.gst_override_amount = Number(override.value);
+          result = await expenseSave('api_reconcileExpenseTransaction', payload, 'Expense reconciled');
+        }
+        if (result && result.success === false) submit.disabled = false;
+      } catch (error) {
+        operationsStatus(error && error.message ? error.message : 'Could not save.', 'warn');
+        submit.disabled = false;
+      }
     });
     row.appendChild(panel);
-    if (mode !== 'reconcile') input.focus(); else submit.focus();
+    (panel.querySelector('input') || submit).focus();
   }
 
   const EXPENSE_FREQUENCY_LABELS = { weekly:'Weekly', fortnightly:'Fortnightly', monthly:'Monthly', quarterly:'Quarterly', yearly:'Yearly', annually:'Yearly', annual:'Yearly', once:'Once only', one_off:'Once only' };
@@ -213,8 +352,20 @@
     document.getElementById('expense-vendor').value = item?.vendor || ''; document.getElementById('expense-abn').value = item?.vendor_abn || ''; document.getElementById('expense-description').value = item?.description || ''; document.getElementById('expense-category').value = item?.category || ''; document.getElementById('expense-amount').value = item?.amount ?? ''; document.getElementById('expense-gst-code').value = item?.gst_code || 'taxable'; document.getElementById('expense-notes').value = item?.notes || '';
     document.getElementById('expense-business-use').value = item ? Math.round((Number(item.business_use_percentage) || 0) * 10000) / 100 : 100;
     document.getElementById('expense-date').value = item?.purchase_date || expenseToday(); document.getElementById('expense-supplier-date').value = item?.supplier_invoice_date || '';
+    // Paying is offered when recording a new expense; an existing one is paid from its row instead.
+    document.getElementById('expense-paid-now-wrap').style.display = item ? 'none' : 'block';
+    document.getElementById('expense-paid-now').checked = true;
+    document.getElementById('expense-paid-date').value = expenseToday();
+    document.getElementById('expense-paid-reference').value = '';
+    syncExpensePaidNow();
     form.querySelector('h4').textContent = item ? 'Edit expense' : 'Record expense';
     document.getElementById('expense-vendor').focus();
+  }
+
+  function syncExpensePaidNow() {
+    const on = document.getElementById('expense-paid-now').checked;
+    document.getElementById('expense-paid-now-fields').style.display = on ? '' : 'none';
+    document.getElementById('expense-paid-date').required = on && !operationsState.expenseEditId;
   }
 
   function openExpenseRuleForm(rule) {
@@ -258,12 +409,24 @@
     event.preventDefault();
     const form = event.currentTarget;
     const payload = { id:operationsState.expenseEditId || '', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, supplier_invoice_date:document.getElementById('expense-supplier-date').value, notes:document.getElementById('expense-notes').value };
-    const result = await operationsApi('api_upsertExpenseTransaction', payload);
-    if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
-    form.style.display = 'none'; operationsState.expenseEditId = '';
-    operationsStatus('Expense saved');
-    renderExpensesPage();
+    const editing = !!operationsState.expenseEditId;
+    const paidNow = !editing && document.getElementById('expense-paid-now').checked;
+    if (paidNow) payload.payment = { payment_date:document.getElementById('expense-paid-date').value, reference:document.getElementById('expense-paid-reference').value };
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const result = await operationsApi('api_upsertExpenseTransaction', payload);
+      if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
+      form.style.display = 'none'; operationsState.expenseEditId = '';
+      operationsStatus(result.payment ? 'Expense recorded and paid' : (paidNow || editing ? 'Expense saved' : 'Expense recorded as unpaid'));
+      renderExpensesPage();
+    } catch (error) {
+      operationsStatus(error && error.message ? error.message : 'Could not save the expense.', 'warn');
+    } finally {
+      submit.disabled = false;
+    }
   });
+  document.getElementById('expense-paid-now')?.addEventListener('change', syncExpensePaidNow);
   document.getElementById('expense-rule-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;

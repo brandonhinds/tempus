@@ -165,24 +165,54 @@ function api_listExpenseTransactions(filters) {
   });
   var payments = expenseReadSheet_('expense_payments').rows;
   var paid = {};
-  payments.forEach(function(payment) { paid[String(payment.expense_transaction_id)] = roundMoney_((paid[String(payment.expense_transaction_id)] || 0) + Number(payment.amount || 0)); });
-  transactions.forEach(function(transaction) { transaction.paid_amount = paid[String(transaction.id)] || 0; });
+  var byTransaction = {};
+  payments.forEach(function(payment) {
+    var key = String(payment.expense_transaction_id);
+    paid[key] = roundMoney_((paid[key] || 0) + Number(payment.amount || 0));
+    (byTransaction[key] = byTransaction[key] || []).push({ id: payment.id, payment_date: String(payment.payment_date || ''), amount: roundMoney_(payment.amount), reference: String(payment.reference || ''), notes: String(payment.notes || '') });
+  });
+  transactions.forEach(function(transaction) {
+    transaction.paid_amount = paid[String(transaction.id)] || 0;
+    transaction.payments = (byTransaction[String(transaction.id)] || []).sort(function(a, b) { return a.payment_date.localeCompare(b.payment_date); });
+  });
   if (filters && filters.from) transactions = transactions.filter(function(item) { return String(item.purchase_date) >= String(filters.from); });
   if (filters && filters.to) transactions = transactions.filter(function(item) { return String(item.purchase_date) <= String(filters.to); });
   if (filters && filters.reconciliation_state) transactions = transactions.filter(function(item) { return String(item.reconciliation_state) === String(filters.reconciliation_state); });
   return transactions.sort(function(a, b) { return String(b.purchase_date).localeCompare(String(a.purchase_date)); });
 }
 
+/**
+ * Saves an expense. An optional `payment` ({ payment_date, reference, notes, amount }) records a payment in the
+ * same step, so "Paid now" and "Mark paid" can't leave a saved-but-unpaid expense behind. Without an amount the
+ * payment covers whatever is still owing.
+ */
 function api_upsertExpenseTransaction(payload) {
   return withScriptLock_('expense transaction update', function() {
     var found = payload && payload.id ? expenseFind_('expense_transactions', payload.id) : expenseFind_('expense_transactions', '');
     if (found.item && (String(found.item.reconciliation_state) === 'reconciled' || String(found.item.status) === 'void')) return apiRecoverableFailure_('immutable_transaction', 'Reconciled or void expense transactions cannot be edited. Record a correction instead.');
     var normalized = normalizeExpenseTransaction_(payload, found.item);
+    var alreadyPaid = found.item ? expenseReadSheet_('expense_payments').rows.filter(function(item) { return String(item.expense_transaction_id) === String(found.item.id); }).reduce(function(sum, item) { return sum + Number(item.amount || 0); }, 0) : 0;
+    if (alreadyPaid > Number(normalized.amount) + 0.005) return apiRecoverableFailure_('below_paid', 'The amount is less than what has already been paid. Remove a payment first.', { paid_amount: roundMoney_(alreadyPaid) });
+    var payment = payload && payload.payment;
+    var paymentAmount = 0;
+    if (payment) {
+      if (normalized.status !== 'recorded') return apiRecoverableFailure_('scheduled_transaction', 'Only a recorded expense can be paid.');
+      normalizeIsoDateStrict_(payment.payment_date, 'Payment date', false);
+      paymentAmount = payment.amount === undefined || payment.amount === '' ? roundMoney_(Number(normalized.amount) - alreadyPaid) : roundMoney_(payment.amount);
+      if (paymentAmount > 0 && alreadyPaid + paymentAmount > Number(normalized.amount) + 0.005) return apiRecoverableFailure_('overpayment', 'Payment exceeds the remaining expense balance.', { balance_due: Math.max(0, roundMoney_(Number(normalized.amount) - alreadyPaid)) });
+    }
     var existingRow = found.item ? found.data.sheet.getRange(found.item.__row, 1, 1, found.data.headers.length).getValues()[0] : null;
     var row = rowValuesFromObject_(found.data.headers, normalized, existingRow);
     if (found.item) found.data.sheet.getRange(found.item.__row, 1, 1, row.length).setValues([row]); else found.data.sheet.appendRow(row);
+    var result = { success: true, transaction: normalized };
+    // A $0 expense (or one already paid in full) has nothing left to pay, so no payment row is written.
+    if (paymentAmount > 0) {
+      var paid = api_addExpensePayment({ expense_transaction_id: normalized.id, payment_date: payment.payment_date, amount: paymentAmount, reference: payment.reference, notes: payment.notes });
+      if (paid.success === false) return paid;
+      result.payment = paid.payment;
+    }
     cacheClearPrefix(EXPENSE_CACHE_PREFIX);
-    return { success: true, transaction: normalized };
+    return result;
   });
 }
 
