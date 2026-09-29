@@ -329,6 +329,74 @@ exports.run = test => {
     assert.match(extract(scripts, 'buildAnnualMonthSummary'), /companyLedgerExpensesForMonth\(year, month\)/);
   });
 
+  test('Deductions page occurrences anchor to the start date like the backend, and drifted exceptions still apply', () => {
+    const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+    const constant = (name) => {
+      const match = scripts.match(new RegExp('  const ' + name + ' = [\\s\\S]*?\\n  \\};'));
+      assert.ok(match, 'Expected client helper ' + name);
+      return match[0];
+    };
+    const client = { state: { deductionExceptions: [] } };
+    vm.runInNewContext([
+      'const ISO_DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;',
+      extract(scripts, 'normalizeDateInput'),
+      'const isoDate = (value) => normalizeDateInput(value);',
+      constant('parseIsoDate'),
+      scripts.match(/  const startOfDay = .*\n/)[0],
+      constant('addDays'),
+      constant('addMonthsClamped'),
+      scripts.match(/  const DEDUCTION_OCCURRENCE_LIMIT = .*\n/)[0],
+      ...['deductionOccurrenceDate', 'getDeductionOccurrencesBetween', 'deductionDriftedOccurrenceDates', 'anchorDeductionExceptions',
+        'findDeductionOccurrenceException', 'getDeductionExceptions', 'applyExceptionsToOccurrences', 'getDeductionOccurrencesWithExceptions',
+        'findLastPastOccurrence', 'findNextFutureOccurrence'].map((name) => extract(scripts, name)),
+      'this.api = { getDeductionOccurrencesBetween, getDeductionOccurrencesWithExceptions, findDeductionOccurrenceException, findNextFutureOccurrence, isoDate };'
+    ].join('\n'), client);
+    const { context: c } = backend();
+    const utc = (iso) => new Date(iso + 'T12:00:00Z');
+    const deduction = { id: 'sacrifice', frequency: 'monthly', start_date: '2026-01-31', end_date: '' };
+
+    // Client and backend agree on every occurrence for a 31st start, across short months.
+    [['monthly', '2026-01-31'], ['quarterly', '2025-11-30'], ['yearly', '2028-02-29'], ['weekly', '2026-01-31']].forEach(([frequency, start]) => {
+      const ded = Object.assign({}, deduction, { frequency, start_date: start });
+      const clientDates = Array.from(client.api.getDeductionOccurrencesBetween(ded, null, new Date(2032, 11, 31)).map(client.api.isoDate));
+      const backendDates = Array.from(c.generateDeductionOccurrenceDates(frequency, utc(start), null, utc(start), utc('2032-12-31')));
+      assert.deepStrictEqual(clientDates, backendDates, frequency + ' from ' + start);
+    });
+    assert.deepStrictEqual(Array.from(client.api.getDeductionOccurrencesBetween(deduction, new Date(2026, 1, 1), new Date(2026, 4, 31)).map(client.api.isoDate)),
+      ['2026-02-28', '2026-03-31', '2026-04-30', '2026-05-31'], 'the day returns to the 31st after February');
+
+    // The page used to drift (31 Jan, 28 Feb, 28 Mar, 28 Apr, ...) and keyed its exceptions to those dates.
+    const drifted = [
+      { deduction_id: 'sacrifice', original_date: '2026-03-28', exception_type: 'adjust_amount', new_amount: 5 },
+      { deduction_id: 'sacrifice', original_date: '2026-05-28', exception_type: 'skip' },
+      { deduction_id: 'sacrifice', original_date: '2026-06-28', exception_type: 'move', new_date: '2026-07-02' },
+      { deduction_id: 'other', original_date: '2026-04-28', exception_type: 'skip' }
+    ];
+    drifted.forEach((ex) => assert.equal(c.api_upsertDeductionException(ex).success, true));
+    client.state.deductionExceptions = drifted.map((ex, i) => Object.assign({ id: 'ex' + i, notes: '', new_date: '', new_amount: 0 }, ex));
+
+    const month = (y, m) => [new Date(y, m, 1), new Date(y, m + 1, 0)];
+    const clientMonth = (y, m, override) => client.api.getDeductionOccurrencesWithExceptions(deduction, ...month(y, m), undefined, override)
+      .map((o) => [o.date, o.amount, o.exceptionType]);
+    // Whole UTC days, because the harness formats dates in UTC while the stepping keeps local time across DST.
+    const backendMonth = (y, m) => Array.from(c.getDeductionOccurrencesWithExceptions('sacrifice', 'monthly', utc('2026-01-31'), null, new Date(Date.UTC(y, m, 1)), new Date(Date.UTC(y, m + 1, 0, 23, 59, 59))))
+      .map((o) => [o.date, o.amount, o.exceptionType]);
+    [[2, [['2026-03-31', 5, 'adjust_amount']]], [3, [['2026-04-30', null, null]]], [4, []], [5, []], [6, [['2026-07-02', null, 'move'], ['2026-07-31', null, null]]]].forEach(([m, expected]) => {
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(clientMonth(2026, m))), expected, 'client month ' + (m + 1));
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(backendMonth(2026, m))), expected, 'backend month ' + (m + 1));
+    });
+    // A snapshot of every deduction's exceptions applies only this deduction's.
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(clientMonth(2026, 3, client.state.deductionExceptions))), [['2026-04-30', null, null]]);
+
+    // Adjusting the anchored occurrence finds the exception recorded against its drifted date.
+    assert.equal(client.api.findDeductionOccurrenceException(deduction, '2026-03-31').id, 'ex0');
+    assert.equal(client.api.findDeductionOccurrenceException(deduction, '2026-04-30'), null);
+    // An exception already keyed to the anchored date wins over a drifted one.
+    client.state.deductionExceptions.push({ id: 'anchored', deduction_id: 'sacrifice', original_date: '2026-03-31', exception_type: 'adjust_amount', new_amount: 7, notes: '', new_date: '' });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(clientMonth(2026, 2))), [['2026-03-31', 7, 'adjust_amount']]);
+    assert.equal(client.api.findDeductionOccurrenceException(deduction, '2026-03-31').id, 'anchored');
+  });
+
   test('the Deductions page can no longer create company expenses', () => {
     const deductions = fs.readFileSync(path.join(root, 'views/partials/deductions.html'), 'utf8');
     assert.ok(!deductions.includes('id="deduction-company-expense"'), 'no Company expense toggle');

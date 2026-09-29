@@ -671,7 +671,8 @@ function getDeductionOccurrencesWithExceptions(deductionId, frequency, startDate
   var occurrenceDates = generateDeductionOccurrenceDates(frequency, startDate, endDate, periodStart, periodEnd);
 
   // Load exceptions for this deduction
-  var exceptions = listDeductionExceptionsInternal(deductionId);
+  // Exceptions the legacy Deductions page recorded against drifted dates apply to their anchored occurrence.
+  var exceptions = anchorDeductionExceptions_(listDeductionExceptionsInternal(deductionId), frequency, startDate);
 
   // Apply exceptions
   var occurrencesWithExceptions = applyExceptionsToOccurrences(occurrenceDates, exceptions, periodStart, periodEnd);

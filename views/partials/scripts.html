@@ -3843,84 +3843,123 @@ let ratePreviewInputSyncing = false;
     return clone;
   };
 
-  function nextOccurrenceDate(current, frequency) {
-    if (!current) return null;
+  /**
+   * Occurrence `index` of a deduction schedule: start + index periods, the day clamped to the target month's
+   * last day. A clamp is never carried forward, so a monthly deduction from 31 January falls on 28 February
+   * and then 31 March, matching the backend (annualviews.js advanceDateByFrequency). Null for an unknown
+   * frequency past the first occurrence.
+   */
+  function deductionOccurrenceDate(startDate, frequency, index) {
+    if (!startDate) return null;
+    if (index === 0) return startOfDay(startDate);
     switch (frequency) {
       case 'weekly':
-        return addDays(current, 7);
+        return startOfDay(addDays(startDate, 7 * index));
       case 'fortnightly':
-        return addDays(current, 14);
+        return startOfDay(addDays(startDate, 14 * index));
       case 'monthly':
-        return addMonthsClamped(current, 1);
+        return addMonthsClamped(startDate, index);
       case 'quarterly':
-        return addMonthsClamped(current, 3);
+        return addMonthsClamped(startDate, 3 * index);
       case 'yearly':
-        return addMonthsClamped(current, 12);
+        return addMonthsClamped(startDate, 12 * index);
       default:
         return null;
     }
   }
 
-  function advanceOccurrenceTo(startDate, frequency, targetDate, endDate) {
-    if (!startDate) return null;
-    if (frequency === 'once') {
-      return startDate;
-    }
-    var current = startDate;
-    var safety = 0;
-    while (current < targetDate && safety < 1000) {
-      var next = nextOccurrenceDate(current, frequency);
-      if (!next) return current;
-      // Stop if advancing would go past the configured end date—there are no later occurrences to include.
-      if (endDate && next > endDate) return null;
-      if (next.getTime() === current.getTime()) return next;
-      current = next;
-      safety++;
-    }
-    return current;
-  }
+  const DEDUCTION_OCCURRENCE_LIMIT = 5000;
 
   function getDeductionOccurrencesBetween(deduction, rangeStart, rangeEnd, limit) {
     const occurrences = [];
     if (!deduction || !deduction.start_date) return occurrences;
     const startSource = parseIsoDate(deduction.start_date);
     if (!startSource || Number.isNaN(startSource.getTime())) return occurrences;
-    let current = startOfDay(startSource);
+    const startDate = startOfDay(startSource);
     const endBoundary = deduction.end_date ? parseIsoDate(deduction.end_date) : null;
     const endDate = endBoundary ? startOfDay(endBoundary) : null;
     const frequency = deduction.frequency || 'once';
-    const hasRangeStart = !!rangeStart;
-    const hasRangeEnd = !!rangeEnd;
-    const rangeStartDate = hasRangeStart ? startOfDay(rangeStart) : null;
-    const rangeEndDate = hasRangeEnd ? startOfDay(rangeEnd) : null;
+    const rangeStartDate = rangeStart ? startOfDay(rangeStart) : null;
+    const rangeEndDate = rangeEnd ? startOfDay(rangeEnd) : null;
 
-    if (rangeStartDate && current < rangeStartDate && frequency !== 'once') {
-      current = advanceOccurrenceTo(current, frequency, rangeStartDate, endDate);
-    }
-
-    const maxIterations = 1000;
-    let iterations = 0;
-    while (current && iterations < maxIterations) {
-      if (rangeStartDate && current < rangeStartDate) {
-        // Occurrence is before range start; skip but continue advancing unless once
-      } else if (!rangeEndDate || current <= rangeEndDate) {
-        occurrences.push(startOfDay(current));
-      } else {
-        break;
-      }
-
+    for (let index = 0; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
+      const current = deductionOccurrenceDate(startDate, frequency, index);
+      if (!current) break;
+      // The end date bounds later occurrences only; the start date itself always counts (as it always has).
+      if (index > 0 && endDate && current > endDate) break;
+      if (rangeEndDate && current > rangeEndDate) break;
+      if (!rangeStartDate || current >= rangeStartDate) occurrences.push(current);
       if (limit && occurrences.length >= limit) break;
       if (frequency === 'once') break;
-
-      const next = nextOccurrenceDate(current, frequency);
-      if (!next) break;
-      if (endDate && next > endDate) break;
-      if (next.getTime() === current.getTime()) break;
-      current = next;
-      iterations++;
     }
 
     return occurrences;
+  }
+
+  /**
+   * Before occurrences were anchored, this page stepped each month from the previous occurrence, so a clamp
+   * in a short month carried forward (31 Jan, 28 Feb, 28 Mar, ...) and exceptions were recorded against those
+   * drifted dates. Returns {anchoredIso: driftedIso} for every occurrence through `throughDate` whose drifted
+   * date differs. Occurrence n's drifted date is in the same month as its anchored one, never later.
+   * Mirrors migrationDriftedOccurrenceDates_ in backend/migrations.js.
+   */
+  function deductionDriftedOccurrenceDates(deduction, throughDate) {
+    const map = {};
+    if (!deduction || !deduction.start_date || !throughDate) return map;
+    const frequency = deduction.frequency || 'once';
+    const months = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : frequency === 'yearly' ? 12 : 0;
+    if (!months) return map;
+    const startSource = parseIsoDate(deduction.start_date);
+    if (!startSource || Number.isNaN(startSource.getTime())) return map;
+    const startDate = startOfDay(startSource);
+    if (startDate.getDate() <= 28) return map;
+    const through = startOfDay(throughDate);
+    let drifted = startDate;
+    for (let index = 1; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
+      const anchored = deductionOccurrenceDate(startDate, frequency, index);
+      if (!anchored || anchored > through) break;
+      drifted = addMonthsClamped(drifted, months);
+      if (drifted.getTime() !== anchored.getTime()) map[isoDate(anchored)] = isoDate(drifted);
+    }
+    return map;
+  }
+
+  /**
+   * A deduction's exceptions, with any keyed to a drifted occurrence date (see deductionDriftedOccurrenceDates)
+   * re-keyed to that occurrence's anchored date. An exception already keyed to the anchored date wins.
+   */
+  function anchorDeductionExceptions(deduction, exceptions) {
+    const list = Array.isArray(exceptions) ? exceptions : [];
+    if (!list.length) return list;
+    const latest = list.reduce((max, ex) => (ex && ex.original_date && ex.original_date > max ? ex.original_date : max), '');
+    const latestDate = latest ? parseIsoDate(latest) : null;
+    if (!latestDate || Number.isNaN(latestDate.getTime())) return list;
+    // A drifted date is never later than its anchored one, so walk a month past the latest exception.
+    const driftedByAnchored = deductionDriftedOccurrenceDates(deduction, addMonthsClamped(latestDate, 1));
+    const anchoredByDrifted = {};
+    Object.keys(driftedByAnchored).forEach((anchored) => { anchoredByDrifted[driftedByAnchored[anchored]] = anchored; });
+    if (!Object.keys(anchoredByDrifted).length) return list;
+    const keyed = new Set(list.map((ex) => ex && ex.original_date));
+    return list.map((ex) => {
+      const anchored = ex && anchoredByDrifted[ex.original_date];
+      if (!anchored || keyed.has(anchored)) return ex;
+      return Object.assign({}, ex, { original_date: anchored });
+    });
+  }
+
+  /**
+   * The exception recorded against the occurrence due on `originalDate` (an anchored date), including one
+   * the page recorded against that occurrence's old drifted date.
+   */
+  function findDeductionOccurrenceException(deduction, originalDate) {
+    if (!deduction || !originalDate) return null;
+    const exceptions = getDeductionExceptions(deduction.id);
+    const exact = exceptions.find((ex) => ex.original_date === originalDate);
+    if (exact) return exact;
+    const parsed = parseIsoDate(originalDate);
+    if (!parsed || Number.isNaN(parsed.getTime())) return null;
+    const drifted = deductionDriftedOccurrenceDates(deduction, parsed)[originalDate];
+    return drifted ? (exceptions.find((ex) => ex.original_date === drifted) || null) : null;
   }
 
   function getDeductionPreviewDates(deduction, limit) {
@@ -4080,8 +4119,13 @@ let ratePreviewInputSyncing = false;
     // Get base occurrences
     const baseOccurrences = getDeductionOccurrencesBetween(deduction, rangeStart, rangeEnd, limit);
 
-    // Apply exceptions
-    return applyExceptionsToOccurrences(baseOccurrences, deduction.id, rangeStart, rangeEnd, exceptionsOverride);
+    // An override is a snapshot of every deduction's exceptions; only this deduction's apply here.
+    const exceptions = Array.isArray(exceptionsOverride)
+      ? exceptionsOverride.filter((ex) => ex && ex.deduction_id === deduction.id)
+      : getDeductionExceptions(deduction.id);
+
+    // Apply exceptions, matching those recorded against an occurrence's old drifted date to that occurrence
+    return applyExceptionsToOccurrences(baseOccurrences, deduction.id, rangeStart, rangeEnd, anchorDeductionExceptions(deduction, exceptions));
   }
 
   function formatDeductionAmount(deduction) {
@@ -8002,14 +8046,14 @@ function updateDeductionFormVisibility() {
       return startDate <= upperBound ? isoDate(startDate) : null;
     }
 
-    let current = startOfDay(startDate);
+    const anchor = startOfDay(startDate);
     let lastPast = null;
 
-    while (current && current <= upperBound) {
+    for (let index = 0; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
+      const current = deductionOccurrenceDate(anchor, deduction.frequency, index);
+      if (!current || current > upperBound) break;
+      if (index > 0 && endDate && current > endDate) break;
       lastPast = isoDate(current);
-      current = nextOccurrenceDate(current, deduction.frequency);
-      if (!current) break;
-      if (endDate && current > endDate) break;
     }
 
     return lastPast;
@@ -8027,15 +8071,16 @@ function updateDeductionFormVisibility() {
       return null; // One-time deduction in the past has no future occurrence
     }
 
-    let current = startOfDay(startDate);
+    const anchor = startOfDay(startDate);
 
-    while (current && current < today) {
-      current = nextOccurrenceDate(current, deduction.frequency);
+    for (let index = 1; index < DEDUCTION_OCCURRENCE_LIMIT; index++) {
+      const current = deductionOccurrenceDate(anchor, deduction.frequency, index);
       if (!current) return null;
       if (endDate && current > endDate) return null;
+      if (current >= today) return isoDate(current);
     }
 
-    return current ? isoDate(current) : null;
+    return null;
   }
 
   function performSplitDeduction(originalDeduction, newPayload) {
@@ -27861,9 +27906,7 @@ function getCachedIncomeSummary(monthKey) {
     adjustingType = type;
 
     // Find if there's already an exception for this occurrence
-    const existingException = state.deductionExceptions.find(ex =>
-      ex.deduction_id === deduction.id && ex.original_date === originalDate
-    );
+    const existingException = findDeductionOccurrenceException(deduction, originalDate);
 
     // Calculate the display amount
     let displayAmount = deduction.amount_value;
@@ -27944,9 +27987,7 @@ function getCachedIncomeSummary(monthKey) {
     };
 
     // Find existing exception
-    const existingException = state.deductionExceptions.find(ex =>
-      ex.deduction_id === adjustingDeduction.id && ex.original_date === adjustingOriginalDate
-    );
+    const existingException = findDeductionOccurrenceException(adjustingDeduction, adjustingOriginalDate);
     if (existingException) {
       payload.id = existingException.id;
     }
@@ -28063,9 +28104,7 @@ function getCachedIncomeSummary(monthKey) {
   function handleDeleteException() {
     if (!adjustingDeduction || !adjustingOriginalDate) return;
 
-    const existingException = state.deductionExceptions.find(ex =>
-      ex.deduction_id === adjustingDeduction.id && ex.original_date === adjustingOriginalDate
-    );
+    const existingException = findDeductionOccurrenceException(adjustingDeduction, adjustingOriginalDate);
 
     if (!existingException) {
       hideModal(modalAdjustOccurrence);
