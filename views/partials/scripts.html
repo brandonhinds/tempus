@@ -3686,14 +3686,19 @@ let ratePreviewInputSyncing = false;
   function buildRecurringPreview(entry, limit = 5) {
     const sanitized = sanitizeRecurringEntry(entry);
     if (!sanitized) return [];
-    const startIso = sanitized.start_date || todayIso();
+    // With no start date the backend anchors the schedule (and starts generating) on the contract's start
+    // date, so the preview must too — otherwise fortnightly-or-longer intervals land on different weeks.
+    const contract = getContractById(sanitized.contract_id);
+    const contractStartIso = (contract && contract.start_date) || '';
+    const today = todayIso();
+    const startIso = sanitized.start_date || (contractStartIso > today ? contractStartIso : today);
     let cursor = parseIsoDate(startIso) || new Date();
     cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
     const results = [];
     const horizon = sanitized.recurrence_type === 'weekly' ? 200 : 600;
     const endCursor = new Date(cursor.getTime());
     endCursor.setDate(endCursor.getDate() + horizon);
-    const anchorDate = parseIsoDate(sanitized.start_date) || cursor;
+    const anchorDate = parseIsoDate(sanitized.start_date || contractStartIso) || cursor;
     const hardStop = sanitized.end_date ? parseIsoDate(sanitized.end_date) : null;
     while (cursor <= endCursor && results.length < limit) {
       if (hardStop && cursor > hardStop) break;
@@ -8091,7 +8096,9 @@ function updateDeductionFormVisibility() {
 
     if (startDate >= today) return null;
 
-    const upperBound = endDate && endDate < today ? endDate : new Date(today.getTime() - 24 * 60 * 60 * 1000); // Yesterday
+    // Yesterday by calendar fields, not today minus 24h: on the day after Sydney's DST start that lands at
+    // 23:00 the day before yesterday and drops the DST-start day's occurrence.
+    const upperBound = endDate && endDate < today ? endDate : new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
 
     if (deduction.frequency === 'once') {
       return startDate <= upperBound ? isoDate(startDate) : null;
