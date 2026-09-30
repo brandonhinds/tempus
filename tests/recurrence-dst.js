@@ -1,0 +1,121 @@
+'use strict';
+// Recurring schedules count civil days between the anchor and each candidate date. In Australia/Sydney the
+// DST start day (4 Oct 2026) is 23 hours long and the DST end day (4 Apr 2027) is 25 hours long, so a
+// local-midnight millisecond diff divided by a 24-hour day and floored lands one day short after DST starts:
+// a fortnight anchored on Sat 26 Sep 2026 skipped 10 Oct and jumped to 17 Oct. These tests pin the process
+// to Sydney time (restored afterwards) so the transitions are really exercised whatever the host timezone.
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { createAppsScriptContext } = require('./mock-apps-script');
+
+const root = path.resolve(__dirname, '..');
+const clientSource = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+
+function extractClientFunction(name) {
+  const match = clientSource.match(new RegExp('  function ' + name + '\\([\\s\\S]*?\\n  \\}'));
+  assert.ok(match, 'Expected client function ' + name);
+  return match[0].trimStart();
+}
+
+function withSydneyTime(callback) {
+  const previous = process.env.TZ;
+  process.env.TZ = 'Australia/Sydney';
+  try {
+    // Guard: the transition must really be in effect, or these tests prove nothing.
+    assert.equal(new Date(2026, 9, 3).getTimezoneOffset(), -600, 'expected AEST before 4 Oct 2026');
+    assert.equal(new Date(2026, 9, 5).getTimezoneOffset(), -660, 'expected AEDT after 4 Oct 2026');
+    assert.equal(new Date(2027, 3, 5).getTimezoneOffset(), -600, 'expected AEST after 4 Apr 2027');
+    callback();
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+function localIso(date) { return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()); }
+
+// Fortnightly Saturdays from Sat 26 Sep 2026, through DST start (4 Oct 2026) and DST end (4 Apr 2027).
+const FORTNIGHT_SCHEDULE = { recurrence_type: 'weekly', weekly_weekdays: [6], weekly_interval: 2 };
+const EXPECTED_FORTNIGHTS = [
+  '2026-09-26', '2026-10-10', '2026-10-24', '2026-11-07', '2026-11-21', '2026-12-05', '2026-12-19',
+  '2027-01-02', '2027-01-16', '2027-01-30', '2027-02-13', '2027-02-27', '2027-03-13', '2027-03-27',
+  '2027-04-10', '2027-04-24', '2027-05-08'
+];
+
+// Walk local days the way generateEntriesForSchedule / buildRecurringPreview do and collect the matches.
+function walkMatches(matcher, anchor, endInclusive) {
+  const out = [];
+  const cursor = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  while (cursor <= endInclusive) {
+    if (matcher(cursor)) out.push(localIso(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+function loadBackend() {
+  const { context } = createAppsScriptContext({});
+  context.toIsoDate = (value) => {
+    if (typeof value === 'string') return value;
+    return value.getFullYear() + '-' + pad(value.getMonth() + 1) + '-' + pad(value.getDate());
+  };
+  context.toIsoDateTime = context.toIsoDate;
+  context.normalizeDurationMinutes = Number;
+  context.punchesTotalMinutes = () => 0;
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'backend/recurringEntries.js'), 'utf8'), context, { filename: 'backend/recurringEntries.js' });
+  return context;
+}
+
+function loadClientPreview() {
+  const context = vm.createContext({});
+  vm.runInContext([
+    'const ISO_DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;',
+    extractClientFunction('normalizeDateInput'),
+    'const isoDate = (value) => normalizeDateInput(value);',
+    'const parseIsoDate = (value) => { const n = normalizeDateInput(value); if (!n) return null; const [y, m, d] = n.split("-").map(Number); return new Date(y, m - 1, d); };',
+    'const todayIso = () => isoDate(new Date());',
+    'const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());',
+    'const sanitizeRecurringEntry = (entry) => entry;',
+    extractClientFunction('monthsBetween'),
+    extractClientFunction('isLastWeekdayOfMonth'),
+    extractClientFunction('matchesWeeklyPreview'),
+    extractClientFunction('matchesMonthlyPreview'),
+    extractClientFunction('buildRecurringPreview'),
+    'this.matchesWeeklyPreview = matchesWeeklyPreview; this.buildRecurringPreview = buildRecurringPreview;'
+  ].join('\n'), context, { filename: 'scripts.html (recurring preview)' });
+  return context;
+}
+
+exports.run = function run(test) {
+  test('backend fortnightly schedule stays on its fortnight across Sydney DST start and end', () => withSydneyTime(() => {
+    const context = loadBackend();
+    const anchor = context.parseIsoDateStrict('2026-09-26');
+    const end = context.parseIsoDateStrict('2027-05-08');
+    const matches = walkMatches((d) => context.matchesWeeklySchedule(FORTNIGHT_SCHEDULE, d, anchor), anchor, end);
+    assert.deepStrictEqual(matches, EXPECTED_FORTNIGHTS);
+  }));
+
+  test('backend daysBetweenIso counts whole civil days across Sydney DST start and end', () => withSydneyTime(() => {
+    const context = loadBackend();
+    assert.equal(context.daysBetweenIso('2026-09-26', '2026-10-10'), 14);
+    assert.equal(context.daysBetweenIso('2026-10-03', '2026-10-05'), 2);
+    assert.equal(context.daysBetweenIso('2027-04-03', '2027-04-05'), 2);
+    assert.equal(context.daysBetweenIso('2026-09-26', '2027-05-08'), 224);
+    assert.equal(context.daysBetweenIso('2026-10-10', '2026-09-26'), -14);
+  }));
+
+  test('client recurring preview matches the backend fortnight across Sydney DST start and end', () => withSydneyTime(() => {
+    const context = loadClientPreview();
+    const anchor = new Date(2026, 8, 26);
+    const matches = walkMatches((d) => context.matchesWeeklyPreview(FORTNIGHT_SCHEDULE, d, anchor), anchor, new Date(2027, 4, 8));
+    assert.deepStrictEqual(matches, EXPECTED_FORTNIGHTS);
+    // The preview walks a 200-day weekly horizon (to 14 Apr 2027), which still crosses DST end on 4 Apr.
+    const withinHorizon = EXPECTED_FORTNIGHTS.filter((iso) => iso <= '2027-04-14');
+    const preview = context.buildRecurringPreview(Object.assign({ start_date: '2026-09-26' }, FORTNIGHT_SCHEDULE), 50);
+    assert.deepStrictEqual(Array.from(preview), withinHorizon);
+    assert.equal(withinHorizon[withinHorizon.length - 1], '2027-04-10');
+  }));
+};

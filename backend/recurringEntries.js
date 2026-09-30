@@ -721,7 +721,11 @@ function daysBetweenIso(startIso, endIso) {
   var start = parseIsoDateStrict(startIso);
   var end = parseIsoDateStrict(endIso);
   if (!start || !end) return 0;
-  return Math.floor((startOfDay(end) - startOfDay(start)) / (24 * 60 * 60 * 1000));
+  // Compare civil dates in UTC so Sydney's 23/25-hour DST transition days do
+  // not drop or add a day from the count.
+  var endDay = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  var startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  return Math.floor((endDay - startDay) / (24 * 60 * 60 * 1000));
 }
 
 function isIncomeGeneratingHourType(hourTypeId, hourTypeMap) {
