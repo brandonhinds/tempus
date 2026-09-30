@@ -69,9 +69,25 @@ function loadBackend() {
   return context;
 }
 
-function loadClientPreview() {
-  const context = vm.createContext({});
+// A Date whose no-argument form reports a fixed local "now", so client code calling new Date() sees that day.
+function fixedNowDate(y, m, d) {
+  const RealDate = Date;
+  return class FixedDate extends RealDate {
+    constructor(...args) { if (args.length) super(...args); else super(y, m, d, 9, 0, 0); }
+    static now() { return new RealDate(y, m, d, 9, 0, 0).getTime(); }
+  };
+}
+
+function extractClientConstant(name) {
+  const match = clientSource.match(new RegExp('  const ' + name + ' = [\\s\\S]*?\\n  \\};'));
+  assert.ok(match, 'Expected client helper ' + name);
+  return match[0].trimStart();
+}
+
+function loadClientPreview(options = {}) {
+  const context = vm.createContext(Object.assign({ contracts: options.contracts || {} }, options.now ? { Date: options.now } : {}));
   vm.runInContext([
+    'const getContractById = (id) => (id ? contracts[id] : undefined);',
     'const ISO_DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;',
     extractClientFunction('normalizeDateInput'),
     'const isoDate = (value) => normalizeDateInput(value);',
@@ -117,5 +133,39 @@ exports.run = function run(test) {
     const preview = context.buildRecurringPreview(Object.assign({ start_date: '2026-09-26' }, FORTNIGHT_SCHEDULE), 50);
     assert.deepStrictEqual(Array.from(preview), withinHorizon);
     assert.equal(withinHorizon[withinHorizon.length - 1], '2027-04-10');
+  }));
+
+  test('client recurring preview anchors a blank start date on the contract start like the backend', () => withSydneyTime(() => {
+    const contracts = { c1: { id: 'c1', start_date: '2026-09-26' }, future: { id: 'future', start_date: '2026-11-07' } };
+    // Today is Mon 12 Oct 2026: anchoring on today would put the fortnight on 17 Oct / 31 Oct.
+    const context = loadClientPreview({ contracts, now: fixedNowDate(2026, 9, 12) });
+    const blank = Object.assign({ start_date: '', contract_id: 'c1' }, FORTNIGHT_SCHEDULE);
+    assert.deepStrictEqual(Array.from(context.buildRecurringPreview(blank, 3)), ['2026-10-24', '2026-11-07', '2026-11-21']);
+    // A contract that starts later generates from its start, so the preview begins there too.
+    const later = Object.assign({}, blank, { contract_id: 'future' });
+    assert.deepStrictEqual(Array.from(context.buildRecurringPreview(later, 2)), ['2026-11-07', '2026-11-21']);
+    // An explicit start date still wins over the contract.
+    const explicit = Object.assign({}, blank, { start_date: '2026-10-03' });
+    assert.deepStrictEqual(Array.from(context.buildRecurringPreview(explicit, 2)), ['2026-10-03', '2026-10-17']);
+  }));
+
+  test('deduction last past occurrence includes the Sydney DST-start day', () => withSydneyTime(() => {
+    const context = vm.createContext({ Date: fixedNowDate(2026, 9, 5) });
+    vm.runInContext([
+      'const ISO_DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;',
+      extractClientFunction('normalizeDateInput'),
+      'const isoDate = (value) => normalizeDateInput(value);',
+      extractClientConstant('parseIsoDate'),
+      clientSource.match(/  const startOfDay = .*\n/)[0],
+      extractClientConstant('addDays'),
+      extractClientConstant('addMonthsClamped'),
+      clientSource.match(/  const DEDUCTION_OCCURRENCE_LIMIT = .*\n/)[0],
+      extractClientFunction('deductionOccurrenceDate'),
+      extractClientFunction('findLastPastOccurrence'),
+      'this.findLastPastOccurrence = findLastPastOccurrence;'
+    ].join('\n'), context, { filename: 'scripts.html (deductions)' });
+    // Today is Mon 5 Oct 2026; clocks went forward on Sun 4 Oct, so yesterday is 4 Oct.
+    assert.equal(context.findLastPastOccurrence({ frequency: 'weekly', start_date: '2026-09-27', end_date: '' }), '2026-10-04');
+    assert.equal(context.findLastPastOccurrence({ frequency: 'once', start_date: '2026-10-04', end_date: '' }), '2026-10-04');
   }));
 };
