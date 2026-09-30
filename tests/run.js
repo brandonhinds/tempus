@@ -1851,3 +1851,5 @@ require('./lil-assessments').run(test);
 
 // Async (promise-driven) mobile sync tests report through the same test() helper once they settle.
 require('./mobile-sync').run(test);
+
+require('./bas-ledger').run(test);

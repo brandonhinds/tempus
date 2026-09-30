@@ -500,7 +500,34 @@
   document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
   document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });
 
-  async function renderBasLedgerSummary() {
+  // api_calculateBasPeriod is one of the heaviest server calls (reads invoices, expenses, payments and the
+  // timesheet forecast, then hashes the lot — 6–17s per call). renderBasReporting() runs on every income
+  // re-render (every entry change, day-modal open/close, …), so without these guards each UI change queued
+  // another full calculation for a panel that is usually off-screen. Now: only compute while the BAS page is
+  // visible (showPage('bas') re-renders on arrival), coalesce bursts, and never run two calculations at once.
+  let basLedgerTimer=null;
+  let basLedgerInFlight=false;
+  let basLedgerRerun=false;
+  function renderBasLedgerSummary() {
+    if(state.currentPage!=='bas')return;
+    clearTimeout(basLedgerTimer);
+    basLedgerTimer=setTimeout(runBasLedgerSummary_,800);
+  }
+  async function runBasLedgerSummary_() {
+    basLedgerTimer=null;
+    if(state.currentPage!=='bas')return;
+    // A calculation is already running: remember to run once more when it settles, with the latest inputs.
+    if(basLedgerInFlight){basLedgerRerun=true;return;}
+    basLedgerInFlight=true;
+    basLedgerRerun=false;
+    try {
+      await calculateBasLedgerSummary_();
+    } finally {
+      basLedgerInFlight=false;
+      if(basLedgerRerun){basLedgerRerun=false;renderBasLedgerSummary();}
+    }
+  }
+  async function calculateBasLedgerSummary_() {
     const target=document.getElementById('bas-ledger-summary');
     if(!target)return;
     const basisSelect=document.getElementById('bas-accounting-basis');
