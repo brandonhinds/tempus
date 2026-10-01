@@ -223,6 +223,28 @@ test('a column holding only a header is never re-appended when the data region u
   assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
 });
 
+test('upgraded hour types read lowercase text booleans as on (quick actions and leave survive the upgrade)', () => {
+  const { context } = createAppsScriptContext({
+    hour_types: [
+      CANONICAL_HOUR_TYPE_HEADERS,
+      ['leave-id', 'Annual Leave', 'annual-leave', '#0ea5e9', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 0, '', '2026-01-22T23:51:58Z', 1, 'true', 7.5, 'plane', 'hours', 'true'],
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'true', 'TRUE', 'FALSE', 0, '', '2025-11-02T23:42:37Z', 0, 'true', 8.5, 'briefcase', 'hours', 'false'],
+      ['home-id', 'Home billable', 'home', '#06b6d4', 'TRUE', 'TRUE', 'FALSE', 'FALSE', 'FALSE', 0, '', '2026-07-06T12:49:37Z', 3, 'false', '', 'clock', 'hours', 'false']
+    ]
+  });
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/migrations.js');
+  load(context, 'backend/hourtypes.js');
+  context.assertMigrationsSettled_ = () => true;
+  const byName = Object.fromEntries(context.api_getHourTypes().map((ht) => [ht.name, ht]));
+  assert.equal(byName['Annual Leave'].quick_fill_enabled, true);
+  assert.equal(byName['Annual Leave'].counts_as_leave, true);
+  assert.equal(byName['Home billable'].quick_fill_enabled, false);
+  assert.equal(byName['Home billable'].counts_as_leave, false);
+  assert.equal(byName.Work.is_default, true, 'a lowercase is_default still marks the default type');
+});
+
 test('a sheet already carrying duplicate quick-fill columns is repaired by the upgrade', () => {
   const damaged = CANONICAL_HOUR_TYPE_HEADERS.concat(['quick_fill_hours', 'icon']);
   const { context, spreadsheet } = createAppsScriptContext({
