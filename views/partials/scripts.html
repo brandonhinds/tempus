@@ -24520,6 +24520,12 @@ function getCachedIncomeSummary(monthKey) {
     renderDayDurationEntries(dateIso);
     renderDayLevelActions(dateIso);
     updateDayClockToggle(dateIso);
+    // Simple-only days (Settings › Default entry mode = Simple, no contract/hour type overriding it, and no
+    // session already logged that day) show just Duration Entries — the setting promises "a single
+    // total-hours field". dayEntryModes() keeps Detailed on for any day that already holds a session, so
+    // nothing logged is ever hidden.
+    const sessionsSection = document.querySelector('#modal-day-entry section[aria-labelledby="day-sessions-title"]');
+    if (sessionsSection) sessionsSection.style.display = dayEntryModes(dateIso).detailed ? '' : 'none';
   }
 
   function daySessionsPendingKey(entryId, punchIndex) { return String(entryId) + '#' + punchIndex; }
