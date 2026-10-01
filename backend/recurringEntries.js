@@ -378,6 +378,7 @@ function deleteFutureRecurringEntriesUnlocked_(payload) {
     throw new Error('Recurrence identifier is required.');
   }
   var fromDate = payload.fromDate ? toIsoDate(payload.fromDate) : toIsoDate(new Date());
+  rewindRecurringProgress_(recurrenceId, fromDate);
   var sh = getOrCreateSheet('timesheet_entries');
   var values = sh.getDataRange().getValues();
   if (values.length <= 1) {
@@ -402,6 +403,20 @@ function deleteFutureRecurringEntriesUnlocked_(payload) {
     cacheClearPrefix(ENTRY_CACHE_PREFIX);
   }
   return { success: true, deleted: deleted };
+}
+
+// Deleting a schedule's entries from `fromDate` must also move its generation progress back to the day
+// before, or the next sync treats the cleared dates as already generated and never refills them. That
+// left re-saving a schedule with "Delete future entries" as a delete-only action, so rows written by an
+// older, wrong matcher (e.g. the pre-fix DST fortnight bucketing) could not be regenerated correctly.
+function rewindRecurringProgress_(recurrenceId, fromDate) {
+  if (!fromDate) return;
+  var entry = findRecurringEntryById(listRecurringEntriesInternal(), recurrenceId);
+  if (!entry || !entry.generated_until) return;
+  var rewindTo = addDaysIso(fromDate, -1);
+  if (entry.generated_until <= rewindTo) return;
+  entry.generated_until = rewindTo;
+  persistRecurringEntry(entry);
 }
 
 function api_syncRecurringTimeEntries(options) {
