@@ -150,7 +150,8 @@ function normalizeHourTypeRow(headers, row) {
     quick_fill_hours: quickFillHours,
     icon: cell('icon') ? String(cell('icon')) : '',
     // 'punch' = the quick action starts the clock; anything else (incl. blank legacy rows) = fill hours.
-    quick_fill_mode: String(cell('quick_fill_mode')).toLowerCase() === 'punch' ? 'punch' : 'hours'
+    quick_fill_mode: String(cell('quick_fill_mode')).toLowerCase() === 'punch' ? 'punch' : 'hours',
+    counts_as_leave: boolFromSheetCell(cell('counts_as_leave'))
   };
 }
 
@@ -251,6 +252,8 @@ function createHourTypeUnlocked_(data) {
         return data.icon ? String(data.icon) : '';
       case 'quick_fill_mode':
         return data.quick_fill_mode === 'punch' ? 'punch' : 'hours';
+      case 'counts_as_leave':
+        return data.counts_as_leave ? 'TRUE' : 'FALSE';
       default:
         return '';
     }
@@ -388,6 +391,10 @@ function updateHourTypeUnlocked_(id, data) {
   var quickModeIndex = headers.indexOf('quick_fill_mode');
   if (quickModeIndex !== -1 && data.hasOwnProperty('quick_fill_mode')) {
     updatedRow[quickModeIndex] = data.quick_fill_mode === 'punch' ? 'punch' : 'hours';
+  }
+  var countsAsLeaveIndex = headers.indexOf('counts_as_leave');
+  if (countsAsLeaveIndex !== -1 && data.hasOwnProperty('counts_as_leave')) {
+    updatedRow[countsAsLeaveIndex] = data.counts_as_leave ? 'TRUE' : 'FALSE';
   }
 
   sh.getRange(rowIndex + 2, 1, 1, updatedRow.length).setValues([updatedRow]);

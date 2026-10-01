@@ -75,7 +75,7 @@ test('canonical migration rejects conflicting duplicate legacy values', () => {
   assert.throws(() => context.canonicalizeSheet_('hour_types'), /duplicate header "icon" has conflicting values in row 2/);
 });
 
-const CANONICAL_HOUR_TYPE_HEADERS = ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'];
+const CANONICAL_HOUR_TYPE_HEADERS = ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode', 'counts_as_leave'];
 
 // A copy of a production sheet as it stood before the quick-fill release: no use_for_rate_calculation,
 // no entry_mode, no quick-fill columns, and contracts still on its original six columns.
@@ -228,7 +228,7 @@ test('a sheet already carrying duplicate quick-fill columns is repaired by the u
   const { context, spreadsheet } = createAppsScriptContext({
     hour_types: [
       damaged,
-      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '2024-02-01T00:00:00Z', 1, 'TRUE', '', '', 'hours', 7.5, 'clock']
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 0, '', '2024-02-01T00:00:00Z', 1, 'TRUE', '', '', 'hours', 'FALSE', 7.5, 'clock']
     ]
   });
   withSheetApiStubs(context);

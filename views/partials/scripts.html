@@ -2807,6 +2807,14 @@ let ratePreviewInputSyncing = false;
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_TARGET_HOURS_PER_DAY;
   };
 
+  // Annual leave entitlement, in days. The leave balance card compares hours banked ahead of contract
+  // pace against this allowance (allowance × standard day = the hours the year's leave will consume).
+  const DEFAULT_LEAVE_ALLOWANCE_DAYS = 20;
+  const getLeaveAllowanceDays = () => {
+    const v = Number(state.settings ? state.settings.leave_allowance_days : NaN);
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LEAVE_ALLOWANCE_DAYS;
+  };
+
   const getTrendMethod = () => {
     const value = state.settings ? state.settings.monthly_insights_trend_method : undefined;
     const validMethods = ['standard_contract_hours', 'current_month', 'last_3_months', 'contract_lifetime', 'same_month_last_year'];
@@ -3133,6 +3141,7 @@ let ratePreviewInputSyncing = false;
     clone.quick_fill_hours = Number.isFinite(quickFill) && quickFill > 0 ? quickFill : null;
     clone.quick_fill_mode = clone.quick_fill_mode === 'punch' ? 'punch' : 'hours';
     clone.icon = clone.icon ? String(clone.icon) : '';
+    clone.counts_as_leave = Boolean(clone.counts_as_leave === 'TRUE' || clone.counts_as_leave === true);
     return clone;
   };
 
@@ -4826,7 +4835,28 @@ function hideAnnualLoadingState() {
   // standard day — and never forecasts past the ceiling. Uncapped or open-ended contracts keep standard
   // hours. The pace is a per-contract constant (identical every month), so it stays consistent across the
   // year and each contract in a multi-contract year is budgeted independently against its own cap.
-  function avProjectionDailyHours(contract, std, paceStart, cEnd, holidayMap){
+  // Future days marked with a leave hour type, as ISO date → marked leave hours. Lets the forecast
+  // treat planned leave like public holidays: no income is projected on a fully-marked leave day, and
+  // the remaining budget spreads over the days actually available (raising the per-day pace instead).
+  function collectFutureLeaveDayHours() {
+    const map = {};
+    const leaveIds = getLeaveHourTypeIds();
+    if (!leaveIds.length) return map;
+    const todayIso = isoDate(startOfDay(new Date()));
+    (state.entries || []).forEach((e) => {
+      if (!entryIsLeave(e, leaveIds)) return;
+      const dIso = getEntryDateIso(e);
+      if (!dIso || dIso <= todayIso) return;
+      map[dIso] = (map[dIso] || 0) + (Number(e.duration_minutes) || 0) / 60;
+    });
+    return map;
+  }
+  function isFullLeaveDay(leaveMap, iso, std) {
+    const dayLen = Number(std) > 0 ? Number(std) : DEFAULT_TARGET_HOURS_PER_DAY;
+    return (leaveMap && leaveMap[iso] || 0) >= dayLen - 0.01;
+  }
+
+  function avProjectionDailyHours(contract, std, paceStart, cEnd, holidayMap, leaveMap){
     const cap = Number(contract.total_hours || 0);
     if (!(cap > 0) || !cEnd || Number.isNaN(cEnd.getTime())) return std; // uncapped / open-ended → standard day
     let loggedHours = 0;
@@ -4839,6 +4869,7 @@ function hideAnnualLoadingState() {
     if (remainingBudget <= 0) return 0; // cap already reached — forecast nothing further
     let workdays = collectBusinessDays(paceStart, cEnd, !!contract.include_weekends);
     if (holidayMap) workdays = workdays.filter((iso) => !holidayMap[iso]);
+    if (leaveMap) workdays = workdays.filter((iso) => !isFullLeaveDay(leaveMap, iso, std));
     if (!workdays.length) return 0;
     const pace = remainingBudget / workdays.length;
     return Math.min(std, pace); // never project beyond a standard day (no unrealistic catch-up)
@@ -4858,6 +4889,9 @@ function hideAnnualLoadingState() {
     // currently-loaded calendar year, which covers the common case (forecasting the rest of this FY); a
     // holiday in a year the calendar hasn't loaded simply isn't skipped (no worse than before).
     const holidayMap = getFeatureFlag('enable_public_holidays') ? (state.publicHolidayMap || null) : null;
+    // Planned leave works the same way: a future day fully marked with a leave hour type is not a working
+    // day, so no income is forecast on it.
+    const leaveMap = collectFutureLeaveDayHours();
     // Synthetic entries use the default income hour type (or any income-contributing one). When hour types
     // are off, leave it undefined — the summary treats a missing hour type as income-contributing.
     let projHourTypeId;
@@ -4883,10 +4917,11 @@ function hideAnnualLoadingState() {
       if (rangeEnd < rangeStart) return;
       let days = collectBusinessDays(rangeStart, rangeEnd, !!contract.include_weekends).filter((iso) => !logged.has(iso));
       if (holidayMap) days = days.filter((iso) => !holidayMap[iso]);
+      days = days.filter((iso) => !isFullLeaveDay(leaveMap, iso, std));
       if (!days.length) return;
       // Pace against the contract's hour cap from tomorrow (or its start, if it begins later) to its end.
       const paceStart = (cStart && cStart > tomorrow) ? cStart : tomorrow;
-      const dailyHours = avProjectionDailyHours(contract, std, paceStart, cEnd, holidayMap);
+      const dailyHours = avProjectionDailyHours(contract, std, paceStart, cEnd, holidayMap, leaveMap);
       if (dailyHours <= 0) return; // cap reached or nothing left to forecast for this contract
       out.push({
         date: isoDate(rangeStart),
@@ -8939,6 +8974,12 @@ function updateDeductionFormVisibility() {
       name: 'Enable expected monthly hours insights',
       description: 'Adds a calendar badge that projects contract hours for the month and shows whether you are ahead or behind.',
       order: 130,
+      group: 'income'
+    },
+    leave_balance_card: {
+      name: 'Show leave balance card',
+      description: 'Adds a fourth card to the Time Entries KPI strip showing the hours banked ahead of contract pace, expressed as funded leave. Needs the expected monthly hours insights and an active contract with a total-hours cap.',
+      order: 135,
       group: 'income'
     },
     contract_rate_preview: {
@@ -13514,6 +13555,336 @@ function updateDeductionFormVisibility() {
       if (e.key === 'Enter' || e.key === ' ') openHelp(e);
     });
   }
+  // ---- Leave balance card ----
+  // Answers "how much leave have I funded?": hours logged ahead of the contract's day-weighted pace are
+  // the hours that pay for leave days later in the year. Positive = leave banked, negative = behind pace.
+  const leaveBankBadge = document.getElementById('calendar-leave-bank');
+
+  function getLeaveHourTypeIds() {
+    return (state.hourTypes || [])
+      .filter((ht) => ht && ht.counts_as_leave)
+      .map((ht) => String(ht.id));
+  }
+
+  function entryIsLeave(entry, leaveIds) {
+    if (!entry || !entry.hour_type_id) return false;
+    const ids = leaveIds || getLeaveHourTypeIds();
+    return ids.includes(String(entry.hour_type_id));
+  }
+
+  // Express a span of hours as working days/weeks (5-day weeks at the standard day length).
+  function formatLeaveSpan(hours, std) {
+    const dayLen = Number(std) > 0 ? Number(std) : DEFAULT_TARGET_HOURS_PER_DAY;
+    const days = Math.abs(Number(hours) || 0) / dayLen;
+    const weeks = Math.floor(days / 5);
+    const rem = Math.round((days - weeks * 5) * 10) / 10;
+    const parts = [];
+    if (weeks > 0) parts.push(weeks + (weeks === 1 ? ' wk' : ' wks'));
+    if (rem > 0) parts.push(rem + (rem === 1 ? ' day' : ' days'));
+    return parts.length ? parts.join(' ') : '0 days';
+  }
+
+  // Banked leave = billable hours logged to date minus the contract's expected hours to date, where
+  // "expected" spreads total_hours across the contract's working days (weekends and, when loaded, public
+  // holidays excluded). Day-weighted rather than the monthly quota's even spread so the pace is honest
+  // across short and long months. Only capped, dated contracts active today participate.
+  function buildLeaveBankSummary() {
+    if (!getFeatureFlag('leave_balance_card')) return null;
+    if (!getFeatureFlag('expected_monthly_hours')) return null;
+    const today = startOfDay(new Date());
+    const todayIso = isoDate(today);
+    const holidayMap = getFeatureFlag('enable_public_holidays') ? (state.publicHolidayMap || null) : null;
+    const std = getTargetHoursPerDay();
+
+    const contracts = (state.contracts || []).filter((c) => {
+      if (!c || !(Number(c.total_hours) > 0) || !c.start_date || !c.end_date) return false;
+      const cs = parseIsoDate(c.start_date);
+      const ce = parseIsoDate(c.end_date);
+      if (!cs || Number.isNaN(cs.getTime()) || !ce || Number.isNaN(ce.getTime())) return false;
+      return startOfDay(cs) <= today && today <= startOfDay(ce);
+    });
+    if (!contracts.length) return null;
+
+    let banked = 0;
+    const rows = [];
+    let windowStartIso = null;
+    let windowEndIso = null;
+    const leaveIds = getLeaveHourTypeIds();
+
+    contracts.forEach((c) => {
+      const cs = startOfDay(parseIsoDate(c.start_date));
+      const ce = startOfDay(parseIsoDate(c.end_date));
+      const csIso = isoDate(cs);
+      const ceIso = isoDate(ce);
+      if (!windowStartIso || csIso < windowStartIso) windowStartIso = csIso;
+      if (!windowEndIso || ceIso > windowEndIso) windowEndIso = ceIso;
+
+      let allDays = collectBusinessDays(cs, ce, !!c.include_weekends);
+      if (holidayMap) allDays = allDays.filter((iso) => !holidayMap[iso]);
+      if (!allDays.length) return;
+      const cap = Number(c.total_hours);
+      const stdC = Number(c.standard_hours_per_day) > 0 ? Number(c.standard_hours_per_day) : std;
+      const totalProMonths = calculateProRatedMonths(cs, ce);
+      if (!(totalProMonths > 0)) return;
+      const quotaPerMonth = cap / totalProMonths;
+
+      let logged = 0;                  // billable hours worked, up to today
+      let committedIncome = 0;         // billable hours any date, incl. prefilled future days
+      const futureDayHours = {};       // iso → hours already spoken for on future days (work or leave)
+      const futureIncomeDayHours = {}; // iso → prefilled billable hours only (drives the quota charge)
+      (state.entries || []).forEach((e) => {
+        if (!e) return;
+        const dIso = getEntryDateIso(e);
+        if (!dIso || dIso < csIso || dIso > ceIso) return;
+        const isContractEntry = String(e.contract_id || '') === String(c.id);
+        const hrs = (Number(e.duration_minutes) || 0) / 60;
+        if (isContractEntry && entryContributesToIncome(e)) {
+          committedIncome += hrs;
+          if (dIso <= todayIso) logged += hrs;
+          else futureIncomeDayHours[dIso] = (futureIncomeDayHours[dIso] || 0) + hrs;
+        }
+        if (dIso > todayIso && (isContractEntry || entryIsLeave(e, leaveIds))) {
+          futureDayHours[dIso] = (futureDayHours[dIso] || 0) + hrs;
+        }
+      });
+
+      // Expected-so-far walks the contract month by month against the SAME monthly quota the Projected
+      // variance badge uses (cap ÷ pro-rated months), so "30 h over in July" banks as 30 h — not a
+      // day-weighted remix of it. A completed month charges its full quota; the current month charges
+      // the slice already passed; and a future day you have prefilled counts as passed (its committed
+      // hours are credited, so its share of quota must be charged too, else prefilling inflates the bank).
+      let expectedToDate = 0;
+      const monthCursor = new Date(cs.getFullYear(), cs.getMonth(), 1);
+      const lastMonth = new Date(ce.getFullYear(), ce.getMonth(), 1);
+      while (monthCursor <= lastMonth) {
+        const mY = monthCursor.getFullYear();
+        const mM = monthCursor.getMonth();
+        const mStart = startOfDay(new Date(mY, mM, 1));
+        const mEnd = startOfDay(new Date(mY, mM + 1, 0));
+        const pStart = cs > mStart ? cs : mStart;
+        const pEnd = ce < mEnd ? ce : mEnd;
+        if (pEnd >= pStart) {
+          const quotaForMonth = quotaPerMonth * calculateProRatedMonths(pStart, pEnd);
+          const monthDays = collectBusinessDays(pStart, pEnd, !!c.include_weekends);
+          if (monthDays.length) {
+            let accountedDays = 0;
+            monthDays.forEach((iso) => {
+              if (iso <= todayIso) accountedDays += 1;
+              else accountedDays += Math.min(1, (futureIncomeDayHours[iso] || 0) / stdC);
+            });
+            expectedToDate += quotaForMonth * Math.min(1, accountedDays / monthDays.length);
+          }
+        }
+        monthCursor.setMonth(monthCursor.getMonth() + 1);
+      }
+
+      // The pace you'd need on the days genuinely left: remaining budget over future working days,
+      // counting a part-filled or part-leave day as the fraction of it still free.
+      let availableFutureDays = 0;
+      allDays.forEach((iso) => {
+        if (iso <= todayIso) return;
+        const used = Math.min(1, (futureDayHours[iso] || 0) / stdC);
+        availableFutureDays += 1 - used;
+      });
+      const remainingBudget = Math.max(0, cap - committedIncome);
+      const requiredPace = availableFutureDays > 0.01 ? remainingBudget / availableFutureDays : null;
+
+      banked += committedIncome - expectedToDate;
+      rows.push({
+        contract: c,
+        cap,
+        logged,
+        committedIncome,
+        expectedToDate,
+        totalProMonths,
+        quotaPerMonth,
+        stdC,
+        remainingBudget,
+        availableFutureDays,
+        requiredPace
+      });
+    });
+    if (!rows.length) return null;
+
+    // Leave already logged (taken) and marked ahead (planned), inside the contract window. Leave hour
+    // types usually carry no contract, so this scans all entries rather than the per-contract tallies.
+    // Only working days count toward the allowance: leave marked on a weekend or public holiday costs
+    // nothing (those days never owe quota), so it must not tick the taken/planned counters either.
+    const anyWeekendContract = contracts.some((c) => !!c.include_weekends);
+    let takenLeaveHours = 0;
+    let plannedLeaveHours = 0;
+    if (leaveIds.length) {
+      (state.entries || []).forEach((e) => {
+        if (!entryIsLeave(e, leaveIds)) return;
+        const dIso = getEntryDateIso(e);
+        if (!dIso || dIso < windowStartIso || dIso > windowEndIso) return;
+        const dObj = parseIsoDate(dIso);
+        if (!anyWeekendContract && dObj && isWeekendDate(dObj)) return;
+        if (holidayMap && holidayMap[dIso]) return;
+        const hrs = (Number(e.duration_minutes) || 0) / 60;
+        if (dIso <= todayIso) takenLeaveHours += hrs; else plannedLeaveHours += hrs;
+      });
+    }
+
+    const allowanceDays = getLeaveAllowanceDays();
+    return {
+      banked,
+      rows,
+      contractCount: rows.length,
+      std,
+      allowanceDays,
+      allowanceHours: allowanceDays * std,
+      leaveTypesConfigured: leaveIds.length > 0,
+      takenLeaveHours,
+      plannedLeaveHours
+    };
+  }
+
+  function renderLeaveBankCard() {
+    if (!leaveBankBadge) return;
+    const summary = buildLeaveBankSummary();
+    state.leaveBankSummary = summary;
+    const v = document.getElementById('calendar-leave-bank-value');
+    const sub = document.getElementById('calendar-leave-bank-sub');
+    if (!summary) {
+      leaveBankBadge.style.display = 'none';
+      return;
+    }
+    leaveBankBadge.style.display = 'flex';
+    const banked = summary.banked;
+    const mag = Math.abs(banked);
+    if (v) {
+      v.classList.remove('ts-stat-card-value--pos', 'ts-stat-card-value--neg');
+      if (mag < 0.05) {
+        v.textContent = 'On pace';
+      } else {
+        const unit = Math.round(mag * 100) / 100 === 1 ? 'hr' : 'hrs';
+        v.textContent = `${formatDecimalHours(mag)} ${unit} ${banked > 0 ? 'banked' : 'short'}`;
+        v.classList.add(banked > 0 ? 'ts-stat-card-value--pos' : 'ts-stat-card-value--neg');
+      }
+    }
+    if (sub) {
+      if (banked >= 0.05) {
+        sub.textContent = `≈ ${formatLeaveSpan(banked, summary.std)} of ${formatLeaveSpan(summary.allowanceHours, summary.std)} leave funded`;
+      } else if (banked <= -0.05) {
+        sub.textContent = 'behind contract pace';
+      } else {
+        sub.textContent = 'level with contract pace';
+      }
+    }
+  }
+
+  // Explainer built from the live numbers, mirroring the Projected Variance modal's vocabulary.
+  function openLeaveBankExplainer() {
+    const summary = state.leaveBankSummary;
+    if (!summary || !summary.rows.length) {
+      openMetricExplainer({
+        title: 'Leave balance',
+        bodyHtml: '<p class="ts-explainer-lead">Once a capped contract is active, this shows the hours you have worked ahead of its pace — the hours that fund your leave days later in the year.</p>'
+      });
+      return;
+    }
+
+    const step = (n, label, value) =>
+      '<div class="ts-explainer-step"><span class="ts-explainer-step-num">' + n + '</span>'
+      + '<span class="ts-explainer-step-label">' + label + '</span>'
+      + '<span class="ts-explainer-step-value">' + value + '</span></div>';
+
+    const single = summary.contractCount === 1 ? summary.rows[0] : null;
+    const totalExpected = summary.rows.reduce((a, r) => a + r.expectedToDate, 0);
+    const totalCommitted = summary.rows.reduce((a, r) => a + (Number(r.committedIncome) || 0), 0);
+    const banked = summary.banked;
+    const bankedWord = banked >= 0 ? 'banked' : 'short';
+    const bankedMag = Math.abs(banked);
+
+    let steps = '';
+    if (single) {
+      steps += step(1,
+        escapeHtmlSafe(single.contract.name) + ': ' + formatDecimalHours(single.cap) + ' h ÷ ' + (Math.round(single.totalProMonths * 10) / 10) + ' months — the same quota the Projected variance badge uses',
+        formatDecimalHours(single.quotaPerMonth) + ' h/month');
+      steps += step(2,
+        'Quota owed so far — full quota for finished months, plus this month’s share for the days passed or already prefilled',
+        formatDecimalHours(single.expectedToDate) + ' h');
+      steps += step(3, 'Billable hours committed (worked + prefilled ahead)', formatDecimalHours(single.committedIncome) + ' h');
+    } else {
+      steps += step(1, 'Quota owed so far across ' + summary.contractCount + ' contracts (monthly quota × months elapsed or prefilled)', formatDecimalHours(totalExpected) + ' h');
+      steps += step(2, 'Billable hours committed (worked + prefilled ahead)', formatDecimalHours(totalCommitted) + ' h');
+    }
+
+    const resultHtml = '<div class="ts-explainer-result">'
+      + '<div class="ts-explainer-result-head">Committed − quota owed = <strong>'
+      + (bankedMag < 0.05 ? 'on pace' : formatDecimalHours(bankedMag) + ' h ' + bankedWord)
+      + (bankedMag >= 0.05 ? ' ≈ ' + formatLeaveSpan(banked, summary.std) : '')
+      + '</strong></div>'
+      + '<div class="ts-explainer-result-sub">Hours ahead of pace are not overwork to correct — they are what pays for the working days you’ll take off later in the year.</div>'
+      + '</div>';
+
+    const fundedPct = summary.allowanceHours > 0 ? Math.max(0, Math.min(100, (banked / summary.allowanceHours) * 100)) : 0;
+    let allowanceHtml = '<div class="ts-explainer-result-sub" style="margin-bottom:14px;">'
+      + 'Allowance: <strong>' + summary.allowanceDays + ' days</strong> (' + formatDecimalHours(summary.allowanceHours) + ' h at '
+      + formatDecimalHours(summary.std) + ' h/day)' + (banked > 0.05 ? ' · ' + Math.round(fundedPct) + '% funded so far' : '') + '.';
+    if (summary.leaveTypesConfigured) {
+      const takenSpan = formatLeaveSpan(summary.takenLeaveHours, summary.std);
+      const plannedSpan = formatLeaveSpan(summary.plannedLeaveHours, summary.std);
+      allowanceHtml += ' Leave taken: <strong>' + takenSpan + '</strong>'
+        + (summary.plannedLeaveHours > 0.05 ? ' · marked ahead: <strong>' + plannedSpan + '</strong>' : '') + '.';
+    }
+    allowanceHtml += '</div>';
+
+    // Forward look: what the days still free must average for the contract hours to land exactly.
+    const totalRemaining = summary.rows.reduce((a, r) => a + (Number(r.remainingBudget) || 0), 0);
+    const totalAvailable = summary.rows.reduce((a, r) => a + (Number(r.availableFutureDays) || 0), 0);
+    let aheadHtml = '';
+    if (totalAvailable > 0.01) {
+      const pace = totalRemaining / totalAvailable;
+      const stdRef = single ? single.stdC : summary.std;
+      // Read the gap between the needed pace and a standard day back as days off, so the number carries
+      // its own interpretation: below standard = leave you can still afford; above = over-committed.
+      let paceNote = '';
+      if (pace < stdRef - 0.05) {
+        const slackDays = Math.round((((stdRef - pace) * totalAvailable) / stdRef) * 10) / 10;
+        paceNote = ' It sits under a standard day because days you plan to take off but haven’t marked as leave yet '
+          + 'are still counted as free: at ' + formatDecimalHours(stdRef) + ' h/day you could take about <strong>'
+          + slackDays + ' more days off</strong> and still land the contract exactly. Mark your leave and this pace '
+          + 'climbs toward your standard day.';
+      } else if (pace > stdRef + 0.05) {
+        paceNote = ' That is <strong>above</strong> a standard day — more days are marked out than the remaining '
+          + 'hours afford, so the days you do work would need to run long.';
+      } else {
+        paceNote = ' That matches your standard day: work the free days normally and the contract lands exactly.';
+      }
+      aheadHtml = '<div class="ts-explainer-result-sub" style="margin-bottom:14px;">'
+        + 'Looking ahead: <strong>' + formatDecimalHours(totalRemaining) + ' h</strong> of contract left across '
+        + '<strong>' + (Math.round(totalAvailable * 10) / 10) + ' free working days</strong> (marked leave, holidays and '
+        + 'prefilled days removed) → <strong>' + formatDecimalHours(pace) + ' h/day</strong> needed, vs your standard '
+        + formatDecimalHours(stdRef) + ' h day.' + paceNote + '</div>';
+    }
+
+    // Until an hour type is flagged as leave, planned leave days can't be recognised — point at the switch.
+    const nudgeHtml = summary.leaveTypesConfigured ? '' :
+      '<div class="ts-explainer-nudge"><div class="ts-explainer-nudge-text">To plan leave in advance, turn on '
+      + '<strong>Counts as annual leave</strong> for your leave hour type on the Hour Types page. Days marked with it are '
+      + 'excluded from projections and tracked here as taken or upcoming leave.</div></div>';
+
+    openMetricExplainer({
+      title: 'How the leave balance is worked out',
+      subtitle: single ? escapeHtmlSafe(single.contract.name) : (summary.contractCount + ' active contracts'),
+      bodyHtml: '<div class="ts-explainer-steps">' + steps + '</div>' + resultHtml + allowanceHtml + aheadHtml + nudgeHtml
+    });
+  }
+
+  if (leaveBankBadge) {
+    leaveBankBadge.addEventListener('click', () => openLeaveBankExplainer());
+  }
+  const leaveBankHelpBtn = document.getElementById('btn-leave-bank-help');
+  if (leaveBankHelpBtn) {
+    const openLeaveHelp = (e) => { e.stopPropagation(); e.preventDefault(); openLeaveBankExplainer(); };
+    leaveBankHelpBtn.addEventListener('click', openLeaveHelp);
+    leaveBankHelpBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') openLeaveHelp(e);
+    });
+  }
+
   const metricExplainerModal = document.getElementById('modal-metric-explainer');
   const metricExplainerDismissBtn = document.getElementById('btn-dismiss-metric-explainer');
   if (metricExplainerDismissBtn) metricExplainerDismissBtn.addEventListener('click', () => hideModal(metricExplainerModal));
@@ -13582,6 +13953,7 @@ function updateDeductionFormVisibility() {
   const minimumEndTimeInput = document.getElementById('set-minimum-end-time');
   const monthlyInsightsTrendMethodSelect = document.getElementById('set-monthly-insights-trend-method');
   const projectionsVarianceValueSelect = document.getElementById('set-projections-variance-value');
+  const leaveAllowanceDaysInput = document.getElementById('set-leave-allowance-days');
   const lostSuperRecoveryModeSelect = document.getElementById('set-lost-super-recovery-mode');
   const saveSettingsBtn = document.getElementById('btn-save-settings');
   const discardSettingsBtn = document.getElementById('btn-discard-settings');
@@ -22413,6 +22785,9 @@ function getCachedIncomeSummary(monthKey) {
 
   function renderExpectedHoursSummary() {
     if (!expectedHoursBadge || !expectedHoursBreakdownEl) return;
+    // The leave balance card shares this repaint choke point (every data change funnels through
+    // renderCalendar → here), and hides itself when the flag is off or no capped contract is active.
+    if (typeof renderLeaveBankCard === 'function') renderLeaveBankCard();
     if (!getFeatureFlag('expected_monthly_hours')) {
       expectedHoursBadge.style.display = 'none';
       resetExpectedHoursBadge();
@@ -26770,6 +27145,18 @@ function getCachedIncomeSummary(monthKey) {
       setValue: (el, val) => el.value = val || 'monthly_capacity',
       defaultValue: 'monthly_capacity',
       event: 'change'
+    },
+    leave_allowance_days: {
+      section: 'leave_balance_card',
+      order: 95,
+      element: () => leaveAllowanceDaysInput,
+      getValue: (el) => {
+        const v = Number(el.value);
+        return Number.isFinite(v) && v >= 0 ? v : DEFAULT_LEAVE_ALLOWANCE_DAYS;
+      },
+      setValue: (el, val) => { const v = Number(val); el.value = String(Number.isFinite(v) && v >= 0 ? v : DEFAULT_LEAVE_ALLOWANCE_DAYS); },
+      defaultValue: DEFAULT_LEAVE_ALLOWANCE_DAYS,
+      event: 'input'
     },
     invoice_template_reference: {
       section: 'enable_lil_assessments_mode',
@@ -32419,6 +32806,8 @@ function getCachedIncomeSummary(monthKey) {
     contributesInput.checked = hourType ? hourType.contributes_to_income : false;
     defaultInput.checked = hourType ? hourType.is_default : false;
     if (rateCalcInput) rateCalcInput.checked = hourType ? hourType.use_for_rate_calculation : false;
+    const countsAsLeaveInput = document.getElementById('hour-type-counts-as-leave');
+    if (countsAsLeaveInput) countsAsLeaveInput.checked = hourType ? !!hourType.counts_as_leave : false;
     if (entryModeInput) entryModeInput.value = hourType && (hourType.entry_mode === 'simple' || hourType.entry_mode === 'detailed') ? hourType.entry_mode : '';
     const entryModeNote = document.getElementById('hour-type-entry-mode-note');
     if (entryModeNote) {
@@ -32566,7 +32955,11 @@ function getCachedIncomeSummary(monthKey) {
       quick_fill_enabled: quickFillEnabled,
       quick_fill_hours: quickFillHours,
       quick_fill_mode: quickFillMode,
-      icon: icon
+      icon: icon,
+      counts_as_leave: (() => {
+        const leaveInput = document.getElementById('hour-type-counts-as-leave');
+        return leaveInput ? leaveInput.checked : false;
+      })()
     };
 
     // A new default clears the flag on every other type, so it guards the whole list.
