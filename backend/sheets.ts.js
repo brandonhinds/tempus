@@ -25,9 +25,9 @@ var TEMPUS_SHEET_SCHEMAS = {
   // own one-click duration and icon. quick_fill_mode decides what the one click DOES: 'hours' fills the
   // quick_fill_hours, 'punch' starts the punch clock instead (no hours needed).
   hour_types: {
-    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode'],
-    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5, entry_mode: '', quick_fill_enabled: 'FALSE', quick_fill_mode: 'hours' },
-    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at', 'quick_fill_enabled', 'icon', 'quick_fill_mode']
+    headers: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'auto_populate_hours', 'entry_mode', 'created_at', 'display_order', 'quick_fill_enabled', 'quick_fill_hours', 'icon', 'quick_fill_mode', 'counts_as_leave'],
+    defaults: { contributes_to_income: 'FALSE', requires_contract: 'FALSE', is_default: 'FALSE', use_for_rate_calculation: 'FALSE', auto_populate_public_holidays: 'FALSE', auto_populate_hours: 7.5, entry_mode: '', quick_fill_enabled: 'FALSE', quick_fill_mode: 'hours', counts_as_leave: 'FALSE' },
+    text: ['id', 'name', 'slug', 'color', 'contributes_to_income', 'requires_contract', 'is_default', 'use_for_rate_calculation', 'auto_populate_public_holidays', 'entry_mode', 'created_at', 'quick_fill_enabled', 'icon', 'quick_fill_mode', 'counts_as_leave']
   },
   deductions: {
     headers: ['id', 'name', 'category_id', 'company_expense', 'deduction_type', 'amount_type', 'amount_value', 'gst_inclusive', 'gst_amount', 'frequency', 'start_date', 'end_date', 'notes', 'active', 'created_at', 'updated_at', 'display_order', 'anchor_day'],

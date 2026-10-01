@@ -39,7 +39,7 @@ function migrateEntryDefaultsToHourTypes(sh) {
   // whichever hour type is currently the default.
   var defaultId = '';
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i][isDefaultIdx] === true || rows[i][isDefaultIdx] === 'TRUE') { defaultId = rows[i][idIdx]; break; }
+    if (boolFromSheetCell(rows[i][isDefaultIdx])) { defaultId = rows[i][idIdx]; break; }
   }
   if (!defaultId && slugIdx !== -1) {
     for (var j = 0; j < rows.length; j++) {
@@ -105,8 +105,10 @@ function api_getHourTypes() {
   return hourTypes;
 }
 
+// Case-insensitive: the schema upgrade rewrites checkbox cells into text-formatted columns, which can leave a
+// real boolean stored as lowercase "true". A strict === 'TRUE' then read every quick action / leave flag as off.
 function boolFromSheetCell(value) {
-  return value === true || value === 'TRUE';
+  return value === true || String(value == null ? '' : value).trim().toUpperCase() === 'TRUE';
 }
 
 function normalizeHourTypeEntryMode(value) {
@@ -150,7 +152,8 @@ function normalizeHourTypeRow(headers, row) {
     quick_fill_hours: quickFillHours,
     icon: cell('icon') ? String(cell('icon')) : '',
     // 'punch' = the quick action starts the clock; anything else (incl. blank legacy rows) = fill hours.
-    quick_fill_mode: String(cell('quick_fill_mode')).toLowerCase() === 'punch' ? 'punch' : 'hours'
+    quick_fill_mode: String(cell('quick_fill_mode')).toLowerCase() === 'punch' ? 'punch' : 'hours',
+    counts_as_leave: boolFromSheetCell(cell('counts_as_leave'))
   };
 }
 
@@ -197,7 +200,7 @@ function createHourTypeUnlocked_(data) {
   if (data.is_default) {
     for (var i = 0; i < rows.length; i++) {
       var defaultIndex = headers.indexOf('is_default');
-      if (rows[i][defaultIndex] === true || rows[i][defaultIndex] === 'TRUE') {
+      if (boolFromSheetCell(rows[i][defaultIndex])) {
         sh.getRange(i + 2, defaultIndex + 1).setValue('FALSE');
       }
     }
@@ -251,6 +254,8 @@ function createHourTypeUnlocked_(data) {
         return data.icon ? String(data.icon) : '';
       case 'quick_fill_mode':
         return data.quick_fill_mode === 'punch' ? 'punch' : 'hours';
+      case 'counts_as_leave':
+        return data.counts_as_leave ? 'TRUE' : 'FALSE';
       default:
         return '';
     }
@@ -327,7 +332,7 @@ function updateHourTypeUnlocked_(id, data) {
     for (var i = 0; i < rows.length; i++) {
       if (i !== rowIndex) {
         var defaultIndex = headers.indexOf('is_default');
-        if (rows[i][defaultIndex] === true || rows[i][defaultIndex] === 'TRUE') {
+        if (boolFromSheetCell(rows[i][defaultIndex])) {
           sh.getRange(i + 2, defaultIndex + 1).setValue('FALSE');
         }
       }
@@ -388,6 +393,10 @@ function updateHourTypeUnlocked_(id, data) {
   var quickModeIndex = headers.indexOf('quick_fill_mode');
   if (quickModeIndex !== -1 && data.hasOwnProperty('quick_fill_mode')) {
     updatedRow[quickModeIndex] = data.quick_fill_mode === 'punch' ? 'punch' : 'hours';
+  }
+  var countsAsLeaveIndex = headers.indexOf('counts_as_leave');
+  if (countsAsLeaveIndex !== -1 && data.hasOwnProperty('counts_as_leave')) {
+    updatedRow[countsAsLeaveIndex] = data.counts_as_leave ? 'TRUE' : 'FALSE';
   }
 
   sh.getRange(rowIndex + 2, 1, 1, updatedRow.length).setValues([updatedRow]);
@@ -485,7 +494,7 @@ function ensureWorkHourTypeUnlocked_() {
   if (rateCalcIndex !== -1 && data.length > 1) {
     var rows = data.slice(1);
     for (var i = 0; i < rows.length; i++) {
-      if (rows[i][rateCalcIndex] === true || rows[i][rateCalcIndex] === 'TRUE') {
+      if (boolFromSheetCell(rows[i][rateCalcIndex])) {
         hasRateCalcHourType = true;
         break;
       }
@@ -548,18 +557,18 @@ function ensureWorkHourTypeUnlocked_() {
   var requiresContractIndex = headers.indexOf('requires_contract');
   var isDefaultIndex = headers.indexOf('is_default');
   var hasExplicitDefault = isDefaultIndex !== -1 && rows.some(function(row) {
-    return row[isDefaultIndex] === true || row[isDefaultIndex] === 'TRUE';
+    return boolFromSheetCell(row[isDefaultIndex]);
   });
 
   for (var i = 0; i < rows.length; i++) {
     if (rows[i][slugIndex] === 'work') {
       var repaired = rows[i].slice();
       var changed = false;
-      if (incomeIndex !== -1 && repaired[incomeIndex] !== true && repaired[incomeIndex] !== 'TRUE') {
+      if (incomeIndex !== -1 && !boolFromSheetCell(repaired[incomeIndex])) {
         repaired[incomeIndex] = 'TRUE';
         changed = true;
       }
-      if (requiresContractIndex !== -1 && repaired[requiresContractIndex] !== true && repaired[requiresContractIndex] !== 'TRUE') {
+      if (requiresContractIndex !== -1 && !boolFromSheetCell(repaired[requiresContractIndex])) {
         repaired[requiresContractIndex] = 'TRUE';
         changed = true;
       }
@@ -604,7 +613,7 @@ function getDefaultHourTypeId() {
 
   // First look for explicitly marked default
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i][isDefaultIndex] === true || rows[i][isDefaultIndex] === 'TRUE') {
+    if (boolFromSheetCell(rows[i][isDefaultIndex])) {
       return rows[i][0];
     }
   }

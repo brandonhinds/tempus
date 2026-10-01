@@ -1039,6 +1039,7 @@
   .ts-pace-details { margin-top:2px; row-gap:5px; }
   .ts-pace-details[hidden] { display:none; }
   .ts-expected-badge { cursor:pointer; }
+  .ts-leave-bank-badge { cursor:pointer; }
   .ts-income-row { display:contents; font-size:var(--font-size-sm); }
   .ts-income-row-label { color: var(--muted); white-space:nowrap; letter-spacing:-0.003em; }
   .ts-income-row-actual { font-size:var(--font-size-xs); color: var(--muted); white-space:nowrap; justify-self:end; }
@@ -1722,6 +1723,8 @@
   .ts-day-overall small, .ts-day-section-total small { color:var(--muted); font-size:11px; font-weight:500; }
   .ts-day-editor-section { padding:var(--space-4) 0; border-top:1px solid color-mix(in srgb, var(--text) 12%, transparent); }
   .ts-day-editor-section:first-of-type { border-top:none; padding-top:0; }
+  /* Simple-only day: the sessions section is hidden, so Duration Entries leads and drops its divider. */
+  .ts-day-editor-section[style*="display: none"] + .ts-day-editor-section { border-top:none; padding-top:0; }
   .ts-day-editor-section--day { padding-bottom:0; }
   .ts-day-section-head { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-3); margin-bottom:8px; }
   .ts-day-section-head h3 { margin:0; color:var(--text); font-size:14px; font-weight:700; letter-spacing:-0.005em; }
