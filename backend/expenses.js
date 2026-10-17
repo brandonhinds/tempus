@@ -12,7 +12,19 @@ function expenseReadSheet_(name) {
   var sheet = getOrCreateSheet(name);
   var values = sheet.getDataRange().getValues();
   if (!values.length) return { sheet: sheet, headers: [], rows: [] };
-  return { sheet: sheet, headers: values[0], rows: values.slice(1).map(function(row, index) { var item = rowObjectFromHeaders_(values[0], row); item.__row = index + 2; return item; }) };
+  return { sheet: sheet, headers: values[0], rows: values.slice(1).map(function(row, index) {
+    var item = rowObjectFromHeaders_(values[0], row);
+    // Sheets turns a typed or pasted yyyy-mm-dd (or a value written outside the plain-text range) into a
+    // Date. Read it back as the text Tempus stores: google.script.run returns null for any payload holding
+    // a Date, which blanks the whole Expenses page, and every period filter compares these as strings.
+    Object.keys(item).forEach(function(key) {
+      if (Object.prototype.toString.call(item[key]) === '[object Date]') {
+        item[key] = /_at$/.test(key) ? toIsoDateTime(item[key]) : toIsoDate(item[key]);
+      }
+    });
+    item.__row = index + 2;
+    return item;
+  }) };
 }
 
 function expenseFind_(name, id) {
