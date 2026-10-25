@@ -7490,7 +7490,7 @@ function renderDeductionsList() {
     if (deductionsEmptyEl) deductionsEmptyEl.style.display = showSplit ? 'none' : 'block';
     if (deductionsSplitEl) deductionsSplitEl.style.display = showSplit ? '' : 'none';
     // Search appears once there are more than a handful of deductions to sift through.
-    const showSearch = showSplit && list.length > 5;
+    const showSearch = showSplit && scheduleListShowsSearch(list.length);
     if (deductionSearchWrap) deductionSearchWrap.style.display = showSearch ? '' : 'none';
     if (!showSearch && deductionSearchQuery) {
       deductionSearchQuery = '';
@@ -7505,87 +7505,90 @@ function renderDeductionsList() {
     renderAnnualCategorySection();
   }
 
-  // Builds the left-hand deductions list. When categories are enabled, items are grouped under category
-  // headers (custom categories alpha, then Uncategorised); otherwise it's a flat list. Each item is a
-  // clickable card that opens its editor inline on the right. The right pane (placeholder vs. editor) is
-  // managed by openDeductionForm/closeDeductionForm — this function never touches the editor host.
-  function renderDeductionMasterList(list) {
-    if (!deductionMasterListEl) return;
-    deductionMasterListEl.innerHTML = '';
+  // ---------------------------------------------------------------------------------------------------------
+  // Shared schedule list components: the Deductions page and Expenses › Schedules are both lists of repeating
+  // items grouped under the shared categories, with search, a collapsible accordion and a two-panel editor.
+  // Each page supplies its own fields; anything it leaves out isn't rendered.
+  // ---------------------------------------------------------------------------------------------------------
 
-    const selectedId = state.selectedDeductionId;
-    const appendCard = (parent, deduction) => {
-      parent.appendChild(createDeductionCard(deduction, {
-        hideCategoryBadge: true,
-        selected: !!selectedId && deduction.id === selectedId
-      }));
-    };
+  /** Search appears once there are more than a handful of items to sift through. */
+  function scheduleListShowsSearch(count) { return count > 5; }
 
-    const q = deductionSearchQuery;
+  /** Collapse into an accordion once it's worth it: 3+ groups, or more than a handful of items in total. */
+  function scheduleListIsAccordion(groupCount, itemCount) { return groupCount >= 3 || itemCount > 6; }
+
+  /**
+   * Groups items under their categories: categories alphabetically, then Uncategorised. Within a group,
+   * active items come first, then by name. Only categories that have items get a group.
+   * opts: { categories, categoryIdOf(item) ('' = uncategorised), metaOf(category) -> {id,name,color},
+   *         isActive(item), nameOf(item) }
+   */
+  function groupScheduleItems(items, opts) {
+    const byCategory = {};
+    items.forEach((item) => {
+      const key = opts.categoryIdOf(item) || '__uncategorised__';
+      (byCategory[key] || (byCategory[key] = [])).push(item);
+    });
+    const sortItems = (arr) => arr.slice().sort((a, b) => {
+      const aActive = opts.isActive(a), bActive = opts.isActive(b);
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      return (opts.nameOf(a) || '').localeCompare(opts.nameOf(b) || '');
+    });
+    const groups = (opts.categories || [])
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .filter((category) => byCategory[category.id] && byCategory[category.id].length)
+      .map((category) => ({ meta: opts.metaOf(category), items: sortItems(byCategory[category.id]) }));
+    if (byCategory['__uncategorised__'] && byCategory['__uncategorised__'].length) {
+      groups.push({ meta: { id: '__uncategorised__', name: 'Uncategorised', color: '#6b7280' }, items: sortItems(byCategory['__uncategorised__']) });
+    }
+    return groups;
+  }
+
+  /**
+   * Renders a schedule list into `listEl`: grouped under category headers (an accordion once
+   * scheduleListIsAccordion says so) or flat, filtered by `query`.
+   * opts: { items, grouped, groups (from groupScheduleItems), query, matches(item, q), noMatchesText(q),
+   *         collapseControlsEl, collapseState() -> {groupId: collapsed}, ensureCollapseState(),
+   *         isSelectedIn(group), createCard(item), onHeadClick(group, isSelectedHere) }
+   */
+  function renderScheduleGroupedList(listEl, opts) {
+    listEl.innerHTML = '';
+    const q = opts.query || '';
     const searching = !!q;
-    const matches = (d) => !q || (d.name || '').toLowerCase().includes(q);
+    const matches = (item) => !q || opts.matches(item, q);
     const showNoMatches = () => {
       const note = document.createElement('div');
       note.className = 'ts-ded-no-matches ts-note';
-      note.textContent = 'No deductions match “' + q + '”.';
-      deductionMasterListEl.appendChild(note);
+      note.textContent = opts.noMatchesText(q);
+      listEl.appendChild(note);
     };
 
-    const categoriesEnabled = isDeductionCategoriesEnabled();
-    const hasCustomCategories = categoriesEnabled && state.deductionCategories.length > 0;
-
-    // Flat list (no custom categories): just filter + render, no accordion.
-    if (!hasCustomCategories) {
-      if (deductionCategoryCollapseControls) deductionCategoryCollapseControls.style.display = 'none';
-      const items = list.filter(matches);
+    // Flat list (no categories): just filter + render, no accordion.
+    if (!opts.grouped) {
+      if (opts.collapseControlsEl) opts.collapseControlsEl.style.display = 'none';
+      const items = opts.items.filter(matches);
       if (!items.length) { if (searching) showNoMatches(); return; }
-      items.forEach((deduction) => appendCard(deductionMasterListEl, deduction));
+      items.forEach((item) => listEl.appendChild(opts.createCard(item)));
       return;
     }
 
-    // Group the FULL list so the accordion state and counts stay stable regardless of the current filter.
-    const groups = {};
-    list.forEach((deduction) => {
-      const key = deduction.category_id && state.deductionCategoryMap[deduction.category_id]
-        ? deduction.category_id
-        : '__uncategorised__';
-      (groups[key] || (groups[key] = [])).push(deduction);
-    });
-    // Alphabetical within each category (matches the alphabetical category order); inactive sink to the bottom.
-    const sortItems = (arr) => arr.slice().sort((a, b) => {
-      const aActive = a.active !== false, bActive = b.active !== false;
-      if (aActive !== bActive) return aActive ? -1 : 1;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-    // Only categories that actually have items get a header (empty categories live in Manage categories).
-    const ordered = state.deductionCategories
-      .slice()
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-      .filter((cat) => groups[cat.id] && groups[cat.id].length)
-      .map((cat) => ({ meta: getDeductionCategoryMeta(cat.id), items: sortItems(groups[cat.id]) }));
-    if (groups['__uncategorised__'] && groups['__uncategorised__'].length) {
-      ordered.push({
-        meta: { id: '__uncategorised__', name: 'Uncategorised', color: '#6b7280' },
-        items: sortItems(groups['__uncategorised__'])
-      });
-    }
-
-    // Collapse into an accordion once it's worth it: 3+ categories, OR more than a handful of deductions
-    // in total (a single category can hold many, and only a few cards fit on screen at once).
-    const accordion = ordered.length >= 3 || list.length > 6;
+    // Grouped from the FULL list so the accordion state and counts stay stable regardless of the filter.
+    const accordion = scheduleListIsAccordion(opts.groups.length, opts.items.length);
     const showControls = accordion && !searching;
-    if (deductionCategoryCollapseControls) deductionCategoryCollapseControls.style.display = showControls ? '' : 'none';
-    if (accordion) ensureDeductionCategoryCollapseState();
+    if (opts.collapseControlsEl) opts.collapseControlsEl.style.display = showControls ? '' : 'none';
+    if (accordion) opts.ensureCollapseState();
+    const collapseState = opts.collapseState() || {};
 
     let renderedAny = false;
-    ordered.forEach((group) => {
+    opts.groups.forEach((group) => {
       const visibleItems = searching ? group.items.filter(matches) : group.items;
       if (searching && !visibleItems.length) return; // hide categories with no hits while searching
 
-      const isSelectedHere = !!selectedId && group.items.some((d) => d.id === selectedId);
+      const isSelectedHere = opts.isSelectedIn(group);
       const collapsible = accordion && !searching;
-      // Keep the category holding the selected (being-edited) deduction open so its editor target stays visible.
-      const collapsed = collapsible && !isSelectedHere && !!state.deductionCategoryCollapse[group.meta.id];
+      // Keep the group holding the selected (being-edited) item open so its editor target stays visible.
+      const collapsed = collapsible && !isSelectedHere && !!collapseState[group.meta.id];
 
       const wrap = document.createElement('div');
       wrap.className = 'ts-ded-group';
@@ -7610,180 +7613,226 @@ function renderDeductionsList() {
         chev.className = 'ts-ded-group-chev';
         chev.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
         head.appendChild(chev);
-        head.addEventListener('click', () => {
-          ensureDeductionCategoryCollapseState();
-          // If this category holds the deduction being edited, collapsing would hide the editor target. When
-          // there are no unsaved changes, treat the collapse as "cancel the edit and collapse"; if there ARE
-          // changes, keep it open and nudge to save first rather than silently discarding them.
-          if (isSelectedHere && isDeductionEditorOpen()) {
-            if (isDeductionFormDirty()) {
-              if (typeof setStatus === 'function') setStatus('Save or cancel your changes before collapsing this category.', 'warn');
-              return;
-            }
-            state.deductionCategoryCollapse[group.meta.id] = true;
-            saveCache();
-            closeDeductionForm(); // clears the selection + re-renders (now collapsible)
-            return;
-          }
-          // Single-open accordion: opening a category collapses the others, so only one is expanded at a time.
-          const willOpen = !!state.deductionCategoryCollapse[group.meta.id];
-          if (willOpen) {
-            // Switching to another category: drop any clean in-progress edit (in a different category) so its
-            // category can collapse too. Unsaved changes block the switch rather than being silently discarded.
-            const editingElsewhere = isDeductionEditorOpen();
-            if (editingElsewhere && isDeductionFormDirty()) {
-              if (typeof setStatus === 'function') setStatus('Save or cancel your changes before switching categories.', 'warn');
-              return;
-            }
-            Object.keys(state.deductionCategoryCollapse).forEach((k) => { state.deductionCategoryCollapse[k] = true; });
-            state.deductionCategoryCollapse[group.meta.id] = false;
-            saveCache();
-            // Opening a category selects its first (editable) deduction so the right pane is never empty.
-            // openDeductionForm resets + selects + re-renders, so it also clears any prior clean edit.
-            const firstEditable = group.items.find((d) => !d.company_expense);
-            if (firstEditable) { openDeductionForm('edit', firstEditable); return; }
-            if (editingElsewhere) { closeDeductionForm(); return; } // clears selection + re-renders (old category collapses)
-          } else {
-            state.deductionCategoryCollapse[group.meta.id] = true;
-          }
-          saveCache();
-          renderDeductionsList();
-        });
+        head.addEventListener('click', () => opts.onHeadClick(group, isSelectedHere));
       }
       wrap.appendChild(head);
 
       if (!collapsed) {
-        visibleItems.forEach((deduction) => appendCard(wrap, deduction));
+        visibleItems.forEach((item) => wrap.appendChild(opts.createCard(item)));
       }
       renderedAny = true;
-      deductionMasterListEl.appendChild(wrap);
+      listEl.appendChild(wrap);
     });
 
     if (searching && !renderedAny) showNoMatches();
   }
 
-  function createDeductionCard(deduction, options = {}) {
-    const hideCategoryBadge = !!options.hideCategoryBadge;
+  /**
+   * A schedule card: a title with badges, a line of meta, an optional "next" line and note. Clicking an
+   * editable card calls onOpen; a read-only one only shows its title tooltip.
+   * config: { title, badges: [{ text | html, style?, cssText?, title? }], meta: [{ text, title? }],
+   *           occurrence?, note?, selected, readOnly, readOnlyTitle, editTitle, onOpen() }
+   */
+  function createScheduleCard(config) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'ts-deduction-card' + (options.selected ? ' is-selected' : '');
-    if (!deduction.active || deduction.company_expense) {
-      wrapper.classList.add('ts-deduction-readonly');
-    }
+    wrapper.className = 'ts-deduction-card' + (config.selected ? ' is-selected' : '');
+    if (config.readOnly) wrapper.classList.add('ts-deduction-readonly');
 
     const details = document.createElement('div');
     details.className = 'ts-deduction-details';
 
     const header = document.createElement('div');
     header.className = 'ts-deduction-header';
-
     const title = document.createElement('div');
     title.style.fontWeight = '600';
-    title.textContent = deduction.name || 'Untitled deduction';
+    title.textContent = config.title;
     header.appendChild(title);
-
-    if (!hideCategoryBadge && isDeductionCategoriesEnabled()) {
-      const categoryMeta = getDeductionCategoryMeta(deduction.category_id);
-      const categoryBadge = document.createElement('span');
-      categoryBadge.className = 'ts-badge';
-      categoryBadge.textContent = categoryMeta.name;
-      categoryBadge.style.borderLeft = `4px solid ${categoryMeta.color || '#6b7280'}`;
-      header.appendChild(categoryBadge);
-    }
-
-    const expenseBadge = document.createElement('span');
-    expenseBadge.className = 'ts-badge';
-    const isUnusedCompanyExpense = !!deduction.company_expense;
-    expenseBadge.textContent = deduction.company_expense ? 'Company expense' : 'Salary sacrifice';
-    header.appendChild(expenseBadge);
-
-    // Add prominent warning indicator for unused company expenses
-    if (isUnusedCompanyExpense) {
-      const warningBadge = document.createElement('span');
-      warningBadge.className = 'ts-badge';
-      warningBadge.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle;"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg> Not used in calculations';
-      warningBadge.style.cssText = 'background:var(--warning)20; color:var(--warning); border:1px solid var(--warning); font-weight:600;';
-      warningBadge.title = 'Company expenses are recorded on the Expenses page now. This older entry is kept as history and is not included in income or BAS figures.';
-      header.appendChild(warningBadge);
-    }
-
-    if (deduction.deduction_type === 'extra_super') {
-      const typeBadge = document.createElement('span');
-      typeBadge.className = 'ts-badge';
-      typeBadge.textContent = 'Extra super';
-      header.appendChild(typeBadge);
-    }
-
+    (config.badges || []).forEach((badge) => {
+      if (!badge) return;
+      const el = document.createElement('span');
+      el.className = 'ts-badge';
+      if (badge.html != null) el.innerHTML = badge.html; else el.textContent = badge.text;
+      if (badge.style) Object.keys(badge.style).forEach((key) => { el.style[key] = badge.style[key]; });
+      if (badge.cssText) el.style.cssText = badge.cssText;
+      if (badge.title) el.title = badge.title;
+      header.appendChild(el);
+    });
     details.appendChild(header);
 
     const meta = document.createElement('div');
     meta.className = 'ts-deduction-meta';
-    const amountSpan = document.createElement('span');
-    amountSpan.textContent = formatDeductionAmount(deduction);
-    if (deduction.company_expense && deduction.gst_inclusive && deduction.amount_type !== 'percent') {
-      amountSpan.textContent += ' (GST excl.)';
-      amountSpan.title = `Entered ${formatCurrency(deduction.amount_value)} incl. GST`;
-    }
-    meta.appendChild(amountSpan);
-
-    const freqSpan = document.createElement('span');
-    freqSpan.textContent = formatFrequencyLabel(deduction.frequency);
-    meta.appendChild(freqSpan);
-
-    const startSpan = document.createElement('span');
-    startSpan.textContent = `Starts ${deduction.start_date ? DATE_FULL_FORMATTER.format(parseIsoDate(deduction.start_date)) : '—'}`;
-    meta.appendChild(startSpan);
-
-    if (deduction.end_date) {
-      const endSpan = document.createElement('span');
-      endSpan.textContent = `Ends ${DATE_FULL_FORMATTER.format(parseIsoDate(deduction.end_date))}`;
-      meta.appendChild(endSpan);
+    (config.meta || []).forEach((part) => {
+      if (!part) return;
+      const span = document.createElement('span');
+      span.textContent = part.text;
+      if (part.title) span.title = part.title;
+      meta.appendChild(span);
+    });
+    if (config.occurrence != null) {
+      const occurrenceEl = document.createElement('span');
+      occurrenceEl.className = 'ts-deduction-occurrences';
+      occurrenceEl.textContent = config.occurrence;
+      meta.appendChild(occurrenceEl);
     }
     details.appendChild(meta);
 
-    const upcomingDates = getUpcomingDeductionDates(deduction, 5);
-    if (deduction.frequency !== 'once') {
-      const occurrenceEl = document.createElement('span');
-      occurrenceEl.className = 'ts-deduction-occurrences';
-      if (upcomingDates.length) {
-        occurrenceEl.textContent = `Next deduction on ${DATE_FULL_FORMATTER.format(parseIsoDate(upcomingDates[0]))}`;
-      } else {
-        occurrenceEl.textContent = 'No upcoming deductions scheduled.';
-      }
-      meta.appendChild(occurrenceEl);
-    }
-
-    if (deduction.notes) {
+    if (config.note) {
       const noteEl = document.createElement('div');
       noteEl.className = 'ts-deduction-note';
-      noteEl.textContent = deduction.notes;
+      noteEl.textContent = config.note;
       details.appendChild(noteEl);
     }
-
     wrapper.appendChild(details);
+
+    if (config.readOnly) {
+      wrapper.title = config.readOnlyTitle || '';
+    } else {
+      wrapper.setAttribute('role', 'button');
+      wrapper.setAttribute('tabindex', '0');
+      wrapper.title = config.editTitle || '';
+      wrapper.addEventListener('click', (event) => {
+        if (event.target.closest('button, a, input, select')) return;
+        config.onOpen();
+      });
+      wrapper.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          config.onOpen();
+        }
+      });
+    }
+    return wrapper;
+  }
+
+  // Builds the left-hand deductions list. When categories are enabled, items are grouped under category
+  // headers (custom categories alpha, then Uncategorised); otherwise it's a flat list. Each item is a
+  // clickable card that opens its editor inline on the right. The right pane (placeholder vs. editor) is
+  // managed by openDeductionForm/closeDeductionForm — this function never touches the editor host.
+  function renderDeductionMasterList(list) {
+    if (!deductionMasterListEl) return;
+    const selectedId = state.selectedDeductionId;
+    const categoriesEnabled = isDeductionCategoriesEnabled();
+    const hasCustomCategories = categoriesEnabled && state.deductionCategories.length > 0;
+    renderScheduleGroupedList(deductionMasterListEl, {
+      items: list,
+      grouped: hasCustomCategories,
+      groups: hasCustomCategories ? groupScheduleItems(list, {
+        categories: state.deductionCategories,
+        categoryIdOf: (deduction) => (deduction.category_id && state.deductionCategoryMap[deduction.category_id] ? deduction.category_id : ''),
+        metaOf: (category) => getDeductionCategoryMeta(category.id),
+        isActive: (deduction) => deduction.active !== false,
+        nameOf: (deduction) => deduction.name
+      }) : [],
+      query: deductionSearchQuery,
+      matches: (deduction, q) => (deduction.name || '').toLowerCase().includes(q),
+      noMatchesText: (q) => 'No deductions match “' + q + '”.',
+      collapseControlsEl: deductionCategoryCollapseControls,
+      collapseState: () => state.deductionCategoryCollapse,
+      ensureCollapseState: ensureDeductionCategoryCollapseState,
+      isSelectedIn: (group) => !!selectedId && group.items.some((d) => d.id === selectedId),
+      createCard: (deduction) => createDeductionCard(deduction, {
+        hideCategoryBadge: true,
+        selected: !!selectedId && deduction.id === selectedId
+      }),
+      onHeadClick: deductionGroupHeadClick
+    });
+  }
+
+  // A category header on the Deductions page was clicked (accordion mode). Keeps the deduction being edited
+  // visible, and blocks switching away from unsaved changes.
+  function deductionGroupHeadClick(group, isSelectedHere) {
+    ensureDeductionCategoryCollapseState();
+    // If this category holds the deduction being edited, collapsing would hide the editor target. When
+    // there are no unsaved changes, treat the collapse as "cancel the edit and collapse"; if there ARE
+    // changes, keep it open and nudge to save first rather than silently discarding them.
+    if (isSelectedHere && isDeductionEditorOpen()) {
+      if (isDeductionFormDirty()) {
+        if (typeof setStatus === 'function') setStatus('Save or cancel your changes before collapsing this category.', 'warn');
+        return;
+      }
+      state.deductionCategoryCollapse[group.meta.id] = true;
+      saveCache();
+      closeDeductionForm(); // clears the selection + re-renders (now collapsible)
+      return;
+    }
+    // Single-open accordion: opening a category collapses the others, so only one is expanded at a time.
+    const willOpen = !!state.deductionCategoryCollapse[group.meta.id];
+    if (willOpen) {
+      // Switching to another category: drop any clean in-progress edit (in a different category) so its
+      // category can collapse too. Unsaved changes block the switch rather than being silently discarded.
+      const editingElsewhere = isDeductionEditorOpen();
+      if (editingElsewhere && isDeductionFormDirty()) {
+        if (typeof setStatus === 'function') setStatus('Save or cancel your changes before switching categories.', 'warn');
+        return;
+      }
+      Object.keys(state.deductionCategoryCollapse).forEach((k) => { state.deductionCategoryCollapse[k] = true; });
+      state.deductionCategoryCollapse[group.meta.id] = false;
+      saveCache();
+      // Opening a category selects its first (editable) deduction so the right pane is never empty.
+      // openDeductionForm resets + selects + re-renders, so it also clears any prior clean edit.
+      const firstEditable = group.items.find((d) => !d.company_expense);
+      if (firstEditable) { openDeductionForm('edit', firstEditable); return; }
+      if (editingElsewhere) { closeDeductionForm(); return; } // clears selection + re-renders (old category collapses)
+    } else {
+      state.deductionCategoryCollapse[group.meta.id] = true;
+    }
+    saveCache();
+    renderDeductionsList();
+  }
+
+  function createDeductionCard(deduction, options = {}) {
+    const hideCategoryBadge = !!options.hideCategoryBadge;
+    const badges = [];
+    if (!hideCategoryBadge && isDeductionCategoriesEnabled()) {
+      const categoryMeta = getDeductionCategoryMeta(deduction.category_id);
+      badges.push({ text: categoryMeta.name, style: { borderLeft: `4px solid ${categoryMeta.color || '#6b7280'}` } });
+    }
+    badges.push({ text: deduction.company_expense ? 'Company expense' : 'Salary sacrifice' });
+    // Add prominent warning indicator for unused company expenses
+    if (deduction.company_expense) {
+      badges.push({
+        html: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle;"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></svg> Not used in calculations',
+        cssText: 'background:var(--warning)20; color:var(--warning); border:1px solid var(--warning); font-weight:600;',
+        title: 'Company expenses are recorded on the Expenses page now. This older entry is kept as history and is not included in income or BAS figures.'
+      });
+    }
+    if (deduction.deduction_type === 'extra_super') badges.push({ text: 'Extra super' });
+
+    const meta = [];
+    const amount = { text: formatDeductionAmount(deduction) };
+    if (deduction.company_expense && deduction.gst_inclusive && deduction.amount_type !== 'percent') {
+      amount.text += ' (GST excl.)';
+      amount.title = `Entered ${formatCurrency(deduction.amount_value)} incl. GST`;
+    }
+    meta.push(amount);
+    meta.push({ text: formatFrequencyLabel(deduction.frequency) });
+    meta.push({ text: `Starts ${deduction.start_date ? DATE_FULL_FORMATTER.format(parseIsoDate(deduction.start_date)) : '—'}` });
+    if (deduction.end_date) meta.push({ text: `Ends ${DATE_FULL_FORMATTER.format(parseIsoDate(deduction.end_date))}` });
+
+    let occurrence = null;
+    if (deduction.frequency !== 'once') {
+      const upcomingDates = getUpcomingDeductionDates(deduction, 5);
+      occurrence = upcomingDates.length
+        ? `Next deduction on ${DATE_FULL_FORMATTER.format(parseIsoDate(upcomingDates[0]))}`
+        : 'No upcoming deductions scheduled.';
+    }
 
     // Click-to-open the editor (no Edit button); delete lives inside the form (no on-card Delete).
     // Matches the Hour Types pattern. Read-only deductions (inactive, or a company expense kept as history
     // since those moved to the Expenses page) aren't editable, so they stay non-interactive.
     const readOnly = (!deduction.active) || !!deduction.company_expense;
-    if (readOnly) {
-      wrapper.title = deduction.company_expense ? 'Company expenses are recorded on the Expenses page. This entry is read-only history.' : 'This deduction is inactive and read-only.';
-    } else {
-      wrapper.setAttribute('role', 'button');
-      wrapper.setAttribute('tabindex', '0');
-      wrapper.title = 'Edit ' + (deduction.name || 'deduction');
-      wrapper.addEventListener('click', (event) => {
-        if (event.target.closest('button, a, input, select')) return;
-        openDeductionForm('edit', deduction);
-      });
-      wrapper.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openDeductionForm('edit', deduction);
-        }
-      });
-    }
-
-    return wrapper;
+    return createScheduleCard({
+      title: deduction.name || 'Untitled deduction',
+      badges,
+      meta,
+      occurrence,
+      note: deduction.notes,
+      selected: !!options.selected,
+      readOnly,
+      readOnlyTitle: deduction.company_expense ? 'Company expenses are recorded on the Expenses page. This entry is read-only history.' : 'This deduction is inactive and read-only.',
+      editTitle: 'Edit ' + (deduction.name || 'deduction'),
+      onOpen: () => openDeductionForm('edit', deduction)
+    });
   }
 
   function resetDeductionForm() {
@@ -9083,7 +9132,7 @@ function updateDeductionFormVisibility() {
     },
     enable_expenses: {
       name: 'Enable business expense ledger',
-      description: 'Adds immutable expense transactions, payments, receipt evidence, reconciliation and financial-year exports.',
+      description: 'Adds the Expenses page: one-off and scheduled business expenses with a paid date, GST treatment, optional receipt links and financial-year exports.',
       order: 332,
       group: 'company'
     },
@@ -27121,6 +27170,15 @@ function getCachedIncomeSummary(monthKey) {
       defaultValue: '',
       event: 'change'
     },
+    expense_creation: {
+      section: 'enable_expenses',
+      order: 48,
+      element: () => document.getElementById('set-expense-creation'),
+      getValue: (el) => el.value,
+      setValue: (el, val) => { if (el) el.value = ['on_date', 'month', 'financial_year'].includes(val) ? val : 'month'; },
+      defaultValue: 'month',
+      event: 'change'
+    },
     payg_instalment_rate: {
       section: 'is_sole_trader',
       order: 50,
@@ -28328,6 +28386,11 @@ function getCachedIncomeSummary(monthKey) {
       : new Date();
     const year = baseDate.getFullYear();
     const month = baseDate.getMonth();
+    // Company expenses come from the expense ledger (Expenses page), not the old company-expense deductions.
+    if (type === 'company' && typeof showCompanyExpensesModal === 'function') {
+      showCompanyExpensesModal(year, month);
+      return;
+    }
 
     // Set modal title
     const monthName = MONTH_ABBREVIATIONS[month];

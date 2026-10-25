@@ -1,23 +1,129 @@
 {
   "invoices": [
-    {"id":"invoice-part","status":"issued","invoice_date":"2026-07-10"},
-    {"id":"invoice-prepaid","status":"issued","invoice_date":"2026-08-10"},
-    {"id":"invoice-void","status":"void","invoice_date":"2026-07-12"}
+    {
+      "id": "invoice-part",
+      "status": "issued",
+      "invoice_date": "2026-07-10"
+    },
+    {
+      "id": "invoice-prepaid",
+      "status": "issued",
+      "invoice_date": "2026-08-10"
+    },
+    {
+      "id": "invoice-void",
+      "status": "void",
+      "invoice_date": "2026-07-12"
+    }
   ],
   "invoice_lines": {
-    "invoice-part":[{"amount":100,"gst_amount":10}],
-    "invoice-prepaid":[{"amount":200,"gst_amount":20}],
-    "invoice-void":[{"amount":100,"gst_amount":10}]
+    "invoice-part": [
+      {
+        "amount": 100,
+        "gst_amount": 10
+      }
+    ],
+    "invoice-prepaid": [
+      {
+        "amount": 200,
+        "gst_amount": 20
+      }
+    ],
+    "invoice-void": [
+      {
+        "amount": 100,
+        "gst_amount": 10
+      }
+    ]
   },
   "expenses": [
-    {"id":"expense-taxable","status":"recorded","purchase_date":"2026-07-05","supplier_invoice_date":"2026-07-05","amount":110,"gst_code":"taxable","gst_amount":10,"business_use_percentage":1,"claimable_gst_confirmed":"TRUE","reconciliation_state":"reconciled","attachments":[{"id":"receipt-1"}]},
-    {"id":"expense-out-of-scope","status":"recorded","purchase_date":"2026-07-06","supplier_invoice_date":"2026-07-06","amount":50,"gst_code":"out_of_scope","gst_amount":0,"business_use_percentage":1,"claimable_gst_confirmed":"FALSE","reconciliation_state":"reconciled","attachments":[]},
-    {"id":"expense-legacy","status":"legacy_unreconciled","purchase_date":"2026-07-07","supplier_invoice_date":"2026-07-07","amount":55,"gst_code":"taxable","gst_amount":5,"business_use_percentage":1,"claimable_gst_confirmed":"FALSE","reconciliation_state":"legacy_unreconciled","attachments":[]},
-    {"id":"expense-void","status":"void","purchase_date":"2026-07-08","supplier_invoice_date":"2026-07-08","amount":110,"gst_code":"taxable","gst_amount":10,"business_use_percentage":1,"claimable_gst_confirmed":"TRUE","reconciliation_state":"reconciled","attachments":[{"id":"receipt-2"}]}
-  ],
-  "expense_payments": [
-    {"expense_transaction_id":"expense-taxable","payment_date":"2026-07-16","amount":55},
-    {"expense_transaction_id":"expense-taxable","payment_date":"2026-08-16","amount":55},
-    {"expense_transaction_id":"expense-out-of-scope","payment_date":"2026-07-17","amount":50}
+    {
+      "id": "expense-taxable",
+      "status": "recorded",
+      "paid_date": "2026-07-16",
+      "supplier_invoice_date": "2026-07-05",
+      "amount": 110,
+      "gst_code": "taxable",
+      "gst_amount": 10,
+      "business_use_percentage": 1,
+      "payment_method": "Credit card",
+      "attachments": [
+        {
+          "id": "receipt-1"
+        }
+      ]
+    },
+    {
+      "id": "expense-out-of-scope",
+      "status": "recorded",
+      "paid_date": "2026-07-17",
+      "supplier_invoice_date": "2026-07-06",
+      "amount": 50,
+      "gst_code": "out_of_scope",
+      "gst_amount": 0,
+      "business_use_percentage": 1,
+      "payment_method": "Credit card",
+      "attachments": []
+    },
+    {
+      "id": "expense-unpaid",
+      "status": "recorded",
+      "paid_date": "",
+      "supplier_invoice_date": "2026-07-07",
+      "amount": 55,
+      "gst_code": "taxable",
+      "gst_amount": 5,
+      "business_use_percentage": 1,
+      "payment_method": "",
+      "attachments": []
+    },
+    {
+      "id": "expense-prepaid",
+      "status": "recorded",
+      "paid_date": "2026-07-20",
+      "supplier_invoice_date": "2026-08-03",
+      "amount": 22,
+      "gst_code": "taxable",
+      "gst_amount": 2,
+      "business_use_percentage": 1,
+      "payment_method": "Direct debit",
+      "attachments": []
+    },
+    {
+      "id": "expense-half",
+      "status": "recorded",
+      "paid_date": "2026-08-02",
+      "supplier_invoice_date": "2026-07-28",
+      "amount": 220,
+      "gst_code": "taxable",
+      "gst_amount": 20,
+      "business_use_percentage": 0.5,
+      "payment_method": "EFT",
+      "attachments": []
+    },
+    {
+      "id": "expense-scheduled",
+      "status": "scheduled",
+      "paid_date": "",
+      "supplier_invoice_date": "2026-07-25",
+      "amount": 33,
+      "gst_code": "taxable",
+      "gst_amount": 3,
+      "business_use_percentage": 1,
+      "payment_method": "",
+      "attachments": []
+    },
+    {
+      "id": "expense-skipped",
+      "status": "skipped",
+      "paid_date": "",
+      "supplier_invoice_date": "2026-07-26",
+      "amount": 44,
+      "gst_code": "taxable",
+      "gst_amount": 4,
+      "business_use_percentage": 1,
+      "payment_method": "",
+      "attachments": []
+    }
   ]
 }

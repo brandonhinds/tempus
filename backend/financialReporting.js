@@ -41,13 +41,35 @@ function invoiceIncomeForPeriod_(invoice, from, to) {
   return { sales: totals.totalWithGst, gst: totals.gstAmount };
 }
 
-/** `source` ({ transactions, payments }) lets a caller summing many periods read the sheets once. */
+/** True for a real expense (paid or unpaid); scheduled and skipped rows never count. */
+function expenseIsRecorded_(transaction) { return !!transaction && String(transaction.status) === 'recorded'; }
+function expenseIsPaid_(transaction) { return expenseIsRecorded_(transaction) && !!String(transaction.paid_date || ''); }
+
+/**
+ * The date a recorded expense counts on, or '' when it doesn't count on that basis. Cash: the paid date.
+ * Accrual: the earlier of the invoice date and the paid date (the ATO's attribution rule for accruals).
+ */
+function expenseAttributionDate_(basis, transaction) {
+  if (!expenseIsRecorded_(transaction)) return '';
+  var paid = String(transaction.paid_date || '');
+  if (basis !== 'accrual') return paid;
+  var invoice = String(transaction.supplier_invoice_date || '');
+  if (paid && invoice) return paid < invoice ? paid : invoice;
+  return paid || invoice;
+}
+
+/** The GST credit an expense gives: Taxable only, scaled by business use. Never for a schedule forecast. */
+function expenseClaimableGst_(transaction) {
+  if (!expenseIsRecorded_(transaction) || String(transaction.gst_code) !== 'taxable') return 0;
+  return roundMoney_((Number(transaction.gst_amount) || 0) * normalizePercentageDecimal_(transaction.business_use_percentage, 1));
+}
+
+/** `source` ({ transactions }) lets a caller summing many periods read the sheet once. */
 function expenseActualForPeriod_(basis, from, to, source) {
   var transactions = source ? source.transactions : api_listExpenseTransactions({});
-  var payments = source ? source.payments : expenseReadSheet_('expense_payments').rows;
   var totals = { purchases: 0, gst: 0 };
   transactions.forEach(function(transaction) {
-    var share = expenseAttributionForPeriod_(basis, from, to, transaction, payments);
+    var share = expenseAttributionForPeriod_(basis, from, to, transaction);
     totals.purchases += share.purchases;
     totals.gst += share.gst;
   });
@@ -55,22 +77,80 @@ function expenseActualForPeriod_(basis, from, to, source) {
 }
 
 /**
- * One expense's share of a period, unrounded. Accrual counts the whole expense on its supplier invoice
- * (else purchase) date; cash counts what was paid inside the period, with claimable GST in proportion.
- * The BAS total above and the accountant report's line items both use it, so they cannot disagree.
+ * One expense's share of a period: the whole expense and its GST credit when the date it counts on
+ * (expenseAttributionDate_: paid date on cash, the earlier of invoice and paid date on accrual) falls in
+ * the period, else nothing. The BAS total above and the accountant report's line items both use it, so
+ * they cannot disagree.
  */
-function expenseAttributionForPeriod_(basis, from, to, transaction, payments) {
-  if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return { purchases: 0, gst: 0 };
-  if (basis === 'accrual') {
-    var eventDate = String(transaction.supplier_invoice_date || transaction.purchase_date || '');
-    if (eventDate < from || eventDate > to) return { purchases: 0, gst: 0 };
-    return { purchases: Number(transaction.amount) || 0, gst: expenseClaimableGst_(transaction) };
-  }
-  var paid = payments.filter(function(payment) { return String(payment.expense_transaction_id) === String(transaction.id) && payment.payment_date >= from && payment.payment_date <= to; })
-    .reduce(function(sum, payment) { return sum + Number(payment.amount || 0); }, 0);
-  var amount = Number(transaction.amount) || 0;
-  if (amount <= 0 || paid <= 0) return { purchases: 0, gst: 0 };
-  return { purchases: paid, gst: expenseClaimableGst_(transaction) * Math.min(1, paid / amount) };
+function expenseAttributionForPeriod_(basis, from, to, transaction) {
+  var date = expenseAttributionDate_(basis, transaction);
+  if (!date || date < from || date > to) return { purchases: 0, gst: 0 };
+  return { purchases: Number(transaction.amount) || 0, gst: expenseClaimableGst_(transaction) };
+}
+
+/**
+ * The expenses counted in one calendar month on a basis, for the Time Entry "Company expenses" breakdown:
+ * each with its amount including and excluding GST, its GST credit and what it takes off income (the
+ * amount less its credit). `month` is the calendar month index (0-11). The total counted is the figure
+ * api_getCompanyExpenseMonthlyTotals gives the dashboard for that month, so the two always agree.
+ * `pending` lists the month's payments that don't count yet, shown apart and never in the totals: schedule
+ * payments due in the month, and unpaid expenses invoiced in it that the basis doesn't count (cash basis).
+ */
+function api_getCompanyExpensesForMonth(payload) {
+  var year = Number(payload && payload.year);
+  var month = Number(payload && payload.month);
+  if (!isFinite(year) || !isFinite(month) || month < 0 || month > 11) throw new Error('Year and month are required.');
+  var basis = payload && payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
+  var key = year + '-' + ('0' + (month + 1)).slice(-2);
+  var result = companyExpensesBreakdown_(basis, key, api_listExpenseTransactions({}), null);
+  result.success = true;
+  result.accounting_basis = basis;
+  return result;
+}
+
+// What the Company expenses breakdown and the expense form need from each expense, so the breakdowns sent
+// with the monthly totals stay small (no attachments or timestamps).
+var COMPANY_EXPENSE_BREAKDOWN_FIELDS_ = ['id', 'status', 'vendor', 'vendor_abn', 'description', 'category_id', 'category', 'category_color', 'gst_code',
+  'gst_amount', 'amount', 'amount_ex_gst', 'business_use_percentage', 'supplier_invoice_date', 'paid_date', 'payment_method', 'payment_reference', 'notes', 'source_rule_id'];
+
+/**
+ * One calendar month ('YYYY-MM') of company expenses on a basis: the expenses it counts (with counted_date,
+ * gst_credit and counted, what each takes off income), their totals, and the payments not counted yet
+ * (schedule payments due in the month, and unpaid expenses invoiced in it that the basis doesn't count).
+ * `fields` limits each item to those keys; null keeps every field.
+ */
+function companyExpensesBreakdown_(basis, key, transactions, fields) {
+  var from = key + '-01';
+  var parts = key.split('-').map(Number);
+  var to = key + '-' + ('0' + new Date(Date.UTC(parts[0], parts[1], 0, 12)).getUTCDate()).slice(-2);
+  var copy = function(transaction) {
+    var item = {};
+    (fields || Object.keys(transaction)).forEach(function(name) { if (transaction[name] !== undefined) item[name] = transaction[name]; });
+    return item;
+  };
+  var items = [];
+  var pending = [];
+  transactions.forEach(function(transaction) {
+    var share = expenseAttributionForPeriod_(basis, from, to, transaction);
+    var date = expenseAttributionDate_(basis, transaction);
+    if (!date || date < from || date > to) {
+      var due = String(transaction.supplier_invoice_date || '');
+      var waiting = String(transaction.status) === 'scheduled' || (expenseIsRecorded_(transaction) && !expenseIsPaid_(transaction));
+      if (waiting && due >= from && due <= to) pending.push(copy(transaction));
+      return;
+    }
+    var item = copy(transaction);
+    item.counted_date = date;
+    item.gst_credit = roundMoney_(share.gst);
+    item.counted = roundMoney_(share.purchases - share.gst);
+    items.push(item);
+  });
+  items.sort(function(a, b) { return a.counted_date.localeCompare(b.counted_date) || String(a.vendor).localeCompare(String(b.vendor)); });
+  pending.sort(function(a, b) { return String(a.supplier_invoice_date).localeCompare(String(b.supplier_invoice_date)) || String(a.vendor).localeCompare(String(b.vendor)); });
+  var sum = function(name, list) { return roundMoney_((list || items).reduce(function(total, item) { return total + (Number(item[name]) || 0); }, 0)); };
+  return { from: from, to: to, expenses: items,
+    totals: { amount: sum('amount'), amount_ex_gst: sum('amount_ex_gst'), gst_credit: sum('gst_credit'), counted: roundMoney_(sum('amount') - sum('gst_credit')) },
+    pending: pending, pending_totals: { amount: sum('amount', pending), amount_ex_gst: sum('amount_ex_gst', pending) } };
 }
 
 /**
@@ -79,13 +159,18 @@ function expenseAttributionForPeriod_(basis, from, to, transaction, payments) {
  * three figures come from one source and can't drift apart. Months with no activity are omitted (zero).
  */
 function api_getCompanyExpenseMonthlyTotals() {
-  var source = { transactions: api_listExpenseTransactions({}), payments: expenseReadSheet_('expense_payments').rows };
+  var source = { transactions: api_listExpenseTransactions({}) };
   var months = {};
+  var breakdownMonths = {};
   source.transactions.forEach(function(transaction) {
-    var eventDate = String(transaction.supplier_invoice_date || transaction.purchase_date || '');
-    if (/^\d{4}-\d{2}/.test(eventDate)) months[eventDate.substring(0, 7)] = true;
+    ['cash', 'accrual'].forEach(function(basis) {
+      var date = expenseAttributionDate_(basis, transaction);
+      if (/^\d{4}-\d{2}/.test(date)) months[date.substring(0, 7)] = breakdownMonths[date.substring(0, 7)] = true;
+    });
+    // Months with only payments not counted yet still get a breakdown.
+    var due = String(transaction.supplier_invoice_date || '');
+    if (/^\d{4}-\d{2}/.test(due) && String(transaction.status) !== 'skipped') breakdownMonths[due.substring(0, 7)] = true;
   });
-  source.payments.forEach(function(payment) { var date = String(payment.payment_date || ''); if (/^\d{4}-\d{2}/.test(date)) months[date.substring(0, 7)] = true; });
   var result = { cash: {}, accrual: {} };
   Object.keys(months).sort().forEach(function(key) {
     var parts = key.split('-').map(Number);
@@ -97,7 +182,15 @@ function api_getCompanyExpenseMonthlyTotals() {
       if (totals.purchases || totals.gst) result[basis][key] = totals;
     });
   });
-  return { success: true, months: result, hash: sha256Hex_(JSON.stringify(result)).substring(0, 16) };
+  // Each month's Company expenses breakdown, so the Time Entry popup opens from memory with no server call.
+  var breakdowns = { cash: {}, accrual: {} };
+  Object.keys(breakdownMonths).sort().forEach(function(key) {
+    ['cash', 'accrual'].forEach(function(basis) {
+      var breakdown = companyExpensesBreakdown_(basis, key, source.transactions, COMPANY_EXPENSE_BREAKDOWN_FIELDS_);
+      if (breakdown.expenses.length || breakdown.pending.length) breakdowns[basis][key] = breakdown;
+    });
+  });
+  return { success: true, months: result, breakdowns: breakdowns, hash: sha256Hex_(JSON.stringify(result)).substring(0, 16) };
 }
 
 function timesheetForecastForPeriod_(from, to) {
@@ -128,7 +221,7 @@ function timesheetForecastForPeriod_(from, to) {
 
 function scheduledExpenseForecastForPeriod_(from, to) {
   var total = 0;
-  api_listExpenseRules({ include_inactive: false }).forEach(function(rule) {
+  api_listExpenseRules({}).forEach(function(rule) {
     var start = rule.start_date > from ? rule.start_date : from;
     var end = rule.end_date && rule.end_date < to ? rule.end_date : to;
     total += migrationOccurrenceDates_(start, end, rule.frequency).length * (Number(rule.amount) || 0);
@@ -161,19 +254,18 @@ function api_calculateBasPeriod(payload) {
   var expenses = { purchases: actuals.purchases, gst: actuals.gst_on_purchases };
   var forecastIncome = timesheetForecastForPeriod_(range.from, range.to);
   var forecastExpenses = scheduledExpenseForecastForPeriod_(range.from, range.to);
-  var transactions = api_listExpenseTransactions({ from: range.from, to: range.to });
-  var unreconciled = transactions.filter(function(item) { return item.status !== 'void' && item.reconciliation_state !== 'reconciled'; });
-  var missingReceipts = transactions.filter(function(item) { return item.status !== 'void' && item.gst_code === 'taxable' && (!item.attachments || !item.attachments.length); });
-  var source = { basis: basis, range: range, invoices: listInvoicesInternal(), expenses: transactions, expense_payments: expenseReadSheet_('expense_payments').rows };
+  var transactions = api_listExpenseTransactions({ from: range.from, to: range.to }).filter(function(item) { return String(item.status) !== 'skipped'; });
+  // Unpaid expenses invoiced in the period: counted on accrual, but not on a cash basis until paid.
+  var unpaid = transactions.filter(function(item) { var invoice = String(item.supplier_invoice_date || ''); return expenseIsRecorded_(item) && !expenseIsPaid_(item) && invoice >= range.from && invoice <= range.to; });
+  var source = { basis: basis, range: range, invoices: listInvoicesInternal(), expenses: transactions };
   var result = {
     success: true, accounting_basis: basis, period: range,
     actual: { g1_total_sales: roundMoney_(sales), gst_on_sales: roundMoney_(salesGst), purchases: expenses.purchases, gst_on_purchases: expenses.gst },
     forecast: { timesheet_income: forecastIncome.income, scheduled_expenses: forecastExpenses },
-    variance: { uninvoiced_time: forecastIncome.uninvoiced_time, unreconciled_expenses: unreconciled.reduce(function(sum, item) { return sum + Number(item.amount || 0); }, 0), missing_receipt_count: missingReceipts.length },
+    variance: { uninvoiced_time: forecastIncome.uninvoiced_time, unpaid_expenses: roundMoney_(unpaid.reduce(function(sum, item) { return sum + Number(item.amount || 0); }, 0)), unpaid_expense_count: unpaid.length },
     warnings: []
   };
-  if (unreconciled.length) result.warnings.push(unreconciled.length + ' expense(s) are excluded from GST credits until reconciled.');
-  if (missingReceipts.length) result.warnings.push(missingReceipts.length + ' taxable expense(s) have no receipt attached.');
+  if (unpaid.length && basis === 'cash') result.warnings.push(unpaid.length + ' unpaid expense(s) invoiced in this period are not counted on a cash basis until marked paid.');
   result.source_hash = sha256Hex_(stableJsonStringify_(source));
   return result;
 }

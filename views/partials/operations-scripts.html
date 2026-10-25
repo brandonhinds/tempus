@@ -1,5 +1,5 @@
 <script>
-  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], expenseEditId:'', expenseRuleEditId:'' };
+  const operationsState = { expenseTab:'transactions', transactions:[], rules:[], categories:[], expenseEditId:'', expenseRuleEditId:'' };
   // Mirrors PAYMENT_METHODS in backend/integrity.js.
   const PAYMENT_METHOD_OPTIONS = ['EFT', 'Credit card', 'Debit card', 'Cash', 'Direct debit', 'BPAY', 'Other'];
 
@@ -16,12 +16,10 @@
     const key = String(vendor || '').trim().toLowerCase();
     let vendorLatest = null, anyLatest = null;
     (operationsState.transactions || []).forEach((transaction) => {
-      (transaction.payments || []).forEach((payment) => {
-        if (!payment.payment_method) return;
-        const stamp = String(payment.payment_date || '');
-        if (!anyLatest || stamp >= anyLatest.stamp) anyLatest = { stamp, method: payment.payment_method };
-        if (key && String(transaction.vendor || '').trim().toLowerCase() === key && (!vendorLatest || stamp >= vendorLatest.stamp)) vendorLatest = { stamp, method: payment.payment_method };
-      });
+      if (!transaction.paid_date || !transaction.payment_method) return;
+      const stamp = String(transaction.paid_date);
+      if (!anyLatest || stamp >= anyLatest.stamp) anyLatest = { stamp, method: transaction.payment_method };
+      if (key && String(transaction.vendor || '').trim().toLowerCase() === key && (!vendorLatest || stamp >= vendorLatest.stamp)) vendorLatest = { stamp, method: transaction.payment_method };
     });
     return (vendorLatest || anyLatest || { method: PAYMENT_METHOD_OPTIONS[0] }).method;
   }
@@ -59,15 +57,38 @@
     if (cached && cached.months && typeof state !== 'undefined' && !state.companyExpenseLedger) state.companyExpenseLedger = cached;
   } catch (error) { /* storage unavailable: the first load fills it */ }
 
+  /**
+   * Creates schedule payments up to the Expense creation window (api_ensureExpenseOccurrences), at most once
+   * per day and setting, so opening Tempus or the Expenses page lists what's due without an Extend button.
+   */
+  let expenseOccurrencesEnsured = { key:'', promise:null };
+  function ensureExpenseOccurrences() {
+    const enabled = typeof getFeatureFlag === 'function' ? getFeatureFlag('enable_expenses') : true;
+    if (!enabled) return Promise.resolve(null);
+    const mode = (typeof state !== 'undefined' && state.settings && state.settings.expense_creation) || 'month';
+    const key = expenseToday() + '|' + mode;
+    if (expenseOccurrencesEnsured.key === key && expenseOccurrencesEnsured.promise) return expenseOccurrencesEnsured.promise;
+    const promise = operationsApi('api_ensureExpenseOccurrences').catch((error) => {
+      expenseOccurrencesEnsured = { key:'', promise:null };
+      operationsStatus('Could not create upcoming schedule payments: ' + (error && error.message ? error.message : error), 'warn');
+      return null;
+    });
+    expenseOccurrencesEnsured = { key, promise };
+    return promise;
+  }
+
   function loadCompanyExpenseLedgerTotals(options) {
+    const ensured = ensureExpenseOccurrences();
     if (companyExpenseLedgerLoad) return companyExpenseLedgerLoad;
     if (state.companyExpenseLedgerLoaded && !(options && options.force)) return Promise.resolve(state.companyExpenseLedger);
-    companyExpenseLedgerLoad = operationsApi('api_getCompanyExpenseMonthlyTotals').then((result) => {
+    // After any schedule payments due are created, so the breakdowns list them.
+    companyExpenseLedgerLoad = ensured.then(() => operationsApi('api_getCompanyExpenseMonthlyTotals')).then((result) => {
       const changed = !state.companyExpenseLedger || state.companyExpenseLedger.hash !== result.hash;
-      state.companyExpenseLedger = { months:result.months || { cash:{}, accrual:{} }, hash:result.hash || '' };
+      state.companyExpenseLedger = { months:result.months || { cash:{}, accrual:{} }, breakdowns:result.breakdowns || null, hash:result.hash || '' };
       state.companyExpenseLedgerLoaded = true;
       try { localStorage.setItem(COMPANY_EXPENSE_LEDGER_CACHE_KEY, JSON.stringify(state.companyExpenseLedger)); } catch (error) { /* non-fatal */ }
       if (changed) refreshCompanyExpenseViews();
+      refreshOpenCompanyExpensesModal();
       return state.companyExpenseLedger;
     }).catch((error) => {
       operationsStatus('Could not load company expenses for income figures: ' + (error && error.message ? error.message : error), 'warn');
@@ -95,16 +116,24 @@
   // Feature flags can be applied (from cache) before this script has loaded, so start the load here too.
   if (typeof state !== 'undefined' && state.companyTrackingEnabled) loadCompanyExpenseLedgerTotals();
 
-  async function renderExpensesPage() {
+  // The Expenses page load in progress (or last finished), so other screens can wait for its lists.
+  function renderExpensesPage() {
+    operationsState.pageLoad = loadExpensesPage();
+    return operationsState.pageLoad;
+  }
+
+  async function loadExpensesPage() {
     const list = document.getElementById('expense-transactions');
     if (!list) return;
     list.replaceChildren(ledgerText(document.createDocumentFragment(), '', ''));
     list.textContent = 'Loading expense ledger…';
     try {
-      const filters={from:document.getElementById('expense-filter-from')?.value||'',to:document.getElementById('expense-filter-to')?.value||'',reconciliation_state:document.getElementById('expense-filter-state')?.value||''};
-      const [transactions, rules] = await Promise.all([operationsApi('api_listExpenseTransactions', filters), operationsApi('api_listExpenseRules', { include_inactive:true })]);
+      await ensureExpenseOccurrences();
+      // Everything, once: the filters work on this list in the browser.
+      const [transactions, rules, categories] = await Promise.all([operationsApi('api_listExpenseTransactions', {}), operationsApi('api_listExpenseRules', { include_inactive:true }), operationsApi('api_getDeductionCategories')]);
       operationsState.transactions = transactions || [];
       operationsState.rules = rules || [];
+      setExpenseCategories(categories);
       renderExpenseTransactions();
       renderExpenseRules();
       // Any change made on this page re-renders it, so this keeps dashboard and BAS company expenses current.
@@ -115,16 +144,100 @@
     }
   }
 
-  // Paid / part-paid / unpaid is what a person asks about an expense; scheduled and void rows aren't bills yet (or any more).
+  // Paid or unpaid is what a person asks about an expense. A schedule payment isn't a bill yet: it's Due once
+  // its date arrives, Upcoming before that. A skipped one is listed under Skipped so it can be restored.
   function expensePaymentStatus(transaction) {
-    if (transaction.status === 'void') return { key:'void', label:'Void', tone:'' };
-    if (transaction.status === 'scheduled') return String(transaction.purchase_date) <= expenseToday() ? { key:'scheduled', label:'Due', tone:'warn' } : { key:'scheduled', label:'Upcoming', tone:'' };
-    const amount = Number(transaction.amount) || 0;
-    const paid = Number(transaction.paid_amount) || 0;
-    const outstanding = Math.max(0, Math.round((amount - paid) * 100) / 100);
-    if (outstanding <= 0.005) return { key:'paid', label:'Paid', tone:'success', outstanding:0, paid };
-    if (paid > 0.005) return { key:'part', label:'Part-paid', tone:'warn', outstanding, paid };
-    return { key:'unpaid', label:'Unpaid', tone:'warn', outstanding, paid };
+    if (transaction.status === 'skipped') return { key:'skipped', label:'Skipped', tone:'' };
+    if (transaction.status === 'scheduled') return String(transaction.supplier_invoice_date) <= expenseToday() ? { key:'scheduled', label:'Due', tone:'warn' } : { key:'scheduled', label:'Upcoming', tone:'' };
+    if (transaction.paid_date) return { key:'paid', label:'Paid', tone:'success' };
+    return { key:'unpaid', label:'Unpaid', tone:'warn' };
+  }
+
+  // Expenses share the deduction category list. New categories added here get the next colour in turn.
+  const EXPENSE_CATEGORY_COLOURS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#ef4444'];
+  const EXPENSE_NEW_CATEGORY = '__new__';
+
+  function setExpenseCategories(categories) {
+    operationsState.categories = (categories || []).filter((item) => item && item.id).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    document.querySelectorAll('select[data-expense-category]').forEach((select) => renderExpenseCategoryOptions(select, select.value));
+  }
+
+  function renderExpenseCategoryOptions(select, selectedId) {
+    if (!select) return;
+    const options = [new Option('Uncategorised', '')].concat(operationsState.categories.map((item) => new Option(item.name, item.id)), [new Option('New category…', EXPENSE_NEW_CATEGORY)]);
+    select.replaceChildren(...options);
+    select.value = operationsState.categories.some((item) => item.id === selectedId) ? selectedId : '';
+  }
+
+  /** A coloured category tag, or nothing when uncategorised. */
+  function expenseCategoryTag(item) {
+    if (!item || !item.category) return null;
+    const tag = document.createElement('span'); tag.className = 'ts-cat-tag';
+    const colour = item.category_color || '#6b7280';
+    tag.style.setProperty('--chip-color', typeof dataColor === 'function' ? dataColor(colour) : colour);
+    const dot = document.createElement('span'); dot.className = 'ts-cat-tag-dot';
+    tag.append(dot, document.createTextNode(item.category));
+    return tag;
+  }
+
+  function expenseCategoryValue(selectId) {
+    const value = document.getElementById(selectId).value;
+    return value === EXPENSE_NEW_CATEGORY ? '' : value;
+  }
+
+  function showNewExpenseCategory(selectId, show) {
+    const select = document.getElementById(selectId);
+    const panel = document.getElementById(selectId + '-new');
+    if (!select || !panel) return;
+    panel.hidden = !show;
+    if (show) { const input = document.getElementById(selectId + '-new-name'); input.value = ''; input.focus(); }
+    else if (select.value === EXPENSE_NEW_CATEGORY) select.value = select.dataset.previous || '';
+  }
+
+  async function addExpenseCategory(selectId) {
+    const input = document.getElementById(selectId + '-new-name');
+    const name = String(input.value || '').trim();
+    if (!name) { input.focus(); return; }
+    const existing = operationsState.categories.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    let category = existing;
+    if (!category) {
+      try {
+        const result = await operationsApi('api_upsertDeductionCategory', { name, color:EXPENSE_CATEGORY_COLOURS[operationsState.categories.length % EXPENSE_CATEGORY_COLOURS.length] });
+        category = result && result.category;
+      } catch (error) {
+        operationsStatus(error && error.message ? error.message : 'Could not add the category.', 'warn');
+        return;
+      }
+      if (!category) return;
+      setExpenseCategories(operationsState.categories.concat([category]));
+      // Keep the deductions side in step without waiting for its next load.
+      if (typeof state !== 'undefined' && Array.isArray(state.deductionCategories) && !state.deductionCategories.some((item) => item.id === category.id)) {
+        state.deductionCategories.push(category);
+        if (typeof updateDeductionCategoryMap === 'function') updateDeductionCategoryMap();
+      }
+      operationsStatus(`Category “${category.name}” added`);
+    }
+    const select = document.getElementById(selectId);
+    select.value = category.id;
+    select.dataset.previous = category.id;
+    document.getElementById(selectId + '-new').hidden = true;
+  }
+
+  /** Opens the shared category manager (from the Deductions page); the dropdowns refresh when it closes. */
+  function openExpenseCategoryManager() {
+    const modal = document.getElementById('modal-deduction-categories');
+    if (!modal || typeof openDeductionCategoryModal !== 'function') return;
+    if (typeof state !== 'undefined') {
+      state.deductionCategories = operationsState.categories.map((item) => (typeof sanitizeDeductionCategory === 'function' ? sanitizeDeductionCategory(item) : item));
+      if (typeof updateDeductionCategoryMap === 'function') updateDeductionCategoryMap();
+    }
+    openDeductionCategoryModal();
+    const observer = new MutationObserver(() => {
+      if (modal.style.display !== 'none') return;
+      observer.disconnect();
+      renderExpensesPage();
+    });
+    observer.observe(modal, { attributes:true, attributeFilter:['style'] });
   }
 
   function expenseActionButton(label, onClick, primary) {
@@ -134,13 +247,29 @@
     return button;
   }
 
+  /**
+   * Calls an expense API. A change that alters a BAS marked as submitted comes back as submitted_bas_period:
+   * the person is asked, and on yes the same call is resent with confirm_submitted_bas. Nothing is ever
+   * blocked; a declined warning resolves to { success:false, cancelled:true }.
+   */
+  async function expenseCall(api, payload) {
+    const result = await operationsApi(api, payload);
+    if (!result || result.error !== 'submitted_bas_period') return result;
+    const message = result.message + ' Save the change anyway?';
+    const ok = typeof customConfirm === 'function'
+      ? await customConfirm(message, { title:'Submitted BAS will change', okText:'Save anyway', cancelText:'Cancel' })
+      : window.confirm(message);
+    if (!ok) return { success:false, cancelled:true, message:'Not saved.' };
+    return operationsApi(api, { ...payload, confirm_submitted_bas:true });
+  }
+
   // Two-click confirmation for removals: the first click restates the consequence, the second acts.
   function expenseConfirmButton(label, confirmLabel, action, message) {
     const button = expenseActionButton(label, async () => {
       if (!button.dataset.confirm) { button.dataset.confirm = '1'; button.textContent = confirmLabel; return; }
       button.disabled = true;
       const result = await action();
-      if (result && result.success === false) { operationsStatus(result.message, 'warn'); button.disabled = false; return; }
+      if (result && result.success === false) { if (!result.cancelled) operationsStatus(result.message, 'warn'); button.disabled = false; delete button.dataset.confirm; button.textContent = label; return; }
       operationsStatus(message || 'Saved');
       renderExpensesPage();
     });
@@ -148,108 +277,495 @@
   }
 
   async function expenseSave(api, payload, message) {
-    const result = await operationsApi(api, payload);
-    if (result && result.success === false) { operationsStatus(result.message, 'warn'); return result; }
+    const result = await expenseCall(api, payload);
+    if (result && result.success === false) { if (!result.cancelled) operationsStatus(result.message, 'warn'); return result; }
     operationsStatus(message);
     await renderExpensesPage();
     return result;
   }
 
+  // ----- Ledger filters, views and groups -------------------------------------------------------------------
+  // The page loads every expense once and filters in the browser, so changing a filter is instant.
+
   // Upcoming schedule payments this far ahead are listed straight away; the rest sit behind "Show all".
+  // Only with "All dates": a chosen month or financial year lists everything in it.
   const EXPENSE_UPCOMING_WINDOW_DAYS = 45;
+  const EXPENSE_LEDGER_PREFS_KEY = 'tempus_expense_ledger_prefs_v1';
+  const EXPENSE_UNCATEGORISED = '__none__';
+
+  function expenseLedgerPrefs() {
+    if (!operationsState.ledgerPrefs) {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(EXPENSE_LEDGER_PREFS_KEY) || 'null'); } catch (error) { saved = null; }
+      operationsState.ledgerPrefs = { view:saved && saved.view === 'date' ? 'date' : 'grouped', folded:Object.assign({ upcoming:false, recorded:false, skipped:true }, saved && saved.folded) };
+    }
+    return operationsState.ledgerPrefs;
+  }
+
+  function saveExpenseLedgerPrefs() {
+    try { localStorage.setItem(EXPENSE_LEDGER_PREFS_KEY, JSON.stringify(expenseLedgerPrefs())); } catch (error) { /* per-browser convenience only */ }
+  }
+
+  function expenseLedgerFilter() {
+    if (!operationsState.ledgerFilter) operationsState.ledgerFilter = { month:'', status:'', category:'' };
+    return operationsState.ledgerFilter;
+  }
+
+  /**
+   * The date an expense sits under in the ledger's month filter, by the accounting basis, so a month here
+   * holds the same expenses as the Time Entry "Company expenses" popup: cash, the paid date; accrual, the
+   * earlier of invoice and paid date. Anything not counted yet (unpaid on cash, schedule payments, skipped)
+   * sits under its invoice or due date.
+   */
+  function expenseLedgerDate(transaction) {
+    const due = String(transaction.supplier_invoice_date || '');
+    if (transaction.status === 'scheduled' || transaction.status === 'skipped') return due;
+    const paid = String(transaction.paid_date || '');
+    if (defaultAccountingBasis() === 'accrual' && paid && due) return paid < due ? paid : due;
+    return paid || due;
+  }
+
+  /** due | upcoming | unpaid | paid | skipped, as the badges and the Status filter name them. */
+  function expenseLedgerStatus(transaction) {
+    const status = expensePaymentStatus(transaction);
+    if (status.key === 'scheduled') return status.label === 'Due' ? 'due' : 'upcoming';
+    return status.key;
+  }
+
+  function expenseMonthKey(year, monthIndex) {
+    const date = new Date(year, monthIndex, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function expenseMonthLabel(key) {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('en-AU', { month:'long', year:'numeric' });
+  }
+
+  /** The current Australian financial year as from/to month keys (July to June). */
+  function expenseFinancialYearMonths() {
+    const today = expenseToday();
+    const year = Number(today.slice(0, 4)), month = Number(today.slice(5, 7));
+    const start = month >= 7 ? year : year - 1;
+    return { from:`${start}-07`, to:`${start + 1}-06`, label:`This financial year (Jul ${start} – Jun ${start + 1})` };
+  }
+
+  function expenseLedgerMatches(transaction, filter) {
+    const date = expenseLedgerDate(transaction);
+    if (filter.month === 'fy') {
+      const fy = expenseFinancialYearMonths();
+      if (!(date.slice(0, 7) >= fy.from && date.slice(0, 7) <= fy.to)) return false;
+    } else if (filter.month && date.slice(0, 7) !== filter.month) return false;
+    if (filter.status && expenseLedgerStatus(transaction) !== filter.status) return false;
+    if (filter.category === EXPENSE_UNCATEGORISED) { if (transaction.category_id) return false; }
+    else if (filter.category && transaction.category_id !== filter.category) return false;
+    return true;
+  }
+
+  /** Fills the month, status and category controls from the loaded expenses and the current filter. */
+  function renderExpenseLedgerFilters() {
+    const filter = expenseLedgerFilter();
+    const monthSelect = document.getElementById('expense-filter-month');
+    if (monthSelect) {
+      const months = new Set(operationsState.transactions.map((item) => expenseLedgerDate(item).slice(0, 7)).filter((key) => /^\d{4}-\d{2}$/.test(key)));
+      months.add(expenseToday().slice(0, 7));
+      if (/^\d{4}-\d{2}$/.test(filter.month)) months.add(filter.month);
+      const options = [new Option('All dates', ''), new Option(expenseFinancialYearMonths().label, 'fy')]
+        .concat(Array.from(months).sort().reverse().map((key) => new Option(expenseMonthLabel(key), key)));
+      monthSelect.replaceChildren(...options);
+      monthSelect.value = filter.month;
+    }
+    const statusSelect = document.getElementById('expense-filter-state');
+    if (statusSelect) statusSelect.value = filter.status;
+    const categorySelect = document.getElementById('expense-filter-category');
+    if (categorySelect) {
+      categorySelect.replaceChildren(new Option('All categories', ''), ...operationsState.categories.map((item) => new Option(item.name, item.id)), new Option('Uncategorised', EXPENSE_UNCATEGORISED));
+      categorySelect.value = filter.category;
+      if (categorySelect.value !== filter.category) { filter.category = ''; categorySelect.value = ''; }
+    }
+    const clear = document.getElementById('expense-filter-clear');
+    if (clear) clear.hidden = !(filter.month || filter.status || filter.category);
+    const view = expenseLedgerPrefs().view;
+    document.querySelectorAll('[data-expense-view]').forEach((button) => {
+      const active = button.dataset.expenseView === view;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
+  function setExpenseLedgerFilter(changes) {
+    Object.assign(expenseLedgerFilter(), changes);
+    operationsState.showAllUpcoming = false;
+    renderExpenseTransactions();
+  }
+
+  /** Steps the month filter; from "All dates" or the financial year it starts at the current month. */
+  function stepExpenseLedgerMonth(delta) {
+    const filter = expenseLedgerFilter();
+    const base = /^\d{4}-\d{2}$/.test(filter.month) ? filter.month : expenseToday().slice(0, 7);
+    const [year, month] = base.split('-').map(Number);
+    setExpenseLedgerFilter({ month:/^\d{4}-\d{2}$/.test(filter.month) ? expenseMonthKey(year, month - 1 + delta) : base });
+  }
+
+  /** Opens the Expenses ledger filtered to one month (from the Time Entry "Company expenses" popup). */
+  function showExpenseLedgerMonth(year, monthIndex) {
+    operationsState.ledgerFilter = { month:expenseMonthKey(year, monthIndex), status:'', category:'' };
+    operationsState.showAllUpcoming = false;
+    const tab = document.querySelector('[data-expense-tab="transactions"]');
+    if (tab && operationsState.expenseTab !== 'transactions') tab.click();
+  }
+
+  function expenseCountsTowardSpend(transaction) {
+    if (transaction.status === 'scheduled' || transaction.status === 'skipped') return false;
+    return defaultAccountingBasis() === 'accrual' ? !!(transaction.paid_date || transaction.supplier_invoice_date) : !!transaction.paid_date;
+  }
+
+  /** "4 counted · $3,882.92 inc GST · $3,530.12 ex GST" and what isn't counted yet, for what's shown. */
+  function renderExpenseLedgerSummary(items) {
+    const summary = document.getElementById('expense-summary');
+    if (!summary) return;
+    summary.replaceChildren();
+    const active = items.filter((item) => item.status !== 'skipped');
+    if (!active.length) return;
+    const counted = active.filter(expenseCountsTowardSpend), waiting = active.filter((item) => !expenseCountsTowardSpend(item));
+    const sum = (list, key) => list.reduce((total, item) => total + (Number(item[key]) || 0), 0);
+    const exOf = (item) => (item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : expenseExFromInc(item.amount, item.gst_code));
+    const part = (label, list, strong) => {
+      const span = document.createElement('span'); span.className = 'ts-expense-summary__part';
+      const lead = document.createElement(strong ? 'strong' : 'span'); lead.textContent = label;
+      span.append(lead, ` · ${operationsMoney(sum(list, 'amount'))} inc GST · ${operationsMoney(list.reduce((total, item) => total + (Number(exOf(item)) || 0), 0))} ex GST`);
+      summary.appendChild(span);
+    };
+    if (counted.length) part(`${counted.length} counted`, counted, true);
+    if (waiting.length) part(`${waiting.length} not counted yet`, waiting, false);
+  }
+
+  const EXPENSE_CHEVRON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+
+  /** A foldable group heading: name, count and total, with the schedule-accordion chevron. */
+  function expenseLedgerGroupHead(list, key, label, items) {
+    const folded = !!expenseLedgerPrefs().folded[key];
+    const heading = ledgerText(list, 'ts-ledger-group', '');
+    heading.classList.add('ts-ledger-group--toggle');
+    const toggle = document.createElement('button');
+    toggle.type = 'button'; toggle.className = 'ts-ledger-group__toggle';
+    toggle.setAttribute('aria-expanded', String(!folded));
+    ledgerText(toggle, '', label);
+    ledgerText(toggle, 'ts-ledger-group__count', `${items.length} · ${operationsMoney(items.reduce((total, item) => total + (Number(item.amount) || 0), 0))}`);
+    const chev = document.createElement('span'); chev.className = 'ts-ded-group-chev'; chev.innerHTML = EXPENSE_CHEVRON_SVG;
+    toggle.appendChild(chev);
+    toggle.addEventListener('click', () => { const prefs = expenseLedgerPrefs(); prefs.folded[key] = !prefs.folded[key]; saveExpenseLedgerPrefs(); renderExpenseTransactions(); });
+    heading.appendChild(toggle);
+    return !folded;
+  }
 
   function renderExpenseTransactions() {
     const list = document.getElementById('expense-transactions');
     list.replaceChildren();
+    renderExpenseLedgerFilters();
     if (!operationsState.transactions.length) {
+      renderExpenseLedgerSummary([]);
       ledgerText(list, 'ts-empty', 'No expenses yet. Use Record expense for a one-off purchase, or add a schedule for bills that repeat.');
       return;
     }
-    // Forecasts and real spending are kept apart: due and upcoming schedule payments first (soonest first),
-    // then everything recorded (newest first), so a year of forecasts never buries what was actually bought.
-    const upcoming = operationsState.transactions.filter((item) => item.status === 'scheduled').sort((a, b) => String(a.purchase_date).localeCompare(String(b.purchase_date)));
-    const recorded = operationsState.transactions.filter((item) => item.status !== 'scheduled');
-    if (upcoming.length) {
+    const filter = expenseLedgerFilter();
+    const shown = operationsState.transactions.filter((item) => expenseLedgerMatches(item, filter));
+    renderExpenseLedgerSummary(shown);
+    if (!shown.length) {
+      const empty = ledgerText(list, 'ts-empty', 'No expenses match these filters. ');
+      const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'ts-expense-text-button'; clear.textContent = 'Clear filters';
+      clear.addEventListener('click', () => setExpenseLedgerFilter({ month:'', status:'', category:'' }));
+      empty.appendChild(clear);
+      return;
+    }
+    const byDateDesc = (a, b) => expenseLedgerDate(b).localeCompare(expenseLedgerDate(a));
+    if (expenseLedgerPrefs().view === 'date') { renderExpenseLedgerByDate(list, shown.slice().sort(byDateDesc)); return; }
+
+    // Grouped: forecasts and real spending kept apart. Due and upcoming schedule payments first (soonest first),
+    // then everything recorded (newest first), then skipped. Every group folds; the choice is remembered.
+    const upcoming = shown.filter((item) => item.status === 'scheduled').sort((a, b) => String(a.supplier_invoice_date).localeCompare(String(b.supplier_invoice_date)));
+    const recorded = shown.filter((item) => item.status !== 'scheduled' && item.status !== 'skipped').sort(byDateDesc);
+    const skipped = shown.filter((item) => item.status === 'skipped').sort(byDateDesc);
+    if (upcoming.length && expenseLedgerGroupHead(list, 'upcoming', 'Due and upcoming', upcoming)) {
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + EXPENSE_UPCOMING_WINDOW_DAYS);
       const cutoffIso = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
-      const soon = operationsState.showAllUpcoming ? upcoming : upcoming.filter((item) => String(item.purchase_date) <= cutoffIso);
-      ledgerText(list, 'ts-ledger-group', 'Due and upcoming');
+      const windowed = !filter.month && !operationsState.showAllUpcoming;
+      const soon = windowed ? upcoming.filter((item) => String(item.supplier_invoice_date) <= cutoffIso) : upcoming;
       soon.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
       if (!soon.length) ledgerText(list, 'ts-ledger-row__detail ts-ledger-group__empty', `Nothing due in the next ${EXPENSE_UPCOMING_WINDOW_DAYS} days.`);
-      if (upcoming.length > soon.length || operationsState.showAllUpcoming) {
+      if (!filter.month && (upcoming.length > soon.length || operationsState.showAllUpcoming)) {
         const more = expenseActionButton(operationsState.showAllUpcoming ? 'Show only the next ' + EXPENSE_UPCOMING_WINDOW_DAYS + ' days' : `Show all ${upcoming.length} upcoming`, () => { operationsState.showAllUpcoming = !operationsState.showAllUpcoming; renderExpenseTransactions(); });
         more.classList.add('ts-ledger-group__more');
         list.appendChild(more);
       }
     }
-    if (upcoming.length || recorded.length) ledgerText(list, 'ts-ledger-group', 'Recorded');
-    if (!recorded.length) ledgerText(list, 'ts-ledger-row__detail ts-ledger-group__empty', 'Nothing recorded yet. Mark an upcoming payment paid, or use Record expense.');
-    recorded.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
+    if (recorded.length && expenseLedgerGroupHead(list, 'recorded', 'Recorded', recorded)) recorded.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
+    // Skipped schedule payments, folded by default, so they can be restored.
+    if (skipped.length && expenseLedgerGroupHead(list, 'skipped', 'Skipped', skipped)) skipped.forEach((transaction) => renderExpenseTransactionRow(list, transaction));
   }
 
+  /** One list in date order (newest first) under month headings with each month's count and total. */
+  function renderExpenseLedgerByDate(list, items) {
+    // Skipped payments are listed (greyed, like in Grouped) but left out of each month's count and total.
+    let month = '';
+    items.forEach((transaction) => {
+      const key = expenseLedgerDate(transaction).slice(0, 7);
+      if (key !== month) {
+        month = key;
+        const inMonth = items.filter((item) => expenseLedgerDate(item).slice(0, 7) === key && item.status !== 'skipped');
+        const heading = ledgerText(list, 'ts-ledger-group ts-ledger-group--month', /^\d{4}-\d{2}$/.test(key) ? expenseMonthLabel(key) : 'No date');
+        ledgerText(heading, 'ts-ledger-group__count', `${inMonth.length} · ${operationsMoney(inMonth.reduce((total, item) => total + (Number(item.amount) || 0), 0))}`);
+      }
+      renderExpenseTransactionRow(list, transaction);
+    });
+  }
+
+  // "Paid 3 Sep 2026 · Invoice 28 Aug 2026", "Invoice 1 Oct 2026" or "Due 15 Oct 2026".
+  function expenseDatesLabel(transaction) {
+    if (transaction.status === 'skipped' && !transaction.paid_date) return 'Was due ' + expenseDateLabel(transaction.supplier_invoice_date);
+    if (transaction.status === 'scheduled') return 'Due ' + expenseDateLabel(transaction.supplier_invoice_date);
+    const parts = [];
+    if (transaction.paid_date) parts.push('Paid ' + expenseDateLabel(transaction.paid_date));
+    if (transaction.supplier_invoice_date && transaction.supplier_invoice_date !== transaction.paid_date) parts.push('Invoice ' + expenseDateLabel(transaction.supplier_invoice_date));
+    return parts.join(' · ');
+  }
+
+  /** What a status badge explains on hover (the app's data-tip bubble). */
+  function expenseStatusTip(transaction, status) {
+    if (status.key === 'skipped') return transaction.paid_date ? 'Skipped (deleted after it was paid). Not counted. Restore brings it back as paid.' : 'Skipped. Not counted, and the schedule won’t list it again. Restore brings it back as a payment to make.';
+    if (status.key === 'scheduled') return (status.label === 'Due' ? 'Due' : 'Upcoming') + ' payment from a schedule. It doesn’t count as spent until you mark it paid.';
+    if (status.key === 'unpaid') return 'Unpaid. Counted on an accrual basis from its invoice date; not counted on a cash basis until you mark it paid.';
+    return ['Paid ' + expenseDateLabel(transaction.paid_date) + (transaction.payment_method ? ' by ' + transaction.payment_method : ''), transaction.payment_reference ? 'Ref ' + transaction.payment_reference : ''].filter(Boolean).join('\n');
+  }
+
+  const EXPENSE_LINK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+
+  /**
+   * One ledger row, always two lines: the description (vendor only when there's no description) over the
+   * dates and the vendor, then category, status, amounts and actions in fixed columns. Explanations live
+   * in the badge's tooltip; receipt links sit behind the link button.
+   */
   function renderExpenseTransactionRow(list, transaction) {
     const status = expensePaymentStatus(transaction);
-    const locked = transaction.reconciliation_state === 'reconciled';
     const row = document.createElement('div');
-    row.className = 'ts-ledger-row';
+    row.className = 'ts-ledger-row' + (status.key === 'skipped' ? ' is-skipped' : '');
     const identity = document.createElement('div');
-    ledgerText(identity, 'ts-ledger-row__title', transaction.vendor || transaction.description || 'Untitled expense');
-    ledgerText(identity, 'ts-ledger-row__meta', [expenseDateLabel(transaction.purchase_date), transaction.category, transaction.description && transaction.vendor ? transaction.description : ''].filter(Boolean).join(' · '));
+    identity.className = 'ts-ledger-row__identity';
+    const name = transaction.description || transaction.vendor || 'Untitled expense';
+    ledgerText(identity, 'ts-ledger-row__title', name);
+    ledgerText(identity, 'ts-ledger-row__meta', [expenseDatesLabel(transaction), transaction.vendor && transaction.vendor !== name ? transaction.vendor : ''].filter(Boolean).join(' · '));
     row.appendChild(identity);
 
+    const categoryCell = document.createElement('div');
+    categoryCell.className = 'ts-ledger-row__category';
+    const tag = expenseCategoryTag(transaction);
+    if (tag) categoryCell.appendChild(tag);
+    row.appendChild(categoryCell);
+
     const stateCell = document.createElement('div');
+    stateCell.className = 'ts-ledger-row__state';
     const badge = document.createElement('span'); badge.className = 'ts-badge' + (status.tone ? ' ' + status.tone : ''); badge.textContent = status.label;
+    badge.dataset.tip = expenseStatusTip(transaction, status); badge.tabIndex = 0;
     stateCell.appendChild(badge);
-    if (status.key === 'unpaid') ledgerText(stateCell, 'ts-ledger-row__meta', operationsMoney(status.outstanding) + ' outstanding');
-    if (status.key === 'part') ledgerText(stateCell, 'ts-ledger-row__meta', `${operationsMoney(status.paid)} paid · ${operationsMoney(status.outstanding)} outstanding`);
-    if (status.key === 'paid') ledgerText(stateCell, 'ts-ledger-row__meta', operationsMoney(status.paid) + ' paid');
-    if (transaction.status !== 'scheduled' && transaction.status !== 'void') ledgerText(stateCell, 'ts-ledger-row__meta', locked ? 'Reconciled' : 'Not reconciled');
     row.appendChild(stateCell);
-    ledgerText(row, 'ts-ledger-row__amount', operationsMoney(transaction.amount));
+    row.appendChild(expenseAmountCell(transaction));
 
     const actions = document.createElement('div');
     actions.className = 'ts-ledger-row__actions';
-    if (transaction.status === 'scheduled') {
-      actions.append(
-        expenseActionButton('Mark paid', () => showExpenseInlineAction(row, transaction, 'markpaid'), true),
-        expenseActionButton('Record as unpaid bill', () => expenseSave('api_upsertExpenseTransaction', { ...transaction, status:'recorded', reconciliation_state:'unreconciled' }, 'Recorded as an unpaid bill')),
-        expenseActionButton('Edit', () => openExpenseForm(transaction)),
-        expenseConfirmButton('Skip', 'Confirm skip', () => operationsApi('api_voidExpenseTransaction', { id:transaction.id, reason:'Skipped scheduled payment' }), 'Payment skipped')
-      );
-    } else if (transaction.status !== 'void') {
-      if (status.outstanding > 0.005) actions.appendChild(expenseActionButton('Record payment', () => showExpenseInlineAction(row, transaction, 'payment'), true));
-      actions.appendChild(expenseActionButton(transaction.attachments && transaction.attachments.length ? 'Add another receipt' : 'Add receipt', () => showExpenseInlineAction(row, transaction, 'receipt')));
-      if (!locked) {
-        actions.append(
-          expenseActionButton('Edit', () => openExpenseForm(transaction)),
-          expenseActionButton('Reconcile', () => showExpenseInlineAction(row, transaction, 'reconcile')),
-          expenseConfirmButton('Void', 'Confirm void', () => operationsApi('api_voidExpenseTransaction', { id:transaction.id, reason:'Voided from expense ledger' }), 'Expense voided')
-        );
+    if (status.key === 'skipped') {
+      // Restoring is the only action: deleting the row would let the schedule list the payment again.
+      actions.appendChild(expenseConfirmButton('Restore', 'Confirm restore', () => expenseCall('api_restoreExpenseTransaction', { id:transaction.id }), 'Payment restored'));
+    } else {
+      if (status.key !== 'paid') actions.appendChild(expenseActionButton('Mark paid', () => showExpenseInlineAction(row, transaction, 'markpaid'), true));
+      actions.appendChild(expenseActionButton('Edit', () => openExpenseForm(transaction)));
+      if (transaction.status === 'scheduled') actions.appendChild(expenseConfirmButton('Skip', 'Confirm skip', () => operationsApi('api_skipExpenseOccurrence', { id:transaction.id }), 'Payment skipped'));
+      else {
+        actions.appendChild(expenseConfirmButton('Delete', 'Confirm delete', () => expenseCall('api_deleteExpenseTransaction', { id:transaction.id }), 'Expense deleted'));
+        // Receipt links: one small button that shows how many there are and opens the list to open, add or remove.
+        const count = (transaction.attachments || []).length;
+        const links = document.createElement('button');
+        links.type = 'button'; links.className = 'ghost small ts-expense-link-button' + (count ? ' has-links' : '');
+        links.innerHTML = EXPENSE_LINK_SVG;
+        if (count) links.appendChild(document.createTextNode(String(count)));
+        links.setAttribute('aria-label', count ? `Receipt links (${count})` : 'Add a receipt link');
+        links.dataset.tip = count ? `${count} receipt link${count === 1 ? '' : 's'}` : 'Add a receipt link';
+        links.addEventListener('click', () => showExpenseInlineAction(row, transaction, 'receipt'));
+        actions.appendChild(links);
       }
     }
     row.appendChild(actions);
-
-    // Explanations stand in for disabled buttons, so every missing action says why it's missing.
-    if (transaction.status === 'scheduled') ledgerText(row, 'ts-ledger-row__detail', 'Upcoming payment from a schedule. It doesn’t count as spent until you mark it paid.');
-    else if (transaction.status === 'void') ledgerText(row, 'ts-ledger-row__detail', 'Void. Kept for the record and excluded from every total.');
-    else if (locked) ledgerText(row, 'ts-ledger-row__detail', 'Reconciled, so it can’t be edited or have payments removed. Void it and record a correction if something is wrong.');
-    (transaction.payments || []).forEach((payment) => {
-      const line = document.createElement('div'); line.className = 'ts-ledger-row__detail ts-expense-subline';
-      const text = document.createElement('span');
-      text.textContent = `Paid ${operationsMoney(payment.amount)} on ${expenseDateLabel(payment.payment_date)}` + (payment.payment_method ? ` by ${payment.payment_method}` : '') + (payment.reference ? ` · ref ${payment.reference}` : '') + (payment.notes ? ` · ${payment.notes}` : '');
-      line.appendChild(text);
-      if (!locked) line.appendChild(expenseConfirmButton('Remove payment', 'Confirm remove', () => operationsApi('api_deleteExpensePayment', payment.id), 'Payment removed'));
-      row.appendChild(line);
-    });
-    (transaction.attachments || []).forEach((attachment) => {
-      const line = document.createElement('div'); line.className = 'ts-ledger-row__detail ts-expense-subline';
-      const link = document.createElement('a'); link.href = attachment.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Receipt: ' + (attachment.name || 'link');
-      line.appendChild(link);
-      if (!locked) line.appendChild(expenseConfirmButton('Remove receipt', 'Confirm remove', () => operationsApi('api_detachExpenseReceipt', { expense_transaction_id:transaction.id, attachment_id:attachment.id }), 'Receipt removed'));
-      row.appendChild(line);
-    });
     list.appendChild(row);
   }
+
+  /** The receipt links already on an expense, each to open or remove, above the field to add another. */
+  function renderExpenseReceiptLinks(panel, transaction) {
+    const attachments = transaction.attachments || [];
+    if (!attachments.length) return;
+    const listEl = document.createElement('ul'); listEl.className = 'ts-ledger-inline__links';
+    attachments.forEach((attachment) => {
+      const item = document.createElement('li');
+      const link = document.createElement('a'); link.href = attachment.url; link.target = '_blank'; link.rel = 'noopener';
+      let host = '';
+      try { host = new URL(attachment.url).hostname.replace(/^www\./, ''); } catch (error) { host = ''; }
+      link.textContent = (attachment.name || 'Receipt') + (host ? ' · ' + host : '');
+      const remove = expenseConfirmButton('Remove receipt', 'Confirm remove', () => operationsApi('api_detachExpenseReceipt', { expense_transaction_id:transaction.id, attachment_id:attachment.id }), 'Receipt removed');
+      remove.className = 'ts-expense-text-button ts-expense-text-button--quiet';
+      item.append(link, remove);
+      listEl.appendChild(item);
+    });
+    panel.appendChild(listEl);
+  }
+
+  // The month the Company expenses popup is showing, so a newer ledger load can refresh it in place.
+  let companyExpensesModalMonth = null;
+
+  /** A month's breakdown from the loaded ledger, or null when the ledger has no breakdowns (older cache). */
+  function companyLedgerBreakdownForMonth(year, month) {
+    const ledger = typeof state !== 'undefined' ? state.companyExpenseLedger : null;
+    const basis = typeof defaultAccountingBasis === 'function' ? defaultAccountingBasis() : 'cash';
+    const months = ledger && ledger.breakdowns ? ledger.breakdowns[basis] : null;
+    if (!months) return null;
+    const empty = { expenses:[], totals:{ amount:0, amount_ex_gst:0, gst_credit:0, counted:0 }, pending:[], pending_totals:{ amount:0, amount_ex_gst:0 } };
+    return { ...(months[`${year}-${String(month + 1).padStart(2, '0')}`] || empty), accounting_basis:basis };
+  }
+
+  function refreshOpenCompanyExpensesModal() {
+    const modal = document.getElementById('modal-monthly-deductions');
+    if (!companyExpensesModalMonth || !modal || modal.style.display === 'none' || !/^Company expenses/.test(document.getElementById('monthly-deductions-title')?.textContent || '')) return;
+    const { year, month } = companyExpensesModalMonth;
+    const result = companyLedgerBreakdownForMonth(year, month);
+    if (result) renderCompanyExpensesModal(document.getElementById('monthly-deductions-content'), modal, result, new Date(year, month, 1).toLocaleDateString('en-AU', { month:'long', year:'numeric' }));
+  }
+
+  /**
+   * The Time Entry "Company expenses" breakdown for a calendar month: the expenses counted on the current
+   * accounting basis, each with its amount including and excluding GST. Its total is the figure the
+   * Company expenses line takes off (amounts less their GST credits), from the same backend calculation.
+   */
+  async function showCompanyExpensesModal(year, month) {
+    const modal = document.getElementById('modal-monthly-deductions');
+    const title = document.getElementById('monthly-deductions-title');
+    const content = document.getElementById('monthly-deductions-content');
+    if (!modal || !title || !content) return;
+    const monthLabel = new Date(year, month, 1).toLocaleDateString('en-AU', { month:'long', year:'numeric' });
+    const basis = defaultAccountingBasis();
+    title.textContent = `Company expenses · ${monthLabel}`;
+    content.replaceChildren();
+    companyExpensesModalMonth = { year, month };
+    // The monthly totals load brings every month's breakdown, so this usually opens with no server call.
+    const cached = companyLedgerBreakdownForMonth(year, month);
+    if (cached) {
+      renderCompanyExpensesModal(content, modal, cached, monthLabel);
+      if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex';
+      return;
+    }
+    ledgerText(content, 'ts-note', 'Loading company expenses…');
+    if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex';
+    let result;
+    try {
+      result = await operationsApi('api_getCompanyExpensesForMonth', { year, month, accounting_basis:basis });
+    } catch (error) {
+      content.replaceChildren();
+      ledgerText(content, 'ts-note', 'Could not load company expenses: ' + (error && error.message ? error.message : error));
+      return;
+    }
+    renderCompanyExpensesModal(content, modal, result, monthLabel);
+  }
+
+  function renderCompanyExpensesModal(content, modal, result, monthLabel) {
+    content.replaceChildren();
+    // View in Expenses and Edit both land on the ledger filtered to this month.
+    const shownMonth = companyExpensesModalMonth;
+    const openExpenses = async (item) => {
+      if (typeof hideModal === 'function') hideModal(modal); else modal.style.display = 'none';
+      // Edit opens the expense form right here and comes back to this popup; View in Expenses opens the
+      // ledger on this month.
+      if (item) {
+        await ensureExpenseFormLists();
+        operationsState.expenseFormReturn = shownMonth;
+        openExpenseForm(item);
+        return;
+      }
+      if (shownMonth) showExpenseLedgerMonth(shownMonth.year, shownMonth.month);
+      if (typeof showPage === 'function') showPage('expenses');
+    };
+    const pending = result.pending || [];
+    const basisNote = result.accounting_basis === 'cash'
+      ? 'Cash basis: an expense counts on the day it’s paid.'
+      : 'Accrual basis: an expense counts on its invoice date, or the day it’s paid if that’s earlier.';
+    if (!result.expenses.length && !pending.length) {
+      ledgerText(content, 'ts-note', `No company expenses in ${monthLabel}. ${basisNote}`);
+      const open = expenseActionButton('Open Expenses', () => openExpenses(null));
+      open.classList.add('ts-company-expenses-open');
+      content.appendChild(open);
+      return;
+    }
+    const partial = result.expenses.some((item) => expenseRound(item.counted) !== expenseRound(item.amount_ex_gst));
+    const table = document.createElement('table'); table.className = 'ts-ded-modal-table ts-company-expenses-table';
+    // Fixed column widths so every row is one line and the amounts line up; long descriptions end in "…".
+    const widths = ['64px', '', '100px', '100px'].concat(partial ? ['100px'] : []).concat(['52px']);
+    const columns = document.createElement('colgroup');
+    widths.forEach((width) => { const col = document.createElement('col'); if (width) col.style.width = width; columns.appendChild(col); });
+    table.appendChild(columns);
+    const headRow = table.createTHead().insertRow();
+    const heads = ['Date', 'Expense', 'Inc GST', 'Ex GST'].concat(partial ? ['Counts'] : []).concat(['']);
+    heads.forEach((text, index) => { const th = document.createElement('th'); th.textContent = text; if (index >= 2 && text) th.className = 'num'; headRow.appendChild(th); });
+    const body = table.createTBody();
+    const cell = (row, text, className) => { const td = row.insertCell(); td.textContent = text; if (className) td.className = className; return td; };
+    // The month is in the title, so dates drop the year.
+    const shortDate = (iso) => expenseDateLabel(iso).replace(/ \d{4}$/, '');
+    const expenseRow = (item, date, status) => {
+      const row = body.insertRow(); row.className = 'ts-ded-trow' + (status ? ' is-pending' : '');
+      cell(row, shortDate(date), 'ts-ded-tdate');
+      // One line: a category dot and the description (the vendor if there's no description); hover for the rest.
+      const name = cell(row, '', 'ts-ded-tname');
+      const dot = document.createElement('span'); dot.className = 'ts-company-expenses-dot';
+      if (item.category) dot.style.background = typeof dataColor === 'function' ? dataColor(item.category_color || '#6b7280') : (item.category_color || '#6b7280');
+      else dot.classList.add('is-empty');
+      const label = document.createElement('span'); label.className = 'ts-company-expenses-name'; label.textContent = item.description || item.vendor || 'Expense';
+      const line = document.createElement('div'); line.className = 'ts-company-expenses-line';
+      line.append(dot, label);
+      if (status) { const badge = document.createElement('span'); badge.className = 'ts-badge' + (status.tone ? ' ' + status.tone : ''); badge.textContent = status.label; line.appendChild(badge); }
+      name.appendChild(line);
+      // The app's own tooltip (as on the Time Entry ⓘ), one detail per line; the description may be cut short.
+      name.setAttribute('data-tip', [item.description, item.vendor ? 'Vendor: ' + item.vendor : '', 'Category: ' + (item.category || 'Uncategorised')].filter(Boolean).join('\n'));
+      cell(row, operationsMoney(item.amount), 'num');
+      cell(row, operationsMoney(item.amount_ex_gst), 'num');
+      if (partial) {
+        const counts = cell(row, status ? '' : operationsMoney(item.counted), 'num');
+        if (!status && expenseRound(item.counted) !== expenseRound(item.amount_ex_gst)) counts.dataset.tip = `${Math.round(Number(item.business_use_percentage) * 100)}% business use, so only that share of the GST is claimed`;
+      }
+      const actions = row.insertCell(); actions.className = 'num';
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'ts-expense-text-button'; edit.textContent = 'Edit';
+      edit.addEventListener('click', () => openExpenses(item));
+      actions.appendChild(edit);
+    };
+    const totalRow = (label, amounts, className) => {
+      const row = body.insertRow(); row.className = className;
+      cell(row, label).colSpan = 2;
+      cell(row, operationsMoney(amounts.amount), 'num');
+      cell(row, operationsMoney(amounts.amount_ex_gst), 'num');
+      if (partial) cell(row, amounts.counted === undefined ? '' : operationsMoney(amounts.counted), 'num');
+      row.insertCell();
+    };
+    result.expenses.forEach((item) => expenseRow(item, item.counted_date, null));
+    totalRow('Total', result.totals, 'ts-ded-trow-total');
+    // Unpaid bills and schedule payments for the month, shown apart and left out of the total.
+    if (pending.length) {
+      const group = body.insertRow(); group.className = 'ts-company-expenses-group';
+      cell(group, 'Not counted yet').colSpan = widths.length;
+      pending.forEach((item) => expenseRow(item, item.supplier_invoice_date, expensePaymentStatus(item)));
+      totalRow('Not in the total', result.pending_totals, 'ts-company-expenses-subtotal');
+    }
+    content.appendChild(table);
+    const foot = document.createElement('div'); foot.className = 'ts-company-expenses-foot';
+    ledgerText(foot, 'ts-note', basisNote);
+    const view = document.createElement('button'); view.type = 'button'; view.className = 'ts-expense-text-button'; view.textContent = 'View in Expenses';
+    view.addEventListener('click', () => openExpenses(null));
+    foot.appendChild(view);
+    content.appendChild(foot);
+  }
+
 
   function expenseInlineField(panel, labelText, input, grow) {
     const wrap = document.createElement('div');
@@ -269,51 +785,37 @@
     return input;
   }
 
+  // A schedule payment that has come due defaults to being paid on its due date; anything else to today.
+  function expenseDefaultPaidDate(transaction) {
+    const due = String(transaction.status === 'scheduled' ? transaction.supplier_invoice_date || '' : '');
+    return due && due <= expenseToday() ? due : expenseToday();
+  }
+
   function showExpenseInlineAction(row, transaction, mode) {
     row.parentElement.querySelectorAll('.ts-ledger-inline').forEach((el) => el.remove());
     const panel = document.createElement('form');
     panel.className = 'ts-ledger-inline';
-    const status = expensePaymentStatus(transaction);
-    const heading = { markpaid:`Mark paid · ${operationsMoney(transaction.amount)}`, payment:`Record payment · ${operationsMoney(status.outstanding)} outstanding`, receipt:'Add receipt', reconcile:'Reconcile' }[mode];
-    ledgerText(panel, 'ts-ledger-inline__title', heading);
-    let amount, date, method, reference, notes, url, claim, override;
-    if (mode === 'payment') amount = expenseInlineField(panel, 'Amount paid', expenseInput('number', { min:'0.01', step:'0.01', required:true, value:String(status.outstanding) }));
-    if (mode === 'payment' || mode === 'markpaid') {
-      date = expenseInlineField(panel, 'Payment date', expenseInput('date', { required:true, value:expenseToday() }));
+    ledgerText(panel, 'ts-ledger-inline__title', mode === 'markpaid' ? `Mark paid · ${operationsMoney(transaction.amount)}` : 'Receipt links');
+    let date, method, reference, url;
+    if (mode === 'markpaid') {
+      date = expenseInlineField(panel, 'Paid date', expenseInput('date', { required:true, value:expenseDefaultPaidDate(transaction) }));
       method = expenseInlineField(panel, 'Paid by', fillPaymentMethodSelect(document.createElement('select'), expenseDefaultPaymentMethod(transaction.vendor)));
-      reference = expenseInlineField(panel, 'Reference (optional)', expenseInput('text', { maxLength:160, placeholder:'Bank or card ref' }));
-      notes = expenseInlineField(panel, 'Notes (optional)', expenseInput('text', { maxLength:500 }), true);
-    }
-    if (mode === 'receipt') url = expenseInlineField(panel, 'Link to the receipt or tax invoice', expenseInput('url', { required:true, placeholder:'https://drive.google.com/…' }), true);
-    if (mode === 'reconcile') {
-      if (transaction.gst_code === 'taxable') {
-        const toggle = document.createElement('label'); toggle.className = 'ts-expense-inline-check';
-        claim = expenseInput('checkbox', { checked:!!(transaction.attachments && transaction.attachments.length) });
-        toggle.append(claim, document.createTextNode(' Claim the GST credit'));
-        panel.appendChild(toggle);
-        override = expenseInlineField(panel, 'GST amount, if the invoice differs (optional)', expenseInput('number', { min:'0', step:'0.01', placeholder:operationsMoney(transaction.gst_amount) }));
-        ledgerText(panel, 'ts-ledger-inline__note', transaction.attachments && transaction.attachments.length ? 'Reconciling locks this expense. Check it matches your bank statement and tax invoice.' : 'A GST credit needs a tax invoice. Add a receipt first, or reconcile without claiming GST.');
-      } else {
-        ledgerText(panel, 'ts-ledger-inline__note', 'Reconciling locks this expense. Check it matches your bank statement. No GST credit applies to this GST treatment.');
-      }
+      reference = expenseInlineField(panel, 'Reference (optional)', expenseInput('text', { maxLength:160, placeholder:'Bank or card ref' }), true);
+    } else {
+      renderExpenseReceiptLinks(panel, transaction);
+      url = expenseInlineField(panel, (transaction.attachments || []).length ? 'Add another link' : 'Link to the receipt or tax invoice', expenseInput('url', { required:true, placeholder:'https://drive.google.com/…' }), true);
     }
     const buttons = document.createElement('div'); buttons.className = 'ts-ledger-inline__buttons';
-    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = { markpaid:'Mark paid', payment:'Save payment', receipt:'Save receipt', reconcile:'Confirm reconciliation' }[mode];
-    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => panel.remove());
+    const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = mode === 'markpaid' ? 'Mark paid' : 'Add link';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = mode === 'markpaid' ? 'Cancel' : 'Close'; cancel.addEventListener('click', () => panel.remove());
     buttons.append(submit, cancel);
     panel.appendChild(buttons);
     panel.addEventListener('submit', async (event) => {
       event.preventDefault(); submit.disabled = true;
       try {
-        let result;
-        if (mode === 'markpaid') result = await expenseSave('api_upsertExpenseTransaction', { ...transaction, status:'recorded', reconciliation_state:'unreconciled', payment:{ payment_date:date.value, payment_method:method.value, reference:reference.value, notes:notes.value } }, 'Marked paid');
-        else if (mode === 'payment') result = await expenseSave('api_addExpensePayment', { expense_transaction_id:transaction.id, payment_date:date.value, amount:Number(amount.value), payment_method:method.value, reference:reference.value, notes:notes.value }, 'Payment recorded');
-        else if (mode === 'receipt') result = await expenseSave('api_attachExpenseReceipt', { expense_transaction_id:transaction.id, url:url.value, name:'Receipt' }, 'Receipt added');
-        else {
-          const payload = { id:transaction.id, claimable_gst_confirmed:!!(claim && claim.checked) };
-          if (override && override.value !== '') payload.gst_override_amount = Number(override.value);
-          result = await expenseSave('api_reconcileExpenseTransaction', payload, 'Expense reconciled');
-        }
+        const result = mode === 'markpaid'
+          ? await expenseSave('api_markExpensePaid', { id:transaction.id, paid_date:date.value, payment_method:method.value, payment_reference:reference.value }, 'Marked paid')
+          : await expenseSave('api_attachExpenseReceipt', { expense_transaction_id:transaction.id, url:url.value, name:'Receipt' }, 'Receipt added');
         if (result && result.success === false) submit.disabled = false;
       } catch (error) {
         operationsStatus(error && error.message ? error.message : 'Could not save.', 'warn');
@@ -326,8 +828,9 @@
 
   const EXPENSE_FREQUENCY_LABELS = { weekly:'Weekly', fortnightly:'Fortnightly', monthly:'Monthly', quarterly:'Quarterly', yearly:'Yearly', annually:'Yearly', annual:'Yearly', once:'Once only', one_off:'Once only' };
 
+  /** A schedule runs until its end date; once that has passed it has ended. (The old Active flag is ignored.) */
   function expenseIsActive(rule) {
-    return rule.active === true || /^(true|1|yes|y)$/i.test(String(rule.active == null ? '' : rule.active).trim());
+    return !rule.end_date || String(rule.end_date) >= expenseToday();
   }
 
   function expenseToday() {
@@ -338,6 +841,64 @@
   function expenseDateLabel(iso) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return String(iso || '');
     return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric', timeZone:'UTC' });
+  }
+
+  const expenseRound = (value) => Math.round(((Number(value) || 0) + Number.EPSILON) * 100) / 100;
+  // Mirrors expenseAmounts_ (backend/expenses.js): taxable GST is one-eleventh of the amount including GST.
+  function expenseExFromInc(inc, gstCode) {
+    const amount = expenseRound(inc);
+    return gstCode === 'taxable' ? expenseRound(amount - expenseRound(amount / 11)) : amount;
+  }
+  function expenseIncFromEx(ex, gstCode) {
+    return gstCode === 'taxable' ? expenseRound(Number(ex) * 1.1) : expenseRound(ex);
+  }
+
+  /**
+   * Links an "including GST" and an "excluding GST" box: typing in either fills in the other. Changing the
+   * GST treatment recalculates the ex-GST amount from the inc-GST one, because that's what was paid.
+   */
+  function wireExpenseAmountPair(incId, exId, codeId) {
+    const inc = document.getElementById(incId), ex = document.getElementById(exId), code = document.getElementById(codeId);
+    if (!inc || !ex || !code) return;
+    const fromInc = () => { ex.value = inc.value === '' ? '' : expenseExFromInc(inc.value, code.value).toFixed(2); };
+    inc.addEventListener('input', fromInc);
+    code.addEventListener('change', fromInc);
+    ex.addEventListener('input', () => { inc.value = ex.value === '' ? '' : expenseIncFromEx(ex.value, code.value).toFixed(2); inc.dispatchEvent(new Event('expense-amount-sync')); });
+  }
+
+  /** Fills both boxes from a saved expense or schedule, keeping a GST amount taken from an invoice. */
+  function setExpenseAmountPair(incId, exId, item) {
+    const inc = document.getElementById(incId), ex = document.getElementById(exId);
+    const has = item && item.amount !== '' && item.amount != null;
+    inc.value = has ? expenseRound(item.amount).toFixed(2) : '';
+    const stored = item && item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : (has ? expenseExFromInc(item.amount, item.gst_code) : '');
+    ex.value = stored === '' ? '' : expenseRound(stored).toFixed(2);
+  }
+
+  /** The amounts to save: inc-GST is what was paid; the GST is the difference when taxable. */
+  function readExpenseAmountPair(incId, exId, gstCode) {
+    const amount = expenseRound(document.getElementById(incId).value);
+    const exValue = document.getElementById(exId).value;
+    const ex = exValue === '' ? expenseExFromInc(amount, gstCode) : expenseRound(exValue);
+    const gst = gstCode === 'taxable' ? expenseRound(amount - ex) : 0;
+    return gst >= 0 && gst <= amount ? { amount, amount_ex_gst: ex, gst_amount: gst } : { amount, amount_ex_gst: expenseExFromInc(amount, gstCode) };
+  }
+
+  /** "$2,086.79" with "$1,897.08 ex GST" under it, and what it counts as when only part is business use. */
+  function expenseAmountCell(item) {
+    const cell = document.createElement('div');
+    cell.className = 'ts-ledger-row__amount ts-expense-amounts';
+    ledgerText(cell, 'ts-expense-amounts__inc', operationsMoney(item.amount));
+    const ex = item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : expenseExFromInc(item.amount, item.gst_code);
+    ledgerText(cell, 'ts-ledger-row__meta', operationsMoney(ex) + ' ex GST');
+    const businessUse = item.business_use_percentage === '' || item.business_use_percentage == null ? 1 : Number(item.business_use_percentage);
+    // Part business use: what it counts as goes in the tooltip, so every row stays two lines.
+    if (item.gst_code === 'taxable' && businessUse < 1) {
+      const counted = expenseRound(Number(item.amount) - expenseRound((Number(item.amount) - Number(ex)) * businessUse));
+      cell.classList.add('has-tip');
+      cell.dataset.tip = `Counts ${operationsMoney(counted)}: ${Math.round(businessUse * 100)}% business use, so only that share of the GST is claimed`;
+    }
+    return cell;
   }
 
   // Mirrors migrationOccurrenceDates_ (backend/migrations.js): the schedule dates on or after `from`, at most `limit`.
@@ -365,48 +926,156 @@
     return dates;
   }
 
-  function expenseRuleSummary(rule) {
-    if (!expenseIsActive(rule)) return 'Paused. No upcoming payments are listed.';
-    const upcoming = expenseScheduleDates(rule.start_date, rule.end_date, rule.frequency, expenseToday(), 5);
-    if (!upcoming.length) return rule.end_date ? 'Finished. No payments due after the end date.' : 'No upcoming payments.';
-    return 'Next: ' + upcoming.map(expenseDateLabel).join(', ');
+  const EXPENSE_GST_LABELS = { gst_free:'GST-free', input_taxed:'Input taxed', out_of_scope:'Out of scope' };
+
+  // Same date and money formats as the Deductions page cards, so the two schedule lists read alike.
+  function expenseCardDate(iso) {
+    return typeof DATE_FULL_FORMATTER !== 'undefined' && typeof parseIsoDate === 'function' ? DATE_FULL_FORMATTER.format(parseIsoDate(iso)) : expenseDateLabel(iso);
+  }
+  function expenseCardMoney(value) {
+    return typeof formatCurrency === 'function' ? formatCurrency(Number(value) || 0) : operationsMoney(value);
+  }
+
+  /** "Next payment on …", or why there isn't one. */
+  function expenseRuleNextText(rule) {
+    if (!expenseIsActive(rule)) return 'Ended. No more payments are listed.';
+    const next = expenseScheduleDates(rule.start_date, rule.end_date, rule.frequency, expenseToday(), 1)[0];
+    if (next) return 'Next payment on ' + expenseCardDate(next);
+    return rule.end_date ? 'No payments due before the end date.' : 'No upcoming payments.';
+  }
+
+  /** A schedule as a shared schedule card: only the fields that say something are shown. */
+  function createExpenseRuleCard(rule) {
+    const badges = [];
+    if (!expenseIsActive(rule)) badges.push({ text:'Ended' });
+    if (EXPENSE_GST_LABELS[rule.gst_code]) badges.push({ text:EXPENSE_GST_LABELS[rule.gst_code] });
+    const businessUse = rule.business_use_percentage === '' || rule.business_use_percentage == null ? 1 : Number(rule.business_use_percentage);
+    if (businessUse < 1) badges.push({ text:`${Math.round(businessUse * 10000) / 100}% business use` });
+    const ex = rule.amount_ex_gst !== '' && rule.amount_ex_gst != null ? rule.amount_ex_gst : expenseExFromInc(rule.amount, rule.gst_code);
+    const meta = [{ text:expenseCardMoney(rule.amount), title:'Including GST' }];
+    if (rule.gst_code === 'taxable') meta.push({ text:expenseCardMoney(ex) + ' ex GST' });
+    meta.push({ text:EXPENSE_FREQUENCY_LABELS[String(rule.frequency).toLowerCase()] || rule.frequency });
+    meta.push({ text:'Starts ' + expenseCardDate(rule.start_date) });
+    if (rule.end_date) meta.push({ text:'Ends ' + expenseCardDate(rule.end_date) });
+    const note = [rule.vendor && rule.description ? rule.description : '', rule.notes].filter(Boolean).join(' — ');
+    return createScheduleCard({
+      title: rule.vendor || rule.description || 'Untitled schedule',
+      badges, meta,
+      occurrence: expenseRuleNextText(rule),
+      note,
+      selected: !!operationsState.expenseRuleEditId && operationsState.expenseRuleEditId === rule.id,
+      readOnly: false,
+      editTitle: 'Edit ' + (rule.vendor || 'schedule'),
+      onOpen: () => selectExpenseRule(rule)
+    });
+  }
+
+  function ensureExpenseRuleCollapseState(groups) {
+    const collapse = operationsState.ruleCollapse || (operationsState.ruleCollapse = {});
+    groups.forEach((group) => { if (!Object.prototype.hasOwnProperty.call(collapse, group.meta.id)) collapse[group.meta.id] = true; });
   }
 
   function renderExpenseRules() {
     const list = document.getElementById('expense-rules');
-    list.replaceChildren();
-    if (!operationsState.rules.length) { ledgerText(list, 'ts-empty', 'No schedules yet. Add one for bills that repeat, such as insurance, rent or subscriptions.'); return; }
-    operationsState.rules.forEach((rule) => {
-      const active = expenseIsActive(rule);
-      const row = document.createElement('div'); row.className = 'ts-ledger-row';
-      const identity = document.createElement('div');
-      ledgerText(identity, 'ts-ledger-row__title', rule.vendor || rule.description || 'Untitled schedule');
-      ledgerText(identity, 'ts-ledger-row__meta', [EXPENSE_FREQUENCY_LABELS[String(rule.frequency).toLowerCase()] || rule.frequency, 'from ' + expenseDateLabel(rule.start_date), rule.end_date ? 'until ' + expenseDateLabel(rule.end_date) : 'no end date', rule.category].filter(Boolean).join(' · '));
-      row.appendChild(identity);
-      const stateCell = document.createElement('div');
-      const badge = document.createElement('span'); badge.className = 'ts-badge' + (active ? ' success' : ''); badge.textContent = active ? 'Active' : 'Paused';
-      stateCell.appendChild(badge);
-      const next = active ? expenseScheduleDates(rule.start_date, rule.end_date, rule.frequency, expenseToday(), 1)[0] : '';
-      if (next) ledgerText(stateCell, 'ts-ledger-row__meta', 'Next due ' + expenseDateLabel(next));
-      row.appendChild(stateCell);
-      ledgerText(row, 'ts-ledger-row__amount', operationsMoney(rule.amount));
-      const actions = document.createElement('div'); actions.className = 'ts-ledger-row__actions';
-      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'ghost small'; edit.textContent = 'Edit schedule'; edit.addEventListener('click', () => openExpenseRuleForm(rule)); actions.appendChild(edit);
-      if (active) {
-        const archive = document.createElement('button'); archive.type = 'button'; archive.className = 'ghost small'; archive.textContent = 'Stop schedule';
-        archive.addEventListener('click', async () => {
-          // Stopping ends the schedule today and removes its upcoming payments, so it asks first.
-          if (!archive.dataset.confirm) { archive.dataset.confirm = '1'; archive.textContent = 'Confirm: stop and remove upcoming'; return; }
-          archive.disabled = true;
-          const result = await operationsApi('api_archiveExpenseRule', rule.id);
-          if (result.success === false) { operationsStatus(result.message, 'warn'); archive.disabled = false; } else { operationsStatus('Schedule stopped'); renderExpensesPage(); }
-        });
-        actions.appendChild(archive);
-      }
-      row.appendChild(actions);
-      ledgerText(row, 'ts-ledger-row__detail', expenseRuleSummary(rule));
-      list.appendChild(row);
+    if (!list) return;
+    const rules = operationsState.rules || [];
+    const searchWrap = document.getElementById('expense-rule-search-wrap');
+    const showSearch = scheduleListShowsSearch(rules.length);
+    if (searchWrap) searchWrap.style.display = showSearch ? '' : 'none';
+    if (!showSearch && operationsState.ruleQuery) { operationsState.ruleQuery = ''; const input = document.getElementById('expense-rule-search'); if (input) input.value = ''; }
+    const controls = document.getElementById('expense-rule-collapse-controls');
+    if (!rules.length) {
+      if (controls) controls.style.display = 'none';
+      list.replaceChildren();
+      ledgerText(list, 'ts-empty', 'No schedules yet. Add one for bills that repeat, such as insurance, rent or subscriptions.');
+      return;
+    }
+    const known = {};
+    operationsState.categories.forEach((category) => { known[category.id] = true; });
+    const groups = groupScheduleItems(rules, {
+      categories: operationsState.categories,
+      categoryIdOf: (rule) => (rule.category_id && known[rule.category_id] ? rule.category_id : ''),
+      metaOf: (category) => ({ id:category.id, name:category.name, color:category.color || '#6b7280' }),
+      isActive: expenseIsActive,
+      nameOf: (rule) => rule.vendor || rule.description
     });
+    const selectedId = operationsState.expenseRuleEditId;
+    renderScheduleGroupedList(list, {
+      items: rules,
+      grouped: operationsState.categories.length > 0,
+      groups,
+      query: operationsState.ruleQuery || '',
+      matches: (rule, q) => [rule.vendor, rule.description, rule.category].some((text) => String(text || '').toLowerCase().includes(q)),
+      noMatchesText: (q) => 'No schedules match “' + q + '”.',
+      collapseControlsEl: controls,
+      collapseState: () => operationsState.ruleCollapse,
+      ensureCollapseState: () => ensureExpenseRuleCollapseState(groups),
+      isSelectedIn: (group) => !!selectedId && group.items.some((rule) => rule.id === selectedId),
+      createCard: createExpenseRuleCard,
+      onHeadClick: expenseRuleGroupHeadClick
+    });
+  }
+
+  // Same accordion behaviour as the Deductions page: one category open at a time, opening one selects its
+  // first schedule, and unsaved changes block switching away.
+  function expenseRuleGroupHeadClick(group, isSelectedHere) {
+    const collapse = operationsState.ruleCollapse || (operationsState.ruleCollapse = {});
+    const formOpen = expenseRuleFormOpen();
+    if (isSelectedHere && formOpen) {
+      if (expenseRuleFormDirty()) { operationsStatus('Save or cancel your changes before collapsing this category.', 'warn'); return; }
+      collapse[group.meta.id] = true;
+      closeExpenseRuleForm();
+      return;
+    }
+    if (collapse[group.meta.id]) {
+      if (formOpen && expenseRuleFormDirty()) { operationsStatus('Save or cancel your changes before switching categories.', 'warn'); return; }
+      Object.keys(collapse).forEach((key) => { collapse[key] = true; });
+      collapse[group.meta.id] = false;
+      if (group.items.length) { openExpenseRuleForm(group.items[0]); return; }
+      if (formOpen) { closeExpenseRuleForm(); return; }
+    } else {
+      collapse[group.meta.id] = true;
+    }
+    renderExpenseRules();
+  }
+
+  function setAllExpenseRuleGroups(collapsed) {
+    const collapse = operationsState.ruleCollapse || (operationsState.ruleCollapse = {});
+    Object.keys(collapse).forEach((key) => { collapse[key] = collapsed; });
+    renderExpenseRules();
+  }
+
+  function expenseRuleFormOpen() {
+    const form = document.getElementById('expense-rule-form');
+    return !!form && form.style.display !== 'none';
+  }
+
+  function expenseRuleFormValues() {
+    const form = document.getElementById('expense-rule-form');
+    return form ? Array.from(form.elements).map((el) => (el.type === 'checkbox' ? el.checked : el.value)).join('\u0001') : '';
+  }
+
+  function expenseRuleFormDirty() {
+    return expenseRuleFormOpen() && operationsState.ruleFormSnapshot !== expenseRuleFormValues();
+  }
+
+  /** Opening a schedule from the list: unsaved changes to another one have to be saved or cancelled first. */
+  function selectExpenseRule(rule) {
+    if (expenseRuleFormDirty() && operationsState.expenseRuleEditId !== rule.id) {
+      operationsStatus('Save or cancel your changes before opening another schedule.', 'warn');
+      return;
+    }
+    openExpenseRuleForm(rule);
+  }
+
+  function closeExpenseRuleForm() {
+    const form = document.getElementById('expense-rule-form');
+    if (form) form.style.display = 'none';
+    const placeholder = document.getElementById('expense-rule-detail-placeholder');
+    if (placeholder) placeholder.style.display = 'flex';
+    operationsState.expenseRuleEditId = '';
+    operationsState.ruleFormSnapshot = '';
+    renderExpenseRules();
   }
 
   async function renderExpenseReport() {
@@ -414,52 +1083,189 @@
     const fyInput = document.getElementById('expense-report-fy');
     if (!target || !fyInput) return;
     if (!fyInput.value) { fyInput.value = financialYearStartYear(new Date()); }
-    const report = await operationsApi('api_getExpenseReport', { financial_year:Number(fyInput.value) });
+    const basis = defaultAccountingBasis();
+    const report = await operationsApi('api_getExpenseReport', { financial_year:Number(fyInput.value), accounting_basis:basis });
     target.replaceChildren();
-    [['Actual', report.totals.actual], ['Scheduled', report.totals.scheduled], ['Unreconciled', report.totals.unreconciled], ['GST creditable', report.totals.gst_creditable], ['Non-creditable GST', report.totals.non_creditable_gst]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
+    [[`Counted (${report.accounting_basis} basis)`, report.totals.counted], ['GST credits', report.totals.gst_credits], ['Unpaid', report.totals.unpaid], ['Scheduled', report.totals.scheduled]].forEach(([label, value]) => { const item=document.createElement('div'); ledgerText(item, 'ts-ledger-row__meta', label); const strong=document.createElement('strong'); strong.textContent=operationsMoney(value); item.appendChild(strong); target.appendChild(item); });
   }
 
   function openExpenseForm(item) {
     operationsState.expenseEditId = item && item.id ? item.id : '';
-    document.getElementById('expense-rule-form').style.display = 'none';
-    const form = document.getElementById('expense-form'); form.style.display = 'block'; form.reset();
-    document.getElementById('expense-vendor').value = item?.vendor || ''; document.getElementById('expense-abn').value = item?.vendor_abn || ''; document.getElementById('expense-description').value = item?.description || ''; document.getElementById('expense-category').value = item?.category || ''; document.getElementById('expense-amount').value = item?.amount ?? ''; document.getElementById('expense-gst-code').value = item?.gst_code || 'taxable'; document.getElementById('expense-notes').value = item?.notes || '';
+    operationsState.expenseEditStatus = item ? item.status : '';
+    if (expenseRuleFormOpen()) closeExpenseRuleForm();
+    const form = document.getElementById('expense-form'); form.reset();
+    document.getElementById('expense-vendor').value = item?.vendor || ''; document.getElementById('expense-abn').value = item?.vendor_abn || ''; document.getElementById('expense-description').value = item?.description || item?.vendor || ''; renderExpenseCategoryOptions(document.getElementById('expense-category'), item?.category_id || ''); showNewExpenseCategory('expense-category', false); document.getElementById('expense-gst-code').value = item?.gst_code || 'taxable'; setExpenseAmountPair('expense-amount', 'expense-amount-ex', item); document.getElementById('expense-notes').value = item?.notes || '';
     document.getElementById('expense-business-use').value = item ? Math.round((Number(item.business_use_percentage) || 0) * 10000) / 100 : 100;
-    document.getElementById('expense-date').value = item?.purchase_date || expenseToday(); document.getElementById('expense-supplier-date').value = item?.supplier_invoice_date || '';
-    // Paying is offered when recording a new expense; an existing one is paid from its row instead.
-    document.getElementById('expense-paid-now-wrap').style.display = item ? 'none' : 'block';
-    document.getElementById('expense-paid-now').checked = true;
-    document.getElementById('expense-paid-date').value = expenseToday();
-    document.getElementById('expense-paid-reference').value = '';
-    const methodSelect = fillPaymentMethodSelect(document.getElementById('expense-paid-method'), expenseDefaultPaymentMethod(item?.vendor));
-    delete methodSelect.dataset.touched;
+    document.getElementById('expense-supplier-date').value = item?.supplier_invoice_date || '';
+    // A schedule payment's date is when it falls due; it is paid by turning Paid on (or Mark paid).
+    // syncExpensePaidNow sets the date's label and hint to match.
+    const scheduled = item && item.status === 'scheduled';
+    // A new expense is paid today by default; an existing one opens as it is.
+    document.getElementById('expense-paid-now').checked = item ? !!item.paid_date : true;
+    document.getElementById('expense-paid-date').value = item?.paid_date || (scheduled ? expenseDefaultPaidDate(item) : expenseToday());
+    document.getElementById('expense-paid-reference').value = item?.payment_reference || '';
+    const methodSelect = fillPaymentMethodSelect(document.getElementById('expense-paid-method'), item?.payment_method || expenseDefaultPaymentMethod(item?.vendor));
+    if (item?.payment_method) methodSelect.dataset.touched = '1'; else delete methodSelect.dataset.touched;
     syncExpensePaidNow();
-    form.querySelector('h4').textContent = item ? 'Edit expense' : 'Record expense';
-    document.getElementById('expense-vendor').focus();
+    document.getElementById('expense-form-title').textContent = scheduled ? 'Edit scheduled expense' : item ? 'Edit expense' : 'Record expense';
+    // An expense from a schedule says so, with a way to change the schedule itself.
+    const fromSchedule = !!(item && item.source_rule_id);
+    document.getElementById('expense-form-schedule').hidden = !fromSchedule;
+    operationsState.expenseEditRuleId = fromSchedule ? item.source_rule_id : '';
+    showExpenseFormModal();
+    // Description is the expense's name in the ledger, so it's asked first.
+    document.getElementById('expense-description').focus();
   }
 
   function syncExpensePaidNow() {
     const on = document.getElementById('expense-paid-now').checked;
-    document.getElementById('expense-paid-now-fields').style.display = on ? '' : 'none';
-    document.getElementById('expense-paid-date').required = on && !operationsState.expenseEditId;
+    document.querySelectorAll('[data-expense-paid-field]').forEach((field) => { field.style.display = on ? '' : 'none'; });
+    document.getElementById('expense-paid-date').required = on;
+    // Unpaid (or upcoming), the invoice or due date is what dates the expense, so it's needed.
+    document.getElementById('expense-supplier-date').required = !on;
+    const scheduled = operationsState.expenseEditStatus === 'scheduled';
+    document.getElementById('expense-paid-now-hint').textContent = on ? 'Turn off for a bill you haven’t paid yet.' : scheduled ? 'Turn on once it’s paid.' : 'Turn on when you’ve paid it.';
+    document.getElementById('expense-supplier-date-label').textContent = scheduled ? 'Due date' : on ? 'Invoice date (optional)' : 'Invoice date';
+    document.getElementById('expense-supplier-date-hint').textContent = on ? 'Leave blank if it’s the day you paid.' : 'Needed for a bill you haven’t paid yet.';
+    document.getElementById('expense-supplier-date-hint').style.display = scheduled ? 'none' : '';
+  }
+
+  function showExpenseFormModal() {
+    const modal = document.getElementById('modal-expense-form');
+    if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex';
+  }
+
+  function hideExpenseFormModal() {
+    const modal = document.getElementById('modal-expense-form');
+    if (!modal) return;
+    if (typeof hideModal === 'function') hideModal(modal); else modal.style.display = 'none';
+    // Opened from the Time Entry "Company expenses" popup: go back to it. It refreshes itself when the
+    // reload after a save arrives.
+    const back = operationsState.expenseFormReturn;
+    operationsState.expenseFormReturn = null;
+    if (back) showCompanyExpensesModal(back.year, back.month);
+  }
+
+  /** The categories the expense form needs, when it opens before the Expenses page has loaded them. */
+  async function ensureExpenseFormLists() {
+    if (operationsState.categories.length) return;
+    try { setExpenseCategories(await operationsApi('api_getDeductionCategories')); }
+    catch (error) { operationsStatus('Could not load categories: ' + (error && error.message ? error.message : error), 'warn'); }
+  }
+
+  function hideExpenseRuleConfirm() {
+    operationsState.ruleConfirmPayload = null;
+    const panel = document.getElementById('expense-rule-confirm');
+    if (panel) panel.hidden = true;
+    const held = document.getElementById('expense-rule-confirm-held');
+    if (held) held.checked = false;
+  }
+
+  function expensePaymentCount(count, word) {
+    return `${count} ${word ? word + ' ' : ''}payment${count === 1 ? '' : 's'}`;
+  }
+
+  /** "15 Nov, 15 Dec and 3 more" */
+  function expensePaymentDates(list) {
+    const dates = list.map((entry) => expenseDateLabel(entry.date));
+    return dates.length > 4 ? `${dates.slice(0, 3).join(', ')} and ${dates.length - 3} more` : dates.join(', ');
+  }
+
+  /**
+   * What a schedule save will do to unpaid payments, as plain lines (see expenseRuleChangePlan_ on the server):
+   * removed after the end date or off the new dates, upcoming ones updated, and Due or hand-edited ones that
+   * stay as they are unless the person ticks the box.
+   */
+  function expenseRuleChangeLines(details) {
+    const lines = [];
+    const removed = details.removed || [];
+    const afterEnd = details.end_date ? removed.filter((entry) => entry.date > details.end_date) : [];
+    const offSchedule = removed.filter((entry) => !afterEnd.includes(entry));
+    if (afterEnd.length) {
+      const notes = [];
+      const due = afterEnd.filter((entry) => entry.due).length, edited = afterEnd.filter((entry) => entry.edited).length;
+      if (due) notes.push(due === 1 ? 'one is Due' : `${due} are Due`);
+      if (edited) notes.push(edited === 1 ? 'one was edited by hand' : `${edited} were edited by hand`);
+      lines.push(`Removes ${expensePaymentCount(afterEnd.length, 'unpaid')} after ${expenseDateLabel(details.end_date)} (${expensePaymentDates(afterEnd)})${notes.length ? ': ' + notes.join(' and ') : ''}.`);
+    }
+    if (offSchedule.length) lines.push(`Removes ${expensePaymentCount(offSchedule.length, 'upcoming')} no longer on the schedule (${expensePaymentDates(offSchedule)}).`);
+    const updated = details.updated || [];
+    if (updated.length) lines.push(`Updates ${expensePaymentCount(updated.length, 'upcoming')} (${expensePaymentDates(updated)}) to ${operationsMoney(details.amount)}.`);
+    const held = details.held || [];
+    const heldText = held.length ? `Also update ${held.length === 1 ? 'the' : 'the ' + held.length} ${held.every((entry) => entry.due) ? 'Due' : held.every((entry) => entry.edited && !entry.due) ? 'hand-edited' : 'Due or hand-edited'} ${held.length === 1 ? 'payment' : 'payments'} (${held.map((entry) => `${expenseDateLabel(entry.date)}, ${operationsMoney(entry.amount)}`).join('; ')}). Otherwise ${held.length === 1 ? 'it stays' : 'they stay'} as ${held.length === 1 ? 'it is' : 'they are'}.` : '';
+    return { lines, heldText };
+  }
+
+  function showExpenseRuleConfirm(payload, details) {
+    const { lines, heldText } = expenseRuleChangeLines(details);
+    operationsState.ruleConfirmPayload = payload;
+    const text = document.getElementById('expense-rule-confirm-text');
+    text.replaceChildren();
+    ledgerText(text, 'ts-ledger-row__title', 'Saving changes unpaid payments');
+    if (lines.length) {
+      const list = document.createElement('ul');
+      lines.forEach((line) => { const item = document.createElement('li'); item.textContent = line; list.appendChild(item); });
+      text.appendChild(list);
+    }
+    document.getElementById('expense-rule-confirm-held-row').hidden = !heldText;
+    document.getElementById('expense-rule-confirm-held-text').textContent = heldText;
+    document.getElementById('expense-rule-confirm-held').checked = false;
+    const panel = document.getElementById('expense-rule-confirm');
+    panel.hidden = false;
+    panel.scrollIntoView?.({ block:'nearest' });
+    document.getElementById('expense-rule-confirm-save').focus();
+  }
+
+  function expenseRuleSavedMessage(result) {
+    const parts = [];
+    if (result.updated_count) parts.push(`${expensePaymentCount(result.updated_count)} updated`);
+    if (result.removed_count) parts.push(`${expensePaymentCount(result.removed_count)} removed`);
+    if (result.kept_count) parts.push(`${expensePaymentCount(result.kept_count)} kept as ${result.kept_count === 1 ? 'it was' : 'they were'}`);
+    if (result.created_count) parts.push(`${expensePaymentCount(result.created_count, 'new')} listed`);
+    return ['Schedule saved', ...parts].join(' · ');
+  }
+
+  async function saveExpenseRule(payload) {
+    const form = document.getElementById('expense-rule-form');
+    const buttons = [form.querySelector('button[type="submit"]'), document.getElementById('expense-rule-confirm-save')];
+    buttons.forEach((button) => { if (button) button.disabled = true; });
+    try {
+      const result = await operationsApi('api_upsertExpenseRule', payload);
+      if (result && result.error === 'schedule_changes') { showExpenseRuleConfirm(payload, result.details || {}); return; }
+      if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
+      hideExpenseRuleConfirm();
+      closeExpenseRuleForm();
+      operationsStatus(expenseRuleSavedMessage(result));
+      renderExpensesPage();
+    } catch (error) {
+      operationsStatus(error && error.message ? error.message : 'Could not save the schedule.', 'warn');
+    } finally {
+      buttons.forEach((button) => { if (button) button.disabled = false; });
+    }
   }
 
   function openExpenseRuleForm(rule) {
     operationsState.expenseRuleEditId = rule && rule.id ? rule.id : '';
-    document.getElementById('expense-form').style.display = 'none';
+    hideExpenseFormModal();
+    const placeholder = document.getElementById('expense-rule-detail-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
     const form = document.getElementById('expense-rule-form'); form.style.display = 'block'; form.reset();
+    // Ends today is for a running schedule; a new or ended one has nothing to stop.
+    const endsToday = document.getElementById('expense-rule-end-today');
+    if (endsToday) endsToday.hidden = !(rule && expenseIsActive(rule));
+    hideExpenseRuleConfirm();
     const set = (id, value) => { document.getElementById(id).value = value; };
-    set('expense-rule-vendor', rule?.vendor || ''); set('expense-rule-abn', rule?.vendor_abn || ''); set('expense-rule-amount', rule?.amount ?? '');
+    set('expense-rule-vendor', rule?.vendor || ''); set('expense-rule-abn', rule?.vendor_abn || ''); 
     const frequency = String(rule?.frequency || 'monthly').toLowerCase();
     set('expense-rule-frequency', { annually:'yearly', annual:'yearly', one_off:'once' }[frequency] || frequency);
     set('expense-rule-start', rule?.start_date || expenseToday()); set('expense-rule-end', rule?.end_date || '');
-    set('expense-rule-category', rule?.category || ''); set('expense-rule-gst-code', rule?.gst_code || 'taxable');
+    renderExpenseCategoryOptions(document.getElementById('expense-rule-category'), rule?.category_id || ''); showNewExpenseCategory('expense-rule-category', false); set('expense-rule-gst-code', rule?.gst_code || 'taxable'); setExpenseAmountPair('expense-rule-amount', 'expense-rule-amount-ex', rule);
     set('expense-rule-business-use', rule ? Math.round((Number(rule.business_use_percentage) || 0) * 10000) / 100 : 100);
-    set('expense-rule-description', rule?.description || ''); set('expense-rule-notes', rule?.notes || '');
-    // The toggle shows the saved value, so editing a paused schedule never quietly restarts it.
-    document.getElementById('expense-rule-active').checked = rule ? expenseIsActive(rule) : true;
+    set('expense-rule-description', rule?.description || rule?.vendor || ''); set('expense-rule-notes', rule?.notes || '');
     document.getElementById('expense-rule-form-title').textContent = rule ? 'Edit schedule' : 'New schedule';
     renderExpenseRulePreview();
+    operationsState.ruleFormSnapshot = expenseRuleFormValues();
+    renderExpenseRules();
     document.getElementById('expense-rule-vendor').focus();
   }
 
@@ -469,32 +1275,82 @@
     const start = document.getElementById('expense-rule-start').value;
     const end = document.getElementById('expense-rule-end').value;
     if (!start) { target.textContent = 'Enter a start date to see upcoming payments.'; return; }
-    if (end && end < start) { target.textContent = 'The end date is before the start date.'; return; }
-    if (!document.getElementById('expense-rule-active').checked) { target.textContent = 'Paused. No upcoming payments will be listed.'; return; }
+    if (end && end < start) { target.textContent = 'Ends before its first payment, so no payments are listed.'; return; }
     const dates = expenseScheduleDates(start, end, document.getElementById('expense-rule-frequency').value, expenseToday(), 5);
     const amount = Number(document.getElementById('expense-rule-amount').value);
     target.textContent = dates.length ? dates.map(expenseDateLabel).join(' · ') + (amount > 0 ? ` — ${operationsMoney(amount)} each` : '') : 'No payments fall on or after today.';
   }
 
+  document.querySelectorAll('select[data-expense-category]').forEach((select) => {
+    renderExpenseCategoryOptions(select, '');
+    select.addEventListener('focus', () => { if (select.value !== EXPENSE_NEW_CATEGORY) select.dataset.previous = select.value; });
+    select.addEventListener('change', () => {
+      if (select.value === EXPENSE_NEW_CATEGORY) showNewExpenseCategory(select.id, true);
+      else { select.dataset.previous = select.value; showNewExpenseCategory(select.id, false); }
+    });
+  });
+  document.querySelectorAll('[data-expense-category-add]').forEach((button) => button.addEventListener('click', () => addExpenseCategory(button.dataset.expenseCategoryAdd)));
+  document.querySelectorAll('[data-expense-category-cancel]').forEach((button) => button.addEventListener('click', () => showNewExpenseCategory(button.dataset.expenseCategoryCancel, false)));
+  document.querySelectorAll('.ts-expense-new-category input').forEach((input) => input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); addExpenseCategory(input.id.replace(/-new-name$/, '')); }
+    if (event.key === 'Escape') { event.preventDefault(); showNewExpenseCategory(input.id.replace(/-new-name$/, ''), false); }
+  }));
+  document.getElementById('expense-manage-categories')?.addEventListener('click', openExpenseCategoryManager);
+  wireExpenseAmountPair('expense-amount', 'expense-amount-ex', 'expense-gst-code');
+  wireExpenseAmountPair('expense-rule-amount', 'expense-rule-amount-ex', 'expense-rule-gst-code');
+  document.getElementById('expense-rule-amount')?.addEventListener('expense-amount-sync', renderExpenseRulePreview);
   document.getElementById('expense-add')?.addEventListener('click', () => openExpenseForm());
   document.getElementById('expense-rule-add')?.addEventListener('click', () => openExpenseRuleForm());
-  document.getElementById('expense-form-cancel')?.addEventListener('click', () => { document.getElementById('expense-form').style.display = 'none'; });
-  document.getElementById('expense-rule-form-cancel')?.addEventListener('click', () => { document.getElementById('expense-rule-form').style.display = 'none'; });
-  ['expense-rule-start', 'expense-rule-end', 'expense-rule-frequency', 'expense-rule-amount', 'expense-rule-active'].forEach((id) => { const el = document.getElementById(id); el?.addEventListener('input', renderExpenseRulePreview); el?.addEventListener('change', renderExpenseRulePreview); });
+  document.getElementById('expense-form-cancel')?.addEventListener('click', hideExpenseFormModal);
+  // "Edit the schedule" from an expense a schedule created: closes the popup and opens the schedule.
+  document.getElementById('expense-form-open-schedule')?.addEventListener('click', async () => {
+    const ruleId = operationsState.expenseEditRuleId;
+    operationsState.expenseFormReturn = null;
+    hideExpenseFormModal();
+    const tab = document.querySelector('[data-expense-tab="rules"]');
+    if (tab && operationsState.expenseTab !== 'rules') tab.click();
+    // From Time Entry the Expenses page may not have loaded its schedules yet.
+    if (typeof state === 'undefined' || state.currentPage !== 'expenses') await (typeof showPage === 'function' ? showPage('expenses') : null);
+    if (!operationsState.rules.some((item) => item.id === ruleId) && operationsState.pageLoad) await operationsState.pageLoad;
+    const rule = operationsState.rules.find((item) => item.id === ruleId);
+    if (rule) selectExpenseRule(rule);
+  });
+  document.getElementById('expense-rule-form-cancel')?.addEventListener('click', closeExpenseRuleForm);
+  document.getElementById('expense-rule-expand-all')?.addEventListener('click', () => setAllExpenseRuleGroups(false));
+  document.getElementById('expense-rule-collapse-all')?.addEventListener('click', () => setAllExpenseRuleGroups(true));
+  document.getElementById('expense-rule-search')?.addEventListener('input', (event) => { operationsState.ruleQuery = String(event.target.value || '').trim().toLowerCase(); renderExpenseRules(); });
+  // Ends today only fills in the end date; Save then lists what it removes before anything changes.
+  document.getElementById('expense-rule-end-today')?.addEventListener('click', () => {
+    document.getElementById('expense-rule-end').value = expenseToday();
+    renderExpenseRulePreview();
+    hideExpenseRuleConfirm();
+    document.querySelector('#expense-rule-form button[type="submit"]')?.focus();
+  });
+  document.getElementById('expense-rule-confirm-cancel')?.addEventListener('click', hideExpenseRuleConfirm);
+  document.getElementById('expense-rule-confirm-save')?.addEventListener('click', () => {
+    const pending = operationsState.ruleConfirmPayload;
+    if (!pending) return;
+    saveExpenseRule({ ...pending, confirm_changes:true, apply_to_held:document.getElementById('expense-rule-confirm-held').checked });
+  });
+  // Any change to the form makes the listed consequences stale.
+  document.getElementById('expense-rule-form')?.addEventListener('input', (event) => { if (!event.target.closest('#expense-rule-confirm')) hideExpenseRuleConfirm(); });
+  ['expense-rule-start', 'expense-rule-end', 'expense-rule-frequency', 'expense-rule-amount'].forEach((id) => { const el = document.getElementById(id); el?.addEventListener('input', renderExpenseRulePreview); el?.addEventListener('change', renderExpenseRulePreview); });
   document.getElementById('expense-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const payload = { id:operationsState.expenseEditId || '', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category:document.getElementById('expense-category').value, amount:Number(document.getElementById('expense-amount').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), purchase_date:document.getElementById('expense-date').value, supplier_invoice_date:document.getElementById('expense-supplier-date').value, notes:document.getElementById('expense-notes').value };
+    const paid = document.getElementById('expense-paid-now').checked;
+    const payload = { id:operationsState.expenseEditId || '', vendor:document.getElementById('expense-vendor').value, vendor_abn:document.getElementById('expense-abn').value, description:document.getElementById('expense-description').value, category_id:expenseCategoryValue('expense-category'), ...readExpenseAmountPair('expense-amount', 'expense-amount-ex', document.getElementById('expense-gst-code').value), gst_code:document.getElementById('expense-gst-code').value, business_use_percentage:Number(document.getElementById('expense-business-use').value), supplier_invoice_date:document.getElementById('expense-supplier-date').value, notes:document.getElementById('expense-notes').value,
+      paid_date:paid ? document.getElementById('expense-paid-date').value : '', payment_method:paid ? document.getElementById('expense-paid-method').value : '', payment_reference:paid ? document.getElementById('expense-paid-reference').value : '' };
+    // Turning Paid off on a paid schedule payment makes it an unpaid bill, never an upcoming forecast again.
+    if (operationsState.expenseEditId && operationsState.expenseEditStatus !== 'scheduled') payload.status = 'recorded';
     const editing = !!operationsState.expenseEditId;
-    const paidNow = !editing && document.getElementById('expense-paid-now').checked;
-    if (paidNow) payload.payment = { payment_date:document.getElementById('expense-paid-date').value, payment_method:document.getElementById('expense-paid-method').value, reference:document.getElementById('expense-paid-reference').value };
     const submit = form.querySelector('button[type="submit"]');
     submit.disabled = true;
     try {
-      const result = await operationsApi('api_upsertExpenseTransaction', payload);
-      if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
-      form.style.display = 'none'; operationsState.expenseEditId = '';
-      operationsStatus(result.payment ? 'Expense recorded and paid' : (paidNow || editing ? 'Expense saved' : 'Expense recorded as unpaid'));
+      const result = await expenseCall('api_upsertExpenseTransaction', payload);
+      if (result.success === false) { if (!result.cancelled) operationsStatus(result.message, 'warn'); return; }
+      hideExpenseFormModal(); operationsState.expenseEditId = '';
+      operationsStatus(editing ? 'Expense saved' : (paid ? 'Expense recorded as paid' : 'Expense recorded as unpaid'));
       renderExpensesPage();
     } catch (error) {
       operationsStatus(error && error.message ? error.message : 'Could not save the expense.', 'warn');
@@ -509,30 +1365,21 @@
     const select = document.getElementById('expense-paid-method');
     if (select && !select.dataset.touched) fillPaymentMethodSelect(select, expenseDefaultPaymentMethod(event.target.value));
   });
-  document.getElementById('expense-rule-form')?.addEventListener('submit', async (event) => {
+  document.getElementById('expense-rule-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const submit = form.querySelector('button[type="submit"]');
     const value = (id) => document.getElementById(id).value;
-    const payload = { id:operationsState.expenseRuleEditId || '', vendor:value('expense-rule-vendor'), vendor_abn:value('expense-rule-abn'), description:value('expense-rule-description'), category:value('expense-rule-category'), amount:Number(value('expense-rule-amount')), gst_code:value('expense-rule-gst-code'), business_use_percentage:Number(value('expense-rule-business-use')), frequency:value('expense-rule-frequency'), start_date:value('expense-rule-start'), end_date:value('expense-rule-end'), notes:value('expense-rule-notes'), active:document.getElementById('expense-rule-active').checked };
-    submit.disabled = true;
-    try {
-      const result = await operationsApi('api_upsertExpenseRule', payload);
-      if (result.success === false) { operationsStatus(result.message, 'warn'); return; }
-      form.style.display = 'none'; operationsState.expenseRuleEditId = '';
-      operationsStatus(result.created_count ? `Schedule saved · ${result.created_count} upcoming payment${result.created_count === 1 ? '' : 's'} listed` : 'Schedule saved');
-      renderExpensesPage();
-    } catch (error) {
-      operationsStatus(error && error.message ? error.message : 'Could not save the schedule.', 'warn');
-    } finally {
-      submit.disabled = false;
-    }
+    saveExpenseRule({ id:operationsState.expenseRuleEditId || '', vendor:value('expense-rule-vendor'), vendor_abn:value('expense-rule-abn'), description:value('expense-rule-description'), category_id:expenseCategoryValue('expense-rule-category'), ...readExpenseAmountPair('expense-rule-amount', 'expense-rule-amount-ex', value('expense-rule-gst-code')), gst_code:value('expense-rule-gst-code'), business_use_percentage:Number(value('expense-rule-business-use')), frequency:value('expense-rule-frequency'), start_date:value('expense-rule-start'), end_date:value('expense-rule-end'), notes:value('expense-rule-notes') });
   });
-  document.getElementById('expense-filter-apply')?.addEventListener('click',renderExpensesPage);
-  document.getElementById('expense-rule-generate')?.addEventListener('click',async()=>{const end=new Date();end.setFullYear(end.getFullYear()+1);const result=await operationsApi('api_generateExpenseRuleOccurrences',{through_date:end.toISOString().slice(0,10)});if(result.success===false)operationsStatus(result.message,'warn');else{operationsStatus(result.created_count?`${result.created_count} more upcoming payment${result.created_count===1?'':'s'} listed`:'Schedules already list 12 months ahead');renderExpensesPage();}});
+  document.getElementById('expense-filter-month')?.addEventListener('change', (event) => setExpenseLedgerFilter({ month:event.target.value }));
+  document.getElementById('expense-filter-state')?.addEventListener('change', (event) => setExpenseLedgerFilter({ status:event.target.value }));
+  document.getElementById('expense-filter-category')?.addEventListener('change', (event) => setExpenseLedgerFilter({ category:event.target.value }));
+  document.getElementById('expense-filter-prev')?.addEventListener('click', () => stepExpenseLedgerMonth(-1));
+  document.getElementById('expense-filter-next')?.addEventListener('click', () => stepExpenseLedgerMonth(1));
+  document.getElementById('expense-filter-clear')?.addEventListener('click', () => setExpenseLedgerFilter({ month:'', status:'', category:'' }));
+  document.querySelectorAll('[data-expense-view]').forEach((button) => button.addEventListener('click', () => { expenseLedgerPrefs().view = button.dataset.expenseView; saveExpenseLedgerPrefs(); renderExpenseTransactions(); }));
   document.querySelectorAll('[data-expense-tab]').forEach((button)=>button.addEventListener('click',()=>{ operationsState.expenseTab=button.dataset.expenseTab; document.querySelectorAll('[data-expense-tab]').forEach((item)=>{ const active=item===button; item.classList.toggle('is-active',active); item.setAttribute('aria-selected',String(active)); }); ['transactions','rules','report'].forEach((name)=>{ document.getElementById(`expense-${name}-panel`).style.display=name===operationsState.expenseTab?'block':'none'; }); }));
   document.getElementById('expense-report-fy')?.addEventListener('change',renderExpenseReport);
-  document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });
+  document.getElementById('expense-export')?.addEventListener('click',async()=>{ const fy=Number(document.getElementById('expense-report-fy').value); const result=await operationsApi('api_exportExpenseReportCsv',{financial_year:fy,accounting_basis:defaultAccountingBasis()}); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.csv],{type:'text/csv;charset=utf-8'})); link.download=result.filename; link.click(); URL.revokeObjectURL(link.href); });
 
   // api_calculateBasPeriod is one of the heaviest server calls (reads invoices, expenses, payments and the
   // timesheet forecast, then hashes the lot — 6–17s per call). renderBasReporting() runs on every income
@@ -575,7 +1422,7 @@
     try {
       const report=await operationsApi('api_calculateBasPeriod',payload);
       target.replaceChildren();
-      [['Actual sales',report.actual.g1_total_sales],['GST on sales',report.actual.gst_on_sales],['GST credits',report.actual.gst_on_purchases],['Timesheet forecast',report.forecast.timesheet_income],['Scheduled expenses',report.forecast.scheduled_expenses],['Unreconciled expenses',report.variance.unreconciled_expenses]].forEach(([label,value])=>{const item=document.createElement('div');ledgerText(item,'ts-ledger-row__meta',label);const strong=document.createElement('strong');strong.textContent=operationsMoney(value);item.appendChild(strong);target.appendChild(item);});
+      [['Actual sales',report.actual.g1_total_sales],['GST on sales',report.actual.gst_on_sales],['GST credits',report.actual.gst_on_purchases],['Timesheet forecast',report.forecast.timesheet_income],['Scheduled expenses',report.forecast.scheduled_expenses],['Unpaid expenses',report.variance.unpaid_expenses]].forEach(([label,value])=>{const item=document.createElement('div');ledgerText(item,'ts-ledger-row__meta',label);const strong=document.createElement('strong');strong.textContent=operationsMoney(value);item.appendChild(strong);target.appendChild(item);});
       document.getElementById('bas-ledger-period').textContent=`${report.period.from} to ${report.period.to} · ${report.accounting_basis} basis`;
       document.getElementById('bas-ledger-warnings').textContent=(report.warnings||[]).join(' ');
     } catch(error) {

@@ -177,6 +177,23 @@ function deleteDeductionCategoryUnlocked_(id) {
     }
   }
 
+  // Expenses and schedules share this list: anything filed under the category becomes Uncategorised.
+  ['expense_transactions', 'expense_rules'].forEach(function(name) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var expenseValues = sheet.getDataRange().getValues();
+    var column = normalizeSheetHeaders_(expenseValues[0]).indexOf('category_id');
+    if (column === -1) return;
+    var cells = sheet.getRange(2, column + 1, expenseValues.length - 1, 1);
+    var ids = cells.getValues();
+    var cleared = false;
+    ids.forEach(function(cell) { if (String(cell[0]) === String(id)) { cell[0] = ''; cleared = true; } });
+    if (cleared) {
+      cells.setValues(ids);
+      if (typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+    }
+  });
+
   // Clear category reference from deductions that used this category
   var deductionSheet = getDeductionsSheet();
   var deductionValues = deductionSheet.getDataRange().getValues();

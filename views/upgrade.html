@@ -22,6 +22,12 @@
     #status[data-state="error"] { color:var(--danger); }
     .backup { margin-top:16px; color:var(--muted); overflow-wrap:anywhere; }
     .backup a { color:var(--accent); }
+    .review { margin-top:22px; border:1px solid var(--line); border-radius:12px; padding:18px 20px; background:var(--panel); }
+    .review h2 { margin:0 0 6px; font-size:18px; }
+    .review p { margin:0 0 12px; color:var(--muted); }
+    .review ul { margin:0 0 4px; padding-left:20px; display:grid; gap:6px; }
+    .review .small { font-size:13px; color:var(--muted); }
+    .ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
   </style>
 </head>
 <body>
@@ -35,11 +41,19 @@
         <li>A dated copy is created in the same Drive folder and checked sheet by sheet.</li>
         <li>Columns are matched by header name; populated columns are never silently relabelled.</li>
         <li>Legacy company expenses and invoices move into auditable ledgers. Superseded rows are archived.</li>
+        <li>Expenses switch to a simple paid date. Part payments, reconciliation and void go: paid expenses keep their payment date, unpaid ones stay unpaid, and void ones are removed (a skipped schedule payment stays skipped).</li>
         <li>If anything interrupts the run, Tempus resumes at the unfinished migration.</li>
       </ol>
     </section>
+    <div id="review" class="review" hidden>
+      <h2>Check these expenses first</h2>
+      <p>These expenses were part-paid. The upgrade makes each one <strong>unpaid</strong>, keeps its full amount and adds a note listing what was paid, so you can set the paid date or fix the amount afterwards. Nothing has been changed yet.</p>
+      <ul id="review-part-paid"></ul>
+      <div id="review-other"></div>
+    </div>
     <div class="actions">
       <button id="run" type="button">Back up and upgrade</button>
+      <button id="cancel" type="button" class="ghost" hidden>Cancel</button>
       <a id="continue" class="button-link" href="" target="_top" hidden>Open Tempus</a>
       <div id="status" role="status" aria-live="polite">Ready to begin.</div>
     </div>
@@ -48,20 +62,70 @@
   <script>
     (function () {
       var button = document.getElementById('run');
+      var cancelButton = document.getElementById('cancel');
       var continueLink = document.getElementById('continue');
       var status = document.getElementById('status');
       var backup = document.getElementById('backup');
+      var review = document.getElementById('review');
       var webAppUrl = <?!= webAppUrlJson ?>;
+      // Set once the part-paid expenses have been shown, so the next click confirms them.
+      var confirmPartPaid = false;
+      function money(value) { return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(value) || 0); }
+      function item(list, text) { var li = document.createElement('li'); li.textContent = text; list.appendChild(li); }
+      function describe(expense) { return (expense.vendor || expense.description || 'Expense') + (expense.date ? ' · ' + expense.date : ''); }
+      function showReview(preview) {
+        var partPaid = document.getElementById('review-part-paid');
+        partPaid.replaceChildren();
+        (preview.part_paid || []).forEach(function (expense) {
+          item(partPaid, describe(expense) + ' — ' + money(expense.paid) + ' paid of ' + money(expense.amount) + ' in ' + expense.payments.length + ' payment' + (expense.payments.length === 1 ? '' : 's'));
+        });
+        var other = document.getElementById('review-other');
+        other.replaceChildren();
+        if ((preview.instalments || []).length) {
+          var p = document.createElement('p'); p.className = 'small';
+          p.textContent = preview.instalments.length + ' expense(s) paid in full across several payments will count as paid on their last payment date, with the payments noted.';
+          other.appendChild(p);
+        }
+        if ((preview.unclaimed_gst || []).length) {
+          var q = document.createElement('p'); q.className = 'small';
+          q.textContent = preview.unclaimed_gst.length + ' taxable expense(s) reconciled without claiming GST will now claim their credit, with a note on each.';
+          other.appendChild(q);
+        }
+        review.hidden = false;
+        confirmPartPaid = true;
+        button.textContent = 'Make these unpaid and upgrade';
+        cancelButton.hidden = false;
+      }
       function fail(error) {
         button.disabled = false;
         status.dataset.state = 'error';
         status.textContent = error && error.message ? error.message : String(error || 'Upgrade failed.');
       }
+      cancelButton.addEventListener('click', function () {
+        review.hidden = true;
+        cancelButton.hidden = true;
+        button.hidden = true;
+        status.dataset.state = '';
+        status.textContent = 'Upgrade cancelled. Nothing was changed. Tempus opens once the upgrade has run, so refresh this page when you are ready.';
+      });
+      if (google.script.run.api_getUpgradePreview) {
+        google.script.run.withSuccessHandler(function (preview) {
+          if (preview && preview.requires_confirmation && preview.expenses) showReview(preview.expenses);
+        }).api_getUpgradePreview();
+      }
       button.addEventListener('click', function () {
         button.disabled = true;
+        cancelButton.hidden = true;
         status.dataset.state = 'running';
         status.textContent = 'Creating and verifying backup…';
         google.script.run.withSuccessHandler(function (result) {
+          if (result && result.error === 'confirmation_required') {
+            button.disabled = false;
+            status.dataset.state = '';
+            status.textContent = result.message;
+            showReview(result.preview || {});
+            return;
+          }
           if (!result || result.success === false) { fail(result && result.message ? result.message : 'Upgrade failed.'); return; }
           if (result.backup && result.backup.url) {
             var link = document.createElement('a');
@@ -72,6 +136,7 @@
             backup.replaceChildren(document.createTextNode('Verified backup: '), link);
           }
           button.hidden = true;
+          review.hidden = true;
           status.dataset.state = 'complete';
           if (webAppUrl) {
             continueLink.href = webAppUrl;
@@ -81,7 +146,7 @@
           } else {
             status.textContent = 'Upgrade complete. Refresh this page to open Tempus.';
           }
-        }).withFailureHandler(fail).api_runUpgrade();
+        }).withFailureHandler(fail).api_runUpgrade({ confirm_part_paid: confirmPartPaid });
       });
     }());
   </script>

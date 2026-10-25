@@ -4,9 +4,9 @@
  * quarter, with a subtotal row per quarter and year-to-date totals. Net, subtotals and super are live
  * formulas so the accountant can adjust a line and see the totals follow.
  *
- * Every invoice is assumed paid: income is one line per invoice on its invoice date. Expenses are
- * attributed with the same function the BAS figures use (cash: one row per payment made in the year;
- * accrual: one row per expense on its event date), so the year totals agree with the BAS page.
+ * Every invoice is assumed paid: income is one line per invoice on its invoice date. Expenses are one line
+ * each, attributed with the same function the BAS figures use (cash: on the paid date; accrual: on the
+ * earlier of the invoice and paid dates), so the year totals agree with the BAS page.
  */
 
 var ACCOUNTANT_REPORT_MONEY_FORMAT = '#,##0.00';
@@ -32,30 +32,6 @@ function accountantReportExpenseDescription_(transaction) {
   return vendor || description;
 }
 
-function accountantReportMethods_(payments) {
-  var methods = [];
-  payments.forEach(function(payment) { var method = String(payment.payment_method || ''); if (method && methods.indexOf(method) === -1) methods.push(method); });
-  return methods.join(', ');
-}
-
-/**
- * Splits a counted share across the payments that make it up, rounding cumulatively so the parts add up
- * to the rounded whole exactly. `total` is the document total, `gst` its GST (or claimable GST).
- */
-function accountantReportPaymentShares_(payments, total, gst) {
-  var cumulativePaid = 0, allocatedGst = 0, allocatedPaid = 0;
-  return payments.map(function(payment) {
-    var amount = Number(payment.amount || 0);
-    cumulativePaid += amount;
-    var countedTo = total > 0 ? Math.min(total, cumulativePaid) : 0;
-    var grossTarget = roundMoney_(countedTo);
-    var gstTarget = total > 0 ? roundMoney_(gst * countedTo / total) : 0;
-    var share = { payment: payment, gross: roundMoney_(grossTarget - allocatedPaid), gst: roundMoney_(gstTarget - allocatedGst) };
-    allocatedPaid = grossTarget; allocatedGst = gstTarget;
-    return share;
-  });
-}
-
 /** The workbook's rows, independent of how they are written out. */
 function buildAccountantReport_(payload) {
   var financialYear = Number(payload && payload.financial_year);
@@ -63,7 +39,6 @@ function buildAccountantReport_(payload) {
   var basis = payload && payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
   var from = financialYear + '-07-01';
   var to = (financialYear + 1) + '-06-30';
-  var inYear = function(date) { date = String(date || ''); return date >= from && date <= to; };
 
   // Every invoice is assumed paid, so each one is a single line counted on its invoice date.
   var income = [];
@@ -76,25 +51,14 @@ function buildAccountantReport_(payload) {
   });
   income.sort(function(a, b) { return a.date.localeCompare(b.date) || a.invoice_number.localeCompare(b.invoice_number); });
 
-  var expensePayments = expenseReadSheet_('expense_payments').rows;
   var expenses = [];
   api_listExpenseTransactions({}).forEach(function(transaction) {
-    if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return;
-    var payments = expensePayments.filter(function(payment) { return String(payment.expense_transaction_id) === String(transaction.id); })
-      .sort(function(a, b) { return String(a.payment_date).localeCompare(String(b.payment_date)); });
-    var base = { description: accountantReportExpenseDescription_(transaction), category: String(transaction.category || '').trim() || 'Uncategorised' };
-    if (basis === 'accrual') {
-      var share = expenseAttributionForPeriod_(basis, from, to, transaction, expensePayments);
-      if (!share.purchases) return;
-      var eventDate = String(transaction.supplier_invoice_date || transaction.purchase_date || '');
-      expenses.push(Object.assign({}, base, { date: eventDate, quarter: accountantReportQuarter_(eventDate), payment_method: accountantReportMethods_(payments), gross: roundMoney_(share.purchases), gst: roundMoney_(share.gst) }));
-      return;
-    }
-    accountantReportPaymentShares_(payments, Number(transaction.amount) || 0, expenseClaimableGst_(transaction)).forEach(function(part) {
-      var date = String(part.payment.payment_date || '');
-      if (!inYear(date) || !part.gross) return;
-      expenses.push(Object.assign({}, base, { date: date, quarter: accountantReportQuarter_(date), payment_method: String(part.payment.payment_method || ''), gross: part.gross, gst: part.gst }));
-    });
+    var share = expenseAttributionForPeriod_(basis, from, to, transaction);
+    if (!share.purchases) return;
+    var date = expenseAttributionDate_(basis, transaction);
+    expenses.push({ description: accountantReportExpenseDescription_(transaction), category: String(transaction.category || '').trim() || 'Uncategorised',
+      date: date, quarter: accountantReportQuarter_(date), payment_method: expenseIsPaid_(transaction) ? String(transaction.payment_method || '') : '',
+      gross: roundMoney_(share.purchases), gst: roundMoney_(share.gst) });
   });
   expenses.sort(function(a, b) { return a.date.localeCompare(b.date) || a.description.localeCompare(b.description); });
   var categories = [];

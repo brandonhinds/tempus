@@ -1,62 +1,111 @@
 <section class="ts-card ts-card--wide" id="page-expenses" style="display:none;">
   <div class="ts-toolbar" style="align-items:flex-start; margin-bottom:20px;">
-    <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Record what the business buys and pays for. Bills that repeat go on a schedule, which lists each upcoming payment so you can mark it paid when it happens.</p></div>
-    <div style="display:flex; gap:8px;"><button type="button" class="ghost" id="expense-export">Export FY CSV</button><button type="button" id="expense-add">Record expense</button></div>
+    <div><div class="ts-kicker">Business ledger</div><h3 style="margin:2px 0 4px;">Expenses</h3><p class="ts-note" style="margin:0; max-width:620px;">Record what the business pays for. Bills that repeat go on a schedule, which lists each upcoming payment so you can mark it paid when it happens.</p></div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;"><button type="button" class="ghost" id="expense-manage-categories">Manage categories</button><button type="button" class="ghost" id="expense-export">Export FY CSV</button><button type="button" id="expense-add">Record expense</button></div>
   </div>
   <div class="ts-view-toggle" role="tablist" aria-label="Expense view" style="margin-bottom:18px;">
     <button type="button" role="tab" class="ts-view-toggle-btn is-active" aria-selected="true" data-expense-tab="transactions">Transactions</button>
     <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="rules">Schedules</button>
     <button type="button" role="tab" class="ts-view-toggle-btn" aria-selected="false" data-expense-tab="report">FY report</button>
   </div>
-  <form id="expense-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off">
-    <div class="ts-toolbar"><h4 style="margin:0;">Record expense</h4><button type="button" class="ghost" id="expense-form-cancel">Cancel</button></div>
-    <div class="ts-grid ts-grid--gap-md">
-      <div class="ts-col-span-4"><label for="expense-vendor">Vendor</label><input id="expense-vendor" required maxlength="160"></div>
-      <div class="ts-col-span-4"><label for="expense-abn">Vendor ABN (optional)</label><input id="expense-abn" maxlength="20"></div>
-      <div class="ts-col-span-4"><label for="expense-date">Purchase date</label><input id="expense-date" type="date" required></div>
-      <div class="ts-col-span-4"><label for="expense-supplier-date">Supplier invoice date</label><input id="expense-supplier-date" type="date"></div>
-      <div class="ts-col-span-4"><label for="expense-amount">Amount including GST</label><input id="expense-amount" type="number" min="0" step="0.01" required></div>
-      <div class="ts-col-span-4"><label for="expense-category">Category</label><input id="expense-category" maxlength="100"></div>
-      <div class="ts-col-span-4"><label for="expense-gst-code">GST treatment</label><select id="expense-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
-      <div class="ts-col-span-4"><label for="expense-business-use">Business use (%)</label><input id="expense-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
-      <div class="ts-col-span-12"><label for="expense-description">Description</label><input id="expense-description" maxlength="500"></div>
-      <div class="ts-col-span-12"><label for="expense-notes">Notes</label><textarea id="expense-notes" rows="3" maxlength="2000"></textarea></div>
-    </div>
-    <div id="expense-paid-now-wrap" class="ts-expense-preview" role="group" aria-label="Payment">
-      <div class="ts-toggle-row"><label class="ts-toggle"><input type="checkbox" id="expense-paid-now" checked aria-describedby="expense-paid-now-hint"><span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span></label><label for="expense-paid-now" class="ts-toggle-row-label">Paid now</label></div>
-      <div class="ts-note" id="expense-paid-now-hint">Records a payment for the full amount. Turn off for a bill you haven't paid yet; it will show as Unpaid and won't count on a cash-basis BAS until you record the payment.</div>
-      <div class="ts-grid ts-grid--gap-md" id="expense-paid-now-fields" style="margin-top:10px;">
-        <div class="ts-col-span-4"><label for="expense-paid-date">Payment date</label><input id="expense-paid-date" type="date"></div>
-        <div class="ts-col-span-3"><label for="expense-paid-method">Paid by</label><select id="expense-paid-method"></select></div>
-        <div class="ts-col-span-5"><label for="expense-paid-reference">Payment reference (optional)</label><input id="expense-paid-reference" maxlength="160" placeholder="e.g. bank transfer or card ref"></div>
+  <div id="expense-transactions-panel">
+    <div class="ts-expense-filters" role="group" aria-label="Filter expenses">
+      <div class="ts-expense-month">
+        <button type="button" class="ghost ts-expense-month__step" id="expense-filter-prev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <select id="expense-filter-month" aria-label="Month"><option value="">All dates</option></select>
+        <button type="button" class="ghost ts-expense-month__step" id="expense-filter-next" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+      </div>
+      <select id="expense-filter-state" aria-label="Status"><option value="">All statuses</option><option value="due">Due</option><option value="upcoming">Upcoming</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="skipped">Skipped</option></select>
+      <select id="expense-filter-category" aria-label="Category"><option value="">All categories</option></select>
+      <button type="button" class="ts-expense-text-button" id="expense-filter-clear" hidden>Clear</button>
+      <div class="ts-view-toggle ts-expense-view" role="group" aria-label="Show expenses">
+        <button type="button" class="ts-view-toggle-btn is-active" data-expense-view="grouped" aria-pressed="true">Grouped</button>
+        <button type="button" class="ts-view-toggle-btn" data-expense-view="date" aria-pressed="false">By date</button>
       </div>
     </div>
-    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save expense</button></div>
-  </form>
-  <form id="expense-rule-form" class="ts-card ts-card--section" style="display:none;" autocomplete="off" aria-labelledby="expense-rule-form-title">
-    <div class="ts-toolbar"><h4 id="expense-rule-form-title" style="margin:0;">New schedule</h4><button type="button" class="ghost" id="expense-rule-form-cancel">Cancel</button></div>
-    <p class="ts-note" style="margin:0 0 12px; max-width:620px;">A schedule is a bill that repeats. Saving it lists every payment due in the next 12 months under Transactions, where you mark each one paid. Changing a schedule rebuilds its upcoming payments but never changes ones already recorded or paid.</p>
-    <div class="ts-grid ts-grid--gap-md">
-      <div class="ts-col-span-4"><label for="expense-rule-vendor">Vendor</label><input id="expense-rule-vendor" required maxlength="160"></div>
-      <div class="ts-col-span-4"><label for="expense-rule-abn">Vendor ABN (optional)</label><input id="expense-rule-abn" maxlength="20"></div>
-      <div class="ts-col-span-4"><label for="expense-rule-amount">Amount each time, including GST</label><input id="expense-rule-amount" type="number" min="0" step="0.01" required></div>
-      <div class="ts-col-span-4"><label for="expense-rule-frequency">Frequency</label><select id="expense-rule-frequency"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option><option value="once">Once only</option></select></div>
-      <div class="ts-col-span-4"><label for="expense-rule-start">Start date</label><input id="expense-rule-start" type="date" required aria-describedby="expense-rule-start-hint"><div class="ts-note" id="expense-rule-start-hint">The first payment. Later ones repeat from this date.</div></div>
-      <div class="ts-col-span-4"><label for="expense-rule-end">End date (optional)</label><input id="expense-rule-end" type="date" aria-describedby="expense-rule-end-hint"><div class="ts-note" id="expense-rule-end-hint">Leave blank to keep going.</div></div>
-      <div class="ts-col-span-4"><label for="expense-rule-category">Category</label><input id="expense-rule-category" maxlength="100"></div>
-      <div class="ts-col-span-4"><label for="expense-rule-gst-code">GST treatment</label><select id="expense-rule-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
-      <div class="ts-col-span-4"><label for="expense-rule-business-use">Business use (%)</label><input id="expense-rule-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
-      <div class="ts-col-span-12"><label for="expense-rule-description">Description</label><input id="expense-rule-description" maxlength="500"></div>
-      <div class="ts-col-span-12"><label for="expense-rule-notes">Notes</label><textarea id="expense-rule-notes" rows="2" maxlength="2000"></textarea></div>
-      <div class="ts-col-span-12"><div class="ts-toggle-row"><label class="ts-toggle"><input type="checkbox" id="expense-rule-active" checked aria-describedby="expense-rule-active-hint"><span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span></label><label for="expense-rule-active" class="ts-toggle-row-label">Active</label></div><div class="ts-note" id="expense-rule-active-hint">Turn off to pause the schedule. Upcoming payments are removed; ones already recorded stay.</div></div>
+    <div class="ts-expense-summary" id="expense-summary" aria-live="polite"></div>
+    <div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div>
+  </div>
+  <div id="expense-rules-panel" style="display:none;">
+    <div class="ts-toolbar" style="align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:12px;"><p class="ts-note" style="margin:0; max-width:620px;">Bills that repeat. Each schedule lists its expenses under Transactions as set by <strong>List scheduled expenses</strong> in Settings (this month, by default), ready to mark paid.</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" id="expense-rule-add">New schedule</button></div></div>
+    <div class="ts-toolbar" id="expense-rule-collapse-controls" style="display:none; margin-bottom:12px; justify-content:flex-end;">
+      <div class="ts-gap-sm" style="display:flex;">
+        <button type="button" class="ghost small" id="expense-rule-expand-all">Expand all</button>
+        <button type="button" class="ghost small" id="expense-rule-collapse-all">Collapse all</button>
+      </div>
     </div>
-    <div class="ts-expense-preview" aria-live="polite"><div class="ts-ledger-row__meta">Next payments</div><div id="expense-rule-preview">Enter a start date to see upcoming payments.</div></div>
-    <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button type="submit">Save schedule</button></div>
-  </form>
-  <div id="expense-transactions-panel"><div class="ts-toolbar" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;"><div><label for="expense-filter-from">From</label><input id="expense-filter-from" type="date"></div><div><label for="expense-filter-to">To</label><input id="expense-filter-to" type="date"></div><div><label for="expense-filter-state">Reconciliation</label><select id="expense-filter-state"><option value="">All</option><option value="unreconciled">Unreconciled</option><option value="legacy_unreconciled">Legacy unreconciled</option><option value="reconciled">Reconciled</option><option value="scheduled">Scheduled</option></select></div><button type="button" class="ghost" id="expense-filter-apply">Apply filters</button></div><div id="expense-transactions" class="ts-ledger-list" aria-live="polite"></div></div>
-  <div id="expense-rules-panel" style="display:none;"><div class="ts-toolbar" style="align-items:flex-start; flex-wrap:wrap; gap:10px;"><p class="ts-note" style="margin:0; max-width:520px;">Each schedule keeps its payments listed 12 months ahead. Saving a schedule does this automatically; use “Extend to 12 months ahead” now and then so long-running schedules keep a year of payments listed.</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" id="expense-rule-generate" class="ghost">Extend to 12 months ahead</button><button type="button" id="expense-rule-add">New schedule</button></div></div><div id="expense-rules" class="ts-ledger-list"></div></div>
+    <div class="ts-grid ts-grid--gap-lg ts-grid--align-start" id="expense-rules-split">
+      <div class="ts-col-span-5">
+        <div class="ts-ded-search" id="expense-rule-search-wrap" style="display:none;">
+          <svg class="ts-ded-search-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="search" id="expense-rule-search" placeholder="Search schedules" aria-label="Search schedules" autocomplete="off" />
+        </div>
+        <div id="expense-rules" class="ts-ded-master"></div>
+      </div>
+      <div class="ts-col-span-7">
+        <div id="expense-rule-detail-placeholder" class="ts-empty" style="display:flex; align-items:center; justify-content:center; text-align:center; min-height:240px;">
+          <p style="margin:0; max-width:300px;">Select a schedule on the left, or use <strong>New schedule</strong> to create one.</p>
+        </div>
+          <form id="expense-rule-form" class="ts-modal-content ts-inline-editor" style="display:none;" autocomplete="off" aria-labelledby="expense-rule-form-title">
+            <div class="ts-modal-header"><h3 id="expense-rule-form-title">New schedule</h3></div>
+            <div class="ts-modal-body">
+            <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
+              <div class="ts-col-span-4"><label for="expense-rule-vendor">Vendor</label><input id="expense-rule-vendor" required maxlength="160"></div>
+              <div class="ts-col-span-4"><label for="expense-rule-abn">Vendor ABN (optional)</label><input id="expense-rule-abn" maxlength="20"></div>
+              <div class="ts-col-span-4"><label for="expense-rule-category">Category</label><select id="expense-rule-category" data-expense-category></select><div class="ts-expense-new-category" id="expense-rule-category-new" hidden><input id="expense-rule-category-new-name" maxlength="60" placeholder="New category name" aria-label="New category name"><button type="button" class="small" data-expense-category-add="expense-rule-category">Add</button><button type="button" class="ghost small" data-expense-category-cancel="expense-rule-category">Cancel</button></div></div>
+              <div class="ts-col-span-4"><label for="expense-rule-amount">Amount including GST</label><input id="expense-rule-amount" type="number" min="0" step="0.01" required></div>
+              <div class="ts-col-span-4"><label for="expense-rule-amount-ex">Amount excluding GST</label><input id="expense-rule-amount-ex" type="number" min="0" step="0.01"></div>
+              <div class="ts-col-span-4"><label for="expense-rule-gst-code">GST treatment</label><select id="expense-rule-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
+              <div class="ts-col-span-4"><label for="expense-rule-frequency">Frequency</label><select id="expense-rule-frequency"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option><option value="once">Once only</option></select></div>
+              <div class="ts-col-span-4"><label for="expense-rule-start">Start date</label><input id="expense-rule-start" type="date" required aria-describedby="expense-rule-start-hint"><div class="ts-note" id="expense-rule-start-hint">The first payment. Later ones repeat from this date.</div></div>
+              <div class="ts-col-span-4"><label for="expense-rule-end">End date (optional)</label><input id="expense-rule-end" type="date" aria-describedby="expense-rule-end-hint"><div class="ts-note ts-expense-end-hint"><span id="expense-rule-end-hint">The last payment date. Unpaid payments after it are removed; leave blank to keep going.</span> <button type="button" class="ts-expense-text-button" id="expense-rule-end-today" hidden>Ends today</button></div></div>
+              <div class="ts-col-span-4"><label for="expense-rule-business-use">Business use (%)</label><input id="expense-rule-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
+              <div class="ts-col-span-12"><label for="expense-rule-description">Description</label><input id="expense-rule-description" required maxlength="500"></div>
+              <div class="ts-col-span-12"><label for="expense-rule-notes">Notes</label><textarea id="expense-rule-notes" rows="2" maxlength="2000"></textarea></div>
+            </div>
+            <div class="ts-expense-preview" aria-live="polite"><div class="ts-ledger-row__meta">Next payments</div><div id="expense-rule-preview">Enter a start date to see upcoming payments.</div></div>
+            <div class="ts-expense-confirm" id="expense-rule-confirm" role="alert" hidden><div id="expense-rule-confirm-text"></div><label class="ts-expense-confirm__held" id="expense-rule-confirm-held-row" hidden><input type="checkbox" id="expense-rule-confirm-held"> <span id="expense-rule-confirm-held-text"></span></label><div class="ts-note">Paid payments are unchanged.</div><div class="ts-expense-confirm__actions"><button type="button" class="ghost small" id="expense-rule-confirm-cancel">Go back</button><button type="button" class="small" id="expense-rule-confirm-save">Save changes</button></div></div>
+            </div>
+            <div class="ts-modal-footer"><button type="button" class="ghost" id="expense-rule-form-cancel">Cancel</button><button type="submit">Save schedule</button></div>
+          </form>
+      </div>
+    </div>
+  </div>
   <div id="expense-report-panel" style="display:none;"><div class="ts-row" style="max-width:280px; margin-bottom:16px;"><label for="expense-report-fy">Financial year starting</label><input id="expense-report-fy" type="number" min="2000" max="2100"></div><div id="expense-report" class="ts-ledger-summary"></div></div>
 </section>
+
+  <!-- Record / edit expense: a popup, outside the Expenses page so it also opens over Time Entry (the Company expenses ⓘ
+     Edit). Editing a ledger row or a Time Entry expense keeps your place. -->
+  <div class="ts-modal" id="modal-expense-form" style="display:none;">
+  <form id="expense-form" class="ts-modal-content ts-expense-form" autocomplete="off" aria-labelledby="expense-form-title">
+    <div class="ts-modal-header"><h3 id="expense-form-title">Record expense</h3></div>
+    <div class="ts-modal-body">
+    <div class="ts-note ts-expense-form-schedule" id="expense-form-schedule" hidden>From a schedule. Changes apply to this expense only. <button type="button" class="ts-expense-text-button" id="expense-form-open-schedule">Edit the schedule</button></div>
+    <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:0;">
+      <div class="ts-col-span-8"><label for="expense-description">Description</label><input id="expense-description" required maxlength="500"></div>
+      <div class="ts-col-span-4"><label for="expense-category">Category</label><select id="expense-category" data-expense-category></select><div class="ts-expense-new-category" id="expense-category-new" hidden><input id="expense-category-new-name" maxlength="60" placeholder="New category name" aria-label="New category name"><button type="button" class="small" data-expense-category-add="expense-category">Add</button><button type="button" class="ghost small" data-expense-category-cancel="expense-category">Cancel</button></div></div>
+      <div class="ts-col-span-6"><label for="expense-vendor">Vendor</label><input id="expense-vendor" required maxlength="160"></div>
+      <div class="ts-col-span-6"><label for="expense-abn">Vendor ABN (optional)</label><input id="expense-abn" maxlength="20"></div>
+      <div class="ts-col-span-4"><label for="expense-amount">Amount including GST</label><input id="expense-amount" type="number" min="0" step="0.01" required aria-describedby="expense-amount-hint"><div class="ts-note" id="expense-amount-hint">What you paid. Type either amount and the other fills in.</div></div>
+      <div class="ts-col-span-4"><label for="expense-amount-ex">Amount excluding GST</label><input id="expense-amount-ex" type="number" min="0" step="0.01"></div>
+      <div class="ts-col-span-4"><label for="expense-gst-code">GST treatment</label><select id="expense-gst-code"><option value="taxable">Taxable</option><option value="gst_free">GST-free</option><option value="input_taxed">Input taxed</option><option value="out_of_scope">Out of scope</option></select></div>
+      <div class="ts-col-span-4"><label for="expense-business-use">Business use (%)</label><input id="expense-business-use" type="number" min="0" max="100" step="0.01" value="100"></div>
+    </div>
+    <div id="expense-paid-now-wrap" class="ts-expense-preview" role="group" aria-label="Dates">
+      <div class="ts-toggle-row"><label class="ts-toggle"><input type="checkbox" id="expense-paid-now" checked aria-describedby="expense-paid-now-hint"><span class="ts-toggle-track"><span class="ts-toggle-thumb"></span></span></label><label for="expense-paid-now" class="ts-toggle-row-label">Paid</label></div>
+      <div class="ts-note" id="expense-paid-now-hint">Turn off for a bill you haven't paid yet.</div>
+      <div class="ts-grid ts-grid--gap-md ts-grid--align-start" style="margin-top:10px;">
+        <div class="ts-col-span-4" data-expense-paid-field><label for="expense-paid-date">Paid date</label><input id="expense-paid-date" type="date"></div>
+        <div class="ts-col-span-3" data-expense-paid-field><label for="expense-paid-method">Paid by</label><select id="expense-paid-method"></select></div>
+        <div class="ts-col-span-5" data-expense-paid-field><label for="expense-paid-reference">Payment reference (optional)</label><input id="expense-paid-reference" maxlength="160" placeholder="e.g. bank transfer or card ref"></div>
+        <div class="ts-col-span-4"><label for="expense-supplier-date" id="expense-supplier-date-label">Invoice date (optional)</label><input id="expense-supplier-date" type="date" aria-describedby="expense-supplier-date-hint"><div class="ts-note" id="expense-supplier-date-hint">Leave blank if it's the day you paid.</div></div>
+      </div>
+    </div>
+    <div style="margin-top:14px;"><label for="expense-notes">Notes</label><textarea id="expense-notes" rows="3" maxlength="2000"></textarea></div>
+    </div>
+    <div class="ts-modal-footer"><button type="button" class="ghost" id="expense-form-cancel">Cancel</button><button type="submit">Save expense</button></div>
+  </form>
+  </div>
 
 
 
@@ -68,20 +117,20 @@
       <ol>
         <li>Open Expenses → <strong>Schedules</strong> and choose <strong>New schedule</strong>.</li>
         <li>Enter the vendor, the amount each time (including GST), the frequency and the start date, which is the first payment. Add an end date only if the bill stops. A bill on the 29th, 30th or 31st falls on the last day of a shorter month, then returns to its usual day.</li>
-        <li>Choose <strong>Save schedule</strong>. The next 12 months of payments appear under Transactions → <strong>Due and upcoming</strong>.</li>
+        <li>Choose <strong>Save schedule</strong>. Its payments appear under Transactions → <strong>Due and upcoming</strong>: this month's, by default, or as set by <strong>List scheduled expenses</strong> in Settings.</li>
       </ol>
-      <p>Editing a schedule rebuilds its upcoming payments. Ones already recorded or paid are never changed. Turn off <strong>Active</strong> to pause a schedule, or use <strong>Stop schedule</strong> to end it today. Use <strong>Extend to 12 months ahead</strong> now and then so long-running schedules keep a year of payments listed.</p>
+      <p>The <strong>End date</strong> is what stops a schedule: every unpaid payment after it is removed, including Due ones and ones you edited. <strong>Ends today</strong> fills it in for you. When saving would update or remove unpaid payments, Tempus lists them first, and Due or hand-edited payments keep their amount unless you tick the box. Paid payments never change. New payments are created whenever Tempus opens, including any due since it was last opened.</p>
     </details>
     <details><summary>Expenses: recording and paying</summary>
-      <p><strong>A scheduled bill:</strong> choose <strong>Mark paid</strong> to record it and its payment in one step. Use <strong>Record as unpaid bill</strong> if it has arrived but isn't paid yet. Use <strong>Skip</strong> if it won't happen this time.</p>
-      <p><strong>A one-off purchase:</strong> choose <strong>Record expense</strong>. Leave <strong>Paid now</strong> on to record the payment at the same time. Turn it off for a bill you'll pay later.</p>
-      <p>Each expense shows Paid, Part-paid or Unpaid and the amount outstanding. Use <strong>Record payment</strong> to pay what's owing, including in instalments. Payments are listed under the expense with how they were paid and their reference.</p>
-      <p><strong>Fixing mistakes:</strong> <strong>Remove payment</strong> undoes a payment, and <strong>Edit</strong> corrects the details. <strong>Void</strong> keeps the expense for the record but leaves it out of every total. A reconciled expense is locked, so void it and record a correction instead.</p>
+      <p><strong>A scheduled bill:</strong> choose <strong>Mark paid</strong> when it's paid. <strong>Edit</strong> changes this one payment only, and <strong>Skip</strong> sets it aside if it won't happen this time. Skipped payments are listed under <strong>Skipped</strong> at the bottom, where <strong>Restore</strong> brings one back.</p>
+      <p><strong>A one-off purchase:</strong> choose <strong>Record expense</strong>. It's marked <strong>Paid</strong> today unless you change the date. Turn Paid off for a bill you'll pay later; it shows as Unpaid until you choose <strong>Mark paid</strong>.</p>
+      <p>Cash basis counts an expense on its paid date. Accrual basis counts it on the earlier of its invoice date and paid date. A taxable expense gives its GST credit (scaled by business use) in the same period.</p>
+      <p><strong>Fixing mistakes:</strong> you can always <strong>Edit</strong> or <strong>Delete</strong> an expense. If the change alters a BAS you've marked as submitted, Tempus warns you first.</p>
     </details>
-    <details><summary>Expenses and GST</summary><p>On a cash basis an expense counts when it is paid, so an unpaid expense counts as $0. On an accrual basis it counts on its invoice or purchase date. A GST credit (BAS 1B) counts only after you add a receipt and <strong>Reconcile</strong> the expense with the GST credit claimed. Upcoming schedule payments are forecasts, never actuals. The dashboard, the BAS table and the BAS calculation all read company expenses from the Expenses page. The Deductions page is for salary sacrifice and extra super only.</p></details>
+    <details><summary>Expenses and GST</summary><p>On a cash basis an expense counts when it is paid, so an unpaid expense counts as $0. On an accrual basis it counts on the earlier of its invoice date and paid date. A taxable expense gives its GST credit (BAS 1B) in that same period, scaled by its business use; GST-free, input-taxed and out-of-scope expenses give none. No receipt or reconciliation is needed. Upcoming schedule payments are forecasts, never actuals. The dashboard, the BAS table and the BAS calculation all read company expenses from the Expenses page. The Deductions page is for salary sacrifice and extra super only.</p></details>
     <details><summary>Assessments</summary><p>Turn on Lil Assessments mode to open Assessments at the current month. Record the client, date of birth, contract, organisation and one of the five assessment types; the assessment date decides its billing month. Time you log against an assessment is tracked separately on a non-billable hour type and never changes the fee.</p></details>
     <details><summary>Monthly invoice</summary><p>Generate Invoice copies your Google Docs template once for every assessment in the selected month, across contracts and organisations. Generating again asks first, keeps the month’s invoice number, and only replaces the link after the new document is written. Logging time does not make an invoice out of date; adding, editing or deleting an assessment does.</p></details>
-    <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and reconciled expenses. Forecasts come from timesheets and expense schedules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
+    <details><summary>BAS reporting</summary><p>Actuals come from invoices, payments and recorded expenses. Forecasts come from timesheets and expense schedules. Submitted snapshots keep their accounting basis, calculation and source hash.</p></details>
     <details><summary>Tax estimates</summary><p id="help-tax-table-status">Checking the bundled PAYG table…</p><p class="ts-note">Estimates use ATO Scale 2 and are guidance only. Confirm payroll and tax obligations with the ATO or your adviser.</p></details>
     <details><summary>Keyboard access</summary><p>Use Tab to move through controls. Quick-action menus support the Menu key or Shift+F10, arrow keys, Enter and Escape. Focus remains visible in every theme.</p></details>
   </div>
@@ -90,18 +139,74 @@
 <style>
   .ts-kicker { color:var(--primary); font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
   .ts-ledger-list { border-top:1px solid var(--border); }
-  .ts-ledger-row { display:grid; grid-template-columns:minmax(160px,1.4fr) minmax(110px,.8fr) minmax(100px,.65fr) auto; gap:16px; align-items:center; padding:15px 4px; border-bottom:1px solid var(--border); }
+  .ts-ledger-row.is-skipped > :not(.ts-ledger-row__actions) { opacity:.6; }
+  /* Fixed badge, amount and action tracks: every row is its own grid, so flexible tracks would size
+     differently per row and the amounts would not line up down the list. 320px fits the widest action set. */
+  .ts-ledger-row { display:grid; grid-template-columns:minmax(0,1fr) 200px 96px 140px 290px; gap:16px; align-items:center; padding:13px 4px; border-bottom:1px solid var(--border); }
+  .ts-ledger-row__identity .ts-ledger-row__title, .ts-ledger-row__identity .ts-ledger-row__meta { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ts-ledger-row__category { min-width:0; }
+  .ts-ledger-row__category .ts-cat-tag { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+  .ts-ledger-row__state .ts-badge { cursor:default; }
+  .ts-ledger-row__amount.has-tip .ts-expense-amounts__inc { text-decoration:underline dotted; text-underline-offset:3px; cursor:default; }
+  button.ts-expense-link-button { padding:5px 9px; gap:4px; }
+  button.ts-expense-link-button svg { width:15px; height:15px; }
+  button.ts-expense-link-button.has-links { color:var(--primary); }
+  .ts-ledger-inline__links { flex-basis:100%; list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+  .ts-ledger-inline__links li { display:flex; align-items:center; gap:10px; }
+  .ts-ledger-inline__links a { color:var(--primary); overflow-wrap:anywhere; }
+  /* Filters: month stepper, status, category, Clear and the view toggle on one line. */
+  .ts-expense-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:10px; }
+  .ts-expense-filters > .ts-select, .ts-expense-filters > select { width:auto; min-width:170px; }
+  .ts-expense-month { display:flex; align-items:center; gap:4px; }
+  .ts-expense-month .ts-select, .ts-expense-month select { min-width:240px; }
+  button.ts-expense-month__step { padding:8px 10px; }
+  .ts-expense-view { margin-left:auto; }
+  .ts-expense-summary { display:flex; flex-wrap:wrap; gap:4px 24px; padding:4px 4px 12px; color:var(--muted); font-size:var(--font-size-sm); font-variant-numeric:tabular-nums; }
+  .ts-expense-summary strong { color:var(--text); }
+  .ts-expense-summary:empty { display:none; }
+  .ts-ledger-group--month { display:flex; align-items:baseline; gap:8px; }
+  .ts-ledger-row__identity { min-width:0; }
   .ts-ledger-row__title { font-weight:700; overflow-wrap:anywhere; }
   .ts-ledger-row__meta { color:var(--muted); font-size:var(--font-size-xs); }
   .ts-ledger-row__amount { font-variant-numeric:tabular-nums; font-weight:750; text-align:right; }
+  .ts-expense-amounts .ts-ledger-row__meta { font-weight:400; }
+  /* Time Entry "Company expenses" breakdown: one line per expense, fixed columns, unpaid and upcoming apart. */
+  .ts-company-expenses-table { table-layout:fixed; }
+  .ts-company-expenses-table th, .ts-company-expenses-table td { padding-left:8px; padding-right:8px; }
+  .ts-company-expenses-table td { white-space:nowrap; }
+  .ts-company-expenses-line { display:flex; align-items:center; gap:10px; min-width:0; }
+  .ts-company-expenses-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .ts-company-expenses-table .ts-badge { flex:none; font-size:11px; padding:1px 7px; }
+  .ts-company-expenses-dot { flex:none; width:8px; height:8px; border-radius:50%; }
+  .ts-company-expenses-dot.is-empty { border:1px solid var(--border); }
+  .ts-company-expenses-group td { padding:20px 8px 6px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  .ts-company-expenses-table tr.is-pending td:not(:last-child) { color:var(--muted); }
+  .ts-company-expenses-table tr.is-pending .ts-ded-tname { font-weight:500; }
+  .ts-company-expenses-subtotal td { border-bottom:none; color:var(--muted); font-weight:600; padding-top:12px; }
+  .ts-company-expenses-note, .ts-company-expenses-open { margin-top:12px; }
+  .ts-modal-content.ts-expense-form { max-width:820px; }
+  .ts-expense-form .ts-expense-preview { margin-top:16px; }
+  .ts-expense-form-schedule { margin:0 0 14px; }
+  .ts-company-expenses-foot { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-top:12px; }
+  .ts-expense-new-category { display:flex; gap:6px; margin-top:6px; align-items:center; }
+  .ts-expense-new-category input { flex:1; min-width:0; }
+  .ts-expense-new-category[hidden] { display:none; }
   .ts-ledger-row__actions { display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
   .ts-ledger-row__detail { grid-column:1 / -1; color:var(--muted); font-size:var(--font-size-xs); font-variant-numeric:tabular-nums; }
   .ts-ledger-group { padding:18px 4px 6px; border-bottom:1px solid var(--border); color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
   .ts-ledger-group__empty { padding:12px 4px; border-bottom:1px solid var(--border); }
-  .ts-ledger-group__more { margin:10px 4px; }
+  button.ghost.ts-ledger-group__more { margin:6px 0; padding:6px 4px; background:transparent; color:var(--primary); font-weight:600; }
+  button.ghost.ts-ledger-group__more:hover { background:transparent; color:var(--primary); text-decoration:underline; }
+  .ts-ledger-group--toggle { padding:12px 0 0; }
+  button.ts-ledger-group__toggle { width:100%; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:6px 4px; background:transparent; border:none; box-shadow:none; border-radius:8px; color:inherit; font:inherit; letter-spacing:inherit; text-transform:inherit; cursor:pointer; }
+  button.ts-ledger-group__toggle:hover { background:color-mix(in srgb, var(--text) 5%, transparent); background-image:none; }
+  .ts-ledger-group__toggle[aria-expanded="true"] .ts-ded-group-chev svg { transform:rotate(180deg); }
+  .ts-ledger-group__count { font-size:12px; font-weight:400; letter-spacing:0; text-transform:none; }
   .ts-expense-subline { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
   .ts-expense-subline a { color:var(--primary); }
   .ts-ledger-inline { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-end; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--surface-subtle); }
+  /* Inputs inside these subtle panels take the card colour; otherwise they match the panel and vanish. */
+  .ts-ledger-inline :is(input, select, textarea, .ts-select__button):not([type="checkbox"]), .ts-expense-preview :is(input, select, textarea, .ts-select__button):not([type="checkbox"]) { background-color:var(--panel); }
   .ts-ledger-inline__title { flex-basis:100%; font-weight:700; font-variant-numeric:tabular-nums; }
   .ts-ledger-inline__note { flex-basis:100%; color:var(--muted); font-size:var(--font-size-xs); }
   .ts-ledger-inline__buttons { display:flex; gap:8px; }
@@ -109,7 +214,18 @@
   .ts-expense-inline-field.is-grow { flex:1 1 240px; }
   .ts-expense-inline-check { display:flex; align-items:center; gap:6px; flex-basis:100%; font-size:var(--font-size-sm); }
   .ts-expense-preview { margin-top:14px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface-subtle); font-variant-numeric:tabular-nums; }
-  .ts-expense-preview #expense-rule-preview { margin-top:4px; }
+  .ts-expense-preview #expense-rule-preview { margin-top:4px; font-size:var(--font-size-sm); }
+  button.ts-expense-text-button { display:inline; padding:0; background:transparent; border:none; box-shadow:none; color:var(--primary); font-size:inherit; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+  button.ts-expense-text-button:hover, button.ts-expense-text-button:active { background:transparent; background-image:none; transform:none; }
+  button.ts-expense-text-button[hidden] { display:none; }
+  button.ts-expense-text-button--quiet { color:var(--muted); font-weight:500; }
+  .ts-expense-confirm { margin-top:14px; padding:12px 14px; border:1px solid var(--warning); border-radius:8px; background:var(--badge-warn-bg); display:grid; gap:8px; }
+  .ts-expense-confirm ul { margin:4px 0 0; padding-left:18px; }
+  .ts-expense-confirm__held { display:flex; gap:10px; align-items:flex-start; font-weight:normal; margin:0; cursor:pointer; }
+  .ts-expense-confirm__held input { width:auto; flex:none; margin:3px 0 0; }
+  .ts-expense-confirm__held span { flex:1; }
+  .ts-expense-confirm__actions { display:flex; justify-content:flex-end; gap:8px; }
+  .ts-expense-confirm[hidden], .ts-expense-confirm__held[hidden] { display:none; }
   .ts-ledger-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); }
   .ts-ledger-summary > div { padding:18px; background:var(--panel); }
   .ts-ledger-summary strong { display:block; margin-top:5px; font-size:22px; font-variant-numeric:tabular-nums; }
@@ -123,5 +239,17 @@
   .ts-help-grid ol { color:var(--muted); margin:10px 0 0; padding-left:20px; }
   .ts-help-grid li + li { margin-top:4px; }
   .ts-help-grid strong { color:var(--text); }
-  @media (max-width:760px) { .ts-ledger-row { grid-template-columns:1fr auto; } .ts-ledger-row__meta { grid-column:1; } .ts-ledger-row__actions { grid-column:1 / -1; justify-content:flex-start; } .ts-help-grid { grid-template-columns:1fr; } .ts-expense-inline-field, .ts-expense-inline-field.is-grow { flex:1 1 100%; } }
+  @media (max-width:1100px) { .ts-ledger-row { grid-template-columns:minmax(0,1fr) 150px 90px 130px 290px; gap:12px; } }
+  @media (max-width:760px) {
+    .ts-ledger-row { grid-template-columns:minmax(0,1fr) auto; row-gap:8px; }
+    .ts-ledger-row__identity { grid-column:1; grid-row:1; }
+    .ts-ledger-row__state { grid-column:2; grid-row:1; text-align:right; }
+    .ts-ledger-row__category { grid-column:1; grid-row:2; }
+    .ts-ledger-row__actions { grid-column:1; grid-row:3; justify-content:flex-start; }
+    .ts-ledger-row__amount { grid-column:2; grid-row:2 / span 2; align-self:end; }
+    .ts-expense-view { margin-left:0; }
+    .ts-expense-month { flex:1 1 100%; } .ts-expense-month .ts-select, .ts-expense-month select { flex:1; min-width:0; }
+    .ts-help-grid { grid-template-columns:1fr; }
+    .ts-expense-inline-field, .ts-expense-inline-field.is-grow { flex:1 1 100%; }
+  }
 </style>

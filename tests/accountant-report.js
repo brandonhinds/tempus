@@ -12,8 +12,8 @@ const data = JSON.parse(read('tests/fixtures/financial-cases.json'));
 
 const CATEGORIES = { 'expense-taxable': 'Office Supplies', 'expense-out-of-scope': 'Donations' };
 
-// The BAS fixture (issued and void invoices; taxable, out-of-scope, unreconciled and void expenses) wired
-// to the real BAS and report code, with payment methods and categories.
+// The BAS fixture (issued and void invoices; paid, unpaid, prepaid, part-business, scheduled and skipped
+// expenses) wired to the real BAS and report code, with payment methods and categories.
 function reportContext() {
   const { context } = createAppsScriptContext({});
   context.cacheGet = () => null; context.cacheSet = () => {}; context.cacheClearPrefix = () => {};
@@ -33,12 +33,8 @@ function reportContext() {
     return { totalAmount: amount, totalHours: 0, gstAmount: gst, totalWithGst: amount + gst };
   };
   const expenses = data.expenses.map((expense) => Object.assign({ vendor: expense.id.replace('expense-', 'Vendor '), description: '', category: CATEGORIES[expense.id] || '' }, expense))
-    .concat([{ id: 'expense-last-fy', vendor: 'Insurer', description: 'Indemnity insurance', category: '', status: 'recorded', purchase_date: '2026-06-20', supplier_invoice_date: '2026-06-20', amount: 22, gst_code: 'taxable', gst_amount: 2, business_use_percentage: 1, claimable_gst_confirmed: 'TRUE', reconciliation_state: 'reconciled', attachments: [] }]);
-  const expensePayments = data.expense_payments.map((payment) => Object.assign({ payment_method: 'Credit card' }, payment))
-    .concat([{ expense_transaction_id: 'expense-last-fy', payment_date: '2026-07-02', amount: 22, payment_method: 'EFT' }]);
+    .concat([{ id: 'expense-last-fy', vendor: 'Insurer', description: 'Indemnity insurance', category: '', status: 'recorded', paid_date: '2026-07-02', supplier_invoice_date: '2026-06-20', amount: 22, gst_code: 'taxable', gst_amount: 2, business_use_percentage: 1, payment_method: 'EFT', attachments: [] }]);
   context.api_listExpenseTransactions = () => expenses;
-  context.expenseReadSheet_ = (name) => ({ rows: name === 'expense_payments' ? expensePayments : [] });
-  context.expenseClaimableGst_ = (expense) => expense.status !== 'void' && expense.reconciliation_state === 'reconciled' && expense.claimable_gst_confirmed === 'TRUE' && expense.gst_code === 'taxable' ? expense.gst_amount * expense.business_use_percentage : 0;
   context.getSuperGuaranteeRate = (date) => (date >= '2025-07-01' ? 0.12 : 0.115);
   return context;
 }
@@ -100,22 +96,24 @@ exports.run = function run(test) {
     });
   });
 
-  test('cash basis lists expenses one row per payment made, in the quarter it was paid', () => {
+  test('cash basis lists each paid expense once, on its paid date, with how it was paid', () => {
     const report = plain(reportContext().buildAccountantReport_({ financial_year: 2026, accounting_basis: 'cash' }));
     assert.deepStrictEqual(report.expenses.map((item) => [item.date, item.description, item.payment_method, item.gross, item.gst, item.category]), [
       ['2026-07-02', 'Insurer - Indemnity insurance', 'EFT', 22, 2, 'Uncategorised'],
-      ['2026-07-16', 'Vendor taxable', 'Credit card', 55, 5, 'Office Supplies'],
+      ['2026-07-16', 'Vendor taxable', 'Credit card', 110, 10, 'Office Supplies'],
       ['2026-07-17', 'Vendor out-of-scope', 'Credit card', 50, 0, 'Donations'],
-      ['2026-08-16', 'Vendor taxable', 'Credit card', 55, 5, 'Office Supplies']
-    ], 'void and unpaid expenses are left out; last FY\'s purchase counts when it was paid');
+      ['2026-07-20', 'Vendor prepaid', 'Direct debit', 22, 2, 'Uncategorised'],
+      ['2026-08-02', 'Vendor half', 'EFT', 220, 10, 'Uncategorised']
+    ], 'unpaid, scheduled and skipped expenses are left out; last FY\'s purchase counts when it was paid');
     assert.deepStrictEqual(report.categories, ['Donations', 'Office Supplies', 'Uncategorised']);
   });
 
-  test('accrual basis lists each expense once, on its event date', () => {
+  test('accrual basis lists each expense once, on the earlier of its invoice and paid dates', () => {
     const report = plain(reportContext().buildAccountantReport_({ financial_year: 2026, accounting_basis: 'accrual' }));
-    assert.deepStrictEqual(report.expenses.map((item) => [item.date, item.description, item.gross]), [
-      ['2026-07-05', 'Vendor taxable', 110], ['2026-07-06', 'Vendor out-of-scope', 50], ['2026-07-07', 'Vendor legacy', 55]
-    ]);
+    assert.deepStrictEqual(report.expenses.map((item) => [item.date, item.description, item.payment_method, item.gross]), [
+      ['2026-07-05', 'Vendor taxable', 'Credit card', 110], ['2026-07-06', 'Vendor out-of-scope', 'Credit card', 50], ['2026-07-07', 'Vendor unpaid', '', 55],
+      ['2026-07-20', 'Vendor prepaid', 'Direct debit', 22], ['2026-07-28', 'Vendor half', 'EFT', 220]
+    ], 'last FY\'s invoice stays in last FY');
   });
 
   test('the Income tab itemises by quarter with live formulas and super per line', () => {
@@ -137,14 +135,14 @@ exports.run = function run(test) {
     const context = reportContext();
     const [, expenses] = plain(context.accountantReportTabs_(context.buildAccountantReport_({ financial_year: 2026, accounting_basis: 'cash' })));
     assert.deepStrictEqual(expenses.rows[0], ['Date', 'Description', 'Payment Method', 'Gross', 'GST', 'Net', '', 'Donations', 'Office Supplies', 'Uncategorised']);
-    assert.deepStrictEqual(expenses.rows[2], ['=DATE(2026,7,16)', 'Vendor taxable', 'Credit card', 55, 5, '=D3-E3', '', '', 55, '']);
-    assert.deepStrictEqual(expenses.rows[5], ['', 'Q1 Totals', '', '=SUM(D2:D5)', '=SUM(E2:E5)', '=D6-E6', '', '=SUM(H2:H5)', '=SUM(I2:I5)', '=SUM(J2:J5)']);
-    assert.deepStrictEqual(expenses.rows[expenses.rows.length - 1].slice(0, 4), ['', 'YTD Totals', '', '=D6+D7+D8+D9']);
+    assert.deepStrictEqual(expenses.rows[2], ['=DATE(2026,7,16)', 'Vendor taxable', 'Credit card', 110, 10, '=D3-E3', '', '', 110, '']);
+    assert.deepStrictEqual(expenses.rows[6], ['', 'Q1 Totals', '', '=SUM(D2:D6)', '=SUM(E2:E6)', '=D7-E7', '', '=SUM(H2:H6)', '=SUM(I2:I6)', '=SUM(J2:J6)']);
+    assert.deepStrictEqual(expenses.rows[expenses.rows.length - 1].slice(0, 4), ['', 'YTD Totals', '', '=D7+D8+D9+D10']);
     assert.deepStrictEqual(expenses.money, [3, 4, 5, 7, 8, 9]);
     expenses.rows.forEach((row, index) => assert.equal(row.length, expenses.rows[0].length, 'row ' + index + ' width'));
   });
 
-  test('accountant report helpers: descriptions, quarters, column letters and payment splits', () => {
+  test('accountant report helpers: descriptions, quarters and column letters', () => {
     const context = reportContext();
     assert.equal(context.accountantReportInvoiceDescription_({ source_month: '2026-08', invoice_date: '2026-09-02' }), 'August Invoice', 'the month billed, not the month issued');
     assert.equal(context.accountantReportInvoiceDescription_({ source_month: '', invoice_date: '2027-01-15' }), 'January Invoice');
@@ -152,9 +150,6 @@ exports.run = function run(test) {
     assert.deepStrictEqual([7, 9, 10, 12, 1, 3, 4, 6].map((month) => context.accountantReportQuarter_('2026-' + String(month).padStart(2, '0') + '-15')), [1, 1, 2, 2, 3, 3, 4, 4]);
     assert.deepStrictEqual([0, 7, 25, 26, 27].map(context.accountantReportColumn_), ['A', 'H', 'Z', 'AA', 'AB']);
     assert.deepStrictEqual(['=HYPERLINK(1)', '+61 400', '-5', '@x', 'Officeworks'].map(context.accountantReportText_), ["'=HYPERLINK(1)", "'+61 400", "'-5", "'@x", 'Officeworks']);
-    // Three thirds of $100 with $9.09 GST: parts add to the whole exactly.
-    const shares = plain(context.accountantReportPaymentShares_([{ amount: 33.33 }, { amount: 33.33 }, { amount: 33.34 }], 100, 9.09));
-    assert.deepStrictEqual(shares.map((s) => [s.gross, s.gst]), [[33.33, 3.03], [33.33, 3.03], [33.34, 3.03]]);
     assert.throws(() => context.buildAccountantReport_({}), /Financial year is required/);
   });
 

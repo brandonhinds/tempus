@@ -4,6 +4,7 @@ var MIGRATION_STATE_PROP_KEY = 'tempus_migration_state_v3';
 var MIGRATION_BACKUP_PROP_KEY = 'tempus_migration_backup_v3';
 var MIGRATION_CONTEXT = { active: false };
 var __migrationsSettledMemo = false;
+var SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID = '2026-10-simplified-expense-ledger';
 
 function listMigrations() {
   return [
@@ -21,7 +22,9 @@ function listMigrations() {
     { id: '2026-08-rebuild-missing-expense-rules', run: migrationRebuildMissingExpenseRules_ },
     { id: '2026-09-lil-assessments-mode', run: migrationLilAssessments_ },
     { id: '2026-09-anchored-expense-schedule-dates', run: migrationAnchorScheduledExpenseDates_ },
-    { id: '2026-09-late-company-expense-deductions', run: migrationLateCompanyExpenses_ }
+    { id: '2026-09-late-company-expense-deductions', run: migrationLateCompanyExpenses_ },
+    { id: SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID, run: migrationSimplifyExpenseLedger_ },
+    { id: '2026-10-schedule-end-dates', run: migrationScheduleEndDates_ }
   ];
 }
 
@@ -94,7 +97,22 @@ function runPendingMigrations() {
   return migrationsSettled_() ? 'idle' : 'required';
 }
 
-function api_runUpgrade() {
+/**
+ * What the pending upgrade will do that needs the user's say-so, read without changing anything (so it
+ * can run before the upgrade). Lists the expenses the simplified-ledger upgrade treats specially.
+ */
+function api_getUpgradePreview() {
+  var pending = pendingMigrations(PropertiesService.getScriptProperties()).map(function(item) { return item.id; });
+  var expenses = pending.indexOf(SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID) !== -1 ? migrationSimplifiedExpensePreview_() : { part_paid: [], instalments: [], unclaimed_gst: [] };
+  return { success: true, pending: pending, expenses: expenses, requires_confirmation: expenses.part_paid.length > 0 };
+}
+
+/**
+ * Runs every pending migration. When the simplified-ledger upgrade would turn part-paid expenses into
+ * unpaid ones, nothing is changed (not even the backup) until it is called again with
+ * `{ confirm_part_paid: true }`, so the user can see the list and back out.
+ */
+function api_runUpgrade(options) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return { success: false, error: 'upgrade_busy', message: 'Another upgrade is already running.' };
   var props = PropertiesService.getScriptProperties();
@@ -102,6 +120,12 @@ function api_runUpgrade() {
   try {
     var pending = pendingMigrations(props);
     if (!pending.length) return api_getMigrationStatus();
+    if (!(options && options.confirm_part_paid) && pending.some(function(item) { return item.id === SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID; })) {
+      var preview = migrationSimplifiedExpensePreview_();
+      if (preview.part_paid.length) {
+        return { success: false, error: 'confirmation_required', message: preview.part_paid.length + ' part-paid expense(s) will become unpaid, each with a note of what was paid. Confirm to continue, or cancel to leave everything unchanged.', preview: preview };
+      }
+    }
     var backup = ensureVerifiedUpgradeBackup_(props);
     writeMigrationState_(props, { state: 'running', current_migration: '', completed_count: listMigrations().length - pending.length, backup_id: backup.id, error: '' });
     MIGRATION_CONTEXT.active = true;
@@ -1430,4 +1454,296 @@ function migrationLilAssessments_() {
   deleteSheetRowsDescending_(settingsData.sheet,retiredSettings.map(function(r) { return r.__row; }));
   ['settings','feature_flags','contracts','assessments','invoices','hour_types'].forEach(cacheClearPrefix);
   props.setProperty('lil_assessments_migrated','1');
+}
+
+/**
+ * Plan for one expense row under the simplified ledger (paid date, no payments, reconciliation or void).
+ * `transaction` is a row object with ISO-text dates; `payments` its legacy payment rows, oldest first.
+ * Returns the field changes, whether the row is removed, its kind and any note to append.
+ *   - Paid in full: paid on its last payment date, keeping that payment's method and reference.
+ *     Paid in more than one payment: the same, with the payment history noted ('instalments').
+ *   - Part-paid: unpaid, full amount kept, payment history noted to resolve by hand ('part_paid').
+ *   - Unpaid: stays unpaid. Void: removed, unless it came from a schedule (then 'skipped', so the
+ *     schedule never recreates it). Scheduled: stays upcoming.
+ * Every row's invoice date becomes its supplier invoice date, else its purchase date (so accrual still
+ * counts it on the same day), and an invoice's GST correction becomes its GST amount. Any other taxable
+ * expense gets one-eleventh of its amount as its GST: the old screens never let anyone type a GST amount,
+ * so a different one is a leftover, such as the company-expense move copying a deduction's usual GST onto
+ * an occurrence whose amount had been adjusted. It never mattered while credits needed reconciling; now
+ * every taxable expense claims its stored GST. A taxable expense reconciled without claiming its credit
+ * now claims it, so it gets a note ('unclaimed_gst').
+ */
+function migrationPlanSimplifiedExpense_(transaction, payments) {
+  var status = String(transaction.status || '');
+  var notes = String(transaction.notes || '');
+  var changes = { purchase_date: '', reconciliation_state: '', claimable_gst_confirmed: '', gst_override_amount: '' };
+  var invoice = toIsoDate(transaction.supplier_invoice_date || '') || toIsoDate(transaction.purchase_date || '');
+  changes.supplier_invoice_date = invoice;
+  var gstAmount = Number(transaction.gst_amount) || 0;
+  if (transaction.gst_override_amount !== '' && transaction.gst_override_amount != null && isFinite(Number(transaction.gst_override_amount))) {
+    gstAmount = roundMoney_(transaction.gst_override_amount);
+    changes.gst_amount = gstAmount;
+  } else if (String(transaction.gst_code) === 'taxable' && toIsoDate(transaction.purchase_date || '')) {
+    // Only rows not yet converted (they still have a purchase date): a resumed upgrade must not reset a
+    // GST amount the first pass took from an invoice correction.
+    var expectedGst = roundMoney_((Number(transaction.amount) || 0) / 11);
+    if (Math.abs(gstAmount - expectedGst) > 0.005) {
+      gstAmount = expectedGst;
+      changes.gst_amount = expectedGst;
+    }
+  }
+  // Both amounts are stored from now on, so a bank statement (including GST) and a ledger (excluding it)
+  // can each be compared directly.
+  changes.amount_ex_gst = roundMoney_((Number(transaction.amount) || 0) - (String(transaction.gst_code) === 'taxable' ? gstAmount : 0));
+  var plan = { changes: changes, remove: false, kind: '', notes: [] };
+  if (status === 'skipped') { plan.kind = 'skipped'; return plan; }
+  if (status === 'void') {
+    if (transaction.source_rule_id) { changes.status = 'skipped'; plan.kind = 'skipped'; } else { plan.remove = true; plan.kind = 'void'; }
+    return plan;
+  }
+  if (status === 'scheduled') { changes.paid_date = ''; plan.kind = 'scheduled'; return plan; }
+  changes.status = 'recorded';
+  var amount = roundMoney_(transaction.amount);
+  var real = (payments || []).filter(function(payment) { return Number(payment.amount) > 0; });
+  var paid = roundMoney_(real.reduce(function(sum, payment) { return sum + Number(payment.amount); }, 0));
+  var last = real.length ? real[real.length - 1] : null;
+  var legacy = function(payment) { return String(payment.id || '').indexOf('legacy-payment-') === 0; };
+  var history = function(lead) {
+    return 'Upgrade: ' + lead + ' Paid ' + migrationMoney_(paid) + ' of ' + migrationMoney_(amount) + ' in ' + real.length + ' payment' + (real.length === 1 ? '' : 's') + ': ' +
+      real.map(function(payment) {
+        var extra = [String(payment.payment_method || ''), payment.reference && !legacy(payment) ? 'ref ' + payment.reference : ''].filter(Boolean).join(', ');
+        return migrationMoney_(payment.amount) + ' on ' + toIsoDate(payment.payment_date || '') + (extra ? ' (' + extra + ')' : '');
+      }).join('; ') + '.';
+  };
+  if (amount <= 0.005) {
+    changes.paid_date = (last && toIsoDate(last.payment_date || '')) || invoice;
+    plan.kind = 'paid';
+  } else if (paid >= amount - 0.005) {
+    changes.paid_date = toIsoDate(last.payment_date || '');
+    changes.payment_method = String(last.payment_method || '');
+    changes.payment_reference = legacy(last) ? '' : String(last.reference || '');
+    plan.kind = real.length > 1 ? 'instalments' : 'paid';
+    if (real.length > 1) plan.notes.push(history('was paid in instalments, so it now counts as paid on the last payment date.'));
+    else if (last.notes && !legacy(last)) plan.notes.push('Payment note: ' + String(last.notes));
+  } else if (paid > 0.005) {
+    changes.paid_date = '';
+    plan.kind = 'part_paid';
+    plan.notes.push(history('was part-paid, so it is now unpaid.') + ' Set the paid date or adjust the amount to resolve.');
+  } else {
+    changes.paid_date = '';
+    plan.kind = 'unpaid';
+  }
+  if (String(transaction.reconciliation_state) === 'reconciled' && String(transaction.gst_code) === 'taxable' && !migrationBoolean_(transaction.claimable_gst_confirmed) && gstAmount > 0) {
+    var credit = roundMoney_(gstAmount * normalizePercentageDecimal_(transaction.business_use_percentage, 1));
+    plan.unclaimed_gst = credit;
+    plan.notes.push('Upgrade: this expense was reconciled without claiming its GST credit. Taxable expenses now always claim it (' + migrationMoney_(credit) + '). Change its GST treatment if it should not.');
+  }
+  plan.notes = plan.notes.filter(function(note) { return notes.indexOf(note) === -1; });
+  if (plan.notes.length) changes.notes = notes ? notes + '\n' + plan.notes.join('\n') : plan.notes.join('\n');
+  return plan;
+}
+
+function migrationMoney_(value) {
+  var fixed = roundMoney_(value).toFixed(2);
+  var parts = fixed.split('.');
+  return '$' + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + parts[1];
+}
+
+/**
+ * Maps an expense's old category text to an id in the shared deduction category list. The text is a
+ * category id (company expenses moved from Deductions copied the deduction's category id), a name
+ * (matched without regard to case), or a new name, which is added to the list. Blank stays blank.
+ */
+function migrationExpenseCategoryResolver_() {
+  var sheet = getOrCreateSheet('deduction_categories');
+  var values = sheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0] || []);
+  if (headers.indexOf('id') === -1 || headers.indexOf('name') === -1) {
+    headers = ['id', 'name', 'color', 'created_at', 'updated_at'];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    values = [headers];
+  }
+  var byId = {}, byName = {};
+  values.slice(1).forEach(function(row) {
+    var item = rowObjectFromHeaders_(headers, row);
+    if (!item.id) return;
+    byId[String(item.id)] = String(item.id);
+    byName[String(item.name || '').trim().toLowerCase()] = String(item.id);
+  });
+  return function(value) {
+    var text = String(value == null ? '' : value).trim();
+    if (!text) return '';
+    if (byId[text]) return text;
+    if (byName[text.toLowerCase()]) return byName[text.toLowerCase()];
+    var id = Utilities.getUuid();
+    sheet.appendRow(rowValuesFromObject_(headers, { id: id, name: text, color: '#6b7280', created_at: migrationIsoNow_(), updated_at: migrationIsoNow_() }));
+    byId[id] = id;
+    byName[text.toLowerCase()] = id;
+    if (typeof DEDUCTION_CATEGORIES_CACHE_KEY !== 'undefined') cacheClearPrefix(DEDUCTION_CATEGORIES_CACHE_KEY);
+    return id;
+  };
+}
+
+/** Raw expense rows and their legacy payments, read without getOrCreateSheet so it works before an upgrade. */
+function migrationSimplifiedExpenseRows_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName('expense_transactions');
+  var result = { sheet: sheet, headers: [], values: [], rows: [], payments: {} };
+  if (!sheet || sheet.getLastRow() < 2) return result;
+  result.values = sheet.getDataRange().getValues();
+  result.headers = normalizeSheetHeaders_(result.values[0]);
+  result.rows = result.values.slice(1).map(function(row) {
+    var item = rowObjectFromHeaders_(result.headers, row);
+    ['purchase_date', 'supplier_invoice_date', 'paid_date'].forEach(function(key) { if (item[key] !== undefined) item[key] = toIsoDate(item[key] || ''); });
+    return item;
+  });
+  var paymentSheet = spreadsheet.getSheetByName('expense_payments');
+  if (paymentSheet && paymentSheet.getLastRow() > 1) {
+    var paymentValues = paymentSheet.getDataRange().getValues();
+    var paymentHeaders = normalizeSheetHeaders_(paymentValues[0]);
+    paymentValues.slice(1).forEach(function(row) {
+      var payment = rowObjectFromHeaders_(paymentHeaders, row);
+      payment.payment_date = toIsoDate(payment.payment_date || '');
+      var key = String(payment.expense_transaction_id || '');
+      if (key) (result.payments[key] = result.payments[key] || []).push(payment);
+    });
+    Object.keys(result.payments).forEach(function(key) { result.payments[key].sort(function(a, b) { return String(a.payment_date).localeCompare(String(b.payment_date)); }); });
+  }
+  return result;
+}
+
+/** The expenses the simplified-ledger upgrade treats specially, for the upgrade page. Changes nothing. */
+function migrationSimplifiedExpensePreview_() {
+  var data = migrationSimplifiedExpenseRows_();
+  var preview = { part_paid: [], instalments: [], unclaimed_gst: [] };
+  data.rows.forEach(function(transaction) {
+    var payments = data.payments[String(transaction.id)] || [];
+    var plan = migrationPlanSimplifiedExpense_(transaction, payments);
+    var summary = {
+      id: String(transaction.id), vendor: String(transaction.vendor || ''), description: String(transaction.description || ''),
+      date: toIsoDate(transaction.supplier_invoice_date || '') || toIsoDate(transaction.purchase_date || ''), amount: roundMoney_(transaction.amount),
+      paid: roundMoney_(payments.reduce(function(sum, payment) { return sum + (Number(payment.amount) || 0); }, 0)),
+      payments: payments.map(function(payment) { return { date: payment.payment_date, amount: roundMoney_(payment.amount), method: String(payment.payment_method || '') }; })
+    };
+    if (plan.kind === 'part_paid') preview.part_paid.push(summary);
+    if (plan.kind === 'instalments') preview.instalments.push(summary);
+    if (plan.unclaimed_gst) preview.unclaimed_gst.push(Object.assign(summary, { gst_credit: plan.unclaimed_gst }));
+  });
+  return preview;
+}
+
+/**
+ * Simplify the expense ledger: every expense gets a paid date (or none, if unpaid) in place of payment
+ * rows, and stores its amount excluding GST beside the amount including it, and its category as an id in
+ * the shared deduction category list; reconciliation, void and the receipt requirement go. See migrationPlanSimplifiedExpense_ for each
+ * row. The expense_payments sheet is left as it was, unused, as a record. Removed void rows are archived.
+ */
+function migrationSimplifyExpenseLedger_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName('expense_transactions');
+  // Built on first use, so a spreadsheet with no categorised expenses gets no category sheet.
+  var resolveCategory = null;
+  var category = function(value) {
+    if (!String(value == null ? '' : value).trim()) return '';
+    if (!resolveCategory) resolveCategory = migrationExpenseCategoryResolver_();
+    return resolveCategory(value);
+  };
+  if (sheet && sheet.getLastRow() >= 2) {
+    canonicalizeSheet_('expense_transactions');
+    var data = migrationSimplifiedExpenseRows_();
+    var removals = [];
+    var values = data.values;
+    data.rows.forEach(function(transaction, index) {
+      var plan = migrationPlanSimplifiedExpense_(transaction, data.payments[String(transaction.id)] || []);
+      if (plan.remove) { removals.push(index + 2); return; }
+      plan.changes.category_id = category(transaction.category_id || transaction.category);
+      plan.changes.category = '';
+      Object.keys(plan.changes).forEach(function(key) {
+        var column = data.headers.indexOf(key);
+        if (column !== -1) values[index + 1][column] = plan.changes[key];
+      });
+    });
+    if (values.length > 1) data.sheet.getRange(2, 1, values.length - 1, data.headers.length).setValues(values.slice(1).map(function(row) { return row.slice(0, data.headers.length); }));
+    removals.sort(function(a, b) { return b - a; }).forEach(function(rowNumber) {
+      archiveMigrationRow_(SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID, data.sheet, rowNumber, 'void_expense_removed');
+      data.sheet.deleteRow(rowNumber);
+    });
+  }
+  // Schedules: taxable GST is one-eleventh of the amount (as for expenses above), and both amounts are stored.
+  var ruleSheet = spreadsheet.getSheetByName('expense_rules');
+  if (ruleSheet && ruleSheet.getLastRow() >= 2) {
+    canonicalizeSheet_('expense_rules');
+    var ruleValues = ruleSheet.getDataRange().getValues();
+    var ruleHeaders = normalizeSheetHeaders_(ruleValues[0]);
+    var col = function(name) { return ruleHeaders.indexOf(name); };
+    // How far each schedule's payments already go, so creation picks up from there (missed ones included).
+    var latestByRule = {};
+    var txSheet = spreadsheet.getSheetByName('expense_transactions');
+    if (txSheet && txSheet.getLastRow() >= 2) {
+      var txValues = txSheet.getDataRange().getValues();
+      var txHeaders = normalizeSheetHeaders_(txValues[0]);
+      var ruleIdCol = txHeaders.indexOf('source_rule_id'), keyCol = txHeaders.indexOf('source_occurrence_key');
+      if (ruleIdCol !== -1 && keyCol !== -1) txValues.slice(1).forEach(function(row) {
+        var ruleKey = String(row[ruleIdCol] || ''), date = toIsoDate(row[keyCol] || '');
+        if (ruleKey && date && (!latestByRule[ruleKey] || date > latestByRule[ruleKey])) latestByRule[ruleKey] = date;
+      });
+    }
+    for (var r = 1; r < ruleValues.length; r++) {
+      ruleValues[r][col('category_id')] = category(ruleValues[r][col('category_id')] || ruleValues[r][col('category')]);
+      if (!toIsoDate(ruleValues[r][col('generated_through')] || '')) ruleValues[r][col('generated_through')] = latestByRule[String(ruleValues[r][col('id')])] || '';
+      ruleValues[r][col('category')] = '';
+      var ruleAmount = Number(ruleValues[r][col('amount')]) || 0;
+      var taxable = String(ruleValues[r][col('gst_code')]) === 'taxable';
+      var ruleGst = taxable ? roundMoney_(ruleAmount / 11) : 0;
+      ruleValues[r][col('gst_amount')] = ruleGst;
+      ruleValues[r][col('amount_ex_gst')] = roundMoney_(ruleAmount - ruleGst);
+    }
+    ruleSheet.getRange(2, 1, ruleValues.length - 1, ruleHeaders.length).setValues(ruleValues.slice(1).map(function(row) { return row.slice(0, ruleHeaders.length); }));
+  }
+  // The automatic-GST-credit setting is now how every expense works, so its flag is retired.
+  var flags = spreadsheet.getSheetByName('feature_flags');
+  if (flags && flags.getLastRow() > 1) {
+    var flagValues = flags.getDataRange().getValues();
+    var featureIndex = normalizeSheetHeaders_(flagValues[0]).indexOf('feature');
+    for (var row = flagValues.length - 1; featureIndex !== -1 && row >= 1; row--) {
+      if (String(flagValues[row][featureIndex] || '').trim() === 'expense_auto_gst_credits') flags.deleteRow(row + 1);
+    }
+    if (typeof FEATURE_FLAG_CACHE_KEY !== 'undefined') cacheClearPrefix(FEATURE_FLAG_CACHE_KEY);
+  }
+  if (typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+}
+
+/**
+ * A schedule's end date is now the only thing that stops it, so the Active flag is retired. A paused schedule
+ * (active FALSE) gets an end date of the day before it was paused (its last update), unless it already ended
+ * sooner, and is marked active so the flag no longer disagrees. Its upcoming payments were already removed when
+ * it was paused. An end date before the start date simply means it never lists a payment.
+ */
+function migrationScheduleEndDates_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('expense_rules');
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var values = sheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  var col = function(name) { return headers.indexOf(name); };
+  if (col('active') === -1 || col('end_date') === -1) return;
+  var changed = false;
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var flag = String(row[col('active')] == null ? '' : row[col('active')]).trim();
+    if (flag === '' || migrationBoolean_(flag)) continue;
+    var updatedRaw = col('updated_at') === -1 ? '' : row[col('updated_at')];
+    var updated = /^\d{4}-\d{2}-\d{2}/.test(String(updatedRaw)) ? String(updatedRaw).slice(0, 10) : toIsoDate(updatedRaw || '');
+    var pausedOn = updated || migrationToday_();
+    var dayBefore = new Date(Date.UTC(Number(pausedOn.slice(0, 4)), Number(pausedOn.slice(5, 7)) - 1, Number(pausedOn.slice(8, 10)) - 1, 12));
+    var pausedEnd = dayBefore.toISOString().slice(0, 10);
+    var end = toIsoDate(row[col('end_date')] || '');
+    if (!end || end > pausedEnd) {
+      row[col('end_date')] = pausedEnd;
+      if (col('notes') !== -1) row[col('notes')] = (String(row[col('notes')] || '').trim() ? String(row[col('notes')]).trim() + '\n' : '') + 'Was paused; given an end date of ' + pausedEnd + ' when the Active switch was retired. Clear or move the end date to restart it.';
+    }
+    row[col('active')] = 'TRUE';
+    changed = true;
+  }
+  if (changed) sheet.getRange(2, 1, values.length - 1, headers.length).setValues(values.slice(1).map(function(row) { return row.slice(0, headers.length); }));
+  if (typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
 }
