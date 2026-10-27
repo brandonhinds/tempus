@@ -384,6 +384,48 @@ exports.run = test => {
     assert.ok(totals.hash, 'a hash lets the client invalidate cached income summaries');
   });
 
+  test('date cells Sheets has turned into Dates read back as ISO text, so the page and period totals still see them', () => {
+    const { context: c, spreadsheet } = backend();
+    const expense = recordedExpense(c, { purchase_date: '2026-09-09', amount: 110 });
+    c.api_addExpensePayment({ expense_transaction_id: expense.id, amount: 110, payment_date: '2026-09-09' });
+    const rule = c.api_upsertExpenseRule(rulePayload()).rule;
+    // What Sheets does to a yyyy-mm-dd typed or pasted in, or appended below the plain-text-formatted range.
+    const toDates = (sheetName, columns) => {
+      const sheet = spreadsheet.getSheetByName(sheetName);
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      columns.forEach((column) => {
+        const index = headers.indexOf(column) + 1;
+        assert.ok(index, sheetName + ' has ' + column);
+        for (let row = 2; row <= sheet.getLastRow(); row++) {
+          const value = String(sheet.getRange(row, index).getValues()[0][0] || '');
+          if (value) sheet.getRange(row, index).setValue(new Date(value.length === 10 ? value + 'T12:00:00Z' : value));
+        }
+      });
+    };
+    toDates('expense_transactions', ['purchase_date', 'supplier_invoice_date', 'source_occurrence_key', 'created_at', 'updated_at']);
+    toDates('expense_payments', ['payment_date', 'created_at']);
+    toDates('expense_rules', ['start_date', 'created_at']);
+
+    const datesIn = (value, where, found) => {
+      if (Object.prototype.toString.call(value) === '[object Date]') found.push(where);
+      else if (value && typeof value === 'object') Object.keys(value).forEach((key) => datesIn(value[key], where + '.' + key, found));
+      return found;
+    };
+    const transactions = c.api_listExpenseTransactions({});
+    const rules = c.api_listExpenseRules({ include_inactive: true });
+    // google.script.run delivers null for a whole payload that holds a Date, which blanked the Expenses page.
+    assert.deepStrictEqual(datesIn(transactions, 'transactions', []), []);
+    assert.deepStrictEqual(datesIn(rules, 'rules', []), []);
+
+    const listed = transactions.find((t) => t.id === expense.id);
+    assert.equal(listed.purchase_date, '2026-09-09');
+    assert.match(listed.created_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    assert.equal(listed.payments[0].payment_date, '2026-09-09');
+    assert.equal(rules.find((r) => r.id === rule.id).start_date, '2026-09-15');
+    assert.ok(c.api_listExpenseTransactions({ from: '2026-09-01', to: '2026-09-30' }).some((t) => t.id === expense.id), 'period filters compare dates as text');
+    assert.equal(JSON.parse(JSON.stringify(c.api_getCompanyExpenseMonthlyTotals())).months.cash['2026-09'].purchases, 110, 'the paid expense still counts toward September');
+  });
+
   test('dashboard income and client BAS 1B read company expenses from the ledger, not deductions', () => {
     const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
     const client = {
