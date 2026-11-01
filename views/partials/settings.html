@@ -267,6 +267,21 @@
     <input id="set-minimum-end-time" type="time"/>
    </div>
   </div>
+  <div class="ts-settings-item" data-setting-key="xero_timesheet_format" id="xero-timesheet-format-col">
+   <label class="ts-settings-label" for="set-xero-timesheet-format">
+    Xero timesheet format
+   </label>
+   <div class="ts-note">
+    Which Xero timesheet the helper copies for. <strong>Default</strong> follows how each contract logs time: total hours for Simple, start &amp; end for Detailed. <strong>Total hours worked</strong> works for everything, including sessions (they&rsquo;re summed per day). <strong>Start &amp; end hours</strong> needs timed sessions, so a contract logged as total hours falls back to total hours. Pick the matching type when you create the timesheet in Xero.
+   </div>
+   <div class="ts-settings-field ts-settings-control">
+    <select id="set-xero-timesheet-format">
+     <option value="auto">Default — match how I log time</option>
+     <option value="total">Total hours worked</option>
+     <option value="start_end">Start &amp; end hours</option>
+    </select>
+   </div>
+  </div>
   <div class="ts-settings-item" data-setting-key="monthly_insights_trend_method" id="monthly-insights-trend-method-col">
    <label class="ts-settings-label" for="set-monthly-insights-trend-method">
     Monthly insights trend calculation

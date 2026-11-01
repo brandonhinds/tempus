@@ -610,6 +610,9 @@ test('calendar preferences, resilient refresh, quick fill, and rolling holiday w
   const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
   const holidays = fs.readFileSync(path.join(root, 'views/partials/public-holidays.html'), 'utf8');
   assert.match(settings, /data-setting-key="subdue_weekends"/);
+  assert.match(settings, /data-setting-key="xero_timesheet_format"/);
+  assert.match(scripts, /xero_timesheet_format: \{\s*section: 'xero_payroll_helper'[\s\S]*?defaultValue: 'auto'/);
+  assert.match(scripts, /const allSimple = options\.every\(\(o\) => o\.view !== 'sessions'\)/);
   assert.match(scripts, /subdue_weekends:[\s\S]*?defaultValue: true/);
   assert.match(scripts, /classList\.toggle\('ts-subdue-weekends', enabled\)/);
   assert.match(styles, /\.ts-subdue-weekends \.ts-calendar-cell--weekend/);

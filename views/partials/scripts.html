@@ -18237,7 +18237,27 @@ function getCachedIncomeSummary(monthKey) {
     return contracts
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((c) => ({ contract: c, mode: contractEffectiveEntryMode(c) }));
+      .map((c) => {
+        const mode = contractEffectiveEntryMode(c);
+        return { contract: c, mode, view: xeroHelperContractView(c, mode, year, month) };
+      });
+  }
+
+  // Settings › Xero timesheet format. 'auto' keeps the contract rule above; 'total' always shows the
+  // totals grid (sessions sum into daily totals fine); 'start_end' shows sessions wherever the contract
+  // has timed sessions to give — a Detailed contract, or timed entries logged this month — and otherwise
+  // falls back to totals, since basic entries can't be expressed as start/end blocks.
+  function getXeroTimesheetFormat() {
+    const v = state.settings && state.settings.xero_timesheet_format;
+    return (v === 'total' || v === 'start_end') ? v : 'auto';
+  }
+  function xeroHelperContractView(contract, mode, year, month) {
+    const format = getXeroTimesheetFormat();
+    if (format === 'total') return 'totals';
+    if (mode === 'detailed') return 'sessions';
+    if (format === 'auto') return 'totals';
+    const hasTimed = payrollEligibleEntries(year, month, contract.id).some((e) => resolveEntryType(e) === 'advanced');
+    return hasTimed ? 'sessions' : 'totals';
   }
 
   // Per-day sessions for one contract's month — the review shape for Xero's start/end-hours timesheet.
@@ -18322,10 +18342,10 @@ function getCachedIncomeSummary(monthKey) {
       });
     }
 
-    // Contract selection. "All contracts" (id '') only exists while every relevant contract is Simple —
-    // a sessions timesheet is per employment, so Detailed contracts are always reviewed one at a time.
+    // Contract selection. "All contracts" (id '') only exists while every relevant contract shows totals —
+    // a sessions timesheet is per employment, so sessions contracts are always reviewed one at a time.
     const options = xeroHelperContractOptions(year, month);
-    const allSimple = options.every((o) => o.mode !== 'detailed');
+    const allSimple = options.every((o) => o.view !== 'sessions');
     const validIds = options.map((o) => String(o.contract.id));
     let contractId = selectedContractId !== undefined ? selectedContractId : xeroHelperSel.contractId;
     const invalid = contractId == null
@@ -18334,7 +18354,7 @@ function getCachedIncomeSummary(monthKey) {
     if (invalid) contractId = allSimple ? '' : (validIds[0] || '');
     xeroHelperSel.contractId = contractId;
     const selectedOpt = options.find((o) => String(o.contract.id) === String(contractId)) || null;
-    const mode = selectedOpt ? selectedOpt.mode : 'simple';
+    const view = selectedOpt ? selectedOpt.view : 'totals';
 
     if (options.length > 1) {
       const seg = document.createElement('div');
@@ -18353,10 +18373,16 @@ function getCachedIncomeSummary(monthKey) {
       xeroHelperContent.appendChild(seg);
     }
 
-    // Detailed contract → the sessions (start/end) review view; everything else → the totals grid below.
-    if (mode === 'detailed' && contractId) {
+    // Sessions contract → the sessions (start/end) review view; everything else → the totals grid below.
+    if (view === 'sessions' && contractId) {
       renderXeroSessionsView(year, month, monthLabel, selectedOpt.contract);
       return;
+    }
+    if (getXeroTimesheetFormat() === 'start_end') {
+      const fallback = document.createElement('p');
+      fallback.className = 'ts-note';
+      fallback.textContent = `${selectedOpt ? selectedOpt.contract.name : 'This month'} is logged as total hours, so there are no start & end times to copy — showing total hours instead. Choose “Total hours worked” when creating this timesheet in Xero.`;
+      xeroHelperContent.appendChild(fallback);
     }
 
     const report = buildXeroPayrollReport(year, month, contractId || '');
@@ -27153,6 +27179,15 @@ function getCachedIncomeSummary(monthKey) {
       setValue: (el, val) => { const s = val == null ? '' : String(val); el.value = /^\d{1,2}:\d{2}/.test(s) ? s.slice(0, 5) : '17:00'; },
       defaultValue: '17:00',
       event: 'input'
+    },
+    xero_timesheet_format: {
+      section: 'xero_payroll_helper',
+      order: 10,
+      element: () => document.getElementById('set-xero-timesheet-format'),
+      getValue: (el) => (el && (el.value === 'total' || el.value === 'start_end')) ? el.value : 'auto',
+      setValue: (el, val) => { if (el) el.value = (val === 'total' || val === 'start_end') ? val : 'auto'; },
+      defaultValue: 'auto',
+      event: 'change'
     },
     lost_super_recovery_mode: {
       section: 'no_lost_super_to_deductions',
