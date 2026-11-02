@@ -50,9 +50,11 @@
   // Company expenses per month from the expense ledger (api_getCompanyExpenseMonthlyTotals), which the dashboard
   // income, the client BAS table (1B) and the annual views read so they agree with the backend BAS. Kept in
   // localStorage so a reload doesn't briefly show income with no expenses taken off.
-  const COMPANY_EXPENSE_LEDGER_CACHE_KEY = 'tempus_company_expense_ledger_v1';
+  const COMPANY_EXPENSE_LEDGER_CACHE_KEY = 'tempus_company_expense_ledger_v2';
   let companyExpenseLedgerLoad = null;
   try {
+    // v1 also held every month's breakdown, which could grow past the storage limit.
+    localStorage.removeItem('tempus_company_expense_ledger_v1');
     const cached = JSON.parse(localStorage.getItem(COMPANY_EXPENSE_LEDGER_CACHE_KEY) || 'null');
     if (cached && cached.months && typeof state !== 'undefined' && !state.companyExpenseLedger) state.companyExpenseLedger = cached;
   } catch (error) { /* storage unavailable: the first load fills it */ }
@@ -81,14 +83,16 @@
     const ensured = ensureExpenseOccurrences();
     if (companyExpenseLedgerLoad) return companyExpenseLedgerLoad;
     if (state.companyExpenseLedgerLoaded && !(options && options.force)) return Promise.resolve(state.companyExpenseLedger);
-    // After any schedule payments due are created, so the breakdowns list them.
+    // After any schedule payments due are created, so the totals count them.
     companyExpenseLedgerLoad = ensured.then(() => operationsApi('api_getCompanyExpenseMonthlyTotals')).then((result) => {
       const changed = !state.companyExpenseLedger || state.companyExpenseLedger.hash !== result.hash;
-      state.companyExpenseLedger = { months:result.months || { cash:{}, accrual:{} }, breakdowns:result.breakdowns || null, hash:result.hash || '' };
+      state.companyExpenseLedger = { months:result.months || { cash:{}, accrual:{} }, hash:result.hash || '' };
       state.companyExpenseLedgerLoaded = true;
       try { localStorage.setItem(COMPANY_EXPENSE_LEDGER_CACHE_KEY, JSON.stringify(state.companyExpenseLedger)); } catch (error) { /* non-fatal */ }
-      if (changed) refreshCompanyExpenseViews();
-      refreshOpenCompanyExpensesModal();
+      if (changed) {
+        refreshCompanyExpenseViews();
+        refreshOpenCompanyExpensesModal();
+      }
       return state.companyExpenseLedger;
     }).catch((error) => {
       operationsStatus('Could not load company expenses for income figures: ' + (error && error.message ? error.message : error), 'warn');
@@ -619,22 +623,10 @@
   // The month the Company expenses popup is showing, so a newer ledger load can refresh it in place.
   let companyExpensesModalMonth = null;
 
-  /** A month's breakdown from the loaded ledger, or null when the ledger has no breakdowns (older cache). */
-  function companyLedgerBreakdownForMonth(year, month) {
-    const ledger = typeof state !== 'undefined' ? state.companyExpenseLedger : null;
-    const basis = typeof defaultAccountingBasis === 'function' ? defaultAccountingBasis() : 'cash';
-    const months = ledger && ledger.breakdowns ? ledger.breakdowns[basis] : null;
-    if (!months) return null;
-    const empty = { expenses:[], totals:{ amount:0, amount_ex_gst:0, gst_credit:0, counted:0 }, pending:[], pending_totals:{ amount:0, amount_ex_gst:0 } };
-    return { ...(months[`${year}-${String(month + 1).padStart(2, '0')}`] || empty), accounting_basis:basis };
-  }
-
   function refreshOpenCompanyExpensesModal() {
     const modal = document.getElementById('modal-monthly-deductions');
     if (!companyExpensesModalMonth || !modal || modal.style.display === 'none' || !/^Company expenses/.test(document.getElementById('monthly-deductions-title')?.textContent || '')) return;
-    const { year, month } = companyExpensesModalMonth;
-    const result = companyLedgerBreakdownForMonth(year, month);
-    if (result) renderCompanyExpensesModal(document.getElementById('monthly-deductions-content'), modal, result, new Date(year, month, 1).toLocaleDateString('en-AU', { month:'long', year:'numeric' }));
+    showCompanyExpensesModal(companyExpensesModalMonth.year, companyExpensesModalMonth.month);
   }
 
   /**
@@ -651,24 +643,21 @@
     const basis = defaultAccountingBasis();
     title.textContent = `Company expenses · ${monthLabel}`;
     content.replaceChildren();
-    companyExpensesModalMonth = { year, month };
-    // The monthly totals load brings every month's breakdown, so this usually opens with no server call.
-    const cached = companyLedgerBreakdownForMonth(year, month);
-    if (cached) {
-      renderCompanyExpensesModal(content, modal, cached, monthLabel);
-      if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex';
-      return;
-    }
+    const shown = companyExpensesModalMonth = { year, month };
+    // Loaded each time it opens, so Edit always starts from the expense as saved.
     ledgerText(content, 'ts-note', 'Loading company expenses…');
     if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex';
     let result;
     try {
       result = await operationsApi('api_getCompanyExpensesForMonth', { year, month, accounting_basis:basis });
     } catch (error) {
+      if (companyExpensesModalMonth !== shown) return;
       content.replaceChildren();
       ledgerText(content, 'ts-note', 'Could not load company expenses: ' + (error && error.message ? error.message : error));
       return;
     }
+    // A newer open (another month, or a refresh) has taken over the popup.
+    if (companyExpensesModalMonth !== shown) return;
     renderCompanyExpensesModal(content, modal, result, monthLabel);
   }
 

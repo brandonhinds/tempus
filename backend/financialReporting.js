@@ -102,30 +102,24 @@ function api_getCompanyExpensesForMonth(payload) {
   if (!isFinite(year) || !isFinite(month) || month < 0 || month > 11) throw new Error('Year and month are required.');
   var basis = payload && payload.accounting_basis === 'accrual' ? 'accrual' : 'cash';
   var key = year + '-' + ('0' + (month + 1)).slice(-2);
-  var result = companyExpensesBreakdown_(basis, key, api_listExpenseTransactions({}), null);
+  var result = companyExpensesBreakdown_(basis, key, api_listExpenseTransactions({}));
   result.success = true;
   result.accounting_basis = basis;
   return result;
 }
 
-// What the Company expenses breakdown and the expense form need from each expense, so the breakdowns sent
-// with the monthly totals stay small (no attachments or timestamps).
-var COMPANY_EXPENSE_BREAKDOWN_FIELDS_ = ['id', 'status', 'vendor', 'vendor_abn', 'description', 'category_id', 'category', 'category_color', 'gst_code',
-  'gst_amount', 'amount', 'amount_ex_gst', 'business_use_percentage', 'supplier_invoice_date', 'paid_date', 'payment_method', 'payment_reference', 'notes', 'source_rule_id'];
-
 /**
  * One calendar month ('YYYY-MM') of company expenses on a basis: the expenses it counts (with counted_date,
  * gst_credit and counted, what each takes off income), their totals, and the payments not counted yet
  * (schedule payments due in the month, and unpaid expenses invoiced in it that the basis doesn't count).
- * `fields` limits each item to those keys; null keeps every field.
  */
-function companyExpensesBreakdown_(basis, key, transactions, fields) {
+function companyExpensesBreakdown_(basis, key, transactions) {
   var from = key + '-01';
   var parts = key.split('-').map(Number);
   var to = key + '-' + ('0' + new Date(Date.UTC(parts[0], parts[1], 0, 12)).getUTCDate()).slice(-2);
   var copy = function(transaction) {
     var item = {};
-    (fields || Object.keys(transaction)).forEach(function(name) { if (transaction[name] !== undefined) item[name] = transaction[name]; });
+    Object.keys(transaction).forEach(function(name) { if (transaction[name] !== undefined) item[name] = transaction[name]; });
     return item;
   };
   var items = [];
@@ -161,15 +155,11 @@ function companyExpensesBreakdown_(basis, key, transactions, fields) {
 function api_getCompanyExpenseMonthlyTotals() {
   var source = { transactions: api_listExpenseTransactions({}) };
   var months = {};
-  var breakdownMonths = {};
   source.transactions.forEach(function(transaction) {
     ['cash', 'accrual'].forEach(function(basis) {
       var date = expenseAttributionDate_(basis, transaction);
-      if (/^\d{4}-\d{2}/.test(date)) months[date.substring(0, 7)] = breakdownMonths[date.substring(0, 7)] = true;
+      if (/^\d{4}-\d{2}/.test(date)) months[date.substring(0, 7)] = true;
     });
-    // Months with only payments not counted yet still get a breakdown.
-    var due = String(transaction.supplier_invoice_date || '');
-    if (/^\d{4}-\d{2}/.test(due) && String(transaction.status) !== 'skipped') breakdownMonths[due.substring(0, 7)] = true;
   });
   var result = { cash: {}, accrual: {} };
   Object.keys(months).sort().forEach(function(key) {
@@ -182,15 +172,7 @@ function api_getCompanyExpenseMonthlyTotals() {
       if (totals.purchases || totals.gst) result[basis][key] = totals;
     });
   });
-  // Each month's Company expenses breakdown, so the Time Entry popup opens from memory with no server call.
-  var breakdowns = { cash: {}, accrual: {} };
-  Object.keys(breakdownMonths).sort().forEach(function(key) {
-    ['cash', 'accrual'].forEach(function(basis) {
-      var breakdown = companyExpensesBreakdown_(basis, key, source.transactions, COMPANY_EXPENSE_BREAKDOWN_FIELDS_);
-      if (breakdown.expenses.length || breakdown.pending.length) breakdowns[basis][key] = breakdown;
-    });
-  });
-  return { success: true, months: result, breakdowns: breakdowns, hash: sha256Hex_(JSON.stringify(result)).substring(0, 16) };
+  return { success: true, months: result, hash: sha256Hex_(JSON.stringify(result)).substring(0, 16) };
 }
 
 function timesheetForecastForPeriod_(from, to) {

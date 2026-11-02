@@ -892,28 +892,16 @@ exports.run = test => {
     assert.deepStrictEqual(JSON.parse(JSON.stringify(accrual.pending)), [], 'accrual: the unpaid bill already counts');
   });
 
-  test('the monthly totals bring each month\'s breakdown, so the Time Entry popup opens from memory', () => {
+  test('the monthly totals stay small, and the Time Entry popup loads its month each time it opens', () => {
     const { context: c } = backend('2026-10-01', 'financial_year');
     paidExpense(c, { vendor: 'Phone', description: 'Mobile plan', amount: 110, paid_date: '2026-10-10', business_use_percentage: 60, notes: 'Work phone' });
-    c.api_upsertExpenseTransaction({ vendor: 'Unpaid', amount: 33, supplier_invoice_date: '2026-10-15' });
-    c.api_upsertExpenseRule(rulePayload({ start_date: '2026-12-20' }));
     const ledger = JSON.parse(JSON.stringify(c.api_getCompanyExpenseMonthlyTotals()));
-    ['cash', 'accrual'].forEach((basis) => {
-      const direct = JSON.parse(JSON.stringify(c.api_getCompanyExpensesForMonth({ year: 2026, month: 9, accounting_basis: basis })));
-      const cached = ledger.breakdowns[basis]['2026-10'];
-      assert.deepStrictEqual([cached.totals, cached.pending_totals], [direct.totals, direct.pending_totals], basis + ': same figures as the popup\'s own call');
-      assert.deepStrictEqual(cached.expenses.map((e) => e.id), direct.expenses.map((e) => e.id), basis);
-      assert.deepStrictEqual(cached.pending.map((e) => e.id), direct.pending.map((e) => e.id), basis);
-    });
-    const phone = ledger.breakdowns.cash['2026-10'].expenses[0];
-    assert.deepStrictEqual([phone.description, phone.notes, phone.counted, phone.attachments_json], ['Mobile plan', 'Work phone', 104, undefined], 'keeps what the popup and the expense form use, not attachments');
-    assert.ok(ledger.breakdowns.accrual['2026-12'].pending.length, 'a month with only schedule payments still has a breakdown');
-    // The popup renders from the ledger with no server call.
-    const client = { state: { companyExpenseLedger: ledger }, defaultAccountingBasis: () => 'cash', String };
-    vm.runInNewContext(extract(operationsScripts, 'companyLedgerBreakdownForMonth'), client);
-    assert.equal(client.companyLedgerBreakdownForMonth(2026, 9).totals.counted, ledger.breakdowns.cash['2026-10'].totals.counted);
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(client.companyLedgerBreakdownForMonth(2026, 1))).expenses, [], 'an empty month is empty, not a server call');
-    assert.match(operationsScripts, /async function showCompanyExpensesModal\(year, month\) \{[\s\S]*?const cached = companyLedgerBreakdownForMonth\(year, month\);\s*if \(cached\) \{[\s\S]*?return;\s*\}/);
+    assert.deepStrictEqual(Object.keys(ledger).sort(), ['hash', 'months', 'success'], 'no per-expense breakdown in the startup payload or the localStorage cache');
+    const direct = JSON.parse(JSON.stringify(c.api_getCompanyExpensesForMonth({ year: 2026, month: 9, accounting_basis: 'cash' })));
+    assert.deepStrictEqual([direct.expenses[0].description, direct.expenses[0].notes, direct.expenses[0].counted], ['Mobile plan', 'Work phone', 104]);
+    assert.ok(!operationsScripts.includes('companyLedgerBreakdownForMonth') && !operationsScripts.includes('breakdowns'));
+    assert.match(operationsScripts, /async function showCompanyExpensesModal\(year, month\) \{[\s\S]*?operationsApi\('api_getCompanyExpensesForMonth'/);
+    assert.match(operationsScripts, /const COMPANY_EXPENSE_LEDGER_CACHE_KEY = 'tempus_company_expense_ledger_v2';\s*let companyExpenseLedgerLoad = null;\s*try \{[\s\S]*?localStorage\.removeItem\('tempus_company_expense_ledger_v1'\)/);
   });
 
   test('the expense form is a popup that asks for the description first, and says when an expense is from a schedule', () => {
