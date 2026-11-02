@@ -724,14 +724,47 @@ exports.run = test => {
   }
   const rowsById = (c) => Object.fromEntries(c.api_listExpenseTransactions({}).map((t) => [t.id, t]));
 
-  test('upgrade preview lists part-paid expenses, instalments and declined GST credits without changing anything', () => {
+  test('upgrade preview lists part-paid expenses, instalments, new GST credits and recalculated GST without changing anything', () => {
     const { context: c, spreadsheet } = legacyLedger();
     const before = JSON.stringify(spreadsheet.getSheetByName('expense_transactions').getDataRange().getValues());
     const preview = JSON.parse(JSON.stringify(c.migrationSimplifiedExpensePreview_()));
     assert.deepStrictEqual(preview.part_paid.map((p) => [p.id, p.amount, p.paid, p.payments.length]), [['part', 1000, 400, 2]]);
-    assert.deepStrictEqual(preview.instalments.map((p) => p.id), ['instalments']);
-    assert.deepStrictEqual(preview.unclaimed_gst.map((p) => [p.id, p.gst_credit]), [['declined', 5]]);
+    assert.deepStrictEqual(preview.instalments.map((p) => [p.id, p.first_payment_date, p.paid_date, p.crosses_financial_year]), [['instalments', '2026-08-05', '2026-09-05', false]]);
+    // Before, only a reconciled expense with its credit confirmed claimed GST.
+    assert.deepStrictEqual(preview.gst_claimed.map((p) => [p.id, p.gst_credit, p.reason]),
+      [['paid', 10, 'unreconciled'], ['instalments', 20, 'unreconciled'], ['part', 90.91, 'unreconciled'], ['unpaid', 10, 'unreconciled'], ['declined', 5, 'declined'], ['adjusted', 7.18, 'unreconciled']]);
+    assert.deepStrictEqual(preview.gst_recalculated.map((p) => [p.id, p.gst_before, p.gst_after]), [['instalments', 10, 20], ['part', 10, 90.91], ['adjusted', 6.55, 7.18]]);
+    assert.deepStrictEqual(preview.submitted_bas, [], 'no BAS has been submitted');
     assert.equal(JSON.stringify(spreadsheet.getSheetByName('expense_transactions').getDataRange().getValues()), before);
+  });
+
+  test('upgrade preview names the submitted BAS periods whose figures change, before and after', () => {
+    const { context: c } = legacyLedger();
+    const bas = c.getOrCreateSheet('bas_submissions');
+    const headers = bas.getDataRange().getValues()[0];
+    const submit = (values) => bas.appendRow(c.rowValuesFromObject_(headers, Object.assign({ id: c.Utilities.getUuid(), submitted: 'TRUE', submission_state: 'submitted', accounting_basis: 'cash' }, values)));
+    submit({ financial_year: 2026, period_type: 'quarterly', quarter: 1 });
+    submit({ financial_year: 2026, period_type: 'quarterly', quarter: 1 }); // A resubmission of the same period is listed once.
+    submit({ financial_year: 2025, period_type: 'monthly', month: 5, accounting_basis: 'accrual' });
+    submit({ financial_year: 2025, period_type: 'monthly', month: 4 });
+    submit({ financial_year: 2026, period_type: 'quarterly', quarter: 1, accounting_basis: 'accrual', submitted: 'FALSE', submission_state: 'draft' });
+    const preview = JSON.parse(JSON.stringify(c.migrationSimplifiedExpensePreview_()));
+    assert.deepStrictEqual(preview.submitted_bas.map((p) => [p.label, p.accounting_basis, p.before, p.after]), [
+      // Cash: the part-paid laptop's $400 drops out, and every taxable expense paid in the quarter now claims GST.
+      ['Q1 FY 2026-27', 'cash', { purchases: 950, gst: 9 }, { purchases: 550, gst: 44 }],
+      // Accrual: the adjusted occurrence now claims one-eleventh of $79. May 2026 had no expenses, so it is unchanged and left out.
+      ['June 2026', 'accrual', { purchases: 239, gst: 0 }, { purchases: 239, gst: 7.18 }]
+    ]);
+    const refused = c.api_runUpgrade();
+    assert.match(refused.message, /BAS period\(s\) already marked as submitted: Q1 FY 2026-27, June 2026\./);
+  });
+
+  test('an upgrade with nothing to change in what expenses count for runs without asking', () => {
+    const env = backend(), c = env.context;
+    const tx = c.getOrCreateSheet('expense_transactions'), pay = c.getOrCreateSheet('expense_payments');
+    tx.appendRow(c.rowValuesFromObject_(tx.getDataRange().getValues()[0], { id: 'ok', vendor: 'V', amount: 110, gst_code: 'taxable', gst_amount: 10, business_use_percentage: 1, status: 'recorded', reconciliation_state: 'reconciled', claimable_gst_confirmed: 'TRUE', purchase_date: '2026-08-01', attachments_json: '[]' }));
+    pay.appendRow(c.rowValuesFromObject_(pay.getDataRange().getValues()[0], { id: 'p', expense_transaction_id: 'ok', payment_date: '2026-08-01', amount: 110 }));
+    assert.equal(c.migrationPreviewNeedsConfirmation_(c.migrationSimplifiedExpensePreview_()), false);
   });
 
   test('the upgrade turns payments into a paid date, keeps unpaid, notes part-paid, and removes void', () => {
@@ -1158,7 +1191,7 @@ exports.run = test => {
     assert.equal(c.api_listExpenseRules({}).find((r) => r.id === 'old').generated_through, '2026-10-31');
   });
 
-  test('the upgrade waits for confirmation when part-paid expenses exist, and changes nothing until then', () => {
+  test('the upgrade waits for confirmation when it changes what expenses count for, and changes nothing until then', () => {
     const { context: c, properties, spreadsheet } = legacyLedger();
     const others = c.listMigrations().map((m) => m.id).filter((id) => id !== c.SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID);
     properties.setProperty('tempus_migrations_applied', JSON.stringify(others));
@@ -1176,20 +1209,41 @@ exports.run = test => {
     const before = JSON.stringify(spreadsheet.getSheetByName('expense_transactions').getDataRange().getValues());
     const refused = c.api_runUpgrade();
     assert.equal(refused.error, 'confirmation_required');
-    assert.match(refused.message, /1 part-paid expense\(s\) will become unpaid/);
+    assert.match(refused.message, /1 part-paid expense\(s\) will become unpaid[\s\S]*1 expense\(s\) paid in instalments[\s\S]*6 taxable expense\(s\) will start claiming[\s\S]*3 expense\(s\) will have their GST recalculated/);
     assert.equal(JSON.stringify(spreadsheet.getSheetByName('expense_transactions').getDataRange().getValues()), before, 'nothing changed');
     assert.ok(c.api_getMigrationStatus().required, 'the upgrade is still pending');
     assert.equal(copies, 0, 'no backup is taken until the user confirms');
-    const done = c.api_runUpgrade({ confirm_part_paid: true });
+    const done = c.api_runUpgrade({ confirm_changes: true });
     assert.equal(done.state, 'complete');
     assert.equal(rowsById(c).part.paid_date, '');
     assert.equal(c.api_getUpgradePreview().requires_confirmation, false);
   });
 
-  test('the upgrade page lists part-paid expenses and can be cancelled before anything changes', () => {
+  test('the upgrade page lists the changes, with submitted BAS periods first, and can be cancelled before anything changes', () => {
     const page = fs.readFileSync(path.join(root, 'views/upgrade.html'), 'utf8');
+    const { context: c } = legacyLedger();
+    const bas = c.getOrCreateSheet('bas_submissions');
+    bas.appendRow(c.rowValuesFromObject_(bas.getDataRange().getValues()[0], { id: 'q1', financial_year: 2026, period_type: 'quarterly', quarter: 1, submitted: 'TRUE', submission_state: 'submitted', accounting_basis: 'cash' }));
+    const preview = JSON.parse(JSON.stringify(c.api_getUpgradePreview()));
+    const doc = fakeDocument();
+    const make = doc.createElement;
+    const elements = {};
+    doc.createElement = (tag) => Object.assign(make(tag), { replaceChildren(...kids) { this.children = kids; }, dataset: {}, focus() {} });
+    doc.getElementById = (id) => elements[id] || (elements[id] = doc.createElement('div'));
+    const run = { withSuccessHandler(fn) { this.success = fn; return this; }, withFailureHandler() { return this; }, api_getUpgradePreview() { this.success(preview); } };
+    const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>')).replace('<?!= webAppUrlJson ?>', '""');
+    vm.runInNewContext(script, { document: doc, google: { script: { run } }, Intl, Number, String });
+    assert.equal(elements.review.hidden, false);
+    const shown = textOf(elements['review-sections']);
+    assert.ok(shown.indexOf('Submitted BAS periods that change (1)') === 0, shown);
+    assert.match(shown, /Q1 FY 2026-27 \(cash\): purchases \$950\.00 → \$550\.00, GST on purchases \(1B\) \$9\.00 → \$44\.00/);
+    assert.match(shown, /Part-paid expenses become unpaid \(1\)[\s\S]*part · 2026-08-10 — \$400\.00 paid of \$1,000\.00 in 2 payments/);
+    assert.match(shown, /instalments · 2026-07-30 — \$220\.00 in 2 payments from 2026-08-05, now counted on 2026-09-05/);
+    assert.match(shown, /Expenses that start claiming GST \(6\)[\s\S]*Show all 6[\s\S]*declined · 2026-08-21 — \$5\.00 credit \(was reconciled with the credit declined\)/);
+    assert.match(shown, /GST recalculated \(3\)[\s\S]*adjusted · 2026-06-01 — \$79\.00: GST \$6\.55 → \$7\.18/);
+    assert.equal(elements.run.textContent, 'Accept these changes and upgrade');
     assert.match(page, /api_getUpgradePreview\(\)/);
-    assert.match(page, /api_runUpgrade\(\{ confirm_part_paid: confirmPartPaid \}\)/);
+    assert.match(page, /api_runUpgrade\(\{ confirm_changes: confirmChanges \}\)/);
     assert.match(page, /result\.error === 'confirmation_required'/);
     assert.match(page, /id="cancel"/);
     assert.match(page, /Nothing was changed/);

@@ -103,14 +103,14 @@ function runPendingMigrations() {
  */
 function api_getUpgradePreview() {
   var pending = pendingMigrations(PropertiesService.getScriptProperties()).map(function(item) { return item.id; });
-  var expenses = pending.indexOf(SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID) !== -1 ? migrationSimplifiedExpensePreview_() : { part_paid: [], instalments: [], unclaimed_gst: [] };
-  return { success: true, pending: pending, expenses: expenses, requires_confirmation: expenses.part_paid.length > 0 };
+  var expenses = pending.indexOf(SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID) !== -1 ? migrationSimplifiedExpensePreview_() : { part_paid: [], instalments: [], gst_claimed: [], gst_recalculated: [], submitted_bas: [] };
+  return { success: true, pending: pending, expenses: expenses, requires_confirmation: migrationPreviewNeedsConfirmation_(expenses) };
 }
 
 /**
- * Runs every pending migration. When the simplified-ledger upgrade would turn part-paid expenses into
- * unpaid ones, nothing is changed (not even the backup) until it is called again with
- * `{ confirm_part_paid: true }`, so the user can see the list and back out.
+ * Runs every pending migration. When the simplified-ledger upgrade would change what an expense counts
+ * for (see migrationSimplifiedExpensePreview_), nothing is changed (not even the backup) until it is
+ * called again with `{ confirm_changes: true }`, so the user can see the list and back out.
  */
 function api_runUpgrade(options) {
   var lock = LockService.getScriptLock();
@@ -120,10 +120,10 @@ function api_runUpgrade(options) {
   try {
     var pending = pendingMigrations(props);
     if (!pending.length) return api_getMigrationStatus();
-    if (!(options && options.confirm_part_paid) && pending.some(function(item) { return item.id === SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID; })) {
+    if (!(options && options.confirm_changes) && pending.some(function(item) { return item.id === SIMPLIFIED_EXPENSE_LEDGER_MIGRATION_ID; })) {
       var preview = migrationSimplifiedExpensePreview_();
-      if (preview.part_paid.length) {
-        return { success: false, error: 'confirmation_required', message: preview.part_paid.length + ' part-paid expense(s) will become unpaid, each with a note of what was paid. Confirm to continue, or cancel to leave everything unchanged.', preview: preview };
+      if (migrationPreviewNeedsConfirmation_(preview)) {
+        return { success: false, error: 'confirmation_required', message: migrationPreviewMessage_(preview), preview: preview };
       }
     }
     var backup = ensureVerifiedUpgradeBackup_(props);
@@ -1480,7 +1480,8 @@ function migrationLilAssessments_() {
  * so a different one is a leftover, such as the company-expense move copying a deduction's usual GST onto
  * an occurrence whose amount had been adjusted. It never mattered while credits needed reconciling; now
  * every taxable expense claims its stored GST. A taxable expense reconciled without claiming its credit
- * now claims it, so it gets a note ('unclaimed_gst').
+ * now claims it, so it gets a note ('unclaimed_gst'). A recalculated GST is reported as `gst_recalculated`
+ * ({ from, to }) for the upgrade preview.
  */
 function migrationPlanSimplifiedExpense_(transaction, payments) {
   var status = String(transaction.status || '');
@@ -1497,6 +1498,7 @@ function migrationPlanSimplifiedExpense_(transaction, payments) {
     // GST amount the first pass took from an invoice correction.
     var expectedGst = roundMoney_((Number(transaction.amount) || 0) / 11);
     if (Math.abs(gstAmount - expectedGst) > 0.005) {
+      var recalculated = { from: roundMoney_(gstAmount), to: expectedGst };
       gstAmount = expectedGst;
       changes.gst_amount = expectedGst;
     }
@@ -1504,7 +1506,7 @@ function migrationPlanSimplifiedExpense_(transaction, payments) {
   // Both amounts are stored from now on, so a bank statement (including GST) and a ledger (excluding it)
   // can each be compared directly.
   changes.amount_ex_gst = roundMoney_((Number(transaction.amount) || 0) - (String(transaction.gst_code) === 'taxable' ? gstAmount : 0));
-  var plan = { changes: changes, remove: false, kind: '', notes: [] };
+  var plan = { changes: changes, remove: false, kind: '', notes: [], gst_recalculated: recalculated || null };
   if (status === 'skipped') { plan.kind = 'skipped'; return plan; }
   if (status === 'void') {
     if (transaction.source_rule_id) { changes.status = 'skipped'; plan.kind = 'skipped'; } else { plan.remove = true; plan.kind = 'void'; }
@@ -1621,13 +1623,81 @@ function migrationSimplifiedExpenseRows_() {
   return result;
 }
 
-/** The expenses the simplified-ledger upgrade treats specially, for the upgrade page. Changes nothing. */
+/**
+ * An expense's GST credit as the old model gave it: Taxable only, and only once reconciled with the credit
+ * confirmed, scaled by business use. Kept so the upgrade preview can show what it changes.
+ */
+function migrationLegacyClaimableGst_(transaction) {
+  if (String(transaction.status) === 'void' || String(transaction.reconciliation_state) !== 'reconciled' || !migrationBoolean_(transaction.claimable_gst_confirmed) || String(transaction.gst_code) !== 'taxable') return 0;
+  var override = transaction.gst_override_amount;
+  var gst = override !== '' && override != null ? Number(override) : Number(transaction.gst_amount);
+  return roundMoney_((gst || 0) * normalizePercentageDecimal_(transaction.business_use_percentage, 1));
+}
+
+/**
+ * One expense's share of a period as the old model counted it: accrual on its invoice (else purchase)
+ * date, cash on what was paid inside the period with the GST credit in proportion.
+ */
+function migrationLegacyExpenseShare_(basis, from, to, transaction, payments) {
+  var none = { purchases: 0, gst: 0 };
+  if (String(transaction.status) === 'void' || String(transaction.status) === 'scheduled') return none;
+  var amount = Number(transaction.amount) || 0;
+  if (basis === 'accrual') {
+    var date = toIsoDate(transaction.supplier_invoice_date || '') || toIsoDate(transaction.purchase_date || '');
+    if (!date || date < from || date > to) return none;
+    return { purchases: amount, gst: migrationLegacyClaimableGst_(transaction) };
+  }
+  var paid = payments.filter(function(payment) { return payment.payment_date >= from && payment.payment_date <= to; })
+    .reduce(function(sum, payment) { return sum + (Number(payment.amount) || 0); }, 0);
+  if (amount <= 0 || paid <= 0) return none;
+  return { purchases: paid, gst: migrationLegacyClaimableGst_(transaction) * Math.min(1, paid / amount) };
+}
+
+/** BAS periods marked as submitted, one per period and basis, read without getOrCreateSheet so it works before an upgrade. */
+function migrationSubmittedBasPeriods_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('bas_submissions');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var values = sheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  var seen = {};
+  var periods = [];
+  values.slice(1).forEach(function(row) {
+    var submission = normalizeBasSubmissionRow(row, headers);
+    if (!submission || !(submission.submitted || submission.submission_state === 'submitted')) return;
+    var range;
+    try { range = basPeriodRange_(submission); } catch (error) { return; }
+    var basis = submission.accounting_basis === 'accrual' ? 'accrual' : 'cash';
+    if (seen[range.from + range.to + basis]) return;
+    seen[range.from + range.to + basis] = true;
+    periods.push({ label: expenseBasPeriodLabel_(submission, range), from: range.from, to: range.to, accounting_basis: basis });
+  });
+  return periods;
+}
+
+function migrationFinancialYearOf_(isoDate) {
+  var year = Number(String(isoDate).slice(0, 4));
+  return Number(String(isoDate).slice(5, 7)) >= 7 ? year : year - 1;
+}
+
+/**
+ * What the simplified-ledger upgrade changes that the user should see first, for the upgrade page.
+ * Changes nothing.
+ *   - part_paid: become unpaid.
+ *   - instalments: paid in full over several payments; they move onto the last payment date.
+ *   - gst_claimed: start claiming a GST credit they didn't before (not reconciled yet, or reconciled with
+ *     the credit declined).
+ *   - gst_recalculated: a taxable expense's GST becomes one-eleventh of its amount.
+ *   - submitted_bas: BAS periods marked as submitted whose purchases or 1B change, before and after.
+ */
 function migrationSimplifiedExpensePreview_() {
   var data = migrationSimplifiedExpenseRows_();
-  var preview = { part_paid: [], instalments: [], unclaimed_gst: [] };
+  var periods = migrationSubmittedBasPeriods_();
+  var sums = periods.map(function() { return { before: { purchases: 0, gst: 0 }, after: { purchases: 0, gst: 0 } }; });
+  var preview = { part_paid: [], instalments: [], gst_claimed: [], gst_recalculated: [], submitted_bas: [] };
   data.rows.forEach(function(transaction) {
     var payments = data.payments[String(transaction.id)] || [];
     var plan = migrationPlanSimplifiedExpense_(transaction, payments);
+    var after = plan.remove ? null : Object.assign({}, transaction, plan.changes);
     var summary = {
       id: String(transaction.id), vendor: String(transaction.vendor || ''), description: String(transaction.description || ''),
       date: toIsoDate(transaction.supplier_invoice_date || '') || toIsoDate(transaction.purchase_date || ''), amount: roundMoney_(transaction.amount),
@@ -1635,10 +1705,51 @@ function migrationSimplifiedExpensePreview_() {
       payments: payments.map(function(payment) { return { date: payment.payment_date, amount: roundMoney_(payment.amount), method: String(payment.payment_method || '') }; })
     };
     if (plan.kind === 'part_paid') preview.part_paid.push(summary);
-    if (plan.kind === 'instalments') preview.instalments.push(summary);
-    if (plan.unclaimed_gst) preview.unclaimed_gst.push(Object.assign(summary, { gst_credit: plan.unclaimed_gst }));
+    if (plan.kind === 'instalments') {
+      var first = payments.filter(function(payment) { return Number(payment.amount) > 0; })[0];
+      preview.instalments.push(Object.assign({}, summary, {
+        first_payment_date: first.payment_date, paid_date: after.paid_date,
+        crosses_financial_year: migrationFinancialYearOf_(first.payment_date) !== migrationFinancialYearOf_(after.paid_date)
+      }));
+    }
+    if (after && expenseIsRecorded_(after)) {
+      var credit = expenseClaimableGst_(after);
+      if (credit > 0.005 && migrationLegacyClaimableGst_(transaction) <= 0.005) {
+        preview.gst_claimed.push(Object.assign({}, summary, { gst_credit: credit, reason: String(transaction.reconciliation_state) === 'reconciled' ? 'declined' : 'unreconciled' }));
+      }
+      if (plan.gst_recalculated) preview.gst_recalculated.push(Object.assign({}, summary, { gst_before: plan.gst_recalculated.from, gst_after: plan.gst_recalculated.to }));
+    }
+    periods.forEach(function(period, index) {
+      var was = migrationLegacyExpenseShare_(period.accounting_basis, period.from, period.to, transaction, payments);
+      var now = after ? expenseAttributionForPeriod_(period.accounting_basis, period.from, period.to, after) : { purchases: 0, gst: 0 };
+      sums[index].before.purchases += was.purchases;
+      sums[index].before.gst += was.gst;
+      sums[index].after.purchases += now.purchases;
+      sums[index].after.gst += now.gst;
+    });
+  });
+  periods.forEach(function(period, index) {
+    var round = function(totals) { return { purchases: roundMoney_(totals.purchases), gst: roundMoney_(totals.gst) }; };
+    var before = round(sums[index].before), after = round(sums[index].after);
+    if (before.purchases !== after.purchases || before.gst !== after.gst) preview.submitted_bas.push(Object.assign({}, period, { before: before, after: after }));
   });
   return preview;
+}
+
+/** True when the preview lists anything the user has to confirm before the upgrade runs. */
+function migrationPreviewNeedsConfirmation_(preview) {
+  return ['part_paid', 'instalments', 'gst_claimed', 'gst_recalculated', 'submitted_bas'].some(function(key) { return (preview[key] || []).length > 0; });
+}
+
+/** One sentence per kind of change, for the confirmation message. */
+function migrationPreviewMessage_(preview) {
+  var parts = [];
+  if (preview.part_paid.length) parts.push(preview.part_paid.length + ' part-paid expense(s) will become unpaid, each with a note of what was paid.');
+  if (preview.instalments.length) parts.push(preview.instalments.length + ' expense(s) paid in instalments will count in full on their last payment date.');
+  if (preview.gst_claimed.length) parts.push(preview.gst_claimed.length + ' taxable expense(s) will start claiming their GST credit.');
+  if (preview.gst_recalculated.length) parts.push(preview.gst_recalculated.length + ' expense(s) will have their GST recalculated to one-eleventh of the amount.');
+  if (preview.submitted_bas.length) parts.push('This changes the figures for ' + preview.submitted_bas.length + ' BAS period(s) already marked as submitted: ' + preview.submitted_bas.map(function(period) { return period.label; }).join(', ') + '.');
+  return parts.join(' ') + ' Confirm to continue, or cancel to leave everything unchanged.';
 }
 
 /**
