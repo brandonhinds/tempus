@@ -136,41 +136,103 @@ function api_ensureExpenseOccurrences() {
   var today = expenseToday_();
   var mode = expenseCreationMode_();
   var windowEnd = expenseCreationWindowEnd_(mode, today);
-  var result = { success: true, mode: mode, through_date: windowEnd, created_count: 0, removed_count: 0 };
+  var result = { success: true, mode: mode, through_date: windowEnd, created_count: 0, removed_count: 0, paid_count: 0 };
+  // With Expenses are paid automatically on, payments that have fallen due are marked paid, once a day.
+  var payDue = expensePaidAutomatically_() && PropertiesService.getScriptProperties().getProperty(EXPENSE_AUTO_PAID_PROP_KEY) !== today;
   // Runs on every open, so the usual case costs one read of expense_rules and no lock: nothing to do when
   // every schedule is already created through this window and none has changed since the last full update
   // (an end date shortened directly in the sheet still needs its later payments removed).
-  if (expenseSchedulesUpToDate_(expenseReadSheet_('expense_rules').rows, windowEnd)) { result.skipped = true; return result; }
+  if (!payDue && expenseSchedulesUpToDate_(expenseReadSheet_('expense_rules').rows, windowEnd)) { result.skipped = true; return result; }
   return withScriptLock_('expense schedule update', function() {
     var rules = api_listExpenseRules({});
-    if (expenseSchedulesUpToDate_(rules, windowEnd)) { result.skipped = true; return result; }
-    // One read of expense_transactions for the whole update.
-    var data = expenseReadSheet_('expense_transactions');
-    var ends = {};
-    rules.forEach(function(rule) { if (rule.end_date) ends[String(rule.id)] = String(rule.end_date); });
-    var removeRows = [];
-    var keep = data.rows.filter(function(item) {
-      if (String(item.status) === 'scheduled' && item.source_rule_id) {
-        var due = String(item.supplier_invoice_date);
-        var end = ends[String(item.source_rule_id)];
-        // Past its schedule's end date (Due and edited ones too), or an upcoming payment past the window
-        // that wasn't edited by hand (after switching to a shorter Expense creation option).
-        if ((end && due > end) || (due >= today && due > windowEnd && !expenseBoolean_(item.occurrence_edited))) { removeRows.push(item.__row); return false; }
-      }
-      return true;
-    });
-    result.removed_count = removeRows.length ? deleteSheetRowsDescending_(data.sheet, removeRows) : 0;
-    var existing = expenseClaimedOccurrences_(keep);
-    rules.forEach(function(rule) {
-      var through = String(rule.generated_through || '');
-      var from = through ? addDaysIso(through > windowEnd ? windowEnd : through, 1) : today;
-      result.created_count += generateExpenseOccurrencesForRules_([rule], from, windowEnd, { sheet: data.sheet, headers: data.headers, existing: existing }).length;
-    });
-    expenseSetAllGeneratedThrough_(rules, windowEnd);
-    PropertiesService.getScriptProperties().setProperty(EXPENSE_SCHEDULES_ENSURED_PROP_KEY, expenseSchedulesFingerprint_(rules, windowEnd));
-    if (result.created_count || result.removed_count) cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+    var schedulesUpToDate = expenseSchedulesUpToDate_(rules, windowEnd);
+    if (!schedulesUpToDate) expenseUpdateSchedules_(rules, today, windowEnd, result);
+    if (payDue) {
+      result.paid_count = expensePayDueScheduledPayments_(today);
+      PropertiesService.getScriptProperties().setProperty(EXPENSE_AUTO_PAID_PROP_KEY, today);
+    }
+    if (schedulesUpToDate && !payDue) result.skipped = true;
+    if (result.created_count || result.removed_count || result.paid_count) cacheClearPrefix(EXPENSE_CACHE_PREFIX);
     return result;
   });
+}
+
+/** Creates and removes schedule payments for the Expense creation window (see api_ensureExpenseOccurrences). */
+function expenseUpdateSchedules_(rules, today, windowEnd, result) {
+  // One read of expense_transactions for the whole update.
+  var data = expenseReadSheet_('expense_transactions');
+  var ends = {};
+  rules.forEach(function(rule) { if (rule.end_date) ends[String(rule.id)] = String(rule.end_date); });
+  var removeRows = [];
+  var keep = data.rows.filter(function(item) {
+    if (String(item.status) === 'scheduled' && item.source_rule_id) {
+      var due = String(item.supplier_invoice_date);
+      var end = ends[String(item.source_rule_id)];
+      // Past its schedule's end date (Due and edited ones too), or an upcoming payment past the window
+      // that wasn't edited by hand (after switching to a shorter Expense creation option).
+      if ((end && due > end) || (due >= today && due > windowEnd && !expenseBoolean_(item.occurrence_edited))) { removeRows.push(item.__row); return false; }
+    }
+    return true;
+  });
+  result.removed_count = removeRows.length ? deleteSheetRowsDescending_(data.sheet, removeRows) : 0;
+  var existing = expenseClaimedOccurrences_(keep);
+  rules.forEach(function(rule) {
+    var through = String(rule.generated_through || '');
+    var from = through ? addDaysIso(through > windowEnd ? windowEnd : through, 1) : today;
+    result.created_count += generateExpenseOccurrencesForRules_([rule], from, windowEnd, { sheet: data.sheet, headers: data.headers, existing: existing }).length;
+  });
+  expenseSetAllGeneratedThrough_(rules, windowEnd);
+  PropertiesService.getScriptProperties().setProperty(EXPENSE_SCHEDULES_ENSURED_PROP_KEY, expenseSchedulesFingerprint_(rules, windowEnd));
+}
+
+/** The day payments were last marked paid automatically, so it happens once a day. Cleared when the setting is saved. */
+var EXPENSE_AUTO_PAID_PROP_KEY = 'tempus_expense_auto_paid_on';
+
+function expensePaidAutomatically_() {
+  var settings = {};
+  try { settings = api_getSettings() || {}; } catch (error) { settings = {}; }
+  return expenseBoolean_(settings.expenses_paid_automatically);
+}
+
+/** Schedule payments due on or before `today` that are still unpaid (Due, or due today). */
+function expenseDueScheduledPayments_(rows, today) {
+  return rows.filter(function(item) {
+    var due = String(item.supplier_invoice_date || '');
+    return String(item.status) === 'scheduled' && !!due && due <= today;
+  });
+}
+
+/**
+ * Marks every schedule payment due on or before `today` as paid on its due date, for Expenses are paid
+ * automatically. Returns how many were marked. Called under the script lock.
+ */
+function expensePayDueScheduledPayments_(today) {
+  var data = expenseReadSheet_('expense_transactions');
+  var col = function(name) { return data.headers.indexOf(name) + 1; };
+  var now = expenseNow_();
+  var due = expenseDueScheduledPayments_(data.rows, today);
+  due.forEach(function(item) {
+    data.sheet.getRange(item.__row, col('status')).setValue('recorded');
+    data.sheet.getRange(item.__row, col('paid_date')).setValue(String(item.supplier_invoice_date));
+    if (col('updated_at')) data.sheet.getRange(item.__row, col('updated_at')).setValue(now);
+  });
+  return due.length;
+}
+
+/**
+ * What turning on Expenses are paid automatically would do now: the schedule payments already due that
+ * would be marked paid on their due dates, their total, and any BAS periods marked as submitted whose
+ * figures that changes. Changes nothing.
+ */
+function api_previewAutomaticExpensePayments() {
+  var today = expenseToday_();
+  var due = expenseDueScheduledPayments_(api_listExpenseTransactions({}), today);
+  var periods = [];
+  due.forEach(function(item) {
+    var paid = Object.assign({}, item, { status: 'recorded', paid_date: String(item.supplier_invoice_date) });
+    expenseSubmittedBasPeriodsChanged_(item, paid).forEach(function(label) { if (periods.indexOf(label) === -1) periods.push(label); });
+  });
+  return { success: true, count: due.length, total: roundMoney_(due.reduce(function(sum, item) { return sum + (Number(item.amount) || 0); }, 0)), periods: periods };
 }
 
 /** Fingerprint of the schedules and window as of the last full api_ensureExpenseOccurrences update. */

@@ -823,6 +823,30 @@ module.exports={lilContext,mockDrive,run(test){
     assert.equal(cappedFile.blocks.filter(b=>b.kind==='row').length,3,'one line, header, totals');
     assert.ok(drive.count>0);
   });
+  test('a generated month is flagged as changed when its business expenses change, until it is generated again',()=>{
+    const env=lilContext(),c=env.context,create=env.create;
+    mockDrive(c);
+    create({assessment_date:'2026-08-04',assessment_type_id:'standard',client_name:'Ada Lovelace'});
+    const gen=()=>c.api_generateLilMonthlyInvoice({year:2026,month:8,request_id:'x-'+Math.random(),
+      expected_hash:c.lilInvoiceInputs_('2026-08').hash,
+      confirmed_document_id:(c.lilInvoiceForMonth_('2026-08')||{}).generated_doc_id||''}).invoice;
+    const state=()=>c.api_getAssessmentsForMonth(2026,8).invoice;
+    c.expenseActualForPeriod_=()=>({purchases:0,gst:0});
+    gen();
+    assert.deepStrictEqual([state().stale,state().stale_reason],[false,'']);
+    // A $110 expense is marked paid in August after the invoice was generated.
+    c.expenseActualForPeriod_=()=>({purchases:110,gst:10});
+    assert.deepStrictEqual([state().stale,state().stale_reason],[true,'expenses']);
+    gen();
+    assert.deepStrictEqual([state().stale,state().snapshot.expenses_paid],[false,110],'generating again takes the expense off');
+    // A snapshot from before expenses were recorded on it is never flagged for them.
+    const invoice=c.lilInvoiceForMonth_('2026-08');
+    const old=JSON.parse(invoice.financial_snapshot_json);delete old.expenses_paid;
+    assert.equal(c.lilSnapshotExpensesChanged_(invoice,old,'2026-08'),false);
+    const page=fs.readFileSync(path.join(__dirname,'../views/partials/assessments-scripts.html'),'utf8');
+    assert.match(page,/info\.stale_reason==='expenses'\?'This month’s business expenses have changed since'/);
+    c.expenseActualForPeriod_=()=>({purchases:0,gst:0});
+  });
   test('business expenses reduce what is hers, and an unsaved PAYG rate cannot look saved',()=>{
     const env=lilContext(),c=env.context,create=env.create;
     const drive=mockDrive(c);

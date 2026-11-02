@@ -48,6 +48,12 @@ With more than five schedules a search box appears. With three or more categorie
 
 Payments are created whenever Tempus or the Expenses page opens, including any that fell due while Tempus wasn't opened; those show as **Due**. Switching to a shorter option removes upcoming payments past the new window, and switching to a longer one adds them. Payments you have edited are kept.
 
+### Expenses paid automatically
+
+If your expenses come out by direct debit or a card on file, turn on **Expenses are paid automatically** (Settings, under Company). Each schedule payment is then marked paid on its due date when Tempus opens on or after that day, so it comes off that month's income without you marking it. Upcoming payments stay upcoming until their date.
+
+Turning it on also marks every payment that's already Due as paid on its due date. Before you save, Tempus says how many that is and names any BAS period marked as submitted whose figures would change; choose **Cancel** to leave the setting off.
+
 ### Change or end a schedule
 
 The **End date** is the only thing that stops a schedule. There is no pause switch or stop button.

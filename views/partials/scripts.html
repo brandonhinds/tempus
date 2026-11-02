@@ -27205,6 +27205,15 @@ function getCachedIncomeSummary(monthKey) {
       defaultValue: 'month',
       event: 'change'
     },
+    expenses_paid_automatically: {
+      section: 'enable_expenses',
+      order: 49,
+      element: () => document.getElementById('set-expenses-paid-automatically'),
+      getValue: (el) => !!el.checked,
+      setValue: (el, val) => { if (el) el.checked = settingBoolean(val, false); },
+      defaultValue: false,
+      event: 'change'
+    },
     payg_instalment_rate: {
       section: 'is_sole_trader',
       order: 50,
@@ -27536,6 +27545,8 @@ function getCachedIncomeSummary(monthKey) {
         rebaseSettingsBaseline(changedSettings);
         checkSettingsDirty();
         renderIncomeSummary();
+        // Schedule payments follow these two settings, so bring them (and the income figures) up to date now.
+        if (('expense_creation' in changedSettings || 'expenses_paid_automatically' in changedSettings) && typeof refreshExpensesAfterSettings === 'function') refreshExpensesAfterSettings();
       }, (error) => {
         console.error('[Settings] Save failed:', error);
         setStatus('Settings failed', 'error');

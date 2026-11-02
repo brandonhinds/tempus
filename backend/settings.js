@@ -93,6 +93,8 @@ function updateSettingsUnlocked_(settings) {
   if (Object.prototype.hasOwnProperty.call(settings, 'expense_creation') && ['on_date', 'month', 'financial_year'].indexOf(String(settings.expense_creation)) === -1) throw new Error('List scheduled expenses must be on the day they\'re due, for the current month or for the whole financial year.');
   if (Object.prototype.hasOwnProperty.call(settings, 'accounting_basis') && ['cash', 'accrual'].indexOf(String(settings.accounting_basis)) === -1) throw new Error('Accounting basis must be cash or accrual.');
   ['tempus_url'].forEach(function(key) { if (settings[key]) settings[key] = requireHttpUrl_(settings[key], key.replace(/_/g, ' '), true); });
+  // Turning Expenses are paid automatically on (again) marks payments due so far paid at the next open, not tomorrow.
+  if (Object.prototype.hasOwnProperty.call(settings, 'expenses_paid_automatically') && typeof EXPENSE_AUTO_PAID_PROP_KEY !== 'undefined') PropertiesService.getScriptProperties().deleteProperty(EXPENSE_AUTO_PAID_PROP_KEY);
   var sh = getOrCreateSheet('user_settings');
   var values = sh.getDataRange().getValues();
   var map = {};

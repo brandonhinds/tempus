@@ -336,6 +336,48 @@ exports.run = test => {
     assert.deepStrictEqual(scheduled(c, rule.id), ['2026-10-15', '2027-01-15']);
   });
 
+  test('with Expenses are paid automatically, payments due are marked paid on their due dates and count toward income', () => {
+    const { context: c } = backend('2026-08-01', 'financial_year');
+    const rule = c.api_upsertExpenseRule(rulePayload({ start_date: '2026-08-15' })).rule;
+    const byDate = (d) => c.api_listExpenseTransactions({}).find((t) => t.source_rule_id === rule.id && t.supplier_invoice_date === d);
+    // Off (the default): the missed August and September payments wait as Due.
+    c.expenseToday_ = () => '2026-10-15';
+    c.api_ensureExpenseOccurrences();
+    assert.deepStrictEqual(['2026-08-15', '2026-09-15', '2026-10-15'].map((d) => byDate(d).status), ['scheduled', 'scheduled', 'scheduled']);
+    const cashMonths = () => JSON.parse(JSON.stringify(c.api_getCompanyExpenseMonthlyTotals())).months.cash;
+    assert.equal(cashMonths()['2026-09'], undefined);
+    c.api_updateSettings({ expenses_paid_automatically: true });
+    const paid = c.api_ensureExpenseOccurrences();
+    assert.equal(paid.paid_count, 3, 'August, September and today\'s October payment');
+    assert.deepStrictEqual(['2026-08-15', '2026-09-15', '2026-10-15', '2026-11-15'].map((d) => [byDate(d).status, byDate(d).paid_date]),
+      [['recorded', '2026-08-15'], ['recorded', '2026-09-15'], ['recorded', '2026-10-15'], ['scheduled', '']]);
+    assert.deepStrictEqual(cashMonths()['2026-09'], { purchases: 110, gst: 10 });
+    // Once a day: the next open the same day has nothing to do.
+    assert.deepStrictEqual([c.api_ensureExpenseOccurrences().skipped, c.api_ensureExpenseOccurrences().paid_count], [true, 0]);
+    c.expenseToday_ = () => '2026-11-15';
+    assert.equal(c.api_ensureExpenseOccurrences().paid_count, 1);
+    assert.equal(byDate('2026-11-15').paid_date, '2026-11-15');
+  });
+
+  test('turning on Expenses are paid automatically first says what it will mark paid and which submitted BAS changes', () => {
+    const { context: c } = backend('2026-08-01', 'financial_year');
+    c.api_upsertExpenseRule(rulePayload({ start_date: '2026-08-15' }));
+    c.expenseToday_ = () => '2026-10-15';
+    c.api_ensureExpenseOccurrences();
+    const bas = c.getOrCreateSheet('bas_submissions');
+    bas.appendRow(c.rowValuesFromObject_(bas.getDataRange().getValues()[0], { id: 'q1', financial_year: 2026, period_type: 'quarterly', quarter: 1, submitted: 'TRUE', submission_state: 'submitted', accounting_basis: 'cash' }));
+    const preview = JSON.parse(JSON.stringify(c.api_previewAutomaticExpensePayments()));
+    assert.deepStrictEqual(preview, { success: true, count: 3, total: 330, periods: ['Q1 FY 2026-27'] });
+    assert.equal(c.api_listExpenseTransactions({ status: 'paid' }).length, 0, 'the preview changes nothing');
+    const settings = fs.readFileSync(path.join(root, 'views/partials/settings.html'), 'utf8');
+    assert.match(settings, /data-setting-key="expenses_paid_automatically"[\s\S]*?<input type="checkbox" id="set-expenses-paid-automatically" \/>/);
+    assert.match(operationsScripts, /getElementById\('set-expenses-paid-automatically'\)\?\.addEventListener\('change'[\s\S]*?api_previewAutomaticExpensePayments[\s\S]*?toggle\.checked = false;/);
+    assert.match(extract(operationsScripts, 'ensureExpenseOccurrences'), /expenses_paid_automatically/, 'the setting is part of the once-a-day key');
+    const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+    assert.match(scripts, /expenses_paid_automatically: \{\s*section: 'enable_expenses'/);
+    assert.match(scripts, /'expenses_paid_automatically' in changedSettings\) && typeof refreshExpensesAfterSettings === 'function'\) refreshExpensesAfterSettings\(\);/);
+  });
+
   test('opening Tempus creates payments up to the window, including any missed since last time', () => {
     const { context: c } = backend(TODAY, 'month');
     const rule = c.api_upsertExpenseRule(rulePayload()).rule;

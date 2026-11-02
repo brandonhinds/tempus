@@ -20,10 +20,22 @@ function lilInvoiceInputs_(period, rows) {
   var content = selected.map(function(r) { return { id: r.id, date: invoiceToIsoDate(r.assessment_date), contract_id: r.contract_id, type: r.assessment_type_id, name: r.client_name, dob: invoiceToIsoDate(r.client_dob), organisation: r.organisation, adjustment: r.percentage_adjustment, lines: resolveAssessmentLines_(r) }; });
   return { rows: selected, template: templates, hash: sha256Hex_(stableJsonStringify_({ period: period, assessments: content, template: templates })) };
 }
+/** True when the month's business expenses no longer match what a generated invoice's snapshot took off
+ * (an expense added, changed or paid since), on the basis the snapshot used. Snapshots from before
+ * expenses were recorded on them, or a ledger that can't be read, never count as changed. */
+function lilSnapshotExpensesChanged_(invoice, snapshot, period) {
+  if (!invoice || !invoice.generated_doc_id || !snapshot || snapshot.expenses_paid === undefined) return false;
+  var current = lilMonthExpenses_(period, snapshot.accounting_basis === 'accrual' ? 'accrual' : 'cash');
+  if (!current.available) return false;
+  return roundMoney_(snapshot.expenses_paid) !== current.paid || roundMoney_(snapshot.gst_credits || 0) !== current.gst;
+}
 function lilMonthInvoiceState_(period, rows) {
   var inputs = lilInvoiceInputs_(period, rows), invoice = lilInvoiceForMonth_(period);
   var conflicts = listInvoicesInternal().filter(function(i) { return i.kind !== 'lil_assessment' && i.status !== 'void' && (i.source_month === period || (i.migration_warning && String(i.migration_warning).indexOf(period) !== -1)); });
-  return { invoice: invoice, content_hash: inputs.hash, stale: !!(invoice && invoice.generated_doc_id && invoice.content_hash !== inputs.hash), generating: !!(invoice && invoice.pending_request_id && new Date().getTime() - new Date(invoice.pending_started_at).getTime() < 360000), summary: invoice ? summarizeInvoiceLineItems(listInvoiceLineItemsByInvoiceId(invoice.id)) : null, snapshot: invoice ? assessmentJson_(invoice.financial_snapshot_json, null) : null, historical_invoices: conflicts, warning: conflicts.length ? 'Historical invoices overlap this month. Reconcile them before generating another invoice to avoid duplicate income.' : '' };
+  var snapshot = invoice ? assessmentJson_(invoice.financial_snapshot_json, null) : null;
+  var contentChanged = !!(invoice && invoice.generated_doc_id && invoice.content_hash !== inputs.hash);
+  var expensesChanged = !contentChanged && lilSnapshotExpensesChanged_(invoice, snapshot, period);
+  return { invoice: invoice, content_hash: inputs.hash, stale: contentChanged || expensesChanged, stale_reason: contentChanged ? 'assessments' : expensesChanged ? 'expenses' : '', generating: !!(invoice && invoice.pending_request_id && new Date().getTime() - new Date(invoice.pending_started_at).getTime() < 360000), summary: invoice ? summarizeInvoiceLineItems(listInvoiceLineItemsByInvoiceId(invoice.id)) : null, snapshot: snapshot, historical_invoices: conflicts, warning: conflicts.length ? 'Historical invoices overlap this month. Reconcile them before generating another invoice to avoid duplicate income.' : '' };
 }
 /** A saved accounting basis wins; with nothing saved, sole traders report on an accrual basis. Mirrors
  * defaultAccountingBasis() on the BAS page so the two surfaces cannot disagree. */

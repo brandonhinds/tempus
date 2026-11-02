@@ -9,3 +9,5 @@ Assessment records store values in `field_values_json`. Their billable timesheet
 Issued invoice sources are locked. Contracts, hour types, and assessment types cannot be deleted while referenced. Voiding an assessment invoice releases its source records while retaining the invoice audit trail.
 
 Document template ID, output folder ID, filename pattern, invoice template/folder, and email recipient/subject/body values are user settings rather than hard-coded organisational data.
+
+Generating a month's invoice saves its money figures (fees, GST, business expenses, super, tax and what's yours to transfer) with it. If the month's assessments change afterwards, or its business expenses do (an expense added, changed or marked paid in that month), the month shows **Changes since generation** and the figures are greyed out until you generate the invoice again.

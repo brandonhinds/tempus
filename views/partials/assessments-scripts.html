@@ -26,7 +26,7 @@
   }
   function lilMonthPending(month) { return Array.from(lilState.pending.values()).some(op=>op.months.includes(month)); }
   function lilMonthFailed(month) { return Array.from(lilState.failures.values()).some(op=>op.months.includes(month)); }
-  function lilMarkInvoiceChanged(month) { const data=lilState.months[month]; if(data?.invoice) data.invoice.stale=!!data.invoice.invoice?.generated_doc_id; }
+  function lilMarkInvoiceChanged(month) { const data=lilState.months[month]; if(data?.invoice){ data.invoice.stale=!!data.invoice.invoice?.generated_doc_id; data.invoice.stale_reason='assessments'; } }
   function lilSyncEntries(entries, deletedIds) {
     const ids=new Set((deletedIds||[]).concat((entries||[]).map(e=>e.id)));
     state.entries=(state.entries||[]).filter(e=>!ids.has(e.id));
@@ -240,7 +240,8 @@
     const credits=Number(snap.gst_credits)||0;
     const segment=(value,colour)=>`<div class="ts-income-bd-bar-seg" style="flex:${Math.max(0,Number(value)||0).toFixed(2)}; background:${colour};"></div>`;
     const legend=(label,colour)=>`<span class="ts-income-bd-legend-item"><span class="ts-income-bd-legend-dot" style="background:${colour};"></span>${label}</span>`;
-    lilPaint(host,(stale?`<p class="ts-warning ts-asm-alert">These figures are from the invoice generated ${lilEscape(generated)}. This month has changed since — generate a new invoice to bring them up to date.</p>`:'')
+    const changed=info.stale_reason==='expenses'?'This month’s business expenses have changed since':'This month has changed since';
+    lilPaint(host,(stale?`<p class="ts-warning ts-asm-alert">These figures are from the invoice generated ${lilEscape(generated)}. ${changed} — generate a new invoice to bring them up to date.</p>`:'')
       + `<div class="ts-income-breakdown">`
       + `<div class="ts-income-bd-viz">`
       +   `<div class="ts-income-bd-head"><span class="ts-income-bd-title">Where this invoice goes</span><span class="ts-income-bd-gross">${lilMoney(total)} including GST</span></div>`

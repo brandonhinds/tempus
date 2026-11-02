@@ -60,15 +60,16 @@
   } catch (error) { /* storage unavailable: the first load fills it */ }
 
   /**
-   * Creates schedule payments up to the Expense creation window (api_ensureExpenseOccurrences), at most once
-   * per day and setting, so opening Tempus or the Expenses page lists what's due without an Extend button.
+   * Creates schedule payments up to the Expense creation window (api_ensureExpenseOccurrences), and marks due
+   * ones paid when Expenses are paid automatically, at most once per day and setting, so opening Tempus or the
+   * Expenses page lists what's due without an Extend button.
    */
   let expenseOccurrencesEnsured = { key:'', promise:null };
   function ensureExpenseOccurrences() {
     const enabled = typeof getFeatureFlag === 'function' ? getFeatureFlag('enable_expenses') : true;
     if (!enabled) return Promise.resolve(null);
-    const mode = (typeof state !== 'undefined' && state.settings && state.settings.expense_creation) || 'month';
-    const key = expenseToday() + '|' + mode;
+    const settings = (typeof state !== 'undefined' && state.settings) || {};
+    const key = expenseToday() + '|' + (settings.expense_creation || 'month') + '|' + String(settings.expenses_paid_automatically === true || settings.expenses_paid_automatically === 'true');
     if (expenseOccurrencesEnsured.key === key && expenseOccurrencesEnsured.promise) return expenseOccurrencesEnsured.promise;
     const promise = operationsApi('api_ensureExpenseOccurrences').catch((error) => {
       expenseOccurrencesEnsured = { key:'', promise:null };
@@ -116,6 +117,32 @@
     // GST-inclusive spend less the claimable GST credit, as the backend transfer split's expenses_ex_gst.
     return { exGst:Math.round(((Number(totals.purchases) || 0) - gst) * 100) / 100, gst };
   }
+
+  /** After the schedule settings are saved: payments created or paid under the new settings, and the figures that follow. */
+  function refreshExpensesAfterSettings() {
+    loadCompanyExpenseLedgerTotals({ force:true });
+    if (operationsState.pageLoad) renderExpensesPage();
+  }
+
+  /**
+   * Turning on Expenses are paid automatically also marks the payments already due as paid, which can change a
+   * BAS already lodged. Say what it will do first; on Cancel the switch goes back off and nothing is saved.
+   */
+  document.getElementById('set-expenses-paid-automatically')?.addEventListener('change', async (event) => {
+    const toggle = event.target;
+    if (!toggle.checked) return;
+    let preview;
+    try { preview = await operationsApi('api_previewAutomaticExpensePayments'); } catch (error) { return; }
+    if (!preview || !preview.count) return;
+    let message = `${preview.count} scheduled expense${preview.count === 1 ? ' is' : 's are'} already due (${operationsMoney(preview.total)}). Saving this setting marks ${preview.count === 1 ? 'it' : 'them'} paid on ${preview.count === 1 ? 'its due date' : 'their due dates'}, so ${preview.count === 1 ? 'it comes' : 'they come'} off those months' income.`;
+    if (preview.periods.length) message += ` This changes the figures for ${preview.periods.join(', ')}, which ${preview.periods.length === 1 ? 'is' : 'are'} marked as submitted. The lodged BAS will no longer match Tempus.`;
+    const ok = typeof customConfirm === 'function'
+      ? await customConfirm(message, { title:'Mark due expenses paid?', okText:'Mark them paid', cancelText:'Cancel' })
+      : window.confirm(message);
+    if (ok) return;
+    toggle.checked = false;
+    if (typeof checkSettingsDirty === 'function') checkSettingsDirty();
+  });
 
   // Feature flags can be applied (from cache) before this script has loaded, so start the load here too.
   if (typeof state !== 'undefined' && state.companyTrackingEnabled) loadCompanyExpenseLedgerTotals();
