@@ -1888,7 +1888,8 @@ function migrationScheduleEndDates_() {
     var flag = String(row[col('active')] == null ? '' : row[col('active')]).trim();
     if (flag === '' || migrationBoolean_(flag)) continue;
     var updatedRaw = col('updated_at') === -1 ? '' : row[col('updated_at')];
-    var updated = /^\d{4}-\d{2}-\d{2}/.test(String(updatedRaw)) ? String(updatedRaw).slice(0, 10) : toIsoDate(updatedRaw || '');
+    // updated_at is a UTC timestamp; the pause happened on its local date, which can be a day later.
+    var updated = toIsoDate(updatedRaw || '');
     var pausedOn = updated || migrationToday_();
     var dayBefore = new Date(Date.UTC(Number(pausedOn.slice(0, 4)), Number(pausedOn.slice(5, 7)) - 1, Number(pausedOn.slice(8, 10)) - 1, 12));
     var pausedEnd = dayBefore.toISOString().slice(0, 10);

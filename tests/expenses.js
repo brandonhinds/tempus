@@ -244,6 +244,19 @@ exports.run = test => {
     assert.ok(c.listMigrations().some((m) => m.id === '2026-10-schedule-end-dates'));
   });
 
+  test('a schedule paused early in the morning in Australia ends the local day before, not two days before', () => {
+    const { context: c } = backend('2026-10-25', 'financial_year');
+    // Format dates in Sydney time, as Apps Script does (the mock formats everything in UTC).
+    c.Utilities.formatDate = (date, zone, pattern) => pattern.indexOf('HH') !== -1 ? new Date(date).toISOString().replace('.000', '') : new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date(date));
+    c.api_listExpenseRules({});
+    const sheet = c.getOrCreateSheet('expense_rules');
+    const headers = sheet.getDataRange().getValues()[0];
+    // 6am on 20 August in Sydney is still 19 August in UTC.
+    sheet.appendRow(c.rowValuesFromObject_(headers, { id: 'paused', vendor: 'V', amount: 10, gst_code: 'taxable', gst_amount: 0.91, frequency: 'monthly', start_date: '2026-01-15', end_date: '', active: 'FALSE', updated_at: '2026-08-19T20:00:00Z' }));
+    c.migrationScheduleEndDates_();
+    assert.equal(c.api_listExpenseRules({}).find((r) => r.id === 'paused').end_date, '2026-08-19');
+  });
+
   test('a skipped payment can be restored as it was, but not past the schedule end date', () => {
     const { context: c } = backend('2026-10-01', 'financial_year');
     const rule = c.api_upsertExpenseRule(rulePayload()).rule;
