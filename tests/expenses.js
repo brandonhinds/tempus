@@ -464,6 +464,38 @@ exports.run = test => {
   const find = (c, id) => c.api_listExpenseTransactions({}).find(t => t.id === id);
   const monthTotals = (c) => JSON.parse(JSON.stringify(c.api_getCompanyExpenseMonthlyTotals())).months;
 
+  test('saving only some fields keeps the rest, and only a schedule payment can be skipped', () => {
+    const { context: c } = backend();
+    const saved = paidExpense(c, { description: 'Desk', supplier_invoice_date: '2026-09-15', amount: 330, gst_amount: 29, payment_method: 'EFT', notes: 'Standing desk' });
+    c.api_upsertExpenseTransaction({ id: saved.id, vendor: 'Officeworks Pty Ltd' });
+    let row = find(c, saved.id);
+    assert.deepStrictEqual([row.vendor, row.description, row.paid_date, row.supplier_invoice_date, Number(row.amount), Number(row.gst_amount), row.payment_method, row.notes],
+      ['Officeworks Pty Ltd', 'Desk', '2026-09-20', '2026-09-15', 330, 29, 'EFT', 'Standing desk']);
+    // '' still clears, and a new amount recalculates the GST.
+    c.api_upsertExpenseTransaction({ id: saved.id, paid_date: '', amount: 110 });
+    row = find(c, saved.id);
+    assert.deepStrictEqual([row.paid_date, Number(row.amount), Number(row.gst_amount), row.description], ['', 110, 10, 'Desk']);
+    c.api_upsertExpenseTransaction({ id: saved.id, gst_code: 'gst_free' });
+    assert.deepStrictEqual([Number(find(c, saved.id).amount), Number(find(c, saved.id).gst_amount)], [110, 0]);
+    assert.throws(() => c.api_upsertExpenseTransaction({ id: saved.id, status: 'skipped' }), /Only a schedule payment can be skipped/);
+    assert.throws(() => paidExpense(c, { status: 'skipped' }), /Only a schedule payment can be skipped/);
+  });
+
+  test('the ledger summary\'s ex GST is what Time Entry takes off, so part business use claims only its share of GST', () => {
+    const client = { document: { getElementById: () => summary, createElement: (tag) => ({ tag, className: '', textContent: '', classList: { add() {} }, dataset: {}, append(...kids) { this.text = kids.map((k) => typeof k === 'string' ? k : k.textContent).join(''); } }) },
+      Number, Math, String, defaultAccountingBasis: () => 'cash' };
+    const summary = { parts: [], replaceChildren() { this.parts = []; }, appendChild(part) { this.parts.push(part); } };
+    vm.runInNewContext(operationsScripts.match(/  const expenseRound = .*\n/)[0] + ['expenseExFromInc', 'operationsMoney', 'expenseCountsTowardSpend', 'expenseBusinessUse', 'expenseCountedAmount', 'renderExpenseLedgerSummary'].map((name) => extract(operationsScripts, name)).join('\n'), client);
+    const { context: c } = backend();
+    paidExpense(c, { vendor: 'Phone', amount: 110, paid_date: '2026-10-10', business_use_percentage: 60 });
+    paidExpense(c, { vendor: 'Paper', amount: 55, paid_date: '2026-10-12' });
+    client.renderExpenseLedgerSummary(JSON.parse(JSON.stringify(c.api_listExpenseTransactions({}))));
+    const line = c.api_getCompanyExpensesForMonth({ year: 2026, month: 9, accounting_basis: 'cash' }).totals.counted;
+    assert.equal(line, 154);
+    assert.match(summary.parts[0].text, /2 counted · \$165\.00 inc GST · \$154\.00 ex GST/);
+    assert.match(summary.parts[0].dataset.tip, /Part business use/);
+  });
+
   test('a paid expense stores its paid date and how it was paid, and refuses unknown methods', () => {
     const { context: c } = backend();
     const result = c.api_upsertExpenseTransaction({ vendor: 'Adobe', paid_date: '2026-09-20', amount: 79.99, gst_code: 'taxable', payment_method: 'credit CARD', payment_reference: 'Card 4421' });

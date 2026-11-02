@@ -392,8 +392,26 @@ function generateExpenseOccurrencesForRules_(rules, from, through, shared) {
   return created;
 }
 
+/**
+ * A payload changes only the fields it gives: one left out keeps the saved value, and '' clears it. The
+ * amounts go together, so giving either amount, or a new GST treatment, recalculates the GST unless it is given.
+ */
+function expenseWithSavedFields_(payload, existing) {
+  if (!existing) return payload;
+  var value = Object.assign({}, payload);
+  ['vendor', 'vendor_abn', 'description', 'paid_date', 'supplier_invoice_date', 'payment_method', 'payment_reference', 'notes'].forEach(function(key) {
+    if (value[key] === undefined) value[key] = existing[key];
+  });
+  if (value.amount === undefined && value.amount_ex_gst === undefined) {
+    value.amount = existing.amount;
+    var sameTreatment = value.gst_code === undefined || String(value.gst_code) === String(existing.gst_code);
+    if (value.gst_amount === undefined && sameTreatment) value.gst_amount = existing.gst_amount;
+  }
+  return value;
+}
+
 function normalizeExpenseTransaction_(payload, existing) {
-  var value = payload || {};
+  var value = expenseWithSavedFields_(payload || {}, existing);
   var gstCode = String(value.gst_code || (existing && existing.gst_code) || 'taxable');
   if (!EXPENSE_GST_CODES[gstCode]) throw new Error('Unknown GST code.');
   var amounts = expenseAmounts_(value, gstCode);
@@ -402,6 +420,9 @@ function normalizeExpenseTransaction_(payload, existing) {
   var invoiceDate = normalizeIsoDateStrict_(value.supplier_invoice_date, 'Invoice date', true);
   var status = String(value.status || (existing && existing.status) || 'recorded');
   if (!EXPENSE_STATUSES[status]) throw new Error('Unknown expense status.');
+  var sourceRuleId = String(value.source_rule_id || (existing && existing.source_rule_id) || '');
+  // Skipping is for schedule payments; an expense of your own is deleted, which warns first.
+  if (status === 'skipped' && !sourceRuleId) throw new Error('Only a schedule payment can be skipped. Delete the expense instead.');
   // A paid date is what makes an upcoming schedule payment a real expense.
   if (status === 'scheduled' && paidDate) status = 'recorded';
   if (status === 'scheduled' && !invoiceDate) throw new Error('A scheduled payment needs a due date.');
@@ -414,7 +435,7 @@ function normalizeExpenseTransaction_(payload, existing) {
     business_use_percentage: businessUse,
     payment_method: paid ? normalizePaymentMethod_(value.payment_method) : '', payment_reference: paid ? String(value.payment_reference || '').trim() : '',
     status: status,
-    source_rule_id: String(value.source_rule_id || (existing && existing.source_rule_id) || ''), source_occurrence_key: String(value.source_occurrence_key || (existing && existing.source_occurrence_key) || ''),
+    source_rule_id: sourceRuleId, source_occurrence_key: String(value.source_occurrence_key || (existing && existing.source_occurrence_key) || ''),
     occurrence_edited: existing && expenseBoolean_(existing.occurrence_edited) ? 'TRUE' : '',
     attachments_json: existing ? String(existing.attachments_json || '[]') : '[]', notes: String(value.notes || ''), created_at: existing ? existing.created_at : expenseNow_(), updated_at: expenseNow_(),
     // Retired columns, cleared whenever a row is saved so nothing stale is left behind.

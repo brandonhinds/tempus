@@ -424,6 +424,20 @@
     return defaultAccountingBasis() === 'accrual' ? !!(transaction.paid_date || transaction.supplier_invoice_date) : !!transaction.paid_date;
   }
 
+  function expenseBusinessUse(item) {
+    return item.business_use_percentage === '' || item.business_use_percentage == null ? 1 : Number(item.business_use_percentage);
+  }
+
+  /**
+   * What an expense takes off income: its amount less the GST credit it claims, which is only the business-use
+   * share of its GST. The Time Entry Company expenses line is the sum of these (backend counted).
+   */
+  function expenseCountedAmount(item) {
+    const ex = item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : expenseExFromInc(item.amount, item.gst_code);
+    const credit = item.gst_code === 'taxable' ? expenseRound((Number(item.amount) - Number(ex)) * expenseBusinessUse(item)) : 0;
+    return expenseRound(Number(item.amount) - credit);
+  }
+
   /** "4 counted · $3,882.92 inc GST · $3,530.12 ex GST" and what isn't counted yet, for what's shown. */
   function renderExpenseLedgerSummary(items) {
     const summary = document.getElementById('expense-summary');
@@ -433,11 +447,15 @@
     if (!active.length) return;
     const counted = active.filter(expenseCountsTowardSpend), waiting = active.filter((item) => !expenseCountsTowardSpend(item));
     const sum = (list, key) => list.reduce((total, item) => total + (Number(item[key]) || 0), 0);
-    const exOf = (item) => (item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : expenseExFromInc(item.amount, item.gst_code));
     const part = (label, list, strong) => {
       const span = document.createElement('span'); span.className = 'ts-expense-summary__part';
       const lead = document.createElement(strong ? 'strong' : 'span'); lead.textContent = label;
-      span.append(lead, ` · ${operationsMoney(sum(list, 'amount'))} inc GST · ${operationsMoney(list.reduce((total, item) => total + (Number(exOf(item)) || 0), 0))} ex GST`);
+      // Ex GST is the amount less the GST credit claimed, as on Time Entry, so part business use counts more.
+      span.append(lead, ` · ${operationsMoney(sum(list, 'amount'))} inc GST · ${operationsMoney(list.reduce((total, item) => total + expenseCountedAmount(item), 0))} ex GST`);
+      if (list.some((item) => item.gst_code === 'taxable' && expenseBusinessUse(item) < 1)) {
+        span.classList.add('has-tip');
+        span.dataset.tip = 'Ex GST takes off only the GST credit claimed. Part business use claims only that share of the GST, as on Time Entry.';
+      }
       summary.appendChild(span);
     };
     if (counted.length) part(`${counted.length} counted`, counted, true);
@@ -880,12 +898,11 @@
     ledgerText(cell, 'ts-expense-amounts__inc', operationsMoney(item.amount));
     const ex = item.amount_ex_gst !== '' && item.amount_ex_gst != null ? item.amount_ex_gst : expenseExFromInc(item.amount, item.gst_code);
     ledgerText(cell, 'ts-ledger-row__meta', operationsMoney(ex) + ' ex GST');
-    const businessUse = item.business_use_percentage === '' || item.business_use_percentage == null ? 1 : Number(item.business_use_percentage);
+    const businessUse = expenseBusinessUse(item);
     // Part business use: what it counts as goes in the tooltip, so every row stays two lines.
     if (item.gst_code === 'taxable' && businessUse < 1) {
-      const counted = expenseRound(Number(item.amount) - expenseRound((Number(item.amount) - Number(ex)) * businessUse));
       cell.classList.add('has-tip');
-      cell.dataset.tip = `Counts ${operationsMoney(counted)}: ${Math.round(businessUse * 100)}% business use, so only that share of the GST is claimed`;
+      cell.dataset.tip = `Counts ${operationsMoney(expenseCountedAmount(item))}: ${Math.round(businessUse * 100)}% business use, so only that share of the GST is claimed`;
     }
     return cell;
   }
