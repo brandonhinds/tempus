@@ -306,6 +306,23 @@ exports.run = test => {
     assert.ok(c.api_listExpenseTransactions({ status: 'scheduled' }).every((t) => t.occurrence_edited !== 'TRUE'));
   });
 
+  test('a receipt on an upcoming schedule payment keeps it through a shorter window and a schedule change', () => {
+    const { context: c } = backend('2026-10-01', 'financial_year');
+    const rule = c.api_upsertExpenseRule(rulePayload()).rule;
+    const byDate = (d) => c.api_listExpenseTransactions({}).find((t) => t.source_rule_id === rule.id && t.supplier_invoice_date === d);
+    c.api_attachExpenseReceipt({ expense_transaction_id: byDate('2027-01-15').id, url: 'https://drive.google.com/receipt', name: 'Invoice' });
+    assert.equal(byDate('2027-01-15').occurrence_edited, 'TRUE');
+    // Changing the amount holds it rather than recreating it, and applying the change to held payments updates it in place.
+    c.api_upsertExpenseRule(Object.assign(rulePayload({ amount: 120 }), { id: rule.id, confirm_changes: true }));
+    assert.deepStrictEqual([Number(byDate('2027-01-15').amount), byDate('2027-01-15').attachments.length], [110, 1]);
+    c.api_upsertExpenseRule(Object.assign(rulePayload({ amount: 130 }), { id: rule.id, confirm_changes: true, apply_to_held: true }));
+    assert.deepStrictEqual([Number(byDate('2027-01-15').amount), byDate('2027-01-15').attachments.length, byDate('2027-01-15').occurrence_edited], [130, 1, 'TRUE']);
+    // Switching to the current month removes the other upcoming payments past October, but not this one.
+    c.api_updateSettings({ expense_creation: 'month' });
+    c.api_ensureExpenseOccurrences();
+    assert.deepStrictEqual(scheduled(c, rule.id), ['2026-10-15', '2027-01-15']);
+  });
+
   test('opening Tempus creates payments up to the window, including any missed since last time', () => {
     const { context: c } = backend(TODAY, 'month');
     const rule = c.api_upsertExpenseRule(rulePayload()).rule;
@@ -1177,17 +1194,23 @@ exports.run = test => {
     assert.ok(!/12 months/.test(markup), 'no mention of 12 months');
   });
 
-  test('the upgrade records how far each schedule already has payments, so creation carries on from there', () => {
+  test('the upgrade records how far each schedule already has payments, and keeps upcoming ones changed by hand', () => {
     const { context: c } = backend('2026-10-01', 'month');
     const rules = c.getOrCreateSheet('expense_rules'), tx = c.getOrCreateSheet('expense_transactions');
     rules.appendRow(c.rowValuesFromObject_(rules.getDataRange().getValues()[0], { id: 'old', vendor: 'Insurer', amount: 110, gst_code: 'taxable', gst_amount: 10, frequency: 'monthly', start_date: '2026-01-15', active: 'TRUE' }));
-    ['2026-09-15', '2027-09-15'].forEach((key) => tx.appendRow(c.rowValuesFromObject_(tx.getDataRange().getValues()[0], { id: 'old-' + key, vendor: 'Insurer', amount: 110, gst_code: 'taxable', gst_amount: 10, status: 'scheduled', purchase_date: key, source_rule_id: 'old', source_occurrence_key: key, attachments_json: '[]' })));
+    const add = (key, extra) => tx.appendRow(c.rowValuesFromObject_(tx.getDataRange().getValues()[0], Object.assign({ id: 'old-' + key, vendor: 'Insurer', amount: 110, gst_code: 'taxable', gst_amount: 10, status: 'scheduled', purchase_date: key, source_rule_id: 'old', source_occurrence_key: key, attachments_json: '[]' }, extra)));
+    add('2026-09-15');
+    add('2027-09-15');
+    add('2027-01-15', { amount: 132, gst_amount: 12 });
+    add('2027-02-15', { attachments_json: JSON.stringify([{ id: 'r', url: 'https://drive.google.com/r', name: 'Receipt' }]) });
+    add('2027-03-15', { notes: 'Renewal quote attached by email' });
     c.migrationSimplifyExpenseLedger_();
     assert.equal(c.api_listExpenseRules({}).find((r) => r.id === 'old').generated_through, '2027-09-15');
-    // Old schedules listed a year ahead; on the current-month setting the far-off payment is removed.
+    // Old schedules listed a year ahead; on the current-month setting the untouched far-off payment is removed
+    // (it is listed again when the window reaches it). Ones changed by hand, with a receipt or with their own note stay.
     const result = c.api_ensureExpenseOccurrences();
     assert.equal(result.removed_count, 1);
-    assert.deepStrictEqual(scheduled(c, 'old'), ['2026-09-15']);
+    assert.deepStrictEqual(scheduled(c, 'old'), ['2026-09-15', '2027-01-15', '2027-02-15', '2027-03-15']);
     assert.equal(c.api_listExpenseRules({}).find((r) => r.id === 'old').generated_through, '2026-10-31');
   });
 

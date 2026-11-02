@@ -88,7 +88,7 @@ If the change would alter a BAS you've marked as submitted, Tempus warns you and
 
 ## Receipts
 
-**Add receipt** attaches a link to the receipt or tax invoice, for example a Google Drive link. Receipts are optional and don't change any figures.
+**Add receipt** attaches a link to the receipt or tax invoice, for example a Google Drive link. Receipts are optional and don't change any figures. Adding one to an upcoming schedule payment counts as editing it, so the payment (and its receipt) is kept when the schedule changes or the List scheduled expenses window gets shorter.
 
 ## Categories
 
@@ -132,16 +132,19 @@ The expense ledger is the only source of company expenses. The dashboard income 
 
 ## Upgrading from part payments and reconciliation
 
-Earlier versions tracked payments, reconciliation and void separately. The October 2026 upgrade converts each expense once:
+Earlier versions tracked payments, reconciliation and void separately. The October 2026 upgrade converts each expense once.
 
-- Paid in full: paid on its last payment date, keeping that payment's method and reference. If it was paid across several payments, a note lists them.
+Before anything changes, the upgrade page lists what will count differently, and you can cancel: part-paid expenses, expenses paid in instalments, expenses that start claiming GST, expenses whose GST is recalculated, and any BAS period marked as submitted whose purchases or GST on purchases (1B) will change, with the figures before and after. If you continue:
+
+- Paid in full: paid on its last payment date, keeping that payment's method and reference. If it was paid across several payments, a note lists them, and the whole amount now counts on the last payment date (which can move it into a later BAS period or financial year on a cash basis).
 - Unpaid: stays unpaid.
-- **Part-paid**: before anything changes, the upgrade page lists these and you can cancel. If you continue, each becomes unpaid, keeps its full amount and gets a note of what was paid, so you can set the paid date or fix the amount.
+- **Part-paid**: becomes unpaid, keeps its full amount and gets a note of what was paid, so you can set the paid date or fix the amount.
 - Void: removed (it's kept in the upgrade archive). A skipped schedule payment stays skipped.
 - Every expense and schedule stores its amount excluding GST. A taxable expense's GST becomes one-eleventh of its amount, unless you corrected it from the invoice when reconciling. This fixes occurrences of old company-expense deductions whose amount you had adjusted, which kept the usual amount's GST.
 - Every expense and schedule is filed under the shared category list. Company expenses moved from the Deductions page kept their category; a category you had typed is matched to the list by name, or added to it.
 - The invoice date becomes the supplier invoice date, or the old purchase date if there wasn't one, so accrual figures don't move. A GST amount you corrected when reconciling becomes the expense's GST amount.
-- A taxable expense you reconciled without claiming GST now claims it, with a note. Change its GST treatment if it shouldn't.
+- Every taxable expense claims its GST credit, including ones not reconciled yet (before, a credit only counted once reconciled). One you reconciled without claiming GST gets a note. Change its GST treatment if it shouldn't.
+- Upcoming schedule payments past the **List scheduled expenses** window (the current month by default) are removed the first time Tempus opens, and listed again when the window reaches them. One you changed by hand, attached a receipt to or gave its own note is kept.
 - The "Claim GST credits on taxable expenses automatically" setting is gone, because that's now how every expense works.
 - The schedule **Active** switch is gone. A paused schedule gets an end date of the day before it was paused (unless it already ended sooner) and a note saying so, so it stays stopped. Clear or move the end date to restart it.
 

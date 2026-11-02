@@ -1820,6 +1820,7 @@ function migrationSimplifyExpenseLedger_() {
     }
     ruleSheet.getRange(2, 1, ruleValues.length - 1, ruleHeaders.length).setValues(ruleValues.slice(1).map(function(row) { return row.slice(0, ruleHeaders.length); }));
   }
+  migrationKeepChangedUpcomingPayments_();
   // The automatic-GST-credit setting is now how every expense works, so its flag is retired.
   var flags = spreadsheet.getSheetByName('feature_flags');
   if (flags && flags.getLastRow() > 1) {
@@ -1831,6 +1832,41 @@ function migrationSimplifyExpenseLedger_() {
     if (typeof FEATURE_FLAG_CACHE_KEY !== 'undefined') cacheClearPrefix(FEATURE_FLAG_CACHE_KEY);
   }
   if (typeof EXPENSE_CACHE_PREFIX !== 'undefined') cacheClearPrefix(EXPENSE_CACHE_PREFIX);
+}
+
+/**
+ * The old model listed schedule payments a year ahead, and had no way to mark one as changed by hand. The
+ * first open after the upgrade removes upcoming payments past the List scheduled expenses window unless
+ * they are marked as edited, so an upcoming payment holding anything its schedule can't recreate (details
+ * changed by hand, a receipt, or a note of its own) is marked now. Untouched ones are removed and listed
+ * again, the same, when the window reaches them.
+ */
+function migrationKeepChangedUpcomingPayments_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var txSheet = spreadsheet.getSheetByName('expense_transactions');
+  var ruleSheet = spreadsheet.getSheetByName('expense_rules');
+  if (!txSheet || !ruleSheet || txSheet.getLastRow() < 2 || ruleSheet.getLastRow() < 2) return;
+  var ruleValues = ruleSheet.getDataRange().getValues();
+  var ruleHeaders = normalizeSheetHeaders_(ruleValues[0]);
+  var rules = {};
+  ruleValues.slice(1).forEach(function(row) { var rule = rowObjectFromHeaders_(ruleHeaders, row); if (rule.id) rules[String(rule.id)] = rule; });
+  var values = txSheet.getDataRange().getValues();
+  var headers = normalizeSheetHeaders_(values[0]);
+  var editedCol = headers.indexOf('occurrence_edited');
+  if (editedCol === -1) return;
+  var today = migrationToday_();
+  var changed = false;
+  for (var r = 1; r < values.length; r++) {
+    var item = rowObjectFromHeaders_(headers, values[r]);
+    var rule = rules[String(item.source_rule_id || '')];
+    if (!rule || String(item.status) !== 'scheduled' || toIsoDate(item.supplier_invoice_date || '') < today || migrationBoolean_(item.occurrence_edited)) continue;
+    var ownNote = String(item.notes || '').trim() && String(item.notes || '').trim() !== String(rule.notes || '').trim();
+    if (expenseHasAttachments_(item) || ownNote || expenseOccurrenceDiffers_(item, rule)) {
+      values[r][editedCol] = 'TRUE';
+      changed = true;
+    }
+  }
+  if (changed) txSheet.getRange(2, editedCol + 1, values.length - 1, 1).setValues(values.slice(1).map(function(row) { return [row[editedCol]]; }));
 }
 
 /**

@@ -325,9 +325,9 @@ function api_upsertExpenseRule(payload) {
       if (entry.action === 'remove' || entry.action === 'update') { deletions.push(entry.row); return; }
       if (entry.action !== 'held' || !applyHeld) return;
       // An upcoming payment is recreated from the schedule; a Due one (before today) is updated where it is,
-      // because payments before today are never created again.
-      if (!entry.due) { deletions.push(entry.row); return; }
-      var updated = Object.assign({}, entry.item, { occurrence_edited: 'FALSE', updated_at: expenseNow_() });
+      // because payments before today are never created again. So is one with a receipt, to keep the receipt.
+      if (!entry.due && !expenseHasAttachments_(entry.item)) { deletions.push(entry.row); return; }
+      var updated = Object.assign({}, entry.item, { occurrence_edited: expenseHasAttachments_(entry.item) ? 'TRUE' : 'FALSE', updated_at: expenseNow_() });
       EXPENSE_RULE_COPIED_FIELDS.forEach(function(field) { updated[field] = normalized[field]; });
       var values = rowValuesFromObject_(data.headers, updated, data.sheet.getRange(entry.row, 1, 1, data.headers.length).getValues()[0]);
       data.sheet.getRange(entry.row, 1, 1, values.length).setValues([values]);
@@ -600,6 +600,10 @@ function api_deleteExpenseTransaction(payload) {
   });
 }
 
+function expenseHasAttachments_(item) {
+  try { return JSON.parse(item.attachments_json || '[]').length > 0; } catch (error) { return false; }
+}
+
 function api_attachExpenseReceipt(payload) {
   return withScriptLock_('receipt attachment', function() {
     var found = expenseFind_('expense_transactions', payload && payload.expense_transaction_id);
@@ -610,8 +614,12 @@ function api_attachExpenseReceipt(payload) {
     if (!attachments.some(function(item) { return item.id === attachment.id || item.url === attachment.url; })) attachments.push(attachment);
     var attachmentIndex = found.data.headers.indexOf('attachments_json');
     var updatedIndex = found.data.headers.indexOf('updated_at');
+    var editedIndex = found.data.headers.indexOf('occurrence_edited');
     found.data.sheet.getRange(found.item.__row, attachmentIndex + 1).setValue(JSON.stringify(attachments));
     if (updatedIndex !== -1) found.data.sheet.getRange(found.item.__row, updatedIndex + 1).setValue(expenseNow_());
+    // A receipt on an upcoming schedule payment is an edit, so neither the Expense creation window nor a
+    // schedule change removes the payment (and the receipt with it).
+    if (editedIndex !== -1 && String(found.item.status) === 'scheduled') found.data.sheet.getRange(found.item.__row, editedIndex + 1).setValue('TRUE');
     cacheClearPrefix(EXPENSE_CACHE_PREFIX);
     return { success: true, attachments: attachments };
   });
