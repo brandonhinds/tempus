@@ -210,27 +210,75 @@ function getOrCreateSheet(name) {
   }
   var values = sheet.getDataRange().getValues();
   var headers = readSheetHeaderRow_(sheet);
-  validateSheetHeaders_(name, headers, values.slice(1));
   var missing = schema.headers.filter(function(header) { return headers.indexOf(header) === -1; });
-  if (missing.length) {
-    ensureSheetCapacity_(sheet, Math.max(1, sheet.getLastRow()), headers.length + missing.length);
-    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
-    if (sheet.getLastRow() > 1) {
-      var defaults = missing.map(function(header) { return schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? schema.defaults[header] : ''; });
-      var fill = [];
-      for (var row = 1; row < sheet.getLastRow(); row++) fill.push(defaults.slice());
-      sheet.getRange(2, headers.length + 1, fill.length, missing.length).setValues(fill);
-    }
-    headers = headers.concat(missing);
-    // Formatting is a schema-write concern, not a read concern. Reapplying it
-    // here unconditionally made every data API write across whole columns on
-    // every request; on a production-sized timesheet that could make the
-    // otherwise read-only entries sync time out during page load. Existing
-    // canonical sheets were formatted by their migration, so only format when
-    // this call has actually appended schema columns.
-    applyCanonicalFormats_(sheet, schema, headers);
+  if (!missing.length && !sheetHeadersRepeat_(headers)) {
+    validateSheetHeaders_(name, headers, values.slice(1));
+    return sheet;
   }
-  return sheet;
+  // The header row is about to change. Re-read it under the script lock: pages make several calls at once,
+  // and two that both saw a column missing used to append it twice ("duplicate header").
+  return withScriptLock_('sheet schema update', function() {
+    values = sheet.getDataRange().getValues();
+    headers = readSheetHeaderRow_(sheet);
+    if (dropDefaultOnlyDuplicateColumns_(sheet, schema, headers, values.slice(1))) {
+      values = sheet.getDataRange().getValues();
+      headers = readSheetHeaderRow_(sheet);
+    }
+    validateSheetHeaders_(name, headers, values.slice(1));
+    missing = schema.headers.filter(function(header) { return headers.indexOf(header) === -1; });
+    if (missing.length) {
+      ensureSheetCapacity_(sheet, Math.max(1, sheet.getLastRow()), headers.length + missing.length);
+      sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+      if (sheet.getLastRow() > 1) {
+        var defaults = missing.map(function(header) { return schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? schema.defaults[header] : ''; });
+        var fill = [];
+        for (var row = 1; row < sheet.getLastRow(); row++) fill.push(defaults.slice());
+        sheet.getRange(2, headers.length + 1, fill.length, missing.length).setValues(fill);
+      }
+      headers = headers.concat(missing);
+      // Formatting is a schema-write concern, not a read concern. Reapplying it
+      // here unconditionally made every data API write across whole columns on
+      // every request; on a production-sized timesheet that could make the
+      // otherwise read-only entries sync time out during page load. Existing
+      // canonical sheets were formatted by their migration, so only format when
+      // this call has actually appended schema columns.
+      applyCanonicalFormats_(sheet, schema, headers);
+    }
+    return sheet;
+  });
+}
+
+function sheetHeadersRepeat_(headers) {
+  var seen = {};
+  return headers.some(function(header) {
+    if (!header) return false;
+    if (seen[header]) return true;
+    seen[header] = true;
+    return false;
+  });
+}
+
+/**
+ * Removes a later copy of a column when it holds nothing but blanks or the schema default: the leftover
+ * of two requests both appending a missing column, filled with defaults while every save went to the
+ * first copy. Lossless, so it runs on normal access. Copies holding anything else are left for the
+ * explicit, backed-up upgrade (coalesceDuplicateHeaders_). Returns whether any column was removed.
+ */
+function dropDefaultOnlyDuplicateColumns_(sheet, schema, headers, rows) {
+  var seen = {};
+  var drop = [];
+  headers.forEach(function(header, index) {
+    if (!header) return;
+    if (!seen[header]) { seen[header] = true; return; }
+    var fallback = schema.defaults && Object.prototype.hasOwnProperty.call(schema.defaults, header) ? String(schema.defaults[header]).toLowerCase() : '';
+    var defaultOnly = rows.every(function(row) {
+      var value = row[index];
+      return sheetCellIsEmpty_(value) || String(value).trim().toLowerCase() === fallback;
+    });
+    if (defaultOnly) drop.push(index + 1);
+  });
+  drop.sort(function(a, b) { return b - a; }).forEach(function(column) { sheet.deleteColumn(column); });
+  return drop.length > 0;
 }
 
 /** Rebuild a sheet by header name while preserving every named legacy column and cell. */

@@ -267,6 +267,58 @@ test('a sheet already carrying duplicate quick-fill columns is repaired by the u
   assert.equal(repaired[0].icon, 'clock');
 });
 
+test('a second counts_as_leave column holding only defaults is removed on normal access, keeping the edited copy', () => {
+  // Two page-load calls both appended the missing column; the hour type was later set to count as leave.
+  const damaged = CANONICAL_HOUR_TYPE_HEADERS.concat(['counts_as_leave']);
+  const { context, spreadsheet } = createAppsScriptContext({
+    hour_types: [
+      damaged,
+      ['leave-id', 'Annual Leave', 'annual-leave', '#22c55e', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 'FALSE', 7.5, '', '2024-02-01T00:00:00Z', 1, 'FALSE', '', '', 'hours', 'TRUE', false],
+      ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 7.5, '', '2024-02-01T00:00:00Z', 2, 'FALSE', '', '', 'hours', 'FALSE', 'FALSE']
+    ]
+  });
+  withSheetApiStubs(context);
+  let locks = 0;
+  context.withScriptLock_ = (label, callback) => { if (label === 'sheet schema update') locks++; return callback(); };
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  context.assertMigrationsSettled_ = () => true;
+  const byName = Object.fromEntries(context.api_getHourTypes().map((ht) => [ht.name, ht]));
+  assert.equal(byName['Annual Leave'].counts_as_leave, true);
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+  assert.equal(locks, 1, 'the repair ran under the script lock');
+  context.api_getHourTypes();
+  assert.equal(locks, 1, 'a healthy sheet takes no lock');
+});
+
+test('a duplicate column holding real values is still left for the upgrade', () => {
+  const damaged = CANONICAL_HOUR_TYPE_HEADERS.concat(['counts_as_leave']);
+  const { context } = createAppsScriptContext({
+    hour_types: [damaged, ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 7.5, '', '2024-02-01T00:00:00Z', 1, 'FALSE', '', '', 'hours', 'FALSE', 'TRUE']]
+  });
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  load(context, 'backend/hourtypes.js');
+  context.assertMigrationsSettled_ = () => true;
+  assert.throws(() => context.api_getHourTypes(), /duplicate header "counts_as_leave"/);
+});
+
+test('appending a missing schema column re-reads the headers under the lock, so a concurrent call cannot add it twice', () => {
+  const { context, spreadsheet } = createAppsScriptContext({ hour_types: [CANONICAL_HOUR_TYPE_HEADERS.slice(0, -1), ['work-id', 'Work', 'work', '#3b82f6', 'TRUE', 'TRUE', 'TRUE', 'TRUE', 'FALSE', 7.5, '', '2024-02-01T00:00:00Z', 1, 'FALSE', '', '', 'hours']] });
+  withSheetApiStubs(context);
+  load(context, 'backend/sheets.ts.js');
+  context.assertMigrationsSettled_ = () => true;
+  // Another request appends the column between this call's first look and its lock.
+  context.withScriptLock_ = (label, callback) => {
+    const sheet = spreadsheet.getSheetByName('hour_types');
+    sheet.getRange(1, CANONICAL_HOUR_TYPE_HEADERS.length).setValue('counts_as_leave');
+    sheet.getRange(2, CANONICAL_HOUR_TYPE_HEADERS.length).setValue('FALSE');
+    return callback();
+  };
+  context.getOrCreateSheet('hour_types');
+  assert.deepStrictEqual(sheetHeaderRow(spreadsheet, 'hour_types'), CANONICAL_HOUR_TYPE_HEADERS);
+});
+
 test('the repair also removes a duplicate column that holds nothing but a header', () => {
   const { context, spreadsheet } = createAppsScriptContext({
     hour_types: [
@@ -522,6 +574,7 @@ test('legacy Work hour types are repaired to billable without overriding an expl
   });
   context.assertMigrationsSettled_ = () => true;
   context.cacheClearPrefix = () => {};
+  load(context, 'backend/integrity.js');
   load(context, 'backend/sheets.ts.js');
   load(context, 'backend/hourtypes.js');
   const work = context.ensureWorkHourType();

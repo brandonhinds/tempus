@@ -89,6 +89,7 @@ class MockSheet {
   appendRow(row) { this.values.push(row.slice()); this.maxRows = Math.max(this.maxRows, this.values.length); this.maxColumns = Math.max(this.maxColumns, row.length); }
   deleteRow(row) { this.values.splice(row - 1, 1); }
   deleteRows(row, count) { this.values.splice(row - 1, count); }
+  deleteColumn(column) { this.values.forEach((row) => row.splice(column - 1, 1)); this.maxColumns = Math.max(1, this.maxColumns - 1); }
   snapshot() {
     const rows = this.getLastRow();
     const columns = this.getLastColumn();
