@@ -904,6 +904,13 @@ exports.run = test => {
     assert.match(operationsScripts, /const COMPANY_EXPENSE_LEDGER_CACHE_KEY = 'tempus_company_expense_ledger_v2';\s*let companyExpenseLedgerLoad = null;\s*try \{[\s\S]*?localStorage\.removeItem\('tempus_company_expense_ledger_v1'\)/);
   });
 
+  test('clicking outside the expense form leaves it open, so what was typed is kept', () => {
+    const scripts = fs.readFileSync(path.join(root, 'views/partials/scripts.html'), 'utf8');
+    const backdrop = scripts.slice(scripts.indexOf('// Click outside to close'));
+    assert.match(backdrop, /^[^]*?else if \(modal && modal\.id === 'modal-expense-form'\) \{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*\} else \{\s*hideModal\(modal\);/);
+    assert.match(operationsScripts, /function hideExpenseFormModal\(\) \{[\s\S]*?operationsState\.expenseFormReturn = null;/);
+  });
+
   test('the expense form is a popup that asks for the description first, and says when an expense is from a schedule', () => {
     const markup = fs.readFileSync(path.join(root, 'views/partials/operations.html'), 'utf8');
     assert.match(markup, /<div class="ts-modal" id="modal-expense-form"[^>]*>\s*<form id="expense-form" class="ts-modal-content ts-expense-form"/);

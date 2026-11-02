@@ -30509,6 +30509,9 @@ function getCachedIncomeSummary(monthKey) {
             closeBulkModal();
           } else if (modal && modal.id === 'modal-day-entry') {
             closeDayModal();
+          } else if (modal && modal.id === 'modal-expense-form') {
+            // Only Cancel closes the expense form (hideExpenseFormModal), so a stray click outside it
+            // doesn't throw away what was typed.
           } else {
             hideModal(modal);
           }
