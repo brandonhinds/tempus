@@ -1,9 +1,9 @@
 // AUTO-GENERATED FILE. DO NOT EDIT MANUALLY.
 // Generated automatically by scripts/write-version.sh
 var BUILD_META = {
-  buildDate: '2026-08-08',
-  buildTimestamp: '2026-08-08T11:13:23Z',
-  buildCommit: '20c4abc06f5bbdc94fb8ece41146dcdde0c4c3c4'
+  buildDate: '2026-11-23',
+  buildTimestamp: '2026-11-23T11:11:55Z',
+  buildCommit: '85c102480da97675114b65533bc69c041cb48406'
 };
 function api_getBuildMeta() {
   return BUILD_META;
