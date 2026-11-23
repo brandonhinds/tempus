@@ -67,6 +67,29 @@
           <input id="contract-assessment-organisations" type="text" aria-describedby="contract-organisations-help contract-organisations-preview">
           <p id="contract-organisations-help" class="ts-note">Enter organisation names separated by commas.</p>
           <p id="contract-organisations-preview" class="ts-note" aria-live="polite"></p>
+          <!-- Assessment pricing for this contract. Rendered by lilRenderContractPricing (assessments-scripts.html)
+               from the assessment catalogue; blank fees use the catalogue default, so a contract with nothing
+               entered prices exactly as the original contract did. -->
+          <div class="ts-asm-pricing-block">
+            <label id="contract-assessment-pricing-label">Assessment types and fees</label>
+            <p class="ts-note" id="contract-assessment-pricing-help">Tick the types this contract offers. Leave a fee blank to use the default, enter a fixed amount, or switch to × to multiply the hourly rate above. Saved assessments keep the fee they were saved with.</p>
+            <div id="contract-assessment-pricing" role="group" aria-labelledby="contract-assessment-pricing-label" aria-describedby="contract-assessment-pricing-help"></div>
+          </div>
+          <div class="ts-grid ts-grid--gap-md ts-asm-pricing-block">
+            <div class="ts-col-span-6">
+              <label for="contract-super-paid-by">Super</label>
+              <select id="contract-super-paid-by" aria-describedby="contract-super-help">
+                <option value="self">I pay my own super from these fees</option>
+                <option value="employer">The employer pays super on top</option>
+              </select>
+              <p id="contract-super-help" class="ts-note ts-asm-fieldnote">When the employer pays, nothing is set aside for super on this contract's fees and they are taxed in full.</p>
+            </div>
+            <div class="ts-col-span-6" id="contract-employer-super-rate-col" hidden>
+              <label for="contract-employer-super-rate">Employer super rate (%)</label>
+              <input id="contract-employer-super-rate" type="number" min="0" max="100" step="0.01" placeholder="Super guarantee rate" aria-describedby="contract-employer-super-help" />
+              <p id="contract-employer-super-help" class="ts-note ts-asm-fieldnote">Of the fees excluding GST. Leave blank to follow the super guarantee rate in Settings.</p>
+            </div>
+          </div>
         </div>
         <!-- Day-template editor (Phase 4). Only shown for Detailed contracts. Named templates, each a set of
              start · end · hour-type sessions; applied via the calendar/agenda right-click "Sessions" menu,

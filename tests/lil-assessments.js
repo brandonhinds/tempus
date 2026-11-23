@@ -66,9 +66,10 @@ function mockDrive(c) {
   return {files,get count(){return count;},set fail(value){fail=value;},set onRender(fn){onRender=fn;},templateId};
 }
 module.exports={lilContext,mockDrive,run(test){
-  test('Lil catalogue restores all five original wordings and percent-unit fees',()=>{
+  test('Lil catalogue keeps all five original wordings and percent-unit fees',()=>{
     const {context:c,create}=lilContext();
-    assert.equal(c.api_listAssessmentTypes().length,5);
+    // Five original types plus the opt-in within-48-hours cancellation; types are never removed.
+    assert.equal(c.api_listAssessmentTypes().length,6);
     const expected={standard:800,enhanced:884,reval:884,'cancellation-under-24':600,'cancellation-over-24':400};
     for(const [type,amount] of Object.entries(expected))for(const percent of [0,.5,1,10]){const a=create({assessment_type_id:type,percentage_adjustment:percent/100});assert.equal(a.fee,Math.round(amount*(1+percent/100)*100)/100);assert.ok(a.lines.every(l=>!/[{}]/.test(l.description)));assert.match(a.lines[0].description,/Maya Thompson \(DOB: 14\/02\/1992\)/);if(percent&&!type.startsWith('cancellation'))assert.ok(a.lines[0].description.includes(' + '+percent+'% Surge'));}
   });
@@ -170,10 +171,11 @@ module.exports={lilContext,mockDrive,run(test){
     // Run the three real functions against a stub DOM rather than asserting on source text.
     const grab=name=>{const at=partial.indexOf('  function '+name+'(');assert.notEqual(at,-1,name);
       const next=partial.indexOf('\n  function ',at+1);return partial.slice(at,next===-1?partial.length:next);};
-    const sandbox={state:{contracts:[]},nodes:{},lilSetup(){},console};
+    const types=[{id:'standard',name:'Standard',lines:[]},{id:'enhanced',name:'Enhanced',lines:[]},{id:'cancellation-under-48',name:'Cancellation (<48 hrs)',offered_by_default:false,lines:[]}];
+    const sandbox={state:{contracts:[]},nodes:{},lilSetup(){},console,lilData:()=>({types})};
     sandbox.lilEscape=v=>String(v==null?'':v);
     sandbox.lilEl=id=>sandbox.nodes[id]||(sandbox.nodes[id]={innerHTML:'',onclick:null});
-    vm.runInNewContext(grab('lilOptions')+'\n'+grab('lilOrganisations')+'\n'+grab('lilRefreshFormOptions')
+    vm.runInNewContext(['lilOptions','lilOrganisations','lilContractPricing','lilTypeOffered','lilTypeOptions','lilRefreshFormOptions'].map(grab).join('\n')
       +'\nthis.run=lilRefreshFormOptions;',sandbox);
 
     const contract={id:'c1',name:'Assessment services',start_date:'2025-01-01',assessment_organisations:'Northbridge'};
@@ -208,6 +210,19 @@ module.exports={lilContext,mockDrive,run(test){
     sandbox.run(draft);
     assert.equal(draft.contract_id,'c2');
 
+    // The Type list is the contract's offered types; an existing assessment keeps its retired type, labelled.
+    const fresh={id:'c4',name:'New contract',start_date:'2025-01-01',assessment_organisations:'Northbridge',assessment_pricing_json:JSON.stringify({enhanced:{offered:false},'cancellation-under-48':{offered:true}})};
+    sandbox.state.contracts=[fresh];
+    draft={assessment_date:'2026-09-04',contract_id:'c4',organisation:'',assessment_type_id:'enhanced'};
+    sandbox.run(draft);
+    assert.equal(draft.assessment_type_id,'standard','a type the contract does not offer falls back to Standard');
+    assert.ok(!sandbox.nodes.type.innerHTML.includes('Enhanced'));
+    assert.ok(sandbox.nodes.type.innerHTML.includes('Cancellation (<48 hrs)'));
+    draft={assessment_date:'2026-09-04',contract_id:'c4',organisation:'',assessment_type_id:'enhanced',original:{contract_id:'c4',assessment_type_id:'enhanced',organisation:'Northbridge'}};
+    sandbox.run(draft);
+    assert.equal(draft.assessment_type_id,'enhanced','a saved assessment keeps its retired type');
+    assert.ok(sandbox.nodes.type.innerHTML.includes('Enhanced (no longer offered)'));
+
     // Every dropdown calendar starts on Monday, matching the calendar/agenda/mobile week grids.
     const client=fs.readFileSync(path.join(__dirname,'../views/partials/scripts.html'),'utf8');
     assert.match(client,/function createDatePicker\(input, extraOpts\)[\s\S]*?firstDayOfWeek: 1/);
@@ -217,8 +232,8 @@ module.exports={lilContext,mockDrive,run(test){
     const partial=fs.readFileSync(path.join(__dirname,'../views/partials/assessments-scripts.html'),'utf8');
     const grab=name=>{const at=partial.indexOf('  function '+name+'('),next=partial.indexOf('\n  function ',at+1);return partial.slice(at,next);};
     const contract={id:'c1',start_date:'2025-01-01',end_date:'2026-12-31',assessment_organisations:'Northbridge'};
-    const sandbox={state:{contracts:[contract]},lilState:{month:'2026-09'},todayIso:()=> '2026-09-12',lilData:()=>({types:[{id:'standard'}]}),lilMonthLabel:month=>month};
-    vm.runInNewContext(['lilOrganisations','lilValidDate','lilAssessmentErrors','lilReadAssessmentForm'].map(grab).join('\n'),sandbox);
+    const sandbox={state:{contracts:[contract]},lilState:{month:'2026-09'},todayIso:()=> '2026-09-12',lilData:()=>({types:[{id:'standard',name:'Standard'},{id:'enhanced',name:'Enhanced'}]}),lilMonthLabel:month=>month};
+    vm.runInNewContext(['lilOrganisations','lilContractPricing','lilTypeOffered','lilValidDate','lilAssessmentErrors','lilReadAssessmentForm'].map(grab).join('\n'),sandbox);
     const valid={assessment_date:'2026-09-04',contract_id:'c1',assessment_type_id:'standard',organisation:'Northbridge',client_name:'Maya',client_dob:'1992-02-29',adjustment_percent:0};
     const errors=patch=>sandbox.lilAssessmentErrors({...valid,...patch});
     assert.equal(errors({}).length,0);
@@ -233,6 +248,10 @@ module.exports={lilContext,mockDrive,run(test){
     assert.equal(errors({client_dob:'2026-09-12'}).length,0);
     assert.match(errors({contract_id:'missing'})[0].message,/Contract:/);
     assert.equal(errors({assessment_type_id:'missing'})[0].field,'assessment_type_id');
+    contract.name='Assessment services';contract.assessment_pricing_json=JSON.stringify({enhanced:{offered:false}});
+    assert.match(errors({assessment_type_id:'enhanced'})[0].message,/Enhanced assessments are not offered under Assessment services/);
+    assert.equal(errors({assessment_type_id:'enhanced',id:'old',original:{contract_id:'c1',assessment_type_id:'enhanced',organisation:'Northbridge'}}).length,0,'a saved assessment keeps its retired type');
+    delete contract.assessment_pricing_json;
     assert.equal(errors({organisation:'Other'})[0].field,'organisation');
     assert.equal(errors({organisation:'Historical',original:{contract_id:'c1',organisation:'Historical'}}).length,0);
     assert.equal(errors({client_name:'  '})[0].field,'client_name');
@@ -945,6 +964,120 @@ module.exports={lilContext,mockDrive,run(test){
     assert.equal(c.resolvePaygInstalmentRate_(),null,'nothing stored still means no rate for the BAS split');
     c.api_getSettings=()=>({payg_instalment_rate:30});
     assert.equal(c.resolvePaygInstalmentRate_(),0.3,'and a saved 30 still reads as 30%');
+  });
+
+  // A contract signed after the original one, priced in fixed fees: Standard and Reval only (Reval keeps its
+  // Document Review line), the two old cancellations replaced by a single within-48-hours one.
+  const NEW_PRICING={standard:{lines:[{amount:1650}]},enhanced:{offered:false},reval:{lines:[{amount:1700},{amount:180}]},'cancellation-under-24':{offered:false},'cancellation-over-24':{offered:false},'cancellation-under-48':{offered:true}};
+  const newContract=(c,extra)=>c.api_addContract(Object.assign({name:'New contract',start_date:'2025-01-01',hourly_rate:1500,assessment_organisations:'Northbridge',assessment_pricing_json:JSON.stringify(NEW_PRICING)},extra||{})).contract;
+  test('contract pricing: fixed fees, multipliers and the types a contract offers',()=>{
+    const env=lilContext(),c=env.context,create=env.create;
+    const fresh=newContract(c);
+    const make=(type,extra)=>create(Object.assign({contract_id:fresh.id,assessment_type_id:type},extra||{}));
+    assert.equal(make('standard').fee,1650,'a fixed fee replaces rate x multiplier');
+    assert.equal(make('standard',{percentage_adjustment:0.1}).fee,1815,'surge still applies on top of a fixed fee');
+    const reval=make('reval');
+    assert.equal(reval.fee,1880);
+    assert.deepEqual(reval.lines.map(l=>l.amount),[1700,180],'Reval keeps both invoice lines');
+    assert.deepEqual(reval.pricing_snapshot.lines.map(l=>[l.source,l.fixed_amount]),[['contract',1700],['contract',180]],'the snapshot records where each fee came from');
+    const cancel=make('cancellation-under-48');
+    assert.equal(cancel.fee,1125,'an un-overridden line is the catalogue multiplier on the contract rate');
+    assert.match(cancel.lines[0].description,/^Short Notice Cancellation Fee\nClearance Subject: Maya Thompson/);
+    assert.equal(c.findAssessmentBillableEntry_(make('standard').id).duration_minutes,66,'billing hours are the fee at the contract rate');
+    ['enhanced','cancellation-under-24','cancellation-over-24'].forEach(type=>assert.throws(()=>make(type),/not offered under New contract/,type));
+    // The original contract is untouched: it offers its five, and not the new cancellation.
+    assert.equal(create({assessment_type_id:'enhanced'}).fee,884);
+    assert.throws(()=>create({assessment_type_id:'cancellation-under-48'}),/not offered under Assessment services/);
+    // A multiplier override is relative to the contract's rate, like the defaults.
+    c.api_updateContract({...fresh,assessment_pricing_json:JSON.stringify({...NEW_PRICING,'cancellation-under-48':{offered:true,lines:[{multiplier:0.5}]}})});
+    assert.equal(make('cancellation-under-48').fee,750);
+    const types=c.api_listAssessmentTypes();
+    assert.deepEqual(types.filter(t=>!t.offered_by_default).map(t=>t.id),['cancellation-under-48'],'only the new type is opt-in');
+  });
+  test('retiring a type keeps old assessments, their fees and their invoices intact',()=>{
+    const env=lilContext(),c=env.context,create=env.create,contract=env.contract;
+    const drive=mockDrive(c);
+    const old=create({assessment_type_id:'enhanced'});
+    assert.equal(old.fee,884);
+    // The old contract stops offering Enhanced; the catalogue still has it.
+    c.api_updateContract({...contract,assessment_pricing_json:JSON.stringify({enhanced:{offered:false}})});
+    const decorated=c.api_getAssessmentsForMonth(2026,8).assessments.find(a=>a.id===old.id);
+    assert.equal(decorated.assessment_type_name,'Enhanced');
+    assert.deepEqual(decorated.invoice_blockers,[]);
+    assert.equal(decorated.fee,884);
+    // Still editable without changing its type, contract or fee.
+    const edited=c.api_upsertAssessment({...old,client_name:'Renamed',request_id:'edit-retired',expected_revision:old.revision}).assessment;
+    assert.equal(edited.fee,884);
+    assert.equal(edited.assessment_type_id,'enhanced');
+    // But a new Enhanced, or switching an assessment to it, is refused.
+    assert.throws(()=>create({assessment_type_id:'enhanced'}),/not offered/);
+    const std=create({assessment_type_id:'standard'});
+    assert.throws(()=>c.api_upsertAssessment({...std,assessment_type_id:'enhanced',request_id:'switch',expected_revision:std.revision}),/not offered/);
+    // Moving the old one to a contract that doesn't offer its type is refused too.
+    const fresh=newContract(c);
+    assert.throws(()=>c.api_upsertAssessment({...edited,contract_id:fresh.id,request_id:'move',expected_revision:edited.revision}),/not offered under New contract/);
+    // The month still invoices.
+    const result=c.api_generateLilMonthlyInvoice({year:2026,month:8,request_id:'gen-retired',expected_hash:c.lilInvoiceInputs_('2026-08').hash});
+    assert.equal(result.success,true);
+    assert.ok(drive.count>=1);
+  });
+  test('contract pricing is validated on save and read leniently',()=>{
+    const env=lilContext(),c=env.context,contract=env.contract;
+    const bad=pricing=>()=>c.api_updateContract({...contract,assessment_pricing_json:typeof pricing==='string'?pricing:JSON.stringify(pricing)});
+    assert.throws(bad({standard:{lines:[{amount:-5}]}}),/Standard: enter a fee of \$0 or more/);
+    assert.throws(bad({reval:{lines:[null,{multiplier:'x'}]}}),/Reval line 2: enter a multiplier/);
+    assert.throws(bad({standard:{lines:[{amount:1,multiplier:1}]}}),/not both/);
+    assert.throws(bad({mystery:{offered:true}}),/unknown type: mystery/);
+    assert.throws(bad('{not json'),/could not be read/);
+    assert.throws(()=>c.api_updateContract({...contract,employer_super_rate:1.5}),/Employer super rate/);
+    // Canonical: catalogue order, defaults dropped, blank lines trimmed.
+    assert.equal(c.normalizeAssessmentPricingJson_({'cancellation-under-48':{offered:false},reval:{lines:[null,{amount:'180'}]},standard:{offered:true,lines:[null]}},true),'{"reval":{"lines":[null,{"amount":180}]}}');
+    assert.equal(c.normalizeAssessmentPricingJson_('garbage',false),'','a bad cell reads as no overrides');
+    // Partial updates keep the pricing and super settings already on the row.
+    c.api_updateContract({...contract,assessment_pricing_json:JSON.stringify({standard:{lines:[{amount:900}]}}),super_paid_by:'employer',employer_super_rate:0.115});
+    c.api_updateContract({id:contract.id,name:'Renamed'});
+    const saved=c.api_getContracts().find(x=>x.id===contract.id);
+    assert.equal(saved.assessment_pricing_json,'{"standard":{"lines":[{"amount":900}]}}');
+    assert.equal(saved.super_paid_by,'employer');
+    assert.equal(saved.employer_super_rate,0.115);
+    assert.equal(c.api_getContracts().find(x=>x.name==='Assessment services'||x.id===contract.id).super_paid_by,'employer');
+    // Existing contracts read as before: self-paid super, no overrides.
+    const plainContract=c.api_addContract({name:'Plain',start_date:'2025-01-01',hourly_rate:100}).contract;
+    assert.equal(plainContract.super_paid_by,'self');
+    assert.equal(plainContract.assessment_pricing_json,'');
+  });
+  test('a contract priced only in fixed fees needs no hourly rate',()=>{
+    const env=lilContext(),c=env.context,create=env.create;
+    const fixed=newContract(c,{hourly_rate:0});
+    const a=create({contract_id:fixed.id,assessment_type_id:'standard'});
+    assert.equal(a.fee,1650);
+    assert.equal(c.findAssessmentBillableEntry_(a.id).duration_minutes,60,'with no rate the billing entry reads as one hour');
+    assert.throws(()=>create({contract_id:fixed.id,assessment_type_id:'cancellation-under-48'}),/positive assessment rate, or a fixed Cancellation \(<48 hrs\) fee/);
+  });
+  test('employer-paid super is not set aside, deducted or taxed in the invoice snapshot',()=>{
+    const env=lilContext(),c=env.context;
+    c.expenseActualForPeriod_=()=>({purchases:0,gst:0});
+    const employer=newContract(c,{super_paid_by:'employer'});
+    const custom=newContract(c,{name:'Custom rate',super_paid_by:'employer',employer_super_rate:0.115});
+    const line=(amount,contract)=>({amount,gst_amount:c.roundMoney_(amount*0.1),gst_rate:0.1,contract_id:contract.id});
+    const self=c.lilInvoiceSnapshot_([line(4000,env.contract)],'2026-08');
+    assert.equal(self.super,480,'a self-paid contract sets aside super exactly as before');
+    assert.equal(self.employer_super,0);
+    const emp=c.lilInvoiceSnapshot_([line(4000,employer)],'2026-08');
+    assert.equal(emp.super,0,'nothing is set aside when the employer pays');
+    assert.equal(emp.employer_super,480,'12% of the fees excluding GST');
+    assert.equal(emp.employer_super_fees,4000);
+    assert.equal(emp.taxable_profit,4000,'and nothing is deducted before tax');
+    assert.ok(emp.tax>self.tax,'so the tax provision is higher than with self-paid super');
+    assert.equal(c.roundMoney_(emp.income+emp.retained_in_business),emp.invoice_total,'the split still balances');
+    assert.equal(c.lilInvoiceSnapshot_([line(4000,custom)],'2026-08').employer_super,460,'a contract rate overrides the guarantee rate');
+    // A month with both: super is set aside on the self-paid share of profit after costs.
+    c.expenseActualForPeriod_=()=>({purchases:110,gst:10});
+    const mixed=c.lilInvoiceSnapshot_([line(1000,env.contract),line(3000,employer)],'2026-08');
+    assert.equal(mixed.super_base,975,'a quarter of the $3,900 profit is self-paid');
+    assert.equal(mixed.super,117);
+    assert.equal(mixed.employer_super,360);
+    assert.equal(c.roundMoney_(mixed.income+mixed.retained_in_business),mixed.invoice_total);
   });
   // Queued operations run the real client code against a stub DOM, so they settle asynchronously.
   (async()=>{

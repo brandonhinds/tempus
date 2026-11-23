@@ -1216,10 +1216,14 @@ function splitContext(sheets, settings) {
   load(context, 'backend/financialReporting.js');
   context.basActualsForRange_ = (basis, from, to) => (built.actuals[from] || { g1_total_sales: 0, gst_on_sales: 0, purchases: 0, gst_on_purchases: 0 });
   load(context, 'backend/transferSplit.js');
+  // Who pays super is read from invoice lines and contracts; by default every month is self-paid, and a
+  // test sets built.superSplits[from] to model fees from an employer-pays-super contract.
+  context.superSplitForRange_ = (from) => built.superSplits[from] || { fees: 0, self_fees: 0, employer_fees: 0, employer_super: 0, employer_super_rate: 0, self_share: 1 };
   // settings.js and tax.js define their own api_getSettings/lock helpers, so re-stub after every load.
   context.api_getSettings = () => settings || {};
   context.listBasSubmissionsInternal = () => [];
   built.actuals = {};
+  built.superSplits = {};
   return built;
 }
 
@@ -1254,6 +1258,24 @@ test('transfer split sets aside net GST, super and tax, and the offset is her af
   assert.equal(august.to_offset, 7040 - 1500);
   // The identity: money in is fully accounted for.
   assert.equal(august.received, august.to_business_account + august.to_offset + august.expenses_paid);
+});
+
+test('transfer split sets no super aside on fees whose employer pays super on top', () => {
+  const built = splitContext({}, { payg_instalment_rate: 15 });
+  built.actuals['2026-08-01'] = { g1_total_sales: 11000, gst_on_sales: 1000, purchases: 2200, gst_on_purchases: 200 };
+  // A quarter of August's fees are self-paid; the rest come from a contract whose employer pays super.
+  built.superSplits['2026-08-01'] = { fees: 10000, self_fees: 2500, employer_fees: 7500, employer_super: 900, employer_super_rate: 0.12, self_share: 0.25 };
+  const report = built.context.api_getMonthlyTransferSplit({ financial_year: 2026 });
+  const august = report.months.filter((month) => month.calendar_month === 7)[0];
+  assert.equal(august.profit_before_super, 8000);
+  assert.equal(august.super, 240, '12% of the self-paid quarter of profit');
+  assert.equal(august.employer_super, 900, 'reported, but not money she holds');
+  assert.equal(august.taxable_profit, 7760);
+  assert.equal(august.received, august.to_business_account + august.to_offset + august.expenses_paid, 'nothing leaks');
+  assert.equal(report.totals.employer_super, 900);
+  const csv = built.context.api_exportMonthlyTransferSplitCsv({ financial_year: 2026 }).csv;
+  const header = csv.split('\r\n')[0];
+  assert.ok(header.includes('Super paid by employer'), header);
 });
 
 test('the split never leaks money, in any month or for the year, on either tax method', () => {

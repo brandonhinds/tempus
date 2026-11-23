@@ -91,7 +91,12 @@ function lilInvoiceSnapshot_(lines, period) {
   var profitBeforeSuper = roundMoney_(fees - expensesExGst);
   var netGst = roundMoney_(gst - expenses.gst);
   var superRate = Number(getSuperGuaranteeRate(periodStart)) || 0;
-  var superAmount = roundMoney_(Math.max(0, profitBeforeSuper) * superRate);
+  // Only the share of the month's fees whose super Lil pays herself has super set aside. A contract whose
+  // employer pays super on top of the invoice contributes nothing here: that super is never her money,
+  // so it is neither deducted nor taxed. Business costs are shared across both in proportion to fees.
+  var split = invoiceSuperSplit_(lines, periodStart);
+  var superBase = roundMoney_(Math.max(0, profitBeforeSuper) * split.self_share);
+  var superAmount = roundMoney_(superBase * superRate);
   var taxableProfit = roundMoney_(profitBeforeSuper - superAmount);
   // Taxed on the month being invoiced, the same way every other Tempus screen taxes a month.
   var provision = estimateTaxDetails(taxableProfit, periodStart);
@@ -113,6 +118,10 @@ function lilInvoiceSnapshot_(lines, period) {
     profit_before_super: profitBeforeSuper,
     super: superAmount,
     super_rate: superRate,
+    super_base: superBase,
+    employer_super: split.employer_super,
+    employer_super_rate: split.employer_super_rate,
+    employer_super_fees: split.employer_fees,
     taxable_profit: taxableProfit,
     tax: tax,
     tax_method: 'payg_monthly',

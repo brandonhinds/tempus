@@ -41,13 +41,18 @@ function buildAccountantReport_(payload) {
   var to = (financialYear + 1) + '-06-30';
 
   // Every invoice is assumed paid, so each one is a single line counted on its invoice date.
-  var income = [];
+  // Super is only set aside on fees whose super Lil pays herself. Where a contract's employer pays it on
+  // top of the invoice, that share of the line's super is nil and the description says why.
+  var income = [], contracts = superSplitContractsById_();
   listInvoicesInternal().forEach(function(invoice) {
     var allocation = invoiceIncomeForPeriod_(invoice, from, to);
     if (!allocation.sales) return;
     var date = String(invoice.invoice_date || '');
+    var split = invoiceSuperSplit_(listInvoiceLineItemsByInvoiceId(invoice.id), date, contracts);
+    var description = accountantReportInvoiceDescription_(invoice) + (split.employer_fees ? (split.self_fees ? ' (part super paid by employer)' : ' (super paid by employer)') : '');
     income.push({ date: date, quarter: accountantReportQuarter_(date), invoice_number: String(invoice.invoice_number || invoice.id),
-      description: accountantReportInvoiceDescription_(invoice), gross: roundMoney_(allocation.sales), gst: roundMoney_(allocation.gst), super_rate: getSuperGuaranteeRate(date) });
+      description: description, gross: roundMoney_(allocation.sales), gst: roundMoney_(allocation.gst),
+      super_rate: Math.round(getSuperGuaranteeRate(date) * split.self_share * 1000000) / 1000000 });
   });
   income.sort(function(a, b) { return a.date.localeCompare(b.date) || a.invoice_number.localeCompare(b.invoice_number); });
 

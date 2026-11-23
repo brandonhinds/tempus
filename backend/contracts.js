@@ -83,6 +83,29 @@ function assessmentOrganisations_(value) {
   return String(value || '').split(',').map(function(v) { return v.trim(); }).filter(function(v) { var key = v.toLowerCase(); if (!v || seen[key]) return false; seen[key] = true; return true; });
 }
 
+// Assessments mode: who pays super on this contract's fees. 'self' (the default, and how every contract
+// worked before) means Lil sets super aside from her own fees; 'employer' means the client pays it on top
+// of the invoiced fees (excluding GST) straight to her fund, so Tempus sets nothing aside for it.
+function normalizeContractSuperPaidBy(value) {
+  return String(value == null ? '' : value).trim().toLowerCase() === 'employer' ? 'employer' : 'self';
+}
+
+// Employer super rate as a decimal (0.12 = 12%). Blank means "the super guarantee rate on the date",
+// which follows the rates table in Settings rather than freezing today's 12%.
+function normalizeContractSuperRate(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return '';
+  var num = Number(value);
+  if (!isFinite(num) || num < 0 || num > 1) return '';
+  return Math.round(num * 10000) / 10000;
+}
+
+// The pricing format belongs to the assessment catalogue (backend/assessments.js). Without it loaded the
+// stored text is carried through untouched rather than lost.
+function contractAssessmentPricingJson_(value, strict) {
+  if (typeof normalizeAssessmentPricingJson_ === 'function') return normalizeAssessmentPricingJson_(value, strict);
+  return value == null ? '' : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+}
+
 function normalizeContractObject(contract) {
   if (!contract) return contract;
   var standardHoursRaw = contract.standard_hours_per_day != null ? contract.standard_hours_per_day : contract.standardHoursPerDay;
@@ -98,6 +121,9 @@ function normalizeContractObject(contract) {
     standard_hours_per_day: standardHours,
     include_weekends: contractParseBoolean(contract.include_weekends != null ? contract.include_weekends : contract.includeWeekends),
     assessment_organisations: assessmentOrganisations_(contract.assessment_organisations).join(', '),
+    assessment_pricing_json: contractAssessmentPricingJson_(contract.assessment_pricing_json, false),
+    super_paid_by: normalizeContractSuperPaidBy(contract.super_paid_by),
+    employer_super_rate: normalizeContractSuperRate(contract.employer_super_rate),
     color: normalizeContractColor(contract.color),
     archived: contractParseBoolean(contract.archived),
     entry_mode: normalizeContractEntryMode(contract.entry_mode != null ? contract.entry_mode : contract.entryMode),
@@ -110,6 +136,17 @@ function normalizeContractObject(contract) {
     normalized[field] = normalizeContractText_(contract[field], spec.max, spec.multiline);
   });
   return normalized;
+}
+
+/** Reads are lenient (a hand-edited cell must never stop the contract list loading); writes are strict,
+ * so a typo in a price or rate is refused with a reason instead of silently becoming the default. Only
+ * the fields the caller sent are checked — a partial update keeps what is on the row. */
+function validateContractAssessmentFields_(contract) {
+  if (!contract) return;
+  if (contract.assessment_pricing_json != null) contractAssessmentPricingJson_(contract.assessment_pricing_json, true);
+  if (contract.employer_super_rate != null && String(contract.employer_super_rate).trim() !== '' && normalizeContractSuperRate(contract.employer_super_rate) === '') {
+    throw new Error('Employer super rate must be between 0% and 100%, or blank to use the super guarantee rate.');
+  }
 }
 
 function validateContractDates(contract) {
@@ -138,6 +175,9 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     include_weekends: normalized.include_weekends ? 'TRUE' : 'FALSE',
     standard_hours_per_day: normalized.standard_hours_per_day,
     assessment_organisations: normalized.assessment_organisations || '',
+    assessment_pricing_json: normalized.assessment_pricing_json || '',
+    super_paid_by: normalized.super_paid_by || 'self',
+    employer_super_rate: normalized.employer_super_rate,
     color: normalized.color || '',
     archived: normalized.archived ? 'TRUE' : 'FALSE',
     entry_mode: normalized.entry_mode || '',
@@ -170,7 +210,10 @@ function buildContractRow(contract, createdAt, headers, existingRow) {
     byName.work_order_number,
     byName.contract_reference,
     byName.timesheet_statement,
-    byName.assessment_organisations
+    byName.assessment_organisations,
+    byName.assessment_pricing_json,
+    byName.super_paid_by,
+    byName.employer_super_rate
   ];
 }
 
@@ -231,6 +274,7 @@ function api_addContract(contract) {
 function addContractUnlocked_(contract) {
   var sh = getContractsSheet();
   var now = new Date();
+  validateContractAssessmentFields_(contract);
   var normalized = normalizeContractObject(contract || {});
   if (!normalized.name) throw new Error('Contract name is required.');
   validateContractDates(normalized);
@@ -252,6 +296,7 @@ function api_updateContract(contract) {
 
 function updateContractUnlocked_(contract) {
   if (!contract || !contract.id) throw new Error('Contract id is required.');
+  validateContractAssessmentFields_(contract);
   var sh = getContractsSheet();
   var values = sh.getDataRange().getValues();
   var headers = values.length ? values[0] : [];

@@ -15,11 +15,13 @@ var TEMPUS_SHEET_SCHEMAS = {
     // The last four are optional client-timesheet fields (see backend/contracts.js CONTRACT_TEXT_FIELDS).
     // Appended LAST so existing rows stay column-aligned; getOrCreateSheet adds them by name on first read,
     // so no migration id is needed and no spreadsheet is gated behind an upgrade for them.
-    headers: ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations'],
-    defaults: { total_hours: 0, include_weekends: 'FALSE', standard_hours_per_day: 7.5, archived: 'FALSE' },
+    headers: ['id', 'name', 'start_date', 'end_date', 'hourly_rate', 'total_hours', 'include_weekends', 'standard_hours_per_day', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations', 'assessment_pricing_json', 'super_paid_by', 'employer_super_rate'],
+    // Assessment pricing overrides and who pays super are assessments-mode settings; a blank cell means
+    // the catalogue defaults and super set aside by Lil, so existing contracts behave exactly as before.
+    defaults: { total_hours: 0, include_weekends: 'FALSE', standard_hours_per_day: 7.5, archived: 'FALSE', super_paid_by: 'self' },
     // All four are forced to plain text: a work order number like "2026-14" or a bare digit string is
     // otherwise coerced by Sheets into a date/number and reads back mangled on the printed timesheet.
-    text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations']
+    text: ['id', 'name', 'start_date', 'end_date', 'include_weekends', 'line_item_templates_json', 'color', 'archived', 'entry_mode', 'standard_day_json', 'created_at', 'specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations', 'assessment_pricing_json', 'super_paid_by']
   },
   // Quick-action fields: each hour type can opt into the calendar right-click quick-fill bar with its
   // own one-click duration and icon. quick_fill_mode decides what the one click DOES: 'hours' fills the

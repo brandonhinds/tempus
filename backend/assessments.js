@@ -2,15 +2,91 @@
 var ASSESSMENT_CACHE_PREFIX = 'assessments_lil_';
 var ASSESSMENT_BILLABLE_OCCURRENCE_KEY = 'billable';
 var ASSESSMENT_INTERNAL_ENTRY_WRITE_ = false;
+/** The assessment catalogue. Defaults are what the original contract paid: each line is a multiplier of the
+ * contract's assessment rate. A contract can override any line's fee (a fixed amount or its own multiplier)
+ * and choose which types it offers, in `assessment_pricing_json` — see assessmentPricingFor_.
+ *
+ * DATA INTEGRITY — this list only ever grows:
+ *  - Never remove a type, change its id, or remove or reorder its lines. A saved assessment stores its type
+ *    id, and its frozen pricing snapshot and any invoice line items store line ids of the form
+ *    `<type id>-<line number>`. Removing a type would turn every old assessment of that type into
+ *    "Historical type — review needed" and block re-generating its month's invoice.
+ *  - To retire a type, stop offering it on new contracts instead (`offered: false` in the contract's
+ *    pricing). Old assessments keep their type, their saved fee and stay editable; they just can't be
+ *    switched to a type their contract doesn't offer, or moved to a contract that doesn't offer theirs.
+ *  - A type added later sets `offered_by_default: false`, so contracts written before it existed keep
+ *    offering exactly what they always did, and a new contract offers it explicitly.
+ *  - Template wording may be corrected, but it only reaches assessments repriced after the change (saved
+ *    assessments keep the wording in their snapshot). */
 var LIL_ASSESSMENT_TYPES = [
   { id: 'standard', name: 'Standard', lines: [{ template: '{org} Psychological Assessment Report (Initial){surge_suffix}\nClearance Subject: {name} (DOB: {dob})', multiplier: 1 }] },
   { id: 'enhanced', name: 'Enhanced', lines: [{ template: '{org} Psychological Assessment Report (Initial){surge_suffix}\nClearance Subject: {name} (DOB: {dob})', multiplier: 1 }, { template: '{org} Document Review Fee\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.105 }] },
   { id: 'reval', name: 'Reval', lines: [{ template: '{org} Psychological Assessment Report (Reval){surge_suffix}\nClearance Subject: {name} (DOB: {dob})', multiplier: 1 }, { template: '{org} Document Review Fee\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.105 }] },
   { id: 'cancellation-under-24', name: 'Cancellation (<24 hrs)', lines: [{ template: 'PAR Short Notice Cancellation Fee - < 1 business day\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.75 }] },
-  { id: 'cancellation-over-24', name: 'Cancellation (>24 hrs)', lines: [{ template: 'PAR Short Notice Cancellation Fee - > 1 business day\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.5 }] }
+  { id: 'cancellation-over-24', name: 'Cancellation (>24 hrs)', lines: [{ template: 'PAR Short Notice Cancellation Fee - > 1 business day\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.5 }] },
+  { id: 'cancellation-under-48', name: 'Cancellation (<48 hrs)', offered_by_default: false, lines: [{ template: 'Short Notice Cancellation Fee\nClearance Subject: {name} (DOB: {dob})', multiplier: 0.75 }] }
 ];
-function api_listAssessmentTypes() { return JSON.parse(JSON.stringify(LIL_ASSESSMENT_TYPES)); }
+function api_listAssessmentTypes() {
+  return LIL_ASSESSMENT_TYPES.map(function(t) { return Object.assign(JSON.parse(JSON.stringify(t)), { offered_by_default: assessmentTypeOfferedByDefault_(t) }); });
+}
 function assessmentTypeById_(id) { return LIL_ASSESSMENT_TYPES.filter(function(t) { return t.id === String(id); })[0] || null; }
+function assessmentTypeOfferedByDefault_(type) { return !!type && type.offered_by_default !== false; }
+function assessmentPricingValue_(value) { return value !== undefined && value !== null && String(value).trim() !== ''; }
+/** A contract's pricing overrides in canonical form: catalogue order, only what differs from the defaults,
+ * '' when nothing does. Shape: { "<type id>": { "offered": bool, "lines": [ {"amount": n} | {"multiplier": n} | null ] } }
+ * where a null line uses the catalogue default. Reads are lenient (unknown or bad parts are dropped) so a
+ * hand-edited cell never stops contracts loading; `strict` writes refuse them with a reason instead. */
+function normalizeAssessmentPricingJson_(value, strict) {
+  var fail = function(message) { if (strict) throw new Error(message); };
+  if (value === null || value === undefined || (typeof value !== 'object' && String(value).trim() === '')) return '';
+  var parsed = value;
+  if (typeof value !== 'object') { try { parsed = JSON.parse(String(value)); } catch (e) { fail('Assessment pricing could not be read.'); return ''; } }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { fail('Assessment pricing could not be read.'); return ''; }
+  Object.keys(parsed).forEach(function(typeId) { if (!assessmentTypeById_(typeId)) fail('Assessment pricing names an unknown type: ' + typeId + '.'); });
+  var out = {};
+  LIL_ASSESSMENT_TYPES.forEach(function(type) {
+    var entry = parsed[type.id];
+    if (!entry || typeof entry !== 'object') return;
+    var clean = {};
+    if (typeof entry.offered === 'boolean' && entry.offered !== assessmentTypeOfferedByDefault_(type)) clean.offered = entry.offered;
+    var given = Array.isArray(entry.lines) ? entry.lines : [];
+    if (given.length > type.lines.length && given.slice(type.lines.length).some(Boolean)) fail(type.name + ' has ' + type.lines.length + ' invoice line' + (type.lines.length === 1 ? '' : 's') + '.');
+    var lines = type.lines.map(function(line, index) {
+      var o = given[index], label = type.name + (type.lines.length > 1 ? ' line ' + (index + 1) : '');
+      if (!o || typeof o !== 'object') return null;
+      var hasAmount = assessmentPricingValue_(o.amount), hasMultiplier = assessmentPricingValue_(o.multiplier);
+      if (hasAmount && hasMultiplier) { fail(label + ': choose a fixed fee or a multiplier, not both.'); return null; }
+      if (!hasAmount && !hasMultiplier) return null;
+      var number = Number(hasAmount ? o.amount : o.multiplier);
+      if (!isFinite(number) || number < 0) { fail(label + (hasAmount ? ': enter a fee of $0 or more.' : ': enter a multiplier of 0 or more.')); return null; }
+      return hasAmount ? { amount: roundMoney_(number) } : { multiplier: Math.round(number * 1000000) / 1000000 };
+    });
+    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    if (lines.length) clean.lines = lines;
+    if (Object.keys(clean).length) out[type.id] = clean;
+  });
+  return Object.keys(out).length ? JSON.stringify(out) : '';
+}
+function assessmentContractPricing_(contract) {
+  var parsed = assessmentJson_(normalizeAssessmentPricingJson_(contract && contract.assessment_pricing_json, false), {});
+  return parsed && typeof parsed === 'object' ? parsed : {};
+}
+function assessmentTypeOffered_(contract, type) {
+  var entry = assessmentContractPricing_(contract)[type.id];
+  return entry && typeof entry.offered === 'boolean' ? entry.offered : assessmentTypeOfferedByDefault_(type);
+}
+/** Each line's fee before any surge, for this contract: its fixed amount when it has one, otherwise the
+ * multiplier (the contract's, else the catalogue's) times the contract's assessment rate. `base` is left
+ * unrounded so `base * (1 + surge)` rounds exactly as rate * multiplier * (1 + surge) always has. */
+function assessmentPricingFor_(contract, type) {
+  var rate = Number(contract && contract.hourly_rate) || 0, entry = assessmentContractPricing_(contract)[type.id] || {}, overrides = entry.lines || [];
+  return type.lines.map(function(line, index) {
+    var o = overrides[index] || {}, id = type.id + '-' + (index + 1);
+    if (o.amount != null) return { id: id, template: line.template, multiplier: null, fixed_amount: Number(o.amount), base: Number(o.amount), source: 'contract' };
+    var multiplier = o.multiplier != null ? Number(o.multiplier) : line.multiplier;
+    return { id: id, template: line.template, multiplier: multiplier, fixed_amount: null, base: rate * multiplier, source: o.multiplier != null ? 'contract' : 'default' };
+  });
+}
 function assessmentContractById_(id) { return api_getContracts().filter(function(c) { return String(c.id) === String(id); })[0] || null; }
 function assessmentJson_(value, fallback) { try { var parsed = JSON.parse(value || ''); return parsed === null ? fallback : parsed; } catch (e) { return fallback; } }
 function assessmentNow_() { return invoiceToIsoDateTime(new Date()); }
@@ -90,8 +166,12 @@ function api_setAssessmentTimeDefault(id) {
 function normalizeAssessmentRecord_(payload, existing) {
   var record = Object.assign({}, existing || {}, payload);
   var type = assessmentTypeById_(record.assessment_type_id), contract = assessmentContractById_(record.contract_id);
-  if (!type) throw new Error('Choose one of the five assessment types. Historical custom types need review.');
+  if (!type) throw new Error('Choose an assessment type. Historical custom types need review.');
   if (!contract) throw new Error('Choose a contract.');
+  // An assessment already saved with this type on this contract keeps it even if the contract has since
+  // stopped offering it; only choosing the type afresh, or moving to another contract, has to fit.
+  var keepsType = existing && String(existing.contract_id) === String(contract.id) && String(existing.assessment_type_id) === String(type.id);
+  if (!keepsType && !assessmentTypeOffered_(contract, type)) throw new Error(type.name + ' assessments are not offered under ' + contract.name + '. Choose another type, or offer it in Contracts.');
   record.assessment_date = normalizeIsoDateStrict_(record.assessment_date, 'Assessment date', false);
   if ((contract.archived && (!existing || String(existing.contract_id) !== String(contract.id))) || (contract.start_date && record.assessment_date < contract.start_date) || (contract.end_date && record.assessment_date > contract.end_date)) throw new Error('Choose a contract valid on the assessment date.');
   record.client_name = String(record.client_name || '').trim();
@@ -106,9 +186,14 @@ function normalizeAssessmentRecord_(payload, existing) {
   var reprice = !existing || !existing.pricing_snapshot_json || existing.contract_id !== record.contract_id || existing.assessment_type_id !== record.assessment_type_id || Number(existing.percentage_adjustment) !== record.percentage_adjustment;
   // Only an explicit pricing change can replace a previously saved rate or multiplier.
   if (reprice) {
-    var rate = Number(contract.hourly_rate);
-    if (!isFinite(rate) || rate <= 0) throw new Error('The contract needs a positive assessment rate.');
-    record.pricing_snapshot_json = JSON.stringify({ rate: rate, lines: type.lines.map(function(line, index) { return { id: type.id + '-' + (index + 1), template: line.template, multiplier: line.multiplier, amount: roundMoney_(rate * line.multiplier * (1 + record.percentage_adjustment)) }; }) });
+    var rate = Number(contract.hourly_rate), pricing = assessmentPricingFor_(contract, type);
+    var needsRate = pricing.some(function(line) { return line.fixed_amount == null; });
+    if (needsRate && (!isFinite(rate) || rate <= 0)) throw new Error('The contract needs a positive assessment rate, or a fixed ' + type.name + ' fee in Contracts.');
+    record.pricing_snapshot_json = JSON.stringify({ rate: isFinite(rate) ? rate : 0, lines: pricing.map(function(line) {
+      var saved = { id: line.id, template: line.template, multiplier: line.multiplier, amount: roundMoney_(line.base * (1 + record.percentage_adjustment)), source: line.source };
+      if (line.fixed_amount != null) saved.fixed_amount = line.fixed_amount;
+      return saved;
+    }) });
   } else record.pricing_snapshot_json = existing.pricing_snapshot_json;
   record.id = existing ? existing.id : String(payload.client_request_id || Utilities.getUuid());
   record.client_request_id = existing ? existing.client_request_id : record.id;
@@ -156,12 +241,19 @@ function decorateAssessment_(item, entries) {
   var actual = (entries || api_getEntries({})).filter(function(e) { return e.source_type === 'assessment' && String(e.source_id) === String(item.id) && !assessmentEntryIsBillable_(e); }).sort(function(a,b) { return a.date.localeCompare(b.date) || String(a.id).localeCompare(String(b.id)); });
   return { id: String(item.id), assessment_type_id: String(item.assessment_type_id), assessment_type_name: type ? type.name : 'Historical type — review needed', contract_id: String(item.contract_id), contract_name: contract ? contract.name : 'Missing contract', organisation: String(item.organisation || ''), assessment_date: invoiceToIsoDate(item.assessment_date), client_name: String(item.client_name || ''), client_dob: invoiceToIsoDate(item.client_dob), percentage_adjustment: Number(item.percentage_adjustment) || 0, revision: Number(item.revision) || 0, pricing_snapshot: assessmentJson_(item.pricing_snapshot_json, null), lines: lines, fee: roundMoney_(lines.reduce(function(sum,l) { return sum + l.amount; },0)), time_entries: actual, actual_minutes: actual.reduce(function(sum,e) { return sum + Number(e.duration_minutes || 0); },0), migration_warning: String(item.migration_warning || ''), invoice_blockers: assessmentInvoiceBlockers_(item), historical_fields: assessmentJson_(item.field_values_json, {}), updated_at: invoiceToIsoDateTime(item.updated_at) };
 }
+/** Billing-entry hours are the fee at the contract's assessment rate (a standard assessment reads as one
+ * hour). A contract priced only in fixed fees may have no rate, so that falls back to one hour. */
+function assessmentBillableMinutes_(amount, snapshot) {
+  var rate = Number(snapshot && snapshot.rate);
+  if (!isFinite(rate) || rate <= 0) return 60;
+  return Math.max(1, Math.round(amount / rate * 60));
+}
 function syncAssessmentEntry_(record) {
   var snapshot = assessmentJson_(record.pricing_snapshot_json, null);
   if (!snapshot) throw new Error('Assessment pricing needs review.');
   var amount = roundMoney_(resolveAssessmentLines_(record).reduce(function(sum,l) { return sum + l.amount; },0));
   var existing = findAssessmentBillableEntry_(record.id);
-  var payload = { id: existing ? existing.id : '', date: record.assessment_date, duration_minutes: Math.max(1, Math.round(amount / Number(snapshot.rate) * 60)), income_amount: amount, contract_id: record.contract_id, hour_type_id: assessmentBillableHourTypeId_(), entry_type: 'basic', punches: [], round_interval: 1, assessment_id: record.id, source_type: 'assessment', source_id: record.id, source_occurrence_key: ASSESSMENT_BILLABLE_OCCURRENCE_KEY };
+  var payload = { id: existing ? existing.id : '', date: record.assessment_date, duration_minutes: assessmentBillableMinutes_(amount, snapshot), income_amount: amount, contract_id: record.contract_id, hour_type_id: assessmentBillableHourTypeId_(), entry_type: 'basic', punches: [], round_interval: 1, assessment_id: record.id, source_type: 'assessment', source_id: record.id, source_occurrence_key: ASSESSMENT_BILLABLE_OCCURRENCE_KEY };
   ASSESSMENT_INTERNAL_ENTRY_WRITE_ = true;
   try { var result = existing ? api_updateEntry(payload) : api_addEntry(payload); if (!result.success && result.error !== 'duplicate_entry') throw new Error(result.message || result.error); return result.entry; }
   finally { ASSESSMENT_INTERNAL_ENTRY_WRITE_ = false; }

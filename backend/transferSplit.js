@@ -12,7 +12,8 @@
  *   1. received_ex_gst      = money in, less the GST portion of it
  *   2. expenses_ex_gst      = business costs paid, less their claimable GST credits
  *   3. profit_before_super  = 1 - 2
- *   4. super                = super guarantee rate x 3
+ *   4. super                = super guarantee rate x 3 x the share of fees whose super she pays herself
+ *                             (fees from a contract whose employer pays super on top are excluded)
  *   5. taxable_profit       = 3 - 4          (super is deductible)
  *   6. tax                  = instalment-rate method, else cumulative year-to-date
  *   7. net_gst              = GST on sales - GST credits on purchases   (negative = refund)
@@ -47,7 +48,7 @@ function api_getMonthlyTransferSplit(payload) {
   var provisionedTax = 0;
   var totals = {
     received: 0, received_ex_gst: 0, gst_on_sales: 0, expenses_paid: 0, expenses_ex_gst: 0,
-    gst_on_purchases: 0, net_gst: 0, super: 0, tax: 0, to_business_account: 0, to_offset: 0,
+    gst_on_purchases: 0, net_gst: 0, super: 0, employer_super: 0, tax: 0, to_business_account: 0, to_offset: 0,
     profit_before_super: 0, taxable_profit: 0
   };
   var warnings = [];
@@ -65,7 +66,8 @@ function api_getMonthlyTransferSplit(payload) {
 
     var profitBeforeSuper = roundMoney_(receivedExGst - expensesExGst);
     var superRate = getSuperGuaranteeRate(range.from);
-    var superAmount = roundMoney_(Math.max(0, profitBeforeSuper) * superRate);
+    var superSplit = superSplitForRange_(range.from, range.to);
+    var superAmount = roundMoney_(Math.max(0, profitBeforeSuper) * superSplit.self_share * superRate);
     var taxableProfit = roundMoney_(profitBeforeSuper - superAmount);
 
     ytdTaxableProfit = roundMoney_(ytdTaxableProfit + taxableProfit);
@@ -103,6 +105,7 @@ function api_getMonthlyTransferSplit(payload) {
       profit_before_super: profitBeforeSuper,
       super_rate: superRate,
       super: superAmount,
+      employer_super: superSplit.employer_super,
       taxable_profit: taxableProfit,
       tax: provision.amount,
       tax_method: provision.method,
@@ -120,6 +123,7 @@ function api_getMonthlyTransferSplit(payload) {
     totals.net_gst = roundMoney_(totals.net_gst + netGst);
     totals.profit_before_super = roundMoney_(totals.profit_before_super + profitBeforeSuper);
     totals.super = roundMoney_(totals.super + superAmount);
+    totals.employer_super = roundMoney_(totals.employer_super + superSplit.employer_super);
     totals.taxable_profit = roundMoney_(totals.taxable_profit + taxableProfit);
     totals.tax = roundMoney_(totals.tax + provision.amount);
     totals.to_business_account = roundMoney_(totals.to_business_account + toBusinessAccount);
@@ -148,19 +152,19 @@ function api_exportMonthlyTransferSplitCsv(payload) {
   var rows = [[
     'Month', 'BAS quarter', 'Money in (incl GST)', 'GST on sales', 'Business costs paid (incl GST)',
     'GST credits', 'Net GST', 'Super', 'Tax provision', 'Tax method',
-    'To business account', 'To offset'
+    'To business account', 'To offset', 'Super paid by employer'
   ]];
   report.months.forEach(function(month) {
     rows.push([
       month.label, 'Q' + month.bas_quarter, month.received, month.gst_on_sales, month.expenses_paid,
       month.gst_on_purchases, month.net_gst, month.super, month.tax, month.tax_method,
-      month.to_business_account, month.to_offset
+      month.to_business_account, month.to_offset, month.employer_super
     ]);
   });
   rows.push([
     'Total', '', report.totals.received, report.totals.gst_on_sales, report.totals.expenses_paid,
     report.totals.gst_on_purchases, report.totals.net_gst, report.totals.super, report.totals.tax, '',
-    report.totals.to_business_account, report.totals.to_offset
+    report.totals.to_business_account, report.totals.to_offset, report.totals.employer_super
   ]);
   return {
     success: true,

@@ -142,6 +142,20 @@ exports.run = function run(test) {
     expenses.rows.forEach((row, index) => assert.equal(row.length, expenses.rows[0].length, 'row ' + index + ' width'));
   });
 
+  test('invoices from an employer-pays-super contract carry no super, and say why', () => {
+    const context = reportContext();
+    context.api_getContracts = () => [{ id: 'employer', super_paid_by: 'employer', employer_super_rate: '' }];
+    const base = context.listInvoiceLineItemsByInvoiceId;
+    context.listInvoiceLineItemsByInvoiceId = (id) => base(id).map((line, index) => Object.assign({}, line, { contract_id: id === 'invoice-part' ? 'employer' : '' }));
+    const report = plain(context.buildAccountantReport_({ financial_year: 2026, accounting_basis: 'cash' }));
+    const part = report.income.find((item) => item.invoice_number === 'INVOICE-PART');
+    const prepaid = report.income.find((item) => item.invoice_number === 'INVOICE-PREPAID');
+    assert.equal(part.super_rate, 0);
+    assert.equal(part.description, 'July Invoice (super paid by employer)');
+    assert.equal(prepaid.super_rate, 0.12, 'other invoices are unchanged');
+    assert.equal(prepaid.description, 'June Invoice');
+  });
+
   test('accountant report helpers: descriptions, quarters and column letters', () => {
     const context = reportContext();
     assert.equal(context.accountantReportInvoiceDescription_({ source_month: '2026-08', invoice_date: '2026-09-02' }), 'August Invoice', 'the month billed, not the month issued');

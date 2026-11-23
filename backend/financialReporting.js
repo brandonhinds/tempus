@@ -41,6 +41,61 @@ function invoiceIncomeForPeriod_(invoice, from, to) {
   return { sales: totals.totalWithGst, gst: totals.gstAmount };
 }
 
+/**
+ * Who pays super on a set of invoice lines. Each line carries its contract_id; a contract whose
+ * `super_paid_by` is 'employer' has the client pay super on top of those fees (excluding GST) straight to
+ * the fund, so nothing is set aside for that share. Every other line — including lines with no contract —
+ * is super Lil pays herself, which is how every contract worked before the setting existed.
+ *
+ * Returns ex-GST fees split by who pays super, `self_share` (the fraction of fees whose super is
+ * self-paid, 1 when there are no fees, so an empty period behaves as before), and the employer's
+ * contribution, which is information only: it is not part of the invoice and never Lil's taxable income.
+ * `contractsById` lets a caller reading many invoices look the contracts up once.
+ */
+function invoiceSuperSplit_(lines, date, contractsById) {
+  var contracts = contractsById || superSplitContractsById_();
+  var fees = 0, employerFees = 0, employerSuper = 0;
+  (lines || []).forEach(function(line) {
+    var amount = Number(line && line.amount) || 0, contract = contracts[String(line && line.contract_id || '')];
+    fees += amount;
+    if (!contract || contract.super_paid_by !== 'employer') return;
+    var hasRate = contract.employer_super_rate !== '' && contract.employer_super_rate != null && isFinite(Number(contract.employer_super_rate));
+    var rate = hasRate ? Number(contract.employer_super_rate) : Number(getSuperGuaranteeRate(date)) || 0;
+    employerFees += amount;
+    employerSuper += amount * rate;
+  });
+  fees = roundMoney_(fees);
+  employerFees = roundMoney_(employerFees);
+  var selfFees = roundMoney_(fees - employerFees);
+  return {
+    fees: fees,
+    self_fees: selfFees,
+    employer_fees: employerFees,
+    employer_super: roundMoney_(employerSuper),
+    employer_super_rate: employerFees ? Math.round(employerSuper / employerFees * 10000) / 10000 : 0,
+    self_share: fees > 0 ? selfFees / fees : 1
+  };
+}
+
+function superSplitContractsById_() {
+  var byId = {};
+  if (typeof api_getContracts !== 'function') return byId;
+  (api_getContracts() || []).forEach(function(contract) { byId[String(contract.id)] = contract; });
+  return byId;
+}
+
+/** invoiceSuperSplit_ over every issued invoice counted in a period, on the same invoice-date rule as the
+ * BAS sales figure (invoiceIncomeForPeriod_), so its fees line up with that period's sales ex GST. */
+function superSplitForRange_(from, to) {
+  var contracts = superSplitContractsById_(), lines = [];
+  listInvoicesInternal().forEach(function(invoice) {
+    var date = String(invoice.invoice_date || '');
+    if (!date || date < from || date > to || invoice.status === 'void' || invoice.status === 'draft') return;
+    lines = lines.concat(listInvoiceLineItemsByInvoiceId(invoice.id));
+  });
+  return invoiceSuperSplit_(lines, from, contracts);
+}
+
 /** True for a real expense (paid or unpaid); scheduled and skipped rows never count. */
 function expenseIsRecorded_(transaction) { return !!transaction && String(transaction.status) === 'recorded'; }
 function expenseIsPaid_(transaction) { return expenseIsRecorded_(transaction) && !!String(transaction.paid_date || ''); }

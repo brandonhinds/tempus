@@ -1522,6 +1522,10 @@
       warnings.replaceChildren();
       (report.warnings||[]).concat(report.tax_table&&report.tax_table.warning?[report.tax_table.warning]:[])
         .forEach((text)=>ledgerText(warnings,'ts-note',text));
+      // Super an employer pays on top of an invoice never passes through either account, so it is not in
+      // the Super column; say how much there was so the column's lower figure isn't a surprise.
+      if(Number(report.totals&&report.totals.employer_super)>0)
+        ledgerText(warnings,'ts-note',`Employers paid ${operationsMoney(report.totals.employer_super)} super on top of this year’s invoices, straight to your fund. It isn’t in the Super column: nothing needs setting aside for it.`);
     } catch(error) {
       body.replaceChildren();
       foot.replaceChildren();

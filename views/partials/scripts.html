@@ -3109,9 +3109,13 @@ let ratePreviewInputSyncing = false;
     clone.standard_day_json = (typeof clone.standard_day_json === 'string') ? clone.standard_day_json : (clone.standard_day_json ? String(clone.standard_day_json) : '');
     // Optional client-timesheet fields: always present as strings so the print variant can test them with a
     // plain truthiness check rather than guarding for undefined on every line.
-    ['specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations'].forEach((field) => {
+    ['specified_personnel', 'work_order_number', 'contract_reference', 'timesheet_statement', 'assessment_organisations', 'assessment_pricing_json'].forEach((field) => {
       clone[field] = clone[field] == null ? '' : String(clone[field]);
     });
+    // Assessments mode: who pays super on this contract's fees ('self' unless the employer does) and the
+    // employer's rate as a decimal ('' = the super guarantee rate).
+    clone.super_paid_by = clone.super_paid_by === 'employer' ? 'employer' : 'self';
+    clone.employer_super_rate = clone.employer_super_rate === '' || clone.employer_super_rate == null || !Number.isFinite(Number(clone.employer_super_rate)) ? '' : Number(clone.employer_super_rate);
     delete clone.startDate;
     delete clone.endDate;
     delete clone.hourlyRate;
@@ -14225,6 +14229,11 @@ function updateDeductionFormVisibility() {
       const el = CONTRACT_TEXT_FIELD_INPUTS[field];
       if (el) el.value = '';
     });
+    // Assessment fees start on the catalogue defaults; super starts self-paid.
+    if (getFeatureFlag('enable_lil_assessments_mode') && typeof lilRenderContractPricing === 'function') {
+      lilRenderContractPricing(null);
+      lilRenderContractSuper(null);
+    }
     // New contracts start on "Use default" (inherit the global entry mode).
     const contractEntryModeSelect = document.getElementById('contract-entry-mode');
     if (contractEntryModeSelect) { syncContractEntryModeDefaultLabel(); contractEntryModeSelect.value = ''; }
@@ -14314,7 +14323,7 @@ function updateDeductionFormVisibility() {
       { el: contractStartInput, valid: !!startDate },
       { el: contractRateInput, valid: hourlyRateRaw.trim() !== '' && hourlyRate >= 0 },
       { el: contractTotalHoursInput, valid: !Number.isNaN(totalHoursValue) && totalHoursValue >= 0 }
-    ]);
+    ].concat(lilModeContractFields() ? lilContractPricingErrors().map((el) => ({ el, valid: false })) : []));
     if (!fieldsOk) return null;
     // Relational date check keeps the alert (it spans two fields).
     if (endDate && endDate < startDate) {
@@ -14344,8 +14353,23 @@ function updateDeductionFormVisibility() {
       color,
       entry_mode: entryMode,
       standard_day_json: (typeof contractStandardDayPayloadJson === 'function') ? contractStandardDayPayloadJson() : (contract ? (contract.standard_day_json || '') : ''),
-      ...contractTextFieldPayload()
+      ...contractTextFieldPayload(),
+      ...contractAssessmentPayload()
     };
+  }
+
+  function lilModeContractFields() {
+    return !!getFeatureFlag('enable_lil_assessments_mode') && typeof lilContractPricingPayload === 'function';
+  }
+
+  // Assessment pricing and super only travel with the payload in assessments mode. Pricing is omitted while
+  // its editor hasn't loaded, so a save can never blank a contract's fees it didn't show.
+  function contractAssessmentPayload() {
+    if (!lilModeContractFields()) return {};
+    const payload = { ...lilContractSuperPayload() };
+    const pricing = lilContractPricingPayload();
+    if (pricing !== undefined) payload.assessment_pricing_json = pricing;
+    return payload;
   }
 
   // Spell out what "Use default" resolves to on the contract Entry Mode select, so it's clear which surface a
@@ -14606,6 +14630,10 @@ function updateDeductionFormVisibility() {
       contractEntryModeSelect.value = (contract.entry_mode === 'simple' || contract.entry_mode === 'detailed') ? contract.entry_mode : '';
     }
     syncContractEntryModeAvailability();
+    if (lilModeContractFields()) {
+      lilRenderContractPricing(contract);
+      lilRenderContractSuper(contract);
+    }
     loadContractStandardDayDraft(contract);
     const contractColorInput = document.getElementById('contract-color');
     if (contractColorInput) {

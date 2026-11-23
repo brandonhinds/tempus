@@ -238,6 +238,9 @@
     const generated=info.invoice&&info.invoice.generated_at?new Date(info.invoice.generated_at).toLocaleString('en-AU',{dateStyle:'medium',timeStyle:'short'}):'';
     const gstHeld=snap.net_gst!=null?snap.net_gst:snap.gst;
     const credits=Number(snap.gst_credits)||0;
+    // Super an employer pays on top of the invoice is never part of it, so it sits outside the waterfall
+    // as a note; a month billed only to such contracts has no super of its own to set aside.
+    const employerSuper=Number(snap.employer_super)||0,employerOnly=employerSuper>0&&!(Number(snap.super)>0)&&Number(snap.employer_super_fees)>=Number(snap.fees_ex_gst);
     const segment=(value,colour)=>`<div class="ts-income-bd-bar-seg" style="flex:${Math.max(0,Number(value)||0).toFixed(2)}; background:${colour};"></div>`;
     const legend=(label,colour)=>`<span class="ts-income-bd-legend-item"><span class="ts-income-bd-legend-dot" style="background:${colour};"></span>${label}</span>`;
     const changed=info.stale_reason==='expenses'?'This month’s business expenses have changed since':'This month has changed since';
@@ -255,14 +258,15 @@
       + `<div class="ts-income-divider"></div>`
       + lilSnapshotRow('GST held'+(credits?` <span class="ts-info-icon" role="button" tabindex="0" aria-label="GST collected, less the credit already claimed on this month’s expenses" data-tip="GST collected, less the ${lilEscape(lilMoney(credits))} credit already claimed on this month’s expenses.">i</span>`:''),gstHeld,total,{muted:muted})
       + lilSnapshotRow('Business expenses <span class="ts-info-icon" role="button" tabindex="0" aria-label="This month’s company expenses, including GST" data-tip="This month’s company expenses, including GST. Manage them on the Expenses page.">i</span>',snap.expenses_paid||0,total,{muted:muted})
-      + lilSnapshotRow('Super set aside',snap.super,total,{actual:lilPercent(snap.super_rate)+' of '+lilMoney(snap.profit_before_super),muted:muted})
+      + (employerOnly?'':lilSnapshotRow('Super set aside',snap.super,total,{actual:lilPercent(snap.super_rate)+' of '+lilMoney(snap.super_base!=null?snap.super_base:snap.profit_before_super),muted:muted}))
       + lilSnapshotRow('Tax set aside',snap.tax,total,{actual:'on '+lilMoney(snap.taxable_profit)+' taxable',muted:muted})
       + lilSnapshotRow('Stays in business',snap.retained_in_business,total,{anchor:true,muted:muted})
       + `<div class="ts-income-divider"></div>`
       + lilSnapshotRow('Yours to transfer once paid',snap.income,total,{anchor:true,net:!stale,muted:muted})
       + `</div>`
       + `<div class="ts-asm-note-stack">`
-      + (stale?'':'<p class="ts-note">GST, tax, super and this month’s business expenses stay in the business account. Logging time never changes these figures.</p>')
+      + (stale?'':`<p class="ts-note">GST, tax,${employerOnly?'':' super'} and this month’s business expenses stay in the business account. Logging time never changes these figures.</p>`)
+      + (employerSuper?`<p class="ts-note">Your employer pays ${lilEscape(lilMoney(employerSuper))} super (${lilEscape(lilPercent(snap.employer_super_rate))} of ${lilEscape(lilMoney(snap.employer_super_fees))} in fees excluding GST) on top of this invoice, straight to your fund. It isn’t part of the invoice or your taxable income, so nothing is set aside for it.</p>`:'')
       + (snap.warnings||[]).map(text=>`<p class="ts-note">${lilEscape(text)}</p>`).join('')
       + `</div>`);
   }
@@ -338,6 +342,133 @@
     lilState.editors[lilState.month]=draft;lilOpenDetail();lilRenderForm(draft);lilEl('assessment-date')?.focus();
   }
   function lilOptions(items, selected, placeholder) { return (placeholder?`<option value="">${lilEscape(placeholder)}</option>`:'')+items.map(item=>`<option value="${lilEscape(item.id)}" ${String(item.id)===String(selected)?'selected':''}>${lilEscape(item.name)}</option>`).join(''); }
+  // A contract's assessment pricing (backend/assessments.js assessmentPricingFor_): which types it offers
+  // and each line's fee before surge — a fixed amount, or a multiplier of the contract's assessment rate.
+  // The server prices the saved assessment; this only has to agree with it for the preview.
+  function lilContractPricing(contract) {
+    try { const parsed=JSON.parse(contract?.assessment_pricing_json||''); return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{}; }
+    catch (e) { return {}; }
+  }
+  function lilTypeOffered(contract, type) {
+    const entry=lilContractPricing(contract)[type?.id];
+    return entry&&typeof entry.offered==='boolean'?entry.offered:type?.offered_by_default!==false;
+  }
+  function lilPricingLines(contract, type) {
+    const rate=Number(contract?.hourly_rate)||0,overrides=(lilContractPricing(contract)[type.id]||{}).lines||[];
+    return (type.lines||[]).map((line,index)=>{
+      const o=overrides[index]||{},id=type.id+'-'+(index+1);
+      if(o.amount!=null)return {...line,id,multiplier:null,fixed_amount:Number(o.amount),base:Number(o.amount)};
+      const multiplier=o.multiplier!=null?Number(o.multiplier):line.multiplier;
+      return {...line,id,multiplier,fixed_amount:null,base:rate*multiplier};
+    });
+  }
+  // The types a contract offers, plus the one an existing assessment already has on that contract — a
+  // retired type stays selectable for the assessments saved with it, and is labelled so.
+  function lilTypeOptions(contract, draft) {
+    const kept=draft.original&&draft.original.contract_id===draft.contract_id?draft.original.assessment_type_id:'';
+    return lilData().types.filter(t=>t.id===kept||(contract&&lilTypeOffered(contract,t)))
+      .map(t=>({id:t.id,name:t.name+(t.id===kept&&contract&&!lilTypeOffered(contract,t)?' (no longer offered)':'')}));
+  }
+  // ---- Contracts page (assessments mode): the contract's assessment types, fees and who pays super ----
+  // The catalogue is fetched once; until it arrives the pricing editor is not "ready" and the contract
+  // payload omits assessment_pricing_json, so the server keeps whatever the contract already has.
+  let lilCatalogue=null,lilCatalogueLoading=null;
+  function lilLoadCatalogue() {
+    if(lilCatalogue)return Promise.resolve(lilCatalogue);
+    if(!lilCatalogueLoading)lilCatalogueLoading=lilApi('api_listAssessmentTypes').then(types=>{lilCatalogue=Array.isArray(types)?types:[];return lilCatalogue;}).catch(error=>{lilCatalogueLoading=null;throw error;});
+    return lilCatalogueLoading;
+  }
+  function lilLineLabel(type, index) {
+    if(type.lines.length===1)return 'Fee';
+    return /Document Review/.test(type.lines[index].template||'')?'Document review':'Report';
+  }
+  function lilRenderContractPricing(contract) {
+    const host=document.getElementById('contract-assessment-pricing');
+    if(!host)return;
+    host.dataset.ready='';
+    host._lilContract=contract||null;
+    if(!lilCatalogue){
+      host.innerHTML='<p class="ts-note">Loading assessment types…</p>';
+      lilLoadCatalogue().then(()=>{if(host._lilContract===(contract||null))lilRenderContractPricing(contract);})
+        .catch(()=>{if(host._lilContract===(contract||null))host.innerHTML='<p class="ts-warning">Assessment types could not be loaded, so this contract’s fees will be left as they are.</p>';});
+      return;
+    }
+    const pricing=lilContractPricing(contract);
+    let html='<span class="ts-asm-pricing-head">Type</span><span class="ts-asm-pricing-head">Line</span><span class="ts-asm-pricing-head">Fee</span><span class="ts-asm-pricing-head">Default</span>';
+    lilCatalogue.forEach((type,typeIndex)=>{
+      const entry=pricing[type.id]||{},offered=typeof entry.offered==='boolean'?entry.offered:type.offered_by_default!==false;
+      if(typeIndex)html+='<div class="ts-asm-pricing-divider"></div>';
+      type.lines.forEach((line,index)=>{
+        const o=(entry.lines||[])[index]||{},mode=o.multiplier!=null?'multiplier':'amount',value=o.amount!=null?o.amount:(o.multiplier!=null?o.multiplier:'');
+        const key=type.id+':'+index,label=lilEscape(type.name+' '+lilLineLabel(type,index).toLowerCase());
+        html+=(index===0?`<label class="ts-asm-pricing-type${offered?'':' is-off'}"><input type="checkbox" data-pricing-offered="${lilEscape(type.id)}"${offered?' checked':''}> ${lilEscape(type.name)}</label>`:'<span></span>')
+          + `<span>${lilEscape(lilLineLabel(type,index))}</span>`
+          + `<span class="ts-asm-pricing-fee"><select data-pricing-mode="${lilEscape(key)}" data-select-inline aria-label="${label}: fixed amount or multiplier of the hourly rate"><option value="amount"${mode==='amount'?' selected':''}>$</option><option value="multiplier"${mode==='multiplier'?' selected':''}>×</option></select>`
+          + `<input type="number" min="0" step="any" inputmode="decimal" data-pricing-value="${lilEscape(key)}" value="${lilEscape(value)}" placeholder="Default" aria-label="${label} fee"></span>`
+          + `<span class="ts-asm-pricing-default" data-pricing-default="${lilEscape(key)}"></span>`;
+      });
+    });
+    host.innerHTML=`<div class="ts-asm-pricing">${html}</div>`;
+    host.dataset.ready='1';
+    lilRefreshPricingDefaults();
+  }
+  function lilRefreshPricingDefaults() {
+    const rate=Number(document.getElementById('contract-rate')?.value)||0;
+    document.querySelectorAll('[data-pricing-default]').forEach(el=>{
+      const [typeId,index]=el.dataset.pricingDefault.split(':'),type=(lilCatalogue||[]).find(t=>t.id===typeId),multiplier=type?.lines[Number(index)]?.multiplier;
+      el.textContent=multiplier==null?'':`${multiplier} × rate${rate?' = '+lilMoney(rate*multiplier):''}`;
+    });
+  }
+  // undefined (omit the field) while the editor isn't showing a contract's pricing; otherwise the full set,
+  // which the server reduces to what differs from the defaults.
+  function lilContractPricingPayload() {
+    const host=document.getElementById('contract-assessment-pricing');
+    if(!host||host.dataset.ready!=='1'||!lilCatalogue)return undefined;
+    const out={};
+    lilCatalogue.forEach(type=>{
+      const box=host.querySelector(`[data-pricing-offered="${type.id}"]`);
+      const lines=type.lines.map((line,index)=>{
+        const key=type.id+':'+index,input=host.querySelector(`[data-pricing-value="${key}"]`),mode=host.querySelector(`[data-pricing-mode="${key}"]`)?.value;
+        const raw=String(input?.value??'').trim();
+        if(raw==='')return null;
+        return mode==='multiplier'?{multiplier:Number(raw)}:{amount:Number(raw)};
+      });
+      out[type.id]={offered:!!box?.checked,lines};
+    });
+    return JSON.stringify(out);
+  }
+  function lilContractPricingErrors() {
+    const host=document.getElementById('contract-assessment-pricing');
+    if(!host||host.dataset.ready!=='1')return [];
+    const errors=[];
+    host.querySelectorAll('[data-pricing-value]').forEach(input=>{
+      const raw=String(input.value??'').trim();
+      if(raw!==''&&!(Number(raw)>=0))errors.push(input);
+    });
+    return errors.filter(Boolean);
+  }
+  function lilRenderContractSuper(contract) {
+    const select=document.getElementById('contract-super-paid-by'),rate=document.getElementById('contract-employer-super-rate');
+    if(select)select.value=contract?.super_paid_by==='employer'?'employer':'self';
+    if(rate){const value=contract?.employer_super_rate;rate.value=value===''||value==null||!Number.isFinite(Number(value))?'':String(Math.round(Number(value)*10000)/100);}
+    lilSyncContractSuper();
+  }
+  function lilSyncContractSuper() {
+    const select=document.getElementById('contract-super-paid-by'),col=document.getElementById('contract-employer-super-rate-col');
+    if(col)col.hidden=!select||select.value!=='employer';
+  }
+  function lilContractSuperPayload() {
+    const select=document.getElementById('contract-super-paid-by'),rate=document.getElementById('contract-employer-super-rate');
+    if(!select)return {};
+    const employer=select.value==='employer',raw=String(rate?.value??'').trim();
+    return {super_paid_by:employer?'employer':'self',employer_super_rate:employer&&raw!==''?Math.round(Number(raw)*100)/10000:''};
+  }
+  document.addEventListener('change',event=>{
+    const target=event.target;
+    if(target&&target.dataset&&target.dataset.pricingOffered!=null)target.closest('.ts-asm-pricing-type')?.classList.toggle('is-off',!target.checked);
+    if(target&&target.id==='contract-super-paid-by')lilSyncContractSuper();
+  });
+  document.addEventListener('input',event=>{if(event.target&&event.target.id==='contract-rate')lilRefreshPricingDefaults();});
   function lilOrganisations(value) { const seen=new Set();return String(value||'').split(',').map(v=>v.trim()).filter(v=>{const key=v.toLowerCase();if(!v||seen.has(key))return false;seen.add(key);return true;}); }
   // The form is the app's 12-column .ts-grid with the global label and input rules, so its fields match
   // every other form in Tempus rather than being a private 12px scale.
@@ -354,7 +485,7 @@
       + `<div class="ts-grid ts-grid--gap-md">`
       +   `<div class="ts-col-span-6"><label for="lil-assessment-date">Assessment date</label><input id="lil-assessment-date" name="assessment_date" type="date" required value="${lilEscape(draft.assessment_date)}"${bounds}></div>`
       +   `<div class="ts-col-span-6"><label for="lil-contract">Contract</label><select id="lil-contract" name="contract_id" required></select></div>`
-      +   `<div class="ts-col-span-6"><label for="lil-type">Type</label><select id="lil-type" name="assessment_type_id" required>${lilOptions(lilData().types,draft.assessment_type_id,'Choose type')}</select></div>`
+      +   `<div class="ts-col-span-6"><label for="lil-type">Type</label><select id="lil-type" name="assessment_type_id" required></select></div>`
       +   `<div class="ts-col-span-6"><label for="lil-organisation">Organisation <span id="lil-org-info" class="ts-info-icon" tabindex="0" role="button" data-tip="Organisation options are managed in Contracts." aria-label="Organisation options are managed in Contracts." hidden>i</span></label><select id="lil-organisation" name="organisation" required></select><p class="ts-note ts-asm-fieldnote" id="lil-org-help" hidden></p></div>`
       +   `<div class="ts-col-span-6"><label for="lil-client-name">Client name</label><input id="lil-client-name" name="client_name" type="text" required autocomplete="off" value="${lilEscape(draft.client_name)}"></div>`
       +   `<div class="ts-col-span-6"><label for="lil-client-dob">Date of birth</label><input id="lil-client-dob" name="client_dob" type="date" required max="${todayIso()}" value="${lilEscape(draft.client_dob)}"></div>`
@@ -390,6 +521,10 @@
     if(!contracts.some(c=>c.id===draft.contract_id))draft.contract_id=contracts.length===1?contracts[0].id:'';
     lilEl('contract').innerHTML=lilOptions(contracts,draft.contract_id,draft.assessment_date?'Choose contract':'Choose a date first');
     const contract=contracts.find(c=>c.id===draft.contract_id),organisations=lilOrganisations(contract?.assessment_organisations);
+    // Each contract offers its own set of types; a type the new contract doesn't offer falls back to Standard.
+    const types=lilTypeOptions(contract,draft);
+    if(!types.some(t=>t.id===draft.assessment_type_id))draft.assessment_type_id=types.some(t=>t.id==='standard')?'standard':(types[0]?.id||'');
+    lilEl('type').innerHTML=lilOptions(types,draft.assessment_type_id,contract?'Choose type':'Choose a contract first');
     const historical=draft.original?.contract_id===draft.contract_id?draft.original.organisation:'';
     if(historical && !organisations.includes(historical))organisations.push(historical);
     // The first configured option is the working default; an existing assessment keeps its own value.
@@ -405,7 +540,7 @@
   function lilPreview(draft) {
     const contract=state.contracts.find(c=>c.id===draft.contract_id),type=lilData().types.find(t=>t.id===draft.assessment_type_id),percent=Number(draft.adjustment_percent),old=draft.original;
     const unchanged=old && old.contract_id===draft.contract_id && old.assessment_type_id===draft.assessment_type_id && old.percentage_adjustment===percent/100 && old.pricing_snapshot;
-    const lines=unchanged?old.lines:(type?.lines||[]).map((l,index)=>({...l,id:type.id+'-'+(index+1),amount:Math.round((Number(contract?.hourly_rate||0)*l.multiplier*(1+percent/100)+Number.EPSILON)*100)/100}));
+    const lines=unchanged?old.lines:(type?lilPricingLines(contract,type):[]).map(l=>({...l,amount:Math.round((l.base*(1+percent/100)+Number.EPSILON)*100)/100}));
     const fee=lines.reduce((s,l)=>s+l.amount,0);
     if(lilEl('fee-preview'))lilEl('fee-preview').textContent=contract&&type&&Number.isFinite(percent)?lilMoney(fee):'—';
     if(lilEl('preview-lines'))lilEl('preview-lines').textContent=lines.length?lines.map(l=>(l.description||l.label||'Fee line')+' '+lilMoney(l.amount)).join(' · '):'Excluding GST';
@@ -458,7 +593,10 @@
     else if(!draft.id && date.slice(0,7)!==lilState.month)add('assessment_date',`Assessment date: choose a date in ${lilMonthLabel(lilState.month)}, or switch to ${lilMonthLabel(date.slice(0,7))} to add this assessment.`);
     if(!contract)add('contract_id','Contract: choose a contract valid on the assessment date.');
     else if(validDate && ((contract.archived && draft.original?.contract_id!==contract.id) || (contract.start_date && date<contract.start_date) || (contract.end_date && date>contract.end_date)))add('contract_id','Contract: this contract is not active on the assessment date. Choose another contract or correct the date.');
-    if(!lilData().types.some(t=>t.id===draft.assessment_type_id))add('assessment_type_id','Type: choose an assessment type.');
+    const chosenType=lilData().types.find(t=>t.id===draft.assessment_type_id);
+    const keepsType=draft.original?.contract_id===draft.contract_id&&draft.original?.assessment_type_id===draft.assessment_type_id;
+    if(!chosenType)add('assessment_type_id','Type: choose an assessment type.');
+    else if(contract&&!keepsType&&!lilTypeOffered(contract,chosenType))add('assessment_type_id',`Type: ${chosenType.name} assessments are not offered under ${contract.name}. Choose another type, or offer it in Contracts.`);
     const historical=draft.original?.contract_id===draft.contract_id && draft.original?.organisation===draft.organisation;
     if(!String(draft.organisation||'').trim() || (!historical && !lilOrganisations(contract?.assessment_organisations).includes(draft.organisation)))add('organisation','Organisation: choose an organisation for this contract. If none are listed, add organisation options in Contracts.');
     if(!String(draft.client_name||'').trim())add('client_name','Client name: enter the client’s name.');

@@ -50,6 +50,24 @@
      leads a footer from the left. */
   .ts-asm-subnote { margin:4px 0 0; }
   .ts-asm-fieldnote { margin-top:6px; }
+  /* Contract form: assessment types and fees. One row per invoice line; the type name and its Offered
+     toggle sit on the type's first line. Stacks to two columns on a phone. */
+  .ts-asm-pricing-block { margin-top:16px; }
+  .ts-asm-pricing { display:grid; grid-template-columns:minmax(150px,1.2fr) minmax(120px,1fr) minmax(190px,1.2fr) minmax(140px,1fr); gap:8px 12px; align-items:center; margin-top:8px; }
+  .ts-asm-pricing-head { font-size:12px; color:var(--muted); }
+  .ts-asm-pricing-type { display:flex; align-items:center; gap:8px; font-weight:600; }
+  .ts-asm-pricing-type input { width:auto; margin:0; }
+  .ts-asm-pricing-type.is-off { color:var(--muted); font-weight:400; }
+  .ts-asm-pricing-fee { display:flex; gap:6px; }
+  .ts-asm-pricing-fee select { width:auto; flex:0 0 auto; }
+  .ts-asm-pricing-fee input { flex:1 1 auto; min-width:0; }
+  .ts-asm-pricing-default { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .ts-asm-pricing-divider { grid-column:1 / -1; border-top:1px solid var(--border); }
+  @media (max-width: 640px) {
+    .ts-asm-pricing { grid-template-columns:1fr 1fr; }
+    .ts-asm-pricing-head { display:none; }
+    .ts-asm-pricing-fee, .ts-asm-pricing-default { grid-column:span 1; }
+  }
   .ts-asm-alert { margin:0 0 var(--space-4); }
   .ts-asm-footer-lead { margin-right:auto; }
   .ts-asm-loading-note { grid-column:1 / -1; }
