@@ -21753,6 +21753,10 @@ function getCachedIncomeSummary(monthKey) {
         }
       });
 
+      // The days this contract's capacity counts (weekdays, or every day for a weekend contract): only these
+      // can be taken off capacity as full non-income days or count as already-filled future business days.
+      const isContractBusinessDay = (dateObj) => includeWeekends || !isWeekendDate(dateObj);
+
       // Count full non-income days (days where non_income >= standard_hours)
       let fullNonIncomeDays = 0;
       let daysWithEntriesCount = 0;
@@ -21769,8 +21773,10 @@ function getCachedIncomeSummary(monthKey) {
           daysWithEntriesCount++;
         }
 
-        // If a day has non-income hours >= standard hours, it's a full non-income day
-        if (nonIncomeHours >= standardHoursPerDay) {
+        // If a day has non-income hours >= standard hours, it's a full non-income day. Only a business day
+        // can be one: a non-billable weekend day (a Saturday games day) never took a day out of the month's
+        // capacity, so it mustn't come off it.
+        if (nonIncomeHours >= standardHoursPerDay && isContractBusinessDay(dateObj)) {
           fullNonIncomeDays++;
         }
         if (incomeHours > 0 && dateObj <= today) {
@@ -21885,7 +21891,7 @@ function getCachedIncomeSummary(monthKey) {
               iterDaysWithEntriesCount++;
             }
 
-            if (nonIncomeHours >= standardHoursPerDay) {
+            if (nonIncomeHours >= standardHoursPerDay && isContractBusinessDay(dateObj)) {
               iterFullNonIncomeDays++;
             }
           });
@@ -21911,7 +21917,7 @@ function getCachedIncomeSummary(monthKey) {
             let iterFutureDaysWithEntries = 0;
             iterDailyHours.forEach((dayData, dateIso) => {
               const dateObj = parseIsoDate(dateIso);
-              if (!dateObj || dateObj <= today) return;
+              if (!dateObj || dateObj <= today || !isContractBusinessDay(dateObj)) return;
               const incomeHours = dayData.income;
               const nonIncomeHours = dayData.nonIncome;
               if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
@@ -21962,7 +21968,7 @@ function getCachedIncomeSummary(monthKey) {
       let futureDaysWithEntries = 0;
       dailyHours.forEach((dayData, dateIso) => {
         const dateObj = parseIsoDate(dateIso);
-        if (!dateObj || dateObj <= today) return;
+        if (!dateObj || dateObj <= today || !isContractBusinessDay(dateObj)) return;
         const incomeHours = dayData.income;
         const nonIncomeHours = dayData.nonIncome;
         if (incomeHours > 0 || nonIncomeHours >= standardHoursPerDay) {
